@@ -2603,10 +2603,11 @@ Sol High review of exact D3 candidate `bb2ccb7a7d2b3e0afd2a68fb01ad982bf54d233e`
 trigger authority, a full archived programmable-object audit, removal of obsolete public rehearsal mutation modes,
 and exact one-baseline evidence reconciliation. The bounded correction deterministically executes all 456 archived
 migrations in an offline inspector and audits 922 raw SQL operations. It selects all 355/355 snapshot trigger names
-(353 direct final definitions plus two exact same-table rename aliases), preserves 22 later chronological
-`OBJECT_DEFINITION` patches as separate operations, and retains the distinct 15 C5-C8 triggers for 370 unique names.
+(353 direct final definitions plus two exact same-table rename aliases), exhaustively retains 89 still-active
+non-model trigger names, preserves 24 later chronological `OBJECT_DEFINITION` patches as separate operations, and
+retains the distinct 15 C5-C8 triggers for 459 unique names.
 The final non-trigger audit carries one function and one view and proves zero final procedures, synonyms, security
-policies or sequences. Target tables and 12,627 unambiguous inserted/deleted column references reconcile with the
+policies or sequences. Target tables and 15,294 unambiguous inserted/deleted column references reconcile with the
 1,556-table baseline; representative trigger bodies and all provenance are SHA-256 bound in a deterministic manifest.
 The unchanged archive has 656 tracked files and canonical base tree-entry inventory SHA-256
 `EA21CE6DBF118054F5240D7BE837ADDEF9D1A0D8214779697D17E6634C28023F`.
@@ -2616,3 +2617,15 @@ repository count `1`, latest `20260913162402_DisposableDevelopmentCurrentModelBa
 count, zero orphans, and source fingerprint count/latest; re-manifested tampering refuses. Offline EF discovery,
 model parity, zero-to-current generation and generated SQL checks completed without database or configured-connection
 access. Runtime reset remains prohibited pending independent Sol High approval and fresh operational authorization.
+
+Sol High correction of exact `213dccda0f740cc6d2649ff7589e8530696dd668` additionally closes the phase-07
+publication boundary and the incomplete HasTrigger-only inventory. A validated exact target-history file now proves
+the baseline was materially applied even if atomic `MIGRATIONS_APPLIED` marker publication fails; terminal failure
+retains the earlier durable phase while reporting final migration count one and `PHASE_07_PUBLICATION` as the failed
+operation. Every V2 failure after source capture binds terminal status to `source-fingerprint-before.txt`, exact
+source-history count/latest, and any destructive-boundary final fingerprint marker. The exhaustive archived-trigger
+audit restores `TR_PurchaseOrders_ApprovedCommercialCapacity` and
+`TR_PurchaseOrderItems_ApprovedCommercialCapacity` plus their two later RFQ commercial-identity patches; neither is
+model-declared, explicitly dropped, nor superseded. Behavioral and re-manifest tamper fixtures cover phase-07 marker
+failure, target-history downgrade/rebinding, fingerprint file/status drift, and non-history drift from the final
+destructive-boundary evidence. No runtime or preserved evidence access is authorized by this correction.

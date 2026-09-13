@@ -40,6 +40,11 @@ function New-Common([string]$root) {
     $reviewed
 }
 
+function Add-EmptySourceCaptureEvidence([string]$root) {
+    '' | Set-Content -NoNewline -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    '0|EMPTY|0|0|0' | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+}
+
 function New-Status([string]$terminalStatus, [string]$phase, [bool]$backupCreated,
     [bool]$backupVerified, [bool]$resetStarted) {
     $result = @{
@@ -56,6 +61,7 @@ function New-Status([string]$terminalStatus, [string]$phase, [bool]$backupCreate
         backupMediaId=''; backupFileName=''; backupPathSha256=''; attemptOwnedBackup=$backupCreated
         repositoryMigrationCount=1; finalMigrationCount=if($phase -in @('MIGRATIONS_APPLIED','SEED_INVARIANTS_VERIFIED','DBCC_COMPLETE','COMPLETE')){1}else{0}
         latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'; orphanMigrationCount=0
+        sourceFingerprint='0|EMPTY|0|0|0'
         failedOperation=if($terminalStatus -eq 'PASS'){'NOT_APPLICABLE'}else{'SYNTHETIC_OPERATION'}
     }
     $result
@@ -107,6 +113,7 @@ try {
         $null = New-Common $early
         if ($earlyCase.count -ge 1) { Write-Json (Join-Path $early 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE';repositoryMigrationCount=1;latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'}) }
         if ($earlyCase.count -ge 2) { Write-Json (Join-Path $early 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'}) }
+        if ($earlyCase.count -ge 2) { Add-EmptySourceCaptureEvidence $early }
         $earlyStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' $earlyCase.phase $false $false $false
         if ($earlyCase.resolved) {
             $earlyStatus.backupMediaId='4' * 32
@@ -131,6 +138,7 @@ try {
     $null = New-Common $ownedEmpty
     Write-Json (Join-Path $ownedEmpty 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE';repositoryMigrationCount=1;latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'})
     Write-Json (Join-Path $ownedEmpty 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'})
+    Add-EmptySourceCaptureEvidence $ownedEmpty
     $ownedEmptyStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $false $false $false
     $ownedEmptyStatus.backupMediaId='6' * 32
     $ownedEmptyStatus.backupFileName="RhemaERP_DISPOSABLE_RESET_COPYONLY_$('6' * 32).bak"
@@ -235,6 +243,7 @@ try {
 
     $partialBackup = New-PackageRoot 'VERIFY_FAILURE'
     $null = New-Common $partialBackup
+    Add-EmptySourceCaptureEvidence $partialBackup
     $partialMedia = 'e' * 32
     $partialFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_${partialMedia}.bak"
     @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$partialMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
@@ -264,6 +273,7 @@ try {
 
     $markerFailure = New-PackageRoot 'MARKER_FAILURE'
     $null = New-Common $markerFailure
+    Add-EmptySourceCaptureEvidence $markerFailure
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'))) {
         $marker=[ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=$entry[0];phase=$entry[1]}
         if($entry[0] -eq 1){$marker.repositoryMigrationCount=1;$marker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'}
@@ -317,6 +327,7 @@ try {
 
     $postVerifyMutation = New-PackageRoot 'POST_VERIFY_MUTATION'
     $null = New-Common $postVerifyMutation
+    Add-EmptySourceCaptureEvidence $postVerifyMutation
     $mutatedMedia = '1' * 32
     $mutatedFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_${mutatedMedia}.bak"
     $verifiedHash = 'A' * 64
@@ -502,6 +513,72 @@ try {
         $tamperStatus[$migrationTamper.property]=$migrationTamper.value
         Complete-Status $tamperRoot $tamperStatus
         Invoke-ExpectedRemanifestFailure $tamperRoot "baseline $($migrationTamper.label) mismatch"
+    }
+
+    $phaseSevenFailure=New-PackageRoot 'PHASE_07_PUBLICATION_FAILURE'
+    Copy-Item -Path (Join-Path $pass '*') -Destination $phaseSevenFailure
+    "SQLCMD_COALESCED SOURCE_FINAL_FINGERPRINT=$fingerprint PHASE_07_PUBLICATION_FAILED" |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $phaseSevenFailure 'reset-database.log')
+    foreach($ordinal in 7..10){
+        $phasePath=Join-Path $phaseSevenFailure ("phase-{0:D2}.json" -f $ordinal)
+        if(Test-Path -LiteralPath $phasePath){Remove-Item -LiteralPath $phasePath -Force}
+    }
+    $phaseSevenStatus=Get-Content -Raw -LiteralPath (Join-Path $phaseSevenFailure 'reset-status.json')|ConvertFrom-Json -AsHashtable
+    $phaseSevenStatus.status='FAILED_NO_AUTOMATIC_RETRY';$phaseSevenStatus.phase='DATABASE_RECREATED'
+    $phaseSevenStatus.failedOperation='PHASE_07_PUBLICATION';$phaseSevenStatus.finalMigrationCount=1
+    Complete-Status $phaseSevenFailure $phaseSevenStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $phaseSevenFailure -PackageKind DisposableReset -WriteManifest
+    if($LASTEXITCODE -ne 0){throw 'Valid phase-07-publication-failure package was rejected.'}
+    Write-Host 'PASS: failed phase-07 publication package binds validated applied target history'
+
+    foreach($phaseSevenTamper in @(
+        @{label='final count downgrade';kind='status';property='finalMigrationCount';value=0},
+        @{label='same-count target identity';kind='target';property='';value='20260913162403_Unreviewed'},
+        @{label='missing validated target history';kind='missing';property='';value=''}
+    )){
+        $tamperRoot=New-PackageRoot ('PHASE_07_'+$phaseSevenTamper.kind)
+        Copy-Item -Path (Join-Path $phaseSevenFailure '*') -Destination $tamperRoot
+        if($phaseSevenTamper.kind -eq 'status'){
+            $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json')|ConvertFrom-Json -AsHashtable
+            $tamperStatus[$phaseSevenTamper.property]=$phaseSevenTamper.value
+            Complete-Status $tamperRoot $tamperStatus
+        }elseif($phaseSevenTamper.kind -eq 'target'){
+            $phaseSevenTamper.value|Set-Content -Encoding ascii -LiteralPath (Join-Path $tamperRoot 'target-migration-history.txt')
+            Update-ArtifactBinding $tamperRoot 'target-migration-history.txt'
+        }else{
+            Remove-Item -LiteralPath (Join-Path $tamperRoot 'target-migration-history.txt') -Force
+            $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json')|ConvertFrom-Json
+            $tamperStatus.artifactSha256.PSObject.Properties.Remove('target-migration-history.txt')
+            Write-Json (Join-Path $tamperRoot 'reset-status.json') $tamperStatus
+        }
+        Invoke-ExpectedRemanifestFailure $tamperRoot "phase-07 publication $($phaseSevenTamper.label)"
+    }
+
+    $fingerprintFileMismatch=New-PackageRoot 'FAILED_FINGERPRINT_FILE_STATUS'
+    Copy-Item -Path (Join-Path $phaseSevenFailure '*') -Destination $fingerprintFileMismatch
+    '0|EMPTY|1|0|0'|Set-Content -Encoding ascii -LiteralPath (Join-Path $fingerprintFileMismatch 'source-fingerprint-before.txt')
+    Update-ArtifactBinding $fingerprintFileMismatch 'source-fingerprint-before.txt'
+    Invoke-ExpectedRemanifestFailure $fingerprintFileMismatch 'failed source fingerprint file/status mismatch'
+
+    $fingerprintBoundaryMismatch=New-PackageRoot 'FAILED_FINGERPRINT_BOUNDARY'
+    Copy-Item -Path (Join-Path $phaseSevenFailure '*') -Destination $fingerprintBoundaryMismatch
+    $changedFingerprint='0|EMPTY|1|0|0'
+    $changedFingerprint|Set-Content -Encoding ascii -LiteralPath (Join-Path $fingerprintBoundaryMismatch 'source-fingerprint-before.txt')
+    $changedStatus=Get-Content -Raw -LiteralPath (Join-Path $fingerprintBoundaryMismatch 'reset-status.json')|ConvertFrom-Json -AsHashtable
+    $changedStatus.sourceFingerprint=$changedFingerprint
+    Complete-Status $fingerprintBoundaryMismatch $changedStatus
+    Invoke-ExpectedRemanifestFailure $fingerprintBoundaryMismatch 'failed non-history fingerprint drift from destructive boundary'
+
+    foreach ($resetLogTamper in @(
+        @{ label='MISSING'; value='SQLCMD_COALESCED PHASE_07_PUBLICATION_FAILED' },
+        @{ label='DUPLICATE'; value="SOURCE_FINAL_FINGERPRINT=$fingerprint SQLCMD_COALESCED SOURCE_FINAL_FINGERPRINT=$fingerprint" },
+        @{ label='EMBEDDED'; value="PREFIX_SOURCE_FINAL_FINGERPRINT=$fingerprint PHASE_07_PUBLICATION_FAILED" }
+    )) {
+        $tamperRoot=New-PackageRoot ('FAILED_FINGERPRINT_TOKEN_'+$resetLogTamper.label)
+        Copy-Item -Path (Join-Path $phaseSevenFailure '*') -Destination $tamperRoot
+        $resetLogTamper.value|Set-Content -Encoding ascii -LiteralPath (Join-Path $tamperRoot 'reset-database.log')
+        Update-ArtifactBinding $tamperRoot 'reset-database.log'
+        Invoke-ExpectedRemanifestFailure $tamperRoot "failed fingerprint token $($resetLogTamper.label.ToLowerInvariant())"
     }
 
     foreach ($fingerprintTamper in @(

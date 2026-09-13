@@ -5,7 +5,7 @@ namespace ErpSystem.Data.Migrations;
 
 /// <summary>
 /// Deterministically extracted from the archived 456-migration Up operations.
-/// Contains all 355 current-model triggers, later exact definition patches, and final programmable dependencies.
+/// Contains all current-model and still-active non-model triggers, later exact definition patches, and final programmable dependencies.
 /// </summary>
 internal static class ArchivedGovernanceBaselineSql
 {
@@ -96,6 +96,15 @@ internal static class ArchivedGovernanceBaselineSql
                         1;
                 END;
             END;
+            """);
+        // TRIGGER TR_CivilEngineeringConfigurationRevisions_AppendOnly from 20260814205757_AddCivilEngineeringConfigurationLifecycle:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_CivilEngineeringConfigurationRevisions_AppendOnly]
+                  ON [CivilEngineeringConfigurationRevisions]
+                  INSTEAD OF UPDATE, DELETE
+                  AS BEGIN SET NOCOUNT ON;
+                  THROW 51930, 'Civil Engineering configuration history is append-only.', 1;
+                  END
             """);
         // TRIGGER TR_CivilEngineeringMaintenanceAssessmentRevisions_AppendOnly from 20260821050000_AddCivilEngineeringMaintenanceAssessments:4 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
@@ -311,6 +320,37 @@ internal static class ArchivedGovernanceBaselineSql
             BEGIN
               SET NOCOUNT ON;
               IF EXISTS (SELECT 1 FROM inserted value LEFT JOIN CivilEngineeringMaintenanceIntakes intake ON intake.Id=value.IntakeId AND intake.TenantId=value.TenantId LEFT JOIN Users actor ON actor.Id=value.ActorUserId AND actor.TenantId=value.TenantId AND actor.IsActive=1 WHERE intake.Id IS NULL OR actor.Id IS NULL) THROW 52204, 'Civil maintenance intake revision lineage is invalid.', 1;
+            END;
+            """);
+        // TRIGGER TR_CivilEngineeringMaintenanceIntakes_Lifecycle from 20260821033000_AddCivilEngineeringMaintenanceIntakes:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER TR_CivilEngineeringMaintenanceIntakes_Lifecycle ON CivilEngineeringMaintenanceIntakes AFTER UPDATE, DELETE AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (SELECT 1 FROM deleted prior WHERE NOT EXISTS (SELECT 1 FROM inserted value WHERE value.Id=prior.Id)) THROW 52201, 'Civil maintenance intake records cannot be deleted.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted value JOIN deleted prior ON prior.Id=value.Id
+                WHERE value.TenantId<>prior.TenantId OR value.IntakeNumber<>prior.IntakeNumber OR value.WorkClassification<>prior.WorkClassification
+                   OR value.Source<>prior.Source OR value.Urgency<>prior.Urgency OR value.Title<>prior.Title OR value.Description<>prior.Description
+                   OR ISNULL(value.ProjectId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.ProjectId,'00000000-0000-0000-0000-000000000000')
+                   OR ISNULL(value.MaintenanceAssetId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.MaintenanceAssetId,'00000000-0000-0000-0000-000000000000')
+                   OR ISNULL(value.EstateManagedAssetId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.EstateManagedAssetId,'00000000-0000-0000-0000-000000000000')
+                   OR ISNULL(value.MaintenanceScheduleId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.MaintenanceScheduleId,'00000000-0000-0000-0000-000000000000')
+                   OR ISNULL(value.HelpdeskTicketId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.HelpdeskTicketId,'00000000-0000-0000-0000-000000000000')
+                   OR value.RequesterUserId<>prior.RequesterUserId OR value.PriorityLevelId<>prior.PriorityLevelId
+                   OR value.CentralDocumentRecordId<>prior.CentralDocumentRecordId OR value.CentralDocumentVersionId<>prior.CentralDocumentVersionId
+                   OR value.ConfigurationProfileId<>prior.ConfigurationProfileId OR value.ConfigurationDecisionId<>prior.ConfigurationDecisionId
+                   OR value.WorkflowDefinitionId<>prior.WorkflowDefinitionId OR value.EvidenceMetadataTemplateId<>prior.EvidenceMetadataTemplateId
+                   OR value.EvidenceMetadataTemplateCodeSnapshot<>prior.EvidenceMetadataTemplateCodeSnapshot OR value.PolicyHash<>prior.PolicyHash
+                   OR value.ClientRequestId<>prior.ClientRequestId OR value.RequestHash<>prior.RequestHash OR value.IsDeleted<>prior.IsDeleted
+              ) THROW 52202, 'Civil maintenance intake identity and frozen policy lineage are immutable.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted value JOIN deleted prior ON prior.Id=value.Id
+                WHERE NOT ((prior.Status='Logged' AND value.Status IN ('Logged','AssessmentInProgress'))
+                    OR (prior.Status='AssessmentInProgress' AND value.Status IN ('AssessmentInProgress','AssessmentReturned','Assessed'))
+                    OR (prior.Status='AssessmentReturned' AND value.Status IN ('AssessmentReturned','AssessmentInProgress'))
+                    OR (prior.Status='Assessed' AND value.Status='Assessed'))
+              ) THROW 52203, 'Invalid Civil maintenance intake lifecycle transition.', 1;
             END;
             """);
         // TRIGGER TR_CivilEngineeringMaintenanceIntakes_Lineage from 20260821033000_AddCivilEngineeringMaintenanceIntakes:1 (ARCHIVED_FINAL_DEFINITION)
@@ -793,6 +833,30 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51133, 'RCV_GRN_LINE_TENANT_MISMATCH: GRN line is not in the same tenant and purchase order.', 1;
             END
             """);
+        // TRIGGER TR_GoodsReceiptNoteItems_TDC0502AcceptanceProtected from 20260731140000_TDC0502ReceiptInspectionClosure:6 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_GoodsReceiptNoteItems_TDC0502AcceptanceProtected]
+            ON [dbo].[GoodsReceiptNoteItems]
+            AFTER UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i JOIN deleted d ON d.Id = i.Id
+                    JOIN GoodsReceiptNotes g ON g.Id = i.GoodsReceiptNoteId AND g.TenantId = i.TenantId AND g.PurchaseOrderReceiptId IS NOT NULL
+                    LEFT JOIN ProcurementReceiptInspectionCases c
+                      ON c.Id = TRY_CONVERT(uniqueidentifier, SESSION_CONTEXT(N'TDC0502_RECEIPT_INSPECTION_CASE_ID'))
+                     AND c.TenantId = i.TenantId AND c.PurchaseOrderReceiptId = g.PurchaseOrderReceiptId AND c.IsDeleted = 0
+                    LEFT JOIN PurchaseOrderReceiptItems r ON r.ReceiptId = g.PurchaseOrderReceiptId AND r.PurchaseOrderItemId = i.PurchaseOrderItemId AND r.TenantId = i.TenantId AND r.IsDeleted = 0
+                    LEFT JOIN ItemUnitsOfMeasure u ON u.Id = r.ItemUnitOfMeasureId AND u.TenantId = i.TenantId AND u.IsDeleted = 0
+                    WHERE (i.AcceptedQuantity <> d.AcceptedQuantity OR i.RejectedQuantity <> d.RejectedQuantity)
+                      AND (c.Id IS NULL OR r.Id IS NULL
+                           OR i.AcceptedQuantity <> r.AcceptedQuantity * COALESCE(NULLIF(u.ConversionToBase,0),1)
+                           OR i.RejectedQuantity <> r.RejectedQuantity * COALESCE(NULLIF(u.ConversionToBase,0),1)))
+                    THROW 51543, 'RCV_GRN_DIRECT_ACCEPTANCE_BLOCKED: linked GRN acceptance must be the exact TDC-0502 receipt projection.', 1;
+            END
+            """);
         // TRIGGER TR_GoodsReceiptNotes_GovernedSource from 20260731123000_TDC0501ReceiptSourceControl:2 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_GoodsReceiptNotes_GovernedSource]
@@ -865,6 +929,53 @@ internal static class ArchivedGovernanceBaselineSql
                     WHERE i.IsDeleted = 0
                       AND po.Id IS NULL)
                     THROW 51123, 'RCV_GRN_TENANT_MISMATCH: GRN purchase-order source is not in the same tenant.', 1;
+            END
+            """);
+        // TRIGGER TR_GoodsReceiptNotes_TDC0503SodHardStop from 20260731153000_TDC0503ReceiptSodClosure:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_GoodsReceiptNotes_TDC0503SodHardStop]
+            ON [dbo].[GoodsReceiptNotes]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted grn
+                    LEFT JOIN PurchaseOrders purchaseOrder
+                      ON purchaseOrder.Id = grn.PurchaseOrderId
+                     AND purchaseOrder.TenantId = grn.TenantId
+                     AND purchaseOrder.IsDeleted = 0
+                    WHERE grn.IsDeleted = 0
+                      AND grn.PurchaseOrderId IS NOT NULL
+                      AND (
+                           purchaseOrder.Id IS NULL
+                        OR purchaseOrder.CreatedById IS NULL
+                        OR grn.ReceivedById IS NULL
+                        OR grn.ReceivedById = purchaseOrder.CreatedById
+                      ))
+                    THROW 51561, 'RCV_GRN_SOD_BLOCKED: a goods receipt requires a receiver distinct from the purchase-order creator.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted grn
+                    JOIN deleted previous ON previous.Id = grn.Id
+                    LEFT JOIN PurchaseOrders purchaseOrder
+                      ON purchaseOrder.Id = grn.PurchaseOrderId
+                     AND purchaseOrder.TenantId = grn.TenantId
+                     AND purchaseOrder.IsDeleted = 0
+                    WHERE grn.IsDeleted = 0
+                      AND grn.PurchaseOrderId IS NOT NULL
+                      AND previous.StockUpdated = 0
+                      AND grn.StockUpdated = 1
+                      AND (
+                           purchaseOrder.Id IS NULL
+                        OR purchaseOrder.CreatedById IS NULL
+                        OR grn.LastModifiedById IS NULL
+                        OR grn.LastModifiedById = purchaseOrder.CreatedById
+                      ))
+                    THROW 51562, 'RCV_GRN_STOCK_SOD_BLOCKED: GRN stock confirmation requires an actor distinct from the purchase-order creator.', 1;
             END
             """);
         // TRIGGER TR_HrIdentityReconciliationItems_NoMutation from 20260806082400_TDC0809HrIdentityReconciliation:3 (ARCHIVED_FINAL_DEFINITION)
@@ -1244,6 +1355,260 @@ internal static class ArchivedGovernanceBaselineSql
                        OR i.FreezeInventory = 0 OR i.BlindCount = 0 OR i.IsDeleted = 1)
                     THROW 51902, 'INV_COUNT_SCHEDULE_INVALID: schedule scope, calendar ownership, cut-off, blind count and freeze controls are invalid.', 1;
             END
+            """);
+        // TRIGGER TR_InventoryDirectedTaskActions_AppendOnly from 20260802023830_TDC0605DirectedWarehouseOperations:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_InventoryDirectedTaskActions_AppendOnly]
+            ON [dbo].[InventoryDirectedTaskActions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (SELECT 1 FROM deleted)
+                BEGIN
+                    THROW 51000, 'Directed task actions are append-only and cannot be changed or deleted.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN [dbo].[InventoryDirectedTasks] taskRecord
+                      ON taskRecord.[Id] = i.[TaskId] AND taskRecord.[TenantId] = i.[TenantId]
+                    WHERE taskRecord.[Id] IS NULL OR taskRecord.[Status] <> i.[StatusAfter])
+                BEGIN
+                    THROW 51000, 'Directed task action tenant or resulting status does not match its task.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE (i.[ActionType] = 1 AND i.[StatusAfter] <> 1)
+                       OR (i.[ActionType] = 2 AND i.[StatusAfter] <> 2)
+                       OR (i.[ActionType] IN (3,4,6) AND i.[StatusAfter] <> 4)
+                       OR (i.[ActionType] = 5 AND i.[StatusAfter] <> 3)
+                       OR (i.[ActionType] = 7 AND i.[StatusAfter] <> 5))
+                BEGIN
+                    THROW 51000, 'Directed task action type and resulting status are inconsistent.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[Sequence] <> 1 + ISNULL((
+                        SELECT MAX(previousAction.[Sequence])
+                        FROM [dbo].[InventoryDirectedTaskActions] previousAction
+                        WHERE previousAction.[TaskId] = i.[TaskId]
+                          AND previousAction.[TenantId] = i.[TenantId]
+                          AND previousAction.[Id] <> i.[Id]
+                          AND previousAction.[Sequence] < i.[Sequence]), 0))
+                BEGIN
+                    THROW 51000, 'Directed task action sequence must be contiguous.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM [dbo].[UserTenants] ut
+                        JOIN [dbo].[Users] u ON u.[Id] = ut.[UserId] AND u.[IsActive] = 1
+                        WHERE ut.[TenantId] = i.[TenantId] AND ut.[UserId] = i.[ActorUserId]
+                          AND ut.[Status] = 0 AND ut.[IsDeleted] = 0
+                          AND (ut.[ExpiresAt] IS NULL OR ut.[ExpiresAt] > i.[OccurredAtUtc])))
+                BEGIN
+                    THROW 51000, 'Directed task action actor must be an active user in the action tenant.', 1;
+                END;
+            END;
+            """);
+        // TRIGGER TR_InventoryDirectedTasks_Integrity from 20260802023830_TDC0605DirectedWarehouseOperations:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_InventoryDirectedTasks_Integrity]
+            ON [dbo].[InventoryDirectedTasks]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (SELECT 1 FROM deleted) AND NOT EXISTS (SELECT 1 FROM inserted)
+                BEGIN
+                    THROW 51000, 'Directed warehouse tasks cannot be deleted; use the terminal cancellation lifecycle.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN [dbo].[Warehouses] w
+                      ON w.[Id] = i.[WarehouseId] AND w.[TenantId] = i.[TenantId] AND w.[IsDeleted] = 0
+                    LEFT JOIN [dbo].[InventoryItems] item
+                      ON item.[Id] = i.[InventoryItemId] AND item.[TenantId] = i.[TenantId] AND item.[IsDeleted] = 0
+                    WHERE w.[Id] IS NULL OR item.[Id] IS NULL)
+                BEGIN
+                    THROW 51000, 'Directed task warehouse and inventory item must belong to the task tenant.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN [dbo].[WarehouseLocations] sourceLocation
+                      ON sourceLocation.[Id] = i.[SourceLocationId]
+                     AND sourceLocation.[TenantId] = i.[TenantId]
+                     AND sourceLocation.[WarehouseId] = i.[WarehouseId]
+                     AND sourceLocation.[IsDeleted] = 0
+                    LEFT JOIN [dbo].[WarehouseLocations] destinationLocation
+                      ON destinationLocation.[Id] = i.[DestinationLocationId]
+                     AND destinationLocation.[TenantId] = i.[TenantId]
+                     AND destinationLocation.[WarehouseId] = i.[WarehouseId]
+                     AND destinationLocation.[IsDeleted] = 0
+                    WHERE (i.[SourceLocationId] IS NOT NULL AND sourceLocation.[Id] IS NULL)
+                       OR (i.[DestinationLocationId] IS NOT NULL AND destinationLocation.[Id] IS NULL))
+                BEGIN
+                    THROW 51000, 'Directed task bins must belong to the task warehouse and tenant.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE (i.[TaskType] = 1 AND i.[DestinationLocationId] IS NULL)
+                       OR (i.[TaskType] = 2 AND (i.[SourceLocationId] IS NULL OR i.[DestinationLocationId] IS NOT NULL))
+                       OR (i.[TaskType] = 3 AND (i.[SourceLocationId] IS NULL OR i.[DestinationLocationId] IS NULL OR i.[SourceLocationId] = i.[DestinationLocationId])))
+                BEGIN
+                    THROW 51000, 'Directed task type and bin route are inconsistent.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN [dbo].[WarehouseLocations] destinationLocation ON destinationLocation.[Id] = i.[DestinationLocationId]
+                    WHERE (i.[IsQuarantine] = 1 AND destinationLocation.[IsQuarantineLocation] = 0)
+                       OR (i.[IsQuarantine] = 0 AND i.[TaskType] IN (1,3)
+                           AND (destinationLocation.[IsQuarantineLocation] = 1
+                                OR destinationLocation.[IsDamageLocation] = 1
+                                OR destinationLocation.[IsInTransitLocation] = 1)))
+                BEGIN
+                    THROW 51000, 'Directed task quarantine disposition does not match the destination bin.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN [dbo].[InventoryTransfers] transferRecord
+                      ON transferRecord.[Id] = i.[LinkedInventoryTransferId]
+                     AND transferRecord.[TenantId] = i.[TenantId]
+                     AND transferRecord.[SourceWarehouseId] = i.[WarehouseId]
+                     AND transferRecord.[DestinationWarehouseId] = i.[WarehouseId]
+                     AND transferRecord.[IsDeleted] = 0
+                    WHERE (i.[Status] = 3 AND (i.[TaskType] <> 3 OR i.[LinkedInventoryTransferId] IS NULL))
+                       OR (i.[LinkedInventoryTransferId] IS NOT NULL AND (i.[TaskType] <> 3 OR transferRecord.[Id] IS NULL)))
+                BEGIN
+                    THROW 51000, 'Awaiting directed work must reference a same-warehouse replenishment transfer in the same tenant.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE (i.[Status] = 2 AND (i.[StartedAtUtc] IS NULL OR i.[StartedByUserId] IS NULL))
+                       OR (i.[Status] = 4 AND (i.[CompletedAtUtc] IS NULL OR i.[CompletedByUserId] IS NULL))
+                       OR (i.[Status] = 5 AND (i.[CancelledAtUtc] IS NULL OR NULLIF(LTRIM(RTRIM(i.[CancellationReason])), '') IS NULL)))
+                BEGIN
+                    THROW 51000, 'Directed task status requires its matching actor, timestamp, and terminal reason.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM [dbo].[UserTenants] ut
+                        JOIN [dbo].[Users] u ON u.[Id] = ut.[UserId] AND u.[IsActive] = 1
+                        WHERE ut.[TenantId] = i.[TenantId] AND ut.[UserId] = i.[AssignedToUserId]
+                          AND ut.[Status] = 0 AND ut.[IsDeleted] = 0
+                          AND (ut.[ExpiresAt] IS NULL OR ut.[ExpiresAt] > SYSUTCDATETIME()))
+                       OR EXISTS (
+                        SELECT 1 FROM [dbo].[UserRoles] ur
+                        JOIN [dbo].[AspNetRoles] roleRecord ON roleRecord.[Id] = ur.[RoleId]
+                        WHERE ur.[UserId] = i.[AssignedToUserId] AND roleRecord.[Name] = 'ExternalUser')
+                       OR NOT EXISTS (
+                        SELECT 1 FROM [dbo].[UserTenants] ut
+                        JOIN [dbo].[Users] u ON u.[Id] = ut.[UserId] AND u.[IsActive] = 1
+                        WHERE ut.[TenantId] = i.[TenantId] AND ut.[UserId] = i.[CreatedByUserId]
+                          AND ut.[Status] = 0 AND ut.[IsDeleted] = 0
+                          AND (ut.[ExpiresAt] IS NULL OR ut.[ExpiresAt] > SYSUTCDATETIME()))
+                       OR EXISTS (
+                        SELECT 1 FROM [dbo].[UserRoles] ur
+                        JOIN [dbo].[AspNetRoles] roleRecord ON roleRecord.[Id] = ur.[RoleId]
+                        WHERE ur.[UserId] = i.[CreatedByUserId] AND roleRecord.[Name] = 'ExternalUser'))
+                BEGIN
+                    THROW 51000, 'Directed task creator and assignee must be active users in the task tenant.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    CROSS APPLY (VALUES (i.[StartedByUserId]), (i.[CompletedByUserId])) actor([UserId])
+                    WHERE actor.[UserId] IS NOT NULL AND (
+                        NOT EXISTS (
+                            SELECT 1 FROM [dbo].[UserTenants] ut
+                            JOIN [dbo].[Users] u ON u.[Id] = ut.[UserId] AND u.[IsActive] = 1
+                            WHERE ut.[TenantId] = i.[TenantId] AND ut.[UserId] = actor.[UserId]
+                              AND ut.[Status] = 0 AND ut.[IsDeleted] = 0
+                              AND (ut.[ExpiresAt] IS NULL OR ut.[ExpiresAt] > SYSUTCDATETIME()))
+                        OR EXISTS (
+                            SELECT 1 FROM [dbo].[UserRoles] ur
+                            JOIN [dbo].[AspNetRoles] roleRecord ON roleRecord.[Id] = ur.[RoleId]
+                            WHERE ur.[UserId] = actor.[UserId] AND roleRecord.[Name] = 'ExternalUser')))
+                BEGIN
+                    THROW 51000, 'Directed task lifecycle actors must be active internal users in the task tenant.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE i.[TaskNumber] <> d.[TaskNumber]
+                       OR i.[TaskType] <> d.[TaskType]
+                       OR i.[WarehouseId] <> d.[WarehouseId]
+                       OR i.[InventoryItemId] <> d.[InventoryItemId]
+                       OR ISNULL(i.[SourceLocationId], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[SourceLocationId], '00000000-0000-0000-0000-000000000000')
+                       OR ISNULL(i.[DestinationLocationId], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[DestinationLocationId], '00000000-0000-0000-0000-000000000000')
+                       OR i.[Quantity] <> d.[Quantity]
+                       OR i.[SourceDocumentType] <> d.[SourceDocumentType]
+                       OR i.[SourceDocumentId] <> d.[SourceDocumentId]
+                       OR i.[SourceLineId] <> d.[SourceLineId]
+                       OR i.[SourceReference] <> d.[SourceReference]
+                       OR i.[SuggestionKey] <> d.[SuggestionKey]
+                       OR i.[IdempotencyKey] <> d.[IdempotencyKey]
+                       OR i.[PayloadHash] <> d.[PayloadHash]
+                       OR i.[IsQuarantine] <> d.[IsQuarantine]
+                       OR i.[AssignedToUserId] <> d.[AssignedToUserId]
+                       OR i.[CreatedByUserId] <> d.[CreatedByUserId]
+                       OR i.[AssignedAtUtc] <> d.[AssignedAtUtc]
+                       OR i.[TenantId] <> d.[TenantId]
+                       OR i.[IsDeleted] <> d.[IsDeleted]
+                       OR (d.[StartedByUserId] IS NOT NULL AND
+                           (i.[StartedByUserId] IS NULL OR i.[StartedByUserId] <> d.[StartedByUserId]
+                            OR i.[StartedAtUtc] <> d.[StartedAtUtc]))
+                       OR (d.[CompletedByUserId] IS NOT NULL AND
+                           (i.[CompletedByUserId] IS NULL OR i.[CompletedByUserId] <> d.[CompletedByUserId]
+                            OR i.[CompletedAtUtc] <> d.[CompletedAtUtc]))
+                       OR (d.[CancelledAtUtc] IS NOT NULL AND
+                           (i.[CancelledAtUtc] IS NULL OR i.[CancelledAtUtc] <> d.[CancelledAtUtc]
+                            OR i.[CancellationReason] <> d.[CancellationReason])))
+                BEGIN
+                    THROW 51000, 'Directed task source, assignment, replay, and tenant fields are immutable.', 1;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE i.[Status] <> d.[Status]
+                      AND NOT (
+                           (d.[Status] = 1 AND i.[Status] IN (2,4,5))
+                        OR (d.[Status] = 2 AND i.[Status] IN (3,4,5))
+                        OR (d.[Status] = 3 AND i.[Status] IN (4,5))))
+                BEGIN
+                    THROW 51000, 'The directed task status transition is not allowed.', 1;
+                END;
+            END;
             """);
         // TRIGGER TR_InventoryDisposalActions_AppendOnly from 20260802190244_TDC0615InventoryDisposalLifecycle:0 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
@@ -1862,6 +2227,150 @@ internal static class ArchivedGovernanceBaselineSql
                           OR posted.Quantity > COALESCE(porAllowed.Quantity, grnAllowed.Quantity)))
                     THROW 51142, 'RCV_PHANTOM_STOCK_BLOCKED: purchase receipt inventory movement requires an authorized governed receipt and accepted quantity.', 1;
             END
+            """);
+        // TRIGGER TR_InventoryMovements_TDC0502InspectionContext from 20260731140000_TDC0502ReceiptInspectionClosure:7 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_InventoryMovements_TDC0502InspectionContext]
+            ON [dbo].[InventoryMovements]
+            AFTER INSERT
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN ProcurementReceiptInspectionCases c
+                      ON c.Id = TRY_CONVERT(uniqueidentifier, SESSION_CONTEXT(N'TDC0502_RECEIPT_INSPECTION_CASE_ID'))
+                     AND c.TenantId = i.TenantId AND c.PurchaseOrderReceiptId = i.ReferenceId AND c.IsDeleted = 0
+                    WHERE i.IsDeleted = 0 AND i.MovementType = 1 AND i.Direction = 1 AND i.ReferenceType = 1
+                      AND c.Id IS NULL)
+                    THROW 51551, 'RCV_STOCK_INSPECTION_CONTEXT_REQUIRED: purchase receipt inventory movement requires the exact TDC-0502 context.', 1;
+            END
+            """);
+        // TRIGGER TR_InventoryMovements_TDC0503ReceiptSod from 20260731153000_TDC0503ReceiptSodClosure:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_InventoryMovements_TDC0503ReceiptSod]
+            ON [dbo].[InventoryMovements]
+            AFTER INSERT
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted movement
+                    LEFT JOIN PurchaseOrderReceipts receipt
+                      ON receipt.Id = movement.ReferenceId
+                     AND receipt.TenantId = movement.TenantId
+                     AND receipt.IsDeleted = 0
+                    LEFT JOIN PurchaseOrders purchaseOrder
+                      ON purchaseOrder.Id = receipt.PurchaseOrderId
+                     AND purchaseOrder.TenantId = movement.TenantId
+                     AND purchaseOrder.IsDeleted = 0
+                    WHERE movement.IsDeleted = 0
+                      AND movement.MovementType = 1
+                      AND movement.Direction = 1
+                      AND movement.ReferenceType = 1
+                      AND (
+                           receipt.Id IS NULL
+                        OR purchaseOrder.Id IS NULL
+                        OR purchaseOrder.CreatedById IS NULL
+                        OR movement.CreatedById IS NULL
+                        OR movement.CreatedById = purchaseOrder.CreatedById
+                      ))
+                    THROW 51564, 'RCV_INVENTORY_SOD_BLOCKED: purchase-receipt inventory posting requires an actor distinct from the purchase-order creator.', 1;
+            END
+            """);
+        // TRIGGER TR_InventoryProjectReservationActions_Immutable from 20260802160000_TDC0611ProjectInventoryReservations:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_InventoryProjectReservationActions_Immutable]
+            ON [dbo].[InventoryProjectReservationActions]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                THROW 51070, 'INV_PROJECT_RESERVATION_ACTION_IMMUTABLE: reservation actions are append-only.', 1;
+            END
+            """);
+        // TRIGGER TR_InventoryReplenishmentActions_Immutable from 20260802162449_TDC0612InventoryReplenishment:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_InventoryReplenishmentActions_Immutable]
+            ON [dbo].[InventoryReplenishmentActions]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                THROW 51080, 'INV_REPLENISHMENT_ACTION_IMMUTABLE', 1;
+            END;
+            """);
+        // TRIGGER TR_InventoryReplenishmentRecommendations_Guard from 20260802162449_TDC0612InventoryReplenishment:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_InventoryReplenishmentRecommendations_Guard]
+            ON [dbo].[InventoryReplenishmentRecommendations]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.Id = d.Id WHERE i.Id IS NULL)
+                    THROW 51081, 'INV_REPLENISHMENT_DELETE_PROHIBITED', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN deleted d ON d.Id = i.Id
+                    WHERE (d.Id IS NULL AND i.Status <> 1)
+                       OR (d.Id IS NOT NULL AND (
+                            i.TenantId <> d.TenantId OR i.RecommendationNumber <> d.RecommendationNumber
+                            OR i.WarehouseQuantityId <> d.WarehouseQuantityId OR i.WarehouseId <> d.WarehouseId
+                            OR i.InventoryItemId <> d.InventoryItemId
+                            OR ISNULL(i.ItemSupplierId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.ItemSupplierId, '00000000-0000-0000-0000-000000000000')
+                            OR ISNULL(i.PreferredSupplierId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.PreferredSupplierId, '00000000-0000-0000-0000-000000000000')
+                            OR i.DemandWindowDays <> d.DemandWindowDays OR i.DemandFromUtc <> d.DemandFromUtc OR i.DemandToUtc <> d.DemandToUtc
+                            OR i.DemandQuantity <> d.DemandQuantity OR i.AverageDailyDemand <> d.AverageDailyDemand
+                            OR i.LeadTimeDays <> d.LeadTimeDays OR i.SafetyLeadTimeDays <> d.SafetyLeadTimeDays
+                            OR i.CurrentStock <> d.CurrentStock OR i.AvailableStock <> d.AvailableStock OR i.AllocatedStock <> d.AllocatedStock
+                            OR i.OnOrderQuantity <> d.OnOrderQuantity OR i.OpenRecommendationQuantity <> d.OpenRecommendationQuantity
+                            OR i.MinimumLevel <> d.MinimumLevel OR i.MaximumLevel <> d.MaximumLevel OR i.ReorderLevel <> d.ReorderLevel
+                            OR i.ReorderQuantity <> d.ReorderQuantity OR i.SafetyStock <> d.SafetyStock
+                            OR i.MinimumOrderQuantity <> d.MinimumOrderQuantity OR i.OrderMultiple <> d.OrderMultiple
+                            OR i.LeadTimeDemand <> d.LeadTimeDemand OR i.ProjectedAvailableAtReceipt <> d.ProjectedAvailableAtReceipt
+                            OR i.RecommendedQuantity <> d.RecommendedQuantity OR i.EstimatedUnitCost <> d.EstimatedUnitCost
+                            OR i.RequiredDateUtc <> d.RequiredDateUtc OR i.ValidUntilUtc <> d.ValidUntilUtc
+                            OR i.Explanation <> d.Explanation OR i.CalculationSnapshotJson <> d.CalculationSnapshotJson
+                            OR i.CalculationHash <> d.CalculationHash OR i.GeneratedById <> d.GeneratedById OR i.GeneratedAtUtc <> d.GeneratedAtUtc
+                            OR i.IdempotencyKey <> d.IdempotencyKey OR i.PayloadHash <> d.PayloadHash OR i.IsDeleted <> d.IsDeleted
+                       )))
+                    THROW 51082, 'INV_REPLENISHMENT_CALCULATION_IMMUTABLE', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d ON d.Id = i.Id
+                    WHERE i.Status <> d.Status AND NOT (
+                        (d.Status = 1 AND i.Status IN (2,6,7)) OR
+                        (d.Status = 2 AND i.Status IN (3,4,6,7)) OR
+                        (d.Status = 3 AND i.Status IN (5,6,7))))
+                    THROW 51083, 'INV_REPLENISHMENT_TRANSITION_INVALID', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE (i.Status = 1 AND (i.WorkflowInstanceId IS NOT NULL OR i.SubmittedById IS NOT NULL OR i.DecidedById IS NOT NULL OR i.PurchaseRequisitionId IS NOT NULL))
+                       OR (i.Status = 2 AND (i.WorkflowInstanceId IS NULL OR i.SubmittedById IS NULL OR i.SubmittedAtUtc IS NULL OR i.DecidedById IS NOT NULL OR i.PurchaseRequisitionId IS NOT NULL))
+                       OR (i.Status IN (3,4) AND (i.WorkflowInstanceId IS NULL OR i.SubmittedById IS NULL OR i.SubmittedAtUtc IS NULL OR i.DecidedById IS NULL OR i.DecidedAtUtc IS NULL OR i.PurchaseRequisitionId IS NOT NULL))
+                       OR (i.Status = 5 AND (i.WorkflowInstanceId IS NULL OR i.DecidedById IS NULL OR i.PurchaseRequisitionId IS NULL OR i.PurchaseRequisitionNumber IS NULL OR i.ConvertedAtUtc IS NULL)))
+                    THROW 51084, 'INV_REPLENISHMENT_LIFECYCLE_INVALID', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.DecidedById IS NOT NULL AND (i.DecidedById = i.GeneratedById OR i.DecidedById = i.SubmittedById))
+                    THROW 51085, 'INV_REPLENISHMENT_INDEPENDENT_DECISION_REQUIRED', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d ON d.Id = i.Id
+                    WHERE (d.AlertNotificationId IS NOT NULL AND ISNULL(i.AlertNotificationId, '00000000-0000-0000-0000-000000000000') <> d.AlertNotificationId)
+                       OR (d.WorkflowInstanceId IS NOT NULL AND ISNULL(i.WorkflowInstanceId, '00000000-0000-0000-0000-000000000000') <> d.WorkflowInstanceId)
+                       OR (d.SubmittedById IS NOT NULL AND (ISNULL(i.SubmittedById, '00000000-0000-0000-0000-000000000000') <> d.SubmittedById OR ISNULL(i.SubmittedAtUtc, '19000101') <> d.SubmittedAtUtc))
+                       OR (d.DecidedById IS NOT NULL AND (ISNULL(i.DecidedById, '00000000-0000-0000-0000-000000000000') <> d.DecidedById OR ISNULL(i.DecidedAtUtc, '19000101') <> d.DecidedAtUtc OR ISNULL(i.DecisionComment, '') <> ISNULL(d.DecisionComment, '')))
+                       OR (d.PurchaseRequisitionId IS NOT NULL AND (ISNULL(i.PurchaseRequisitionId, '00000000-0000-0000-0000-000000000000') <> d.PurchaseRequisitionId OR ISNULL(i.PurchaseRequisitionNumber, '') <> ISNULL(d.PurchaseRequisitionNumber, '') OR ISNULL(i.ConvertedAtUtc, '19000101') <> d.ConvertedAtUtc)))
+                    THROW 51086, 'INV_REPLENISHMENT_ESTABLISHED_LINEAGE_IMMUTABLE', 1;
+            END;
             """);
         // TRIGGER TR_InventoryReturnVoucherActions_AppendOnly from 20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments:3 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
@@ -2717,6 +3226,41 @@ internal static class ArchivedGovernanceBaselineSql
                        OR (i.Status = N'ReadyToPost' AND i.TotalVarianceQuantity <> 0 AND NOT EXISTS (SELECT 1 FROM StockAdjustments a WHERE a.Id=i.StockAdjustmentId AND a.TenantId=i.TenantId AND a.Status=N'Approved'))
                        OR (i.Status = N'Posted' AND i.TotalVarianceQuantity <> 0 AND NOT EXISTS (SELECT 1 FROM StockAdjustments a WHERE a.Id=i.StockAdjustmentId AND a.TenantId=i.TenantId AND a.Status=N'Posted' AND a.FinancePostingEventId IS NOT NULL)))
                     THROW 51936, 'INV_COUNT_SOD_OR_POSTING_INVALID: independent approvals and governed stock-adjustment Finance lineage are required.', 1;
+            END
+            """);
+        // TRIGGER TR_ProcurementAppSubmissions_LifecycleGuard from 20260721134533_AddProcurementAppSubmissionRegister:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementAppSubmissions_LifecycleGuard]
+            ON [dbo].[ProcurementAppSubmissions]
+            AFTER UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    INNER JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE i.[TenantId] <> d.[TenantId]
+                       OR i.[ProcurementPlanId] <> d.[ProcurementPlanId]
+                       OR i.[SubmissionNumber] <> d.[SubmissionNumber]
+                       OR i.[AttemptNumber] <> d.[AttemptNumber]
+                       OR i.[TimelineCorrelationId] <> d.[TimelineCorrelationId]
+                       OR ISNULL(i.[SupersedesSubmissionId], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[SupersedesSubmissionId], '00000000-0000-0000-0000-000000000000')
+                       OR i.[ExportFileName] <> d.[ExportFileName]
+                       OR i.[ExportFormat] <> d.[ExportFormat]
+                       OR i.[ExportTemplateVersion] <> d.[ExportTemplateVersion]
+                       OR i.[ExportChecksumSha256] <> d.[ExportChecksumSha256]
+                       OR i.[ExportedAtUtc] <> d.[ExportedAtUtc]
+                       OR i.[ExportedById] <> d.[ExportedById]
+                       OR i.[ExportedByName] <> d.[ExportedByName]
+                       OR i.[CreatedAt] <> d.[CreatedAt]
+                       OR ISNULL(i.[CreatedById], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[CreatedById], '00000000-0000-0000-0000-000000000000')
+                       OR i.[IsDeleted] <> d.[IsDeleted]
+                       OR NOT ((d.[Status] = 0 AND i.[Status] = 1) OR (d.[Status] = 1 AND i.[Status] IN (2, 3)))
+                )
+                BEGIN
+                    THROW 51020, 'APP submission identity, export metadata, retention, or lifecycle transition is immutable.', 1;
+                END
             END
             """);
         // TRIGGER TR_ProcurementAppSubmissions_NoDelete from 20260721134533_AddProcurementAppSubmissionRegister:0 (ARCHIVED_FINAL_DEFINITION)
@@ -3768,6 +4312,44 @@ internal static class ArchivedGovernanceBaselineSql
               SET NOCOUNT ON;
               IF EXISTS (SELECT 1 FROM deleted)
                 THROW 52051, 'Formal commitment ledger entries are immutable and cannot be updated or deleted.', 1;
+            END;
+            """);
+        // TRIGGER TR_ProcurementBudgetCommitments_DownstreamExposure from 20260812100000_HardenProcurementCommitmentLifecycle:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementBudgetCommitments_DownstreamExposure]
+            ON [dbo].[ProcurementBudgetCommitments]
+            AFTER UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN deleted d ON d.Id = i.Id
+                    WHERE d.Status = 1
+                      AND i.Status = 2
+                      AND (
+                           EXISTS (
+                               SELECT 1
+                               FROM dbo.PurchaseOrders po
+                               WHERE po.TenantId = i.TenantId
+                                 AND po.SourceRequisitionId = i.PurchaseRequisitionId
+                                 AND po.IsDeleted = 0
+                                 AND po.Status NOT IN ('Cancelled', 'Rejected'))
+                        OR EXISTS (
+                               SELECT 1
+                               FROM dbo.Contracts contract
+                               JOIN dbo.Tenders tender
+                                 ON tender.Id = contract.TenderId
+                                AND tender.TenantId = contract.TenantId
+                                AND tender.IsDeleted = 0
+                               WHERE contract.TenantId = i.TenantId
+                                 AND tender.SourcePurchaseRequisitionId = i.PurchaseRequisitionId
+                                 AND contract.IsDeleted = 0
+                                 AND contract.Status <> 'Terminated')
+                      ))
+                    THROW 52042, 'A budget commitment with active purchase-order or contract exposure cannot be released.', 1;
             END;
             """);
         // TRIGGER TR_ProcurementBudgetCommitments_LifecycleGuard from 20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment:3 (ARCHIVED_FINAL_DEFINITION)
@@ -8110,6 +8692,43 @@ internal static class ArchivedGovernanceBaselineSql
                 ) THROW 51144, 'Captured advertisement, closure, workflow, and decision evidence is immutable.', 1;
             END
             """);
+        // TRIGGER TR_ProcurementPrequalificationExercises_PolicyLineage from 20260723161619_AddProcurementPrequalificationPolicyLineage:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER dbo.TR_ProcurementPrequalificationExercises_PolicyLineage
+            ON dbo.ProcurementPrequalificationExercises
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted AS i
+                    LEFT JOIN dbo.ProcurementPolicySets AS p
+                        ON p.Id = i.PolicySetId
+                       AND p.TenantId = i.TenantId
+                       AND p.IsDeleted = 0
+                    WHERE p.Id IS NULL
+                       OR p.Code <> i.PolicySetCode
+                       OR p.Version <> i.PolicySetVersion
+                       OR p.SourceConfigurationProfileId <> i.SourceConfigurationProfileId
+                )
+                    THROW 51164, 'Prequalification policy lineage must match an undeleted policy in the same tenant.', 1;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted AS i
+                    INNER JOIN deleted AS d ON d.Id = i.Id
+                    WHERE i.PolicySetId <> d.PolicySetId
+                       OR i.PolicySetCode <> d.PolicySetCode
+                       OR i.PolicySetVersion <> d.PolicySetVersion
+                       OR i.SourceConfigurationProfileId <> d.SourceConfigurationProfileId
+                )
+                    THROW 51165, 'Prequalification policy lineage is immutable.', 1;
+            END;
+            """);
         // TRIGGER TR_ProcurementPrequalificationScores_Immutable from 20260723145650_AddProcurementPrequalificationLifecycle:3 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementPrequalificationScores_Immutable]
@@ -8662,6 +9281,42 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51532, 'RCV_INSPECTION_ACTION_TENANT_MISMATCH: action must belong to the same-tenant inspection case.', 1;
             END
             """);
+        // TRIGGER TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop from 20260731153000_TDC0503ReceiptSodClosure:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop]
+            ON [dbo].[ProcurementReceiptInspectionActions]
+            AFTER INSERT
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted action
+                    LEFT JOIN ProcurementReceiptInspectionCases inspection
+                      ON inspection.Id = action.InspectionCaseId
+                     AND inspection.TenantId = action.TenantId
+                     AND inspection.IsDeleted = 0
+                    LEFT JOIN PurchaseOrderReceipts receipt
+                      ON receipt.Id = inspection.PurchaseOrderReceiptId
+                     AND receipt.TenantId = action.TenantId
+                     AND receipt.IsDeleted = 0
+                    LEFT JOIN PurchaseOrders purchaseOrder
+                      ON purchaseOrder.Id = receipt.PurchaseOrderId
+                     AND purchaseOrder.TenantId = action.TenantId
+                     AND purchaseOrder.IsDeleted = 0
+                    WHERE action.IsDeleted = 0
+                      AND action.ActionType IN (3, 11, 12)
+                      AND (
+                           inspection.Id IS NULL
+                        OR receipt.Id IS NULL
+                        OR purchaseOrder.Id IS NULL
+                        OR purchaseOrder.CreatedById IS NULL
+                        OR action.ActorUserId = purchaseOrder.CreatedById
+                      ))
+                    THROW 51563, 'RCV_INSPECTION_SOD_BLOCKED: positive inspection, replacement receipt, and closure actions require an actor distinct from the purchase-order creator.', 1;
+            END
+            """);
         // TRIGGER TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260731140000_TDC0502ReceiptInspectionClosure:0 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementReceiptInspectionCases_TDC0502Protected]
@@ -9020,6 +9675,36 @@ internal static class ArchivedGovernanceBaselineSql
                 END
             END
             """);
+        // TRIGGER TR_ProcurementResponsibilityLocations_ValidateScope from 20260802012523_TDC0604InventoryAccessLocations:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementResponsibilityLocations_ValidateScope]
+            ON [dbo].[ProcurementResponsibilityLocations]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted AS scope
+                    INNER JOIN [dbo].[ProcurementResponsibilityAssignments] AS assignment
+                        ON assignment.[Id] = scope.[AssignmentId]
+                    INNER JOIN [dbo].[Warehouses] AS warehouse
+                        ON warehouse.[Id] = scope.[WarehouseId]
+                    INNER JOIN [dbo].[WarehouseLocations] AS location
+                        ON location.[Id] = scope.[WarehouseLocationId]
+                    WHERE scope.[TenantId] <> assignment.[TenantId]
+                       OR scope.[TenantId] <> warehouse.[TenantId]
+                       OR scope.[TenantId] <> location.[TenantId]
+                       OR scope.[WarehouseId] <> location.[WarehouseId]
+                       OR (scope.[IsDeleted] = 0 AND assignment.[LocationScopeMode] <> 2)
+                )
+                BEGIN
+                    THROW 51004, 'TDC-0604 location assignments must match the tenant, warehouse, location, and restricted assignment scope.', 1;
+                END;
+            END;
+            """);
         // TRIGGER TR_ProcurementRfqEvaluationLines_Lifecycle from 20260723214709_AddProcurementEvaluationCommitteeControls:11 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementRfqEvaluationLines_Lifecycle]
@@ -9216,6 +9901,26 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51086, 'RFQ opening-participant tenant lineage is invalid.', 1;
             END
             """);
+        // TRIGGER TR_ProcurementRfqOpeningRegisters_EffectiveDeadline from 20260723184003_AddProcurementTenderDocumentControls:11 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementRfqOpeningRegisters_EffectiveDeadline]
+            ON [dbo].[ProcurementRfqOpeningRegisters]
+            AFTER INSERT
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN [dbo].[RequestForQuotations] r
+                      ON r.[Id] = i.[RfqId] AND r.[TenantId] = i.[TenantId] AND r.[IsDeleted] = 0
+                    WHERE r.[Id] IS NULL OR r.[SubmissionDeadline] IS NULL
+                       OR i.[OpenedAtUtc] < r.[SubmissionDeadline]
+                )
+                    THROW 51219, 'The RFQ opening register cannot be created before the effective controlled submission deadline.', 1;
+            END
+            """);
         // TRIGGER TR_ProcurementRfqOpeningRegisters_Immutable from 20260723025539_AddProcurementRfqStatutoryControls:1 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementRfqOpeningRegisters_Immutable]
@@ -9227,6 +9932,30 @@ internal static class ArchivedGovernanceBaselineSql
                 IF EXISTS (SELECT 1 FROM deleted) THROW 51083, 'RFQ opening registers are immutable.', 1;
                 IF EXISTS (SELECT 1 FROM inserted i LEFT JOIN [dbo].[RequestForQuotations] r ON r.Id = i.RfqId AND r.TenantId = i.TenantId WHERE r.Id IS NULL)
                     THROW 51084, 'RFQ opening-register tenant lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_ProcurementRfqReceipts_EffectiveDeadline from 20260723184003_AddProcurementTenderDocumentControls:10 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementRfqReceipts_EffectiveDeadline]
+            ON [dbo].[ProcurementRfqReceipts]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    LEFT JOIN [dbo].[RequestForQuotations] r
+                      ON r.[Id] = i.[RfqId] AND r.[TenantId] = i.[TenantId] AND r.[IsDeleted] = 0
+                    WHERE r.[Id] IS NULL OR r.[SubmissionDeadline] IS NULL
+                       OR (d.[Id] IS NULL AND i.[SubmissionDeadlineUtc] <> r.[SubmissionDeadline])
+                       OR (d.[Id] IS NOT NULL
+                           AND i.[OpenedAtUtc] IS NOT NULL
+                           AND i.[OpenedAtUtc] < r.[SubmissionDeadline])
+                )
+                    THROW 51218, 'RFQ receipt classification and opening must use the effective controlled submission deadline.', 1;
             END
             """);
         // TRIGGER TR_ProcurementRfqReceipts_Immutable from 20260723025539_AddProcurementRfqStatutoryControls:0 (ARCHIVED_FINAL_DEFINITION)
@@ -9444,6 +10173,110 @@ internal static class ArchivedGovernanceBaselineSql
                             OR (i.[Status] IN (2, 3) AND (i.[ClosedAtUtc] IS NULL OR i.[ClosedByName] IS NULL OR LEN(LTRIM(RTRIM(i.[ClosureReason]))) < 5))))
                 )
                     THROW 51062, 'Procurement sourcing-case immutable fields or lifecycle transition are invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_ProcurementSourcingCases_MethodSelection from 20260722173828_AddProcurementMethodSelectionControls:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementSourcingCases_MethodSelection]
+            ON [dbo].[ProcurementSourcingCases]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN [dbo].[PurchaseRequisitions] pr ON pr.[Id] = i.[PurchaseRequisitionId]
+                    LEFT JOIN [dbo].[ProcurementPolicySets] ps ON ps.[Id] = i.[PolicySetId]
+                    LEFT JOIN [dbo].[ProcurementPolicyExceptionRules] er ON er.[Id] = i.[ApprovedExceptionRuleId]
+                    LEFT JOIN [dbo].[WorkflowInstances] wi ON wi.[Id] = i.[MethodOverrideWorkflowInstanceId]
+                    LEFT JOIN [dbo].[WorkflowEntityTypes] wet ON wet.[Id] = wi.[EntityTypeId]
+                    LEFT JOIN [dbo].[WorkflowDefinitions] wd ON wd.[Id] = wi.[WorkflowDefinitionId]
+                    WHERE
+                        (i.[MethodSelectionBasis] = 0 AND
+                            (i.[SelectedMethod] <> i.[RecommendedMethod]
+                             OR i.[MethodOverrideWorkflowInstanceId] IS NOT NULL
+                             OR i.[MethodOverrideReason] IS NOT NULL
+                             OR i.[MethodOverrideApprovalActorsJson] IS NOT NULL
+                             OR i.[MethodOverrideApprovedAtUtc] IS NOT NULL))
+                        OR
+                        (i.[MethodSelectionBasis] = 1 AND
+                            (i.[SelectedMethod] = i.[RecommendedMethod]
+                             OR er.[Id] IS NULL OR er.[TenantId] <> i.[TenantId] OR er.[IsDeleted] = 1
+                             OR (er.[PolicySetId] <> i.[PolicySetId] AND ISNULL(ps.[BasePolicySetId], '00000000-0000-0000-0000-000000000000') <> er.[PolicySetId])
+                             OR er.[IsEnabled] = 0 OR er.[Disposition] <> 1
+                             OR er.[EffectiveFrom] > i.[CreatedAt] OR (er.[EffectiveTo] IS NOT NULL AND er.[EffectiveTo] < i.[CreatedAt])
+                             OR (er.[Category] IS NOT NULL AND er.[Category] <> i.[Category])
+                             OR (er.[Method] IS NOT NULL AND er.[Method] <> i.[SelectedMethod])
+                             OR pr.[Id] IS NULL OR pr.[TenantId] <> i.[TenantId] OR pr.[IsDeleted] = 1
+                             OR pr.[ApprovedExceptionRuleId] <> i.[ApprovedExceptionRuleId]
+                             OR pr.[ExceptionWorkflowInstanceId] <> i.[MethodOverrideWorkflowInstanceId]
+                             OR ISNULL(pr.[ExceptionApprovalReference], '') <> ISNULL(i.[ExceptionApprovalReference], '')
+                             OR ISNULL(pr.[ExceptionEvidenceReference], '') <> ISNULL(i.[ExceptionEvidenceReference], '')
+                             OR wi.[Id] IS NULL OR wi.[TenantId] <> i.[TenantId] OR wi.[IsDeleted] = 1
+                             OR wi.[EntityId] <> i.[PurchaseRequisitionId] OR wi.[Status] <> 2 OR wi.[CompletedDate] IS NULL
+                             OR wet.[Id] IS NULL OR wet.[TenantId] <> i.[TenantId] OR wet.[IsDeleted] = 1
+                             OR UPPER(wet.[Code]) NOT IN ('PROCUREMENT_EXCEPTION', 'PROCUREMENTEXCEPTION')
+                             OR er.[WorkflowDefinitionId] IS NULL OR wi.[WorkflowDefinitionId] <> er.[WorkflowDefinitionId]
+                             OR wd.[Id] IS NULL OR wd.[TenantId] <> i.[TenantId] OR wd.[IsDeleted] = 1
+                             OR wd.[IsActive] = 0 OR wd.[LifecycleStatus] <> 1
+                             OR i.[MethodOverrideApprovedAtUtc] <> wi.[CompletedDate]
+                             OR pr.[ExceptionApprovedAtUtc] IS NULL OR pr.[ExceptionApprovedAtUtc] <> wi.[CompletedDate]
+                             OR (er.[MaximumDurationDays] IS NOT NULL AND DATEADD(DAY, er.[MaximumDurationDays], wi.[CompletedDate]) < i.[CreatedAt])
+                             OR NOT EXISTS
+                                (SELECT 1 FROM OPENJSON(i.[MethodOverrideApprovalActorsJson]) j
+                                 WHERE TRY_CONVERT(uniqueidentifier, j.[value]) IS NOT NULL)
+                             OR EXISTS
+                                (SELECT 1 FROM OPENJSON(i.[MethodOverrideApprovalActorsJson]) j
+                                 WHERE TRY_CONVERT(uniqueidentifier, j.[value]) IS NULL)
+                             OR EXISTS
+                                (SELECT 1 FROM OPENJSON(i.[MethodOverrideApprovalActorsJson]) j
+                                 WHERE TRY_CONVERT(uniqueidentifier, j.[value]) IN (pr.[RequestedById], i.[CreatedById]))
+                             OR EXISTS
+                                (SELECT 1 FROM OPENJSON(i.[MethodOverrideApprovalActorsJson]) j
+                                 WHERE NOT EXISTS
+                                    (SELECT 1
+                                     FROM [dbo].[WorkflowStepInstances] wsi
+                                     INNER JOIN [dbo].[WorkflowApprovals] wa ON wa.[StepInstanceId] = wsi.[Id]
+                                     WHERE wsi.[WorkflowInstanceId] = wi.[Id] AND wsi.[TenantId] = i.[TenantId]
+                                       AND wsi.[IsDeleted] = 0 AND wa.[TenantId] = i.[TenantId] AND wa.[IsDeleted] = 0
+                                       AND wa.[Status] = 1 AND wa.[ProcessedById] = TRY_CONVERT(uniqueidentifier, j.[value])))
+                             OR EXISTS
+                                (SELECT 1
+                                 FROM [dbo].[WorkflowStepInstances] wsi
+                                 INNER JOIN [dbo].[WorkflowApprovals] wa ON wa.[StepInstanceId] = wsi.[Id]
+                                 WHERE wsi.[WorkflowInstanceId] = wi.[Id] AND wsi.[TenantId] = i.[TenantId]
+                                   AND wsi.[IsDeleted] = 0 AND wa.[TenantId] = i.[TenantId] AND wa.[IsDeleted] = 0
+                                   AND wa.[Status] = 1 AND wa.[ProcessedById] IS NOT NULL
+                                   AND NOT EXISTS
+                                      (SELECT 1 FROM OPENJSON(i.[MethodOverrideApprovalActorsJson]) j
+                                       WHERE TRY_CONVERT(uniqueidentifier, j.[value]) = wa.[ProcessedById]))
+                             OR NOT EXISTS
+                                (SELECT 1
+                                 FROM [dbo].[WorkflowStepInstances] wsi
+                                 INNER JOIN [dbo].[WorkflowApprovals] wa ON wa.[StepInstanceId] = wsi.[Id]
+                                 WHERE wsi.[WorkflowInstanceId] = wi.[Id] AND wsi.[TenantId] = i.[TenantId]
+                                   AND wsi.[IsDeleted] = 0 AND wa.[TenantId] = i.[TenantId] AND wa.[IsDeleted] = 0
+                                   AND wa.[Status] = 1 AND wa.[ProcessedById] IS NOT NULL
+                                   AND UPPER(ISNULL(wa.[ApproverRole], '')) = UPPER(er.[ApproverRole]))))
+                )
+                    THROW 51073, 'Procurement sourcing method recommendation or approved override lineage is invalid.', 1;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    INNER JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[RecommendedMethod] <> i.[RecommendedMethod]
+                       OR d.[MethodSelectionBasis] <> i.[MethodSelectionBasis]
+                       OR ISNULL(d.[MethodOverrideWorkflowInstanceId], '00000000-0000-0000-0000-000000000000') <> ISNULL(i.[MethodOverrideWorkflowInstanceId], '00000000-0000-0000-0000-000000000000')
+                       OR ISNULL(d.[MethodOverrideReason], '') <> ISNULL(i.[MethodOverrideReason], '')
+                       OR ISNULL(d.[MethodOverrideApprovalActorsJson], '') <> ISNULL(i.[MethodOverrideApprovalActorsJson], '')
+                       OR ISNULL(d.[MethodOverrideApprovedAtUtc], '19000101') <> ISNULL(i.[MethodOverrideApprovedAtUtc], '19000101')
+                )
+                    THROW 51074, 'Procurement sourcing method decision lineage is immutable.', 1;
             END
             """);
         // TRIGGER TR_ProcurementSpecificationTemplates_LifecycleGuard from 20260721194837_AddProcurementSpecificationTemplates:1 (ARCHIVED_FINAL_DEFINITION)
@@ -10939,6 +11772,97 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51301, 'Supplier-risk assessment supplier and DEC-011 policy lineage must belong to the same tenant.', 1;
             END
             """);
+        // TRIGGER TR_ProcurementTenderControls_CommitteeScoreProjection from 20260723214709_AddProcurementEvaluationCommitteeControls:12 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementTenderControls_CommitteeScoreProjection]
+            ON [dbo].[ProcurementTenderControls]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.Id = i.Id
+                    WHERE LEN(LTRIM(RTRIM(ISNULL(i.TechnicalEvaluationSnapshotJson, '')))) > 0
+                      AND (d.Id IS NULL
+                           OR ISNULL(i.TechnicalEvaluationSnapshotJson, '') <> ISNULL(d.TechnicalEvaluationSnapshotJson, '')
+                           OR ISNULL(i.TechnicalEvaluatedAtUtc, '19000101') <> ISNULL(d.TechnicalEvaluatedAtUtc, '19000101'))
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM [dbo].[ProcurementEvaluationScoreSheets] s
+                          JOIN [dbo].[ProcurementEvaluationCommitteeControls] c
+                            ON c.Id = s.CommitteeControlId AND c.TenantId = s.TenantId
+                          JOIN [dbo].[ProcurementEvaluationCommitteeAppointments] a
+                            ON a.Id = s.AppointmentId AND a.TenantId = s.TenantId
+                          WHERE s.TenantId = i.TenantId AND s.IsDeleted = 0 AND s.Status = 0
+                            AND c.SourceType = 0 AND c.SourceId = i.TenderId AND c.Status = 1
+                            AND s.Phase = 0 AND s.ScoreSubjectType = 'ProcurementTenderControl'
+                            AND s.ScoreSubjectId = i.TenderId
+                            AND s.ScoreSnapshotJson = i.TechnicalEvaluationSnapshotJson
+                            AND TRY_CONVERT(datetime2, JSON_VALUE(i.TechnicalEvaluationSnapshotJson, '$.evaluatedAtUtc'))
+                                = i.TechnicalEvaluatedAtUtc
+                            AND JSON_VALUE(i.TechnicalEvaluationSnapshotJson, '$.evidenceReference')
+                                = i.TechnicalEvaluationEvidenceReference
+                            AND TRY_CONVERT(uniqueidentifier, JSON_VALUE(i.TechnicalEvaluationSnapshotJson, '$.evaluatorUserId'))
+                                = a.UserId
+                            AND NOT EXISTS (
+                                SELECT 1 FROM [dbo].[ProcurementEvaluationScoreSheets] newer
+                                WHERE newer.TenantId = s.TenantId AND newer.CommitteeControlId = s.CommitteeControlId
+                                  AND newer.Phase = s.Phase AND newer.AppointmentId = s.AppointmentId
+                                  AND newer.ScoreSubjectType = s.ScoreSubjectType
+                                  AND newer.ScoreSubjectId = s.ScoreSubjectId
+                                  AND newer.IsDeleted = 0 AND newer.Attempt > s.Attempt)
+                            AND NOT EXISTS (
+                                SELECT 1 FROM [dbo].[ProcurementEvaluationScoreRecalls] recall
+                                WHERE recall.ScoreSheetId = s.Id AND recall.TenantId = s.TenantId
+                                  AND recall.IsDeleted = 0 AND recall.Status IN (0, 1))))
+                    THROW 51386, 'Technical tender-control projection does not match its exact current locked committee score sheet.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.Id = i.Id
+                    WHERE LEN(LTRIM(RTRIM(ISNULL(i.FinancialEvaluationSnapshotJson, '')))) > 0
+                      AND (d.Id IS NULL
+                           OR ISNULL(i.FinancialEvaluationSnapshotJson, '') <> ISNULL(d.FinancialEvaluationSnapshotJson, '')
+                           OR ISNULL(i.FinancialEvaluatedAtUtc, '19000101') <> ISNULL(d.FinancialEvaluatedAtUtc, '19000101')
+                           OR ISNULL(i.RecommendedBidId, '00000000-0000-0000-0000-000000000000')
+                              <> ISNULL(d.RecommendedBidId, '00000000-0000-0000-0000-000000000000'))
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM [dbo].[ProcurementEvaluationScoreSheets] s
+                          JOIN [dbo].[ProcurementEvaluationCommitteeControls] c
+                            ON c.Id = s.CommitteeControlId AND c.TenantId = s.TenantId
+                          JOIN [dbo].[ProcurementEvaluationCommitteeAppointments] a
+                            ON a.Id = s.AppointmentId AND a.TenantId = s.TenantId
+                          WHERE s.TenantId = i.TenantId AND s.IsDeleted = 0 AND s.Status = 0
+                            AND c.SourceType = 0 AND c.SourceId = i.TenderId AND c.Status = 1
+                            AND s.Phase = 1 AND s.ScoreSubjectType = 'ProcurementTenderControl'
+                            AND s.ScoreSubjectId = i.TenderId
+                            AND s.ScoreSnapshotJson = i.FinancialEvaluationSnapshotJson
+                            AND TRY_CONVERT(datetime2, JSON_VALUE(i.FinancialEvaluationSnapshotJson, '$.evaluatedAtUtc'))
+                                = i.FinancialEvaluatedAtUtc
+                            AND JSON_VALUE(i.FinancialEvaluationSnapshotJson, '$.evidenceReference')
+                                = i.FinancialEvaluationEvidenceReference
+                            AND TRY_CONVERT(uniqueidentifier, JSON_VALUE(i.FinancialEvaluationSnapshotJson, '$.recommendedBidId'))
+                                = i.RecommendedBidId
+                            AND TRY_CONVERT(uniqueidentifier, JSON_VALUE(i.FinancialEvaluationSnapshotJson, '$.evaluatorUserId'))
+                                = a.UserId
+                            AND NOT EXISTS (
+                                SELECT 1 FROM [dbo].[ProcurementEvaluationScoreSheets] newer
+                                WHERE newer.TenantId = s.TenantId AND newer.CommitteeControlId = s.CommitteeControlId
+                                  AND newer.Phase = s.Phase AND newer.AppointmentId = s.AppointmentId
+                                  AND newer.ScoreSubjectType = s.ScoreSubjectType
+                                  AND newer.ScoreSubjectId = s.ScoreSubjectId
+                                  AND newer.IsDeleted = 0 AND newer.Attempt > s.Attempt)
+                            AND NOT EXISTS (
+                                SELECT 1 FROM [dbo].[ProcurementEvaluationScoreRecalls] recall
+                                WHERE recall.ScoreSheetId = s.Id AND recall.TenantId = s.TenantId
+                                  AND recall.IsDeleted = 0 AND recall.Status IN (0, 1))))
+                    THROW 51387, 'Financial tender-control projection does not match its exact current locked committee score sheet.', 1;
+            END
+            """);
         // TRIGGER TR_ProcurementTenderControls_Lifecycle from 20260723184003_AddProcurementTenderDocumentControls:7 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementTenderControls_Lifecycle]
@@ -12147,6 +13071,30 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51517, 'Tender security source subject, supplier, evidence, hash, or tenant lineage is invalid.', 1;
             END
             """);
+        // TRIGGER TR_ProcurementTenderSubmissionReceipts_EffectiveDeadline from 20260723184003_AddProcurementTenderDocumentControls:9 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementTenderSubmissionReceipts_EffectiveDeadline]
+            ON [dbo].[ProcurementTenderSubmissionReceipts]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    LEFT JOIN [dbo].[ProcurementTenderControls] c
+                      ON c.[Id] = i.[TenderControlId] AND c.[TenantId] = i.[TenantId]
+                    WHERE c.[Id] IS NULL
+                       OR (d.[Id] IS NULL AND i.[SubmissionDeadlineUtc] <> c.[SubmissionDeadlineUtc])
+                       OR (d.[Id] IS NOT NULL
+                           AND i.[OpenedAtUtc] IS NOT NULL
+                           AND i.[OpenedAtUtc] < c.[SubmissionDeadlineUtc])
+                )
+                    THROW 51217, 'Tender receipt classification and opening must use the effective controlled submission deadline.', 1;
+            END
+            """);
         // TRIGGER TR_ProcurementTenderSubmissionReceipts_Immutable from 20260723071908_AddProcurementTenderStatutoryControls:3 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProcurementTenderSubmissionReceipts_Immutable]
@@ -12442,6 +13390,282 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 54097, 'TDC-0409 evidence must reference a current same-tenant controlled record.', 1;
             END
             """);
+        // TRIGGER TR_ProjectAssetLinks_ReconciliationLineage from 20260822003500_AddProjectAssetLinkFixedAssetReconciliation:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER dbo.TR_ProjectAssetLinks_ReconciliationLineage
+            ON dbo.ProjectAssetLinks
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted link
+                    LEFT JOIN dbo.Projects project
+                        ON project.Id = link.ProjectId AND project.TenantId = link.TenantId AND project.IsDeleted = 0
+                    LEFT JOIN dbo.MaintenanceAssets maintenanceAsset
+                        ON maintenanceAsset.Id = link.MaintenanceAssetId AND maintenanceAsset.TenantId = link.TenantId AND maintenanceAsset.IsDeleted = 0
+                    LEFT JOIN dbo.FixedAssets fixedAsset
+                        ON fixedAsset.Id = link.FixedAssetId AND fixedAsset.TenantId = link.TenantId AND fixedAsset.IsDeleted = 0
+                    LEFT JOIN dbo.CompanyAssets companyAsset
+                        ON companyAsset.Id = link.CompanyAssetId AND companyAsset.TenantId = link.TenantId AND companyAsset.IsDeleted = 0
+                    LEFT JOIN dbo.JobCard jobCard
+                        ON jobCard.Id = link.JobCardId AND jobCard.TenantId = link.TenantId AND jobCard.IsDeleted = 0
+                    WHERE project.Id IS NULL
+                       OR (link.MaintenanceAssetId IS NULL AND link.FixedAssetId IS NULL AND link.CompanyAssetId IS NULL AND link.JobCardId IS NULL)
+                       OR (link.MaintenanceAssetId IS NOT NULL AND maintenanceAsset.Id IS NULL)
+                       OR (link.FixedAssetId IS NOT NULL AND fixedAsset.Id IS NULL)
+                       OR (link.CompanyAssetId IS NOT NULL AND companyAsset.Id IS NULL)
+                       OR (link.JobCardId IS NOT NULL AND jobCard.Id IS NULL)
+                       OR (link.JobCardId IS NOT NULL AND link.MaintenanceAssetId IS NOT NULL AND jobCard.AssetId <> link.MaintenanceAssetId)
+                       OR ((link.MaintenanceAssetId IS NOT NULL OR link.FixedAssetId IS NOT NULL OR link.CompanyAssetId IS NOT NULL OR link.JobCardId IS NOT NULL)
+                           AND (link.ReconciliationKey IS NULL OR LEN(link.ReconciliationKey) <> 64))
+                )
+                    THROW 52155, 'Project asset reconciliation lineage is invalid or crosses tenant boundaries.', 1;
+            END;
+            """);
+        // TRIGGER TR_ProjectBoqRemeasurementLines_Guard from 20260810040000_AddProjectBoqRemeasurementWorkflow:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_ProjectBoqRemeasurementLines_Guard] ON [ProjectBoqRemeasurementLines]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (SELECT 1 FROM deleted) THROW 51091, 'Remeasurement quantity lineage is append-only.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted i
+                WHERE NOT EXISTS (SELECT 1 FROM [ProjectBoqRemeasurementRevisions] r WHERE r.[Id]=i.[RemeasurementRevisionId] AND r.[TenantId]=i.[TenantId] AND r.[ProjectId]=i.[ProjectId] AND r.[ProjectBoqVersionId]=i.[ProjectBoqVersionId] AND r.[IsFinalized]=0 AND r.[IsDeleted]=0)
+                   OR NOT EXISTS (SELECT 1 FROM [ProjectBoqVersionLines] c JOIN [ProjectBoqVersions] v ON v.[Id]=c.[ProjectBoqVersionId] WHERE c.[Id]=i.[ProjectBoqVersionLineId] AND c.[TenantId]=i.[TenantId] AND c.[ProjectId]=i.[ProjectId] AND c.[ProjectBoqVersionId]=i.[ProjectBoqVersionId] AND c.[LineKey]=i.[BoqLineKey] AND c.[Quantity]=i.[RevisedQuantity] AND c.[IsDeleted]=0 AND v.[VersionType]=4 AND v.[Status]='Draft' AND v.[IsDeleted]=0)
+                   OR NOT EXISTS (SELECT 1 FROM [ProjectBoqVersionLines] b JOIN [ProjectBoqRemeasurementRevisions] r ON r.[Id]=i.[RemeasurementRevisionId] WHERE b.[Id]=i.[SourceApprovedBoqVersionLineId] AND b.[TenantId]=i.[TenantId] AND b.[ProjectId]=i.[ProjectId] AND b.[ProjectBoqVersionId]=r.[SourceApprovedBoqVersionId] AND b.[LineKey]=i.[BoqLineKey] AND b.[Quantity]=i.[PreviousQuantity] AND b.[IsDeleted]=0))
+                THROW 51091, 'Remeasurement previous/current quantities must match the approved and candidate BoQ line lineage.', 1;
+            END
+            """);
+        // TRIGGER TR_ProjectBoqRemeasurementRevisions_Guard from 20260810040000_AddProjectBoqRemeasurementWorkflow:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_ProjectBoqRemeasurementRevisions_Guard] ON [ProjectBoqRemeasurementRevisions]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (SELECT 1 FROM deleted d WHERE NOT EXISTS (SELECT 1 FROM inserted i WHERE i.[Id]=d.[Id]))
+                THROW 51090, 'Remeasurement revision lineage is append-only.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+                WHERE NOT (d.[IsFinalized]=0 AND i.[IsFinalized]=1)
+                   OR EXISTS (SELECT i.[TenantId],i.[ProjectId],i.[ProjectBoqVersionId],i.[SourceApprovedBoqVersionId],i.[ClientRequestId],i.[RequestHash],i.[MeasurementSetHash],i.[SelectedMeasurementCount],i.[ChangedLineCount],i.[TotalAbsoluteQuantityDelta],i.[CreatedAt],i.[CreatedById],i.[IsDeleted]
+                              EXCEPT SELECT d.[TenantId],d.[ProjectId],d.[ProjectBoqVersionId],d.[SourceApprovedBoqVersionId],d.[ClientRequestId],d.[RequestHash],d.[MeasurementSetHash],d.[SelectedMeasurementCount],d.[ChangedLineCount],d.[TotalAbsoluteQuantityDelta],d.[CreatedAt],d.[CreatedById],d.[IsDeleted]))
+                THROW 51090, 'Only atomic remeasurement-lineage finalization is permitted.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted i
+                WHERE NOT EXISTS (SELECT 1 FROM [ProjectBoqVersions] v WHERE v.[Id]=i.[ProjectBoqVersionId] AND v.[TenantId]=i.[TenantId] AND v.[ProjectId]=i.[ProjectId] AND v.[VersionType]=4 AND v.[SourceVersionId]=i.[SourceApprovedBoqVersionId] AND v.[Status]='Draft' AND v.[IsDeleted]=0)
+                   OR NOT EXISTS (SELECT 1 FROM [ProjectBoqVersions] s WHERE s.[Id]=i.[SourceApprovedBoqVersionId] AND s.[TenantId]=i.[TenantId] AND s.[ProjectId]=i.[ProjectId] AND s.[VersionType]=2 AND s.[Status]='Approved' AND s.[PublishedAt] IS NOT NULL AND s.[IsDeleted]=0))
+                THROW 51090, 'Remeasurement must derive from the current approved BoQ through a Draft Remeasurement candidate.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted i WHERE i.[IsFinalized]=1 AND (
+                  i.[ChangedLineCount]<>(SELECT COUNT(*) FROM [ProjectBoqRemeasurementLines] l WHERE l.[RemeasurementRevisionId]=i.[Id] AND l.[TenantId]=i.[TenantId] AND l.[IsDeleted]=0)
+                  OR i.[SelectedMeasurementCount]<>(SELECT COUNT(*) FROM [ProjectBoqRemeasurementSources] s WHERE s.[RemeasurementRevisionId]=i.[Id] AND s.[TenantId]=i.[TenantId] AND s.[IsDeleted]=0)
+                  OR i.[TotalAbsoluteQuantityDelta]<>(SELECT SUM(ABS(l.[QuantityDelta])) FROM [ProjectBoqRemeasurementLines] l WHERE l.[RemeasurementRevisionId]=i.[Id] AND l.[TenantId]=i.[TenantId] AND l.[IsDeleted]=0)
+                  OR EXISTS (SELECT 1 FROM [ProjectBoqRemeasurementLines] l WHERE l.[RemeasurementRevisionId]=i.[Id] AND l.[TenantId]=i.[TenantId] AND l.[IsDeleted]=0 AND l.[RevisedQuantity]<>(SELECT SUM(s.[MeasuredQuantitySnapshot]) FROM [ProjectBoqRemeasurementSources] s WHERE s.[RemeasurementLineId]=l.[Id] AND s.[TenantId]=i.[TenantId] AND s.[IsDeleted]=0))))
+                THROW 51090, 'Finalized remeasurement counts, deltas and measured quantities must reconcile exactly.', 1;
+            END
+            """);
+        // TRIGGER TR_ProjectBoqRemeasurementSources_Guard from 20260810040000_AddProjectBoqRemeasurementWorkflow:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_ProjectBoqRemeasurementSources_Guard] ON [ProjectBoqRemeasurementSources]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (SELECT 1 FROM deleted) THROW 51092, 'Remeasurement measurement-source lineage is append-only.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted i
+                WHERE NOT EXISTS (SELECT 1 FROM [ProjectBoqRemeasurementRevisions] r WHERE r.[Id]=i.[RemeasurementRevisionId] AND r.[TenantId]=i.[TenantId] AND r.[ProjectId]=i.[ProjectId] AND r.[IsFinalized]=0 AND r.[IsDeleted]=0)
+                   OR NOT EXISTS (SELECT 1 FROM [ProjectBoqRemeasurementLines] l WHERE l.[Id]=i.[RemeasurementLineId] AND l.[TenantId]=i.[TenantId] AND l.[ProjectId]=i.[ProjectId] AND l.[RemeasurementRevisionId]=i.[RemeasurementRevisionId] AND l.[IsDeleted]=0)
+                   OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyMeasurementSheets] m JOIN [ProjectBoqRemeasurementLines] l ON l.[Id]=i.[RemeasurementLineId] WHERE m.[Id]=i.[MeasurementSheetId] AND m.[TenantId]=i.[TenantId] AND m.[ProjectId]=i.[ProjectId] AND m.[ProjectBoqVersionLineId]=l.[SourceApprovedBoqVersionLineId] AND m.[Status]='Recorded' AND m.[SheetReference]=i.[MeasurementReferenceSnapshot] AND m.[TotalMeasuredQuantity]=i.[MeasuredQuantitySnapshot] AND m.[RecordedAt]=i.[RecordedAtSnapshot] AND m.[RequestHash]=i.[MeasurementRequestHashSnapshot] AND m.[IsDeleted]=0))
+                THROW 51092, 'Only immutable Recorded measurement sheets may source a remeasurement revision.', 1;
+            END
+            """);
+        // TRIGGER TR_ProjectBoqVersionLines_ImmutablePublished from 20260808124500_AddProjectBoqApprovalPublication:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProjectBoqVersionLines_ImmutablePublished]
+            ON [dbo].[ProjectBoqVersionLines]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    INNER JOIN [dbo].[ProjectBoqVersions] v ON v.[Id] = i.[ProjectBoqVersionId]
+                    WHERE v.[VersionType] = 2 AND v.[PublishedAt] IS NOT NULL
+                ) OR EXISTS (
+                    SELECT 1
+                    FROM deleted d
+                    INNER JOIN [dbo].[ProjectBoqVersions] v ON v.[Id] = d.[ProjectBoqVersionId]
+                    WHERE v.[VersionType] = 2 AND v.[PublishedAt] IS NOT NULL
+                )
+                BEGIN
+                    THROW 51000, 'Published BoQ version lines are immutable. Create and approve a revision instead.', 1;
+                END
+            END
+            """);
+        // TRIGGER TR_ProjectBoqVersions_ImmutablePublished from 20260808124500_AddProjectBoqApprovalPublication:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProjectBoqVersions_ImmutablePublished]
+            ON [dbo].[ProjectBoqVersions]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM deleted d
+                    LEFT JOIN inserted i ON i.[Id] = d.[Id]
+                    WHERE d.[VersionType] = 2
+                      AND d.[PublishedAt] IS NOT NULL
+                      AND (
+                          i.[Id] IS NULL
+                          OR i.[TenantId] <> d.[TenantId]
+                          OR i.[ProjectId] <> d.[ProjectId]
+                          OR ISNULL(i.[SourceVersionId], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[SourceVersionId], '00000000-0000-0000-0000-000000000000')
+                          OR i.[VersionNumber] <> d.[VersionNumber]
+                          OR i.[VersionType] <> d.[VersionType]
+                          OR i.[ApprovalStatus] <> d.[ApprovalStatus]
+                          OR ISNULL(i.[WorkflowInstanceId], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[WorkflowInstanceId], '00000000-0000-0000-0000-000000000000')
+                          OR ISNULL(i.[WorkflowDefinitionId], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[WorkflowDefinitionId], '00000000-0000-0000-0000-000000000000')
+                          OR ISNULL(i.[SubmittedById], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[SubmittedById], '00000000-0000-0000-0000-000000000000')
+                          OR ISNULL(i.[SubmittedAt], '19000101') <> ISNULL(d.[SubmittedAt], '19000101')
+                          OR ISNULL(i.[ApprovedById], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[ApprovedById], '00000000-0000-0000-0000-000000000000')
+                          OR ISNULL(i.[ApprovedAt], '19000101') <> ISNULL(d.[ApprovedAt], '19000101')
+                          OR ISNULL(i.[PublishedById], '00000000-0000-0000-0000-000000000000') <> ISNULL(d.[PublishedById], '00000000-0000-0000-0000-000000000000')
+                          OR ISNULL(i.[PublishedAt], '19000101') <> ISNULL(d.[PublishedAt], '19000101')
+                          OR i.[ChangeSummary] <> d.[ChangeSummary]
+                          OR i.[SnapshotHash] <> d.[SnapshotHash]
+                          OR i.[LineCount] <> d.[LineCount]
+                          OR i.[SnapshotAt] <> d.[SnapshotAt]
+                          OR i.[IsDeleted] <> d.[IsDeleted]
+                          OR (i.[Status] <> d.[Status] AND NOT (d.[Status] = 'Approved' AND i.[Status] = 'Retired'))
+                      )
+                )
+                BEGIN
+                    THROW 51000, 'Published BoQ versions are immutable. Only retirement through an approved replacement is permitted.', 1;
+                END
+            END
+            """);
+        // TRIGGER TR_ProjectCivilDesignCases_InitiationLineage from 20260821230000_AddCivilEngineeringWorksCaseInitiation:5 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER dbo.TR_ProjectCivilDesignCases_InitiationLineage
+            ON dbo.ProjectCivilDesignCases
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+              SET NOCOUNT ON;
+
+              IF EXISTS (
+                SELECT 1
+                FROM inserted i
+                LEFT JOIN deleted d ON d.Id = i.Id
+                WHERE d.Id IS NULL
+                  AND (i.InitiationSource IS NULL OR i.InitiationSourceId IS NULL
+                    OR i.EstateManagedAssetId IS NULL OR i.EngineeringCategoryId IS NULL
+                    OR i.WorkClassification IS NULL OR i.ScopeSummary IS NULL
+                    OR i.ConstraintSummary IS NULL OR i.RiskSummary IS NULL OR i.Recommendation IS NULL)
+              )
+                THROW 51921, 'New Civil Engineering Cases require controlled source, property/site, category, classification and assessment lineage.', 1;
+
+              IF EXISTS (
+                SELECT 1
+                FROM inserted i
+                JOIN deleted d ON d.Id = i.Id
+                WHERE d.InitiationSource IS NOT NULL
+                  AND (
+                    ISNULL(i.InitiationSource, -1) <> ISNULL(d.InitiationSource, -1)
+                    OR ISNULL(CONVERT(varchar(36), i.InitiationSourceId), '') <> ISNULL(CONVERT(varchar(36), d.InitiationSourceId), '')
+                    OR ISNULL(CONVERT(varchar(36), i.InitiationSourceDocumentVersionId), '') <> ISNULL(CONVERT(varchar(36), d.InitiationSourceDocumentVersionId), '')
+                    OR ISNULL(i.InitiationSourceReference, '') <> ISNULL(d.InitiationSourceReference, '')
+                    OR ISNULL(CONVERT(varchar(36), i.EstateManagedAssetId), '') <> ISNULL(CONVERT(varchar(36), d.EstateManagedAssetId), '')
+                    OR ISNULL(CONVERT(varchar(36), i.EngineeringCategoryId), '') <> ISNULL(CONVERT(varchar(36), d.EngineeringCategoryId), '')
+                    OR ISNULL(i.WorkClassification, -1) <> ISNULL(d.WorkClassification, -1)
+                    OR ISNULL(i.ScopeSummary, '') <> ISNULL(d.ScopeSummary, '')
+                    OR ISNULL(i.ConstraintSummary, '') <> ISNULL(d.ConstraintSummary, '')
+                    OR ISNULL(i.RiskSummary, '') <> ISNULL(d.RiskSummary, '')
+                    OR ISNULL(i.Recommendation, '') <> ISNULL(d.Recommendation, '')
+                  )
+              )
+                THROW 51922, 'Civil Engineering Case source, property/site, category, classification and assessment lineage is immutable.', 1;
+
+              IF EXISTS (
+                SELECT 1
+                FROM inserted i
+                LEFT JOIN dbo.EstateManagedAssets estate
+                  ON estate.Id = i.EstateManagedAssetId AND estate.TenantId = i.TenantId AND estate.IsDeleted = 0
+                LEFT JOIN dbo.ProjectCatalogEntries category
+                  ON category.Id = i.EngineeringCategoryId AND category.TenantId = i.TenantId
+                    AND category.IsDeleted = 0 AND category.IsActive = 1
+                    AND category.CatalogType = 'civil-engineering-categories'
+                WHERE i.InitiationSource IS NOT NULL
+                  AND (estate.Id IS NULL OR category.Id IS NULL)
+              )
+                THROW 51923, 'Civil Engineering Case property/site or category lineage is invalid for this tenant.', 1;
+
+              IF EXISTS (
+                SELECT 1 FROM inserted i
+                WHERE i.InitiationSource IS NOT NULL
+                  AND (
+                    (i.InitiationSource = 0 AND NOT EXISTS (
+                      SELECT 1 FROM dbo.CapitalProjects source
+                      WHERE source.Id = i.InitiationSourceId AND source.TenantId = i.TenantId
+                        AND source.IsDeleted = 0 AND source.Status = 7))
+                    OR
+                    (i.InitiationSource = 1 AND NOT EXISTS (
+                      SELECT 1 FROM dbo.CivilEngineeringMaintenanceIntakes source
+                      WHERE source.Id = i.InitiationSourceId AND source.TenantId = i.TenantId
+                        AND source.IsDeleted = 0 AND source.Source = 1 AND source.Status <> 'Assessed'
+                        AND (source.ProjectId IS NULL OR source.ProjectId = i.ProjectId)
+                        AND (source.EstateManagedAssetId IS NULL OR source.EstateManagedAssetId = i.EstateManagedAssetId)))
+                    OR
+                    (i.InitiationSource = 2 AND NOT EXISTS (
+                      SELECT 1 FROM dbo.EstateManagedAssets source
+                      WHERE source.Id = i.InitiationSourceId AND source.Id = i.EstateManagedAssetId
+                        AND source.TenantId = i.TenantId AND source.IsDeleted = 0
+                        AND source.IsReadyForProjectManagement = 1
+                        AND (source.ProjectId IS NULL OR source.ProjectId = i.ProjectId)))
+                    OR
+                    (i.InitiationSource = 3 AND NOT EXISTS (
+                      SELECT 1 FROM dbo.ProjectCivilDevelopmentApprovalFiles source
+                      WHERE source.Id = i.InitiationSourceId AND source.TenantId = i.TenantId
+                        AND source.IsDeleted = 0 AND source.ProjectId = i.ProjectId
+                        AND source.EstateManagedAssetId = i.EstateManagedAssetId))
+                    OR
+                    (i.InitiationSource = 4 AND NOT EXISTS (
+                      SELECT 1
+                      FROM dbo.CentralDocumentRecords record
+                      JOIN dbo.CentralDocumentVersions version
+                        ON version.Id = i.InitiationSourceDocumentVersionId
+                        AND version.DocumentRecordId = record.Id AND version.TenantId = i.TenantId
+                        AND version.IsDeleted = 0 AND version.Status = 'Published'
+                        AND version.PublishedAt IS NOT NULL AND record.CurrentVersion = version.VersionNumber
+                      WHERE record.Id = i.InitiationSourceId AND record.TenantId = i.TenantId
+                        AND record.IsDeleted = 0 AND record.LifecycleStatus = 'Active'
+                        AND record.VersionStatus = 'Published'
+                        AND record.MetadataTemplateCode = 'TDC-CIV-ENGINEERING-FILE'))
+                    OR
+                    (i.InitiationSource = 5 AND NOT EXISTS (
+                      SELECT 1 FROM dbo.ProjectDefectLiabilityCases source
+                      WHERE source.Id = i.InitiationSourceId AND source.TenantId = i.TenantId
+                        AND source.IsDeleted = 0 AND source.ProjectId = i.ProjectId
+                        AND source.Status NOT IN ('Closed', 'Resolved')))
+                    OR
+                    (i.InitiationSource = 6 AND NOT EXISTS (
+                      SELECT 1 FROM dbo.ProjectIssues source
+                      WHERE source.Id = i.InitiationSourceId AND source.TenantId = i.TenantId
+                        AND source.IsDeleted = 0 AND source.ProjectId = i.ProjectId
+                        AND source.Status NOT IN ('Closed', 'Resolved')))
+                  )
+              )
+                THROW 51924, 'Civil Engineering Case source lineage is not active, current, approved, or tenant-safe.', 1;
+            END;
+            """);
         // TRIGGER TR_ProjectCivilDesignCases_Lifecycle from 20260814234022_AddCivilEngineeringDesignWorkflow:0 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProjectCivilDesignCases_Lifecycle]
@@ -12533,6 +13757,32 @@ internal static class ArchivedGovernanceBaselineSql
                       )
                 )
                     THROW 51904, 'Invalid Civil design workflow transition.', 1;
+            END;
+            """);
+        // TRIGGER TR_ProjectCivilDesignCases_PlanningGisGate from 20260822000000_AddCivilEngineeringPlanningGisValidation:8 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER dbo.TR_ProjectCivilDesignCases_PlanningGisGate
+            ON dbo.ProjectCivilDesignCases
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (
+                SELECT 1 FROM inserted i JOIN deleted d ON d.Id = i.Id
+                WHERE ISNULL(i.RequirePlanningGisValidation, 0) <> ISNULL(d.RequirePlanningGisValidation, 0)
+              )
+                THROW 51936, 'The Planning/GIS requirement frozen on a Civil Engineering Case is immutable.', 1;
+              IF EXISTS (
+                SELECT 1 FROM inserted i
+                WHERE i.RequirePlanningGisValidation = 1
+                  AND i.Stage IN ('CivilEngineerDesign','SceDesignReview','Drafting','SceDrawingReview','HodFinalReview','Approved')
+                  AND NOT EXISTS (
+                    SELECT 1 FROM dbo.ProjectCivilPlanningGisValidations validation
+                    WHERE validation.DesignCaseId = i.Id AND validation.TenantId = i.TenantId
+                      AND validation.IsDeleted = 0 AND validation.Status = 2
+                  )
+              )
+                THROW 51937, 'An independently approved Planning/GIS validation is required before technical Civil Engineering work can proceed.', 1;
             END;
             """);
         // TRIGGER TR_ProjectCivilDesignEvidence_AppendOnly from 20260814234022_AddCivilEngineeringDesignWorkflow:2 (ARCHIVED_FINAL_DEFINITION)
@@ -12715,6 +13965,20 @@ internal static class ArchivedGovernanceBaselineSql
             BEGIN
               SET NOCOUNT ON;
               IF EXISTS (SELECT 1 FROM inserted value LEFT JOIN ProjectCivilDevelopmentApprovalEngineeringReviews review ON review.Id=value.EngineeringReviewId AND review.TenantId=value.TenantId LEFT JOIN Users actor ON actor.Id=value.ActorUserId AND actor.TenantId=value.TenantId AND actor.IsActive=1 WHERE review.Id IS NULL OR actor.Id IS NULL) THROW 52264, 'Civil permitting engineering-review revision lineage is invalid.', 1;
+            END;
+            """);
+        // TRIGGER TR_ProjectCivilDevelopmentApprovalEngineeringReviews_HodDecisionProjection from 20260821153000_AddCivilEngineeringPermittingHodDecisions:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER TR_ProjectCivilDevelopmentApprovalEngineeringReviews_HodDecisionProjection ON ProjectCivilDevelopmentApprovalEngineeringReviews AFTER UPDATE AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (
+                SELECT 1 FROM inserted value JOIN deleted prior ON prior.Id=value.Id
+                WHERE prior.Stage=1 AND value.Stage IN (2,3,4)
+                  AND (NOT EXISTS (SELECT 1 FROM ProjectCivilDevelopmentApprovalEngineeringReviewDecisions decision WHERE decision.TenantId=value.TenantId AND decision.EngineeringReviewId=value.Id AND decision.WorkflowInstanceId=value.WorkflowInstanceId AND ((value.Stage=2 AND decision.Outcome=0) OR (value.Stage=3 AND decision.Outcome=1) OR (value.Stage=4 AND decision.Outcome=2)))
+                       OR (value.Stage=2 AND (value.Status<>'Approved' OR value.ApprovalStatus<>'Approved'))
+                       OR (value.Stage IN (3,4) AND (value.Status<>'Rejected' OR value.ApprovalStatus<>'Rejected')))
+              ) THROW 52272, 'A final Civil permitting recommendation status requires its matching immutable HOD decision.', 1;
             END;
             """);
         // TRIGGER TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lifecycle from 20260821143000_AddCivilEngineeringPermittingEngineeringReviews:2 (ARCHIVED_FINAL_DEFINITION)
@@ -13018,6 +14282,20 @@ internal static class ArchivedGovernanceBaselineSql
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER TR_ProjectCivilDirectTaskFeedbackEntries_AppendOnly ON ProjectCivilDirectTaskFeedbackEntries AFTER UPDATE, DELETE AS
             BEGIN SET NOCOUNT ON; THROW 52286, 'Civil direct-task feedback entries are append-only.', 1; END;
+            """);
+        // TRIGGER TR_ProjectCivilDirectTaskFeedbackEntries_FieldCapture from 20260821200000_AddCivilEngineeringMobileFieldFeedback:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER TR_ProjectCivilDirectTaskFeedbackEntries_FieldCapture ON ProjectCivilDirectTaskFeedbackEntries AFTER INSERT AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (
+                SELECT 1 FROM inserted value
+                LEFT JOIN UnitsOfMeasure unit ON unit.Id=value.MeasurementUnitId AND unit.TenantId=value.TenantId AND unit.IsActive=1 AND unit.IsDeleted=0
+                WHERE (value.MeasurementValue IS NULL AND value.MeasurementUnitId IS NOT NULL)
+                   OR (value.MeasurementValue IS NOT NULL AND (value.MeasurementValue < 0 OR unit.Id IS NULL))
+                   OR (value.CapturedOfflineAtUtc IS NOT NULL AND (value.CapturedOfflineAtUtc > DATEADD(minute,5,value.CreatedAt) OR value.CapturedOfflineAtUtc < DATEADD(day,-31,value.CreatedAt)))
+              ) THROW 52291, 'Civil mobile field feedback measurement, unit or offline-capture lineage is invalid.', 1;
+            END;
             """);
         // TRIGGER TR_ProjectCivilDirectTaskFeedbackEntries_Lineage from 20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow:2 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
@@ -13961,6 +15239,16 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51915, 'Civil reconnaissance item tenant, section, or current Published DMS lineage is invalid.', 1;
             END;
             """);
+        // TRIGGER TR_ProjectCivilReconnaissanceReports_Delete from 20260815005453_AddCivilEngineeringReconnaissance:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProjectCivilReconnaissanceReports_Delete]
+            ON [dbo].[ProjectCivilReconnaissanceReports]
+            INSTEAD OF DELETE
+            AS
+            BEGIN
+                THROW 51914, 'Civil reconnaissance reports cannot be physically deleted.', 1;
+            END;
+            """);
         // TRIGGER TR_ProjectCivilReconnaissanceReports_Lifecycle from 20260815005453_AddCivilEngineeringReconnaissance:0 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProjectCivilReconnaissanceReports_Lifecycle]
@@ -14354,6 +15642,293 @@ internal static class ArchivedGovernanceBaselineSql
               IF EXISTS (SELECT 1 FROM inserted value LEFT JOIN ProjectCivilWeeklySupervisionReports report ON report.Id=value.ReportId AND report.TenantId=value.TenantId LEFT JOIN Users actor ON actor.Id=value.ActorUserId AND actor.TenantId=value.TenantId WHERE report.Id IS NULL OR actor.Id IS NULL) THROW 52141, 'Civil weekly-supervision revision lineage is invalid.', 1;
             END;
             """);
+        // TRIGGER TR_ProjectDrawings_QsRevisionLineage from 20260810103259_AddQuantitySurveyDesignRevisionImpacts:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProjectDrawings_QsRevisionLineage]
+            ON [dbo].[ProjectDrawings]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN [dbo].[ProjectDrawings] p ON p.[Id] = i.[SupersedesDrawingId]
+                    WHERE i.[SupersedesDrawingId] IS NOT NULL AND
+                          (p.[TenantId] <> i.[TenantId] OR p.[ProjectId] <> i.[ProjectId] OR
+                           UPPER(LTRIM(RTRIM(p.[DrawingNumber]))) <> UPPER(LTRIM(RTRIM(i.[DrawingNumber]))) OR
+                           ISNULL(UPPER(LTRIM(RTRIM(p.[Revision]))), '') = ISNULL(UPPER(LTRIM(RTRIM(i.[Revision]))), '') OR
+                           p.[Id] = i.[Id] OR p.[IsDeleted] = 1)
+                ) THROW 51131, 'Invalid project drawing revision lineage.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM deleted d
+                    LEFT JOIN inserted i ON i.[Id] = d.[Id]
+                    WHERE EXISTS (SELECT 1 FROM [dbo].[QuantitySurveyDesignRevisionImpacts] q
+                                  WHERE q.[IsDeleted] = 0 AND (q.[PreviousDrawingId] = d.[Id] OR q.[RevisedDrawingId] = d.[Id]))
+                      AND (i.[Id] IS NULL OR i.[IsDeleted] = 1 OR i.[TenantId] <> d.[TenantId] OR
+                           i.[ProjectId] <> d.[ProjectId] OR i.[DrawingNumber] <> d.[DrawingNumber] OR
+                           ISNULL(i.[Revision], '') <> ISNULL(d.[Revision], '') OR
+                           ISNULL(i.[SupersedesDrawingId], '00000000-0000-0000-0000-000000000000') <>
+                           ISNULL(d.[SupersedesDrawingId], '00000000-0000-0000-0000-000000000000'))
+                ) THROW 51132, 'Drawing lineage referenced by a QS design impact is immutable.', 1;
+            END
+            """);
+        // TRIGGER TR_ProjectExtensionOfTimeRequests_CivilControl from 20260822003400_AddCivilEngineeringExtensionOfTimeControls:5 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER dbo.TR_ProjectExtensionOfTimeRequests_CivilControl ON dbo.ProjectExtensionOfTimeRequests AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (SELECT 1 FROM deleted prior JOIN dbo.ProjectCivilExtensionOfTimeControls control ON control.ProjectExtensionOfTimeId=prior.Id AND control.TenantId=prior.TenantId AND control.IsDeleted=0 WHERE NOT EXISTS (SELECT 1 FROM inserted value WHERE value.Id=prior.Id))
+                THROW 52152, 'A governed Civil extension-of-time request cannot be deleted directly.', 1;
+              IF EXISTS (SELECT 1 FROM inserted value JOIN dbo.Contracts contract ON contract.Id=value.ContractId AND contract.TenantId=value.TenantId AND contract.IsDeleted=0 AND contract.ContractType='Works' LEFT JOIN dbo.ProjectCivilExtensionOfTimeControls control ON control.ProjectExtensionOfTimeId=value.Id AND control.TenantId=value.TenantId AND control.IsDeleted=0 WHERE NOT EXISTS (SELECT 1 FROM deleted prior WHERE prior.Id=value.Id) AND value.Status<>'Draft' AND control.Id IS NULL)
+                THROW 52153, 'Works extension-of-time requests must use the governed Civil control before review or approval.', 1;
+              IF EXISTS (SELECT 1 FROM inserted value JOIN deleted prior ON prior.Id=value.Id JOIN dbo.Contracts contract ON contract.Id=value.ContractId AND contract.TenantId=value.TenantId AND contract.IsDeleted=0 AND contract.ContractType='Works' LEFT JOIN dbo.ProjectCivilExtensionOfTimeControls control ON control.ProjectExtensionOfTimeId=value.Id AND control.TenantId=value.TenantId AND control.IsDeleted=0 WHERE control.Id IS NULL AND value.Status<>'Draft')
+                THROW 52153, 'Works extension-of-time requests must use the governed Civil control before review or approval.', 1;
+              IF EXISTS (SELECT 1 FROM inserted value JOIN deleted prior ON prior.Id=value.Id JOIN dbo.ProjectCivilExtensionOfTimeControls control ON control.ProjectExtensionOfTimeId=value.Id AND control.TenantId=value.TenantId AND control.IsDeleted=0 WHERE
+                value.TenantId<>prior.TenantId OR value.ProjectId<>prior.ProjectId OR ISNULL(value.ProjectPhaseId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.ProjectPhaseId,'00000000-0000-0000-0000-000000000000') OR ISNULL(value.ProjectPackageId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.ProjectPackageId,'00000000-0000-0000-0000-000000000000') OR ISNULL(value.ContractId,'00000000-0000-0000-0000-000000000000')<>ISNULL(prior.ContractId,'00000000-0000-0000-0000-000000000000') OR ISNULL(value.ReferenceNumber,'')<>ISNULL(prior.ReferenceNumber,'') OR value.Title<>prior.Title OR ISNULL(value.Reason,'')<>ISNULL(prior.Reason,'') OR value.RequestedDate<>prior.RequestedDate OR ISNULL(value.DaysRequested,-1)<>ISNULL(prior.DaysRequested,-1) OR ISNULL(value.RevisedCompletionDate,'19000101')<>ISNULL(prior.RevisedCompletionDate,'19000101') OR ISNULL(value.RequestedByName,'')<>ISNULL(prior.RequestedByName,'') )
+                THROW 52154, 'The governed Civil extension-of-time subject is immutable outside its control workflow.', 1;
+              IF EXISTS (SELECT 1 FROM inserted value JOIN dbo.ProjectCivilExtensionOfTimeControls control ON control.ProjectExtensionOfTimeId=value.Id AND control.TenantId=value.TenantId AND control.IsDeleted=0 WHERE
+                (control.Status='PendingApproval' AND value.Status<>'UnderReview') OR (control.Status='Approved' AND (value.Status<>'Approved' OR value.DaysApproved<>value.DaysRequested OR value.DecisionDate IS NULL)) OR (control.Status='Rejected' AND value.Status<>'Rejected'))
+                THROW 52155, 'The Projects extension-of-time status must match its governed Civil workflow state.', 1;
+            END;
+            """);
+        // TRIGGER TR_ProjectFinalAccountRevisions_QS0506AppendOnly from 20260810202208_AddQuantitySurveyFinalAccountLifecycle:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProjectFinalAccountRevisions_QS0506AppendOnly]
+            ON [dbo].[ProjectFinalAccountRevisions]
+            INSTEAD OF UPDATE, DELETE
+            AS
+            BEGIN
+                THROW 51869, 'QS final-account audit revisions are append-only.', 1;
+            END;
+            """);
+        // TRIGGER TR_ProjectFinalAccounts_QS0506Guard from 20260810202208_AddQuantitySurveyFinalAccountLifecycle:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProjectFinalAccounts_QS0506Guard]
+            ON [dbo].[ProjectFinalAccounts]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM deleted d
+                    LEFT JOIN inserted i ON i.[Id] = d.[Id]
+                    WHERE d.[ConfigurationProfileId] IS NOT NULL AND i.[Id] IS NULL)
+                    THROW 51861, 'Governed QS final accounts cannot be deleted.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[ConfigurationProfileId] IS NOT NULL
+                      AND (
+                          i.[TenantId] <> d.[TenantId]
+                          OR i.[ProjectId] <> d.[ProjectId]
+                          OR i.[IsDeleted] <> d.[IsDeleted]
+                          OR (d.[Status] NOT IN ('Draft', 'Rejected') AND (
+                              ISNULL(CONVERT(nvarchar(36), i.[ContractId]), '') <> ISNULL(CONVERT(nvarchar(36), d.[ContractId]), '')
+                              OR ISNULL(CONVERT(nvarchar(36), i.[ApprovedBoqVersionId]), '') <> ISNULL(CONVERT(nvarchar(36), d.[ApprovedBoqVersionId]), '')
+                              OR ISNULL(i.[ApprovedBoqSnapshotHash], '') <> ISNULL(d.[ApprovedBoqSnapshotHash], '')
+                              OR ISNULL(CONVERT(nvarchar(36), i.[ConfigurationProfileId]), '') <> ISNULL(CONVERT(nvarchar(36), d.[ConfigurationProfileId]), '')
+                              OR ISNULL(CONVERT(nvarchar(36), i.[ContractControlsDecisionId]), '') <> ISNULL(CONVERT(nvarchar(36), d.[ContractControlsDecisionId]), '')
+                              OR ISNULL(CONVERT(nvarchar(36), i.[ApprovalWorkflowDefinitionId]), '') <> ISNULL(CONVERT(nvarchar(36), d.[ApprovalWorkflowDefinitionId]), '')
+                              OR ISNULL(i.[PolicyHash], '') <> ISNULL(d.[PolicyHash], '')
+                              OR ISNULL(i.[RequestHash], '') <> ISNULL(d.[RequestHash], '')
+                              OR ISNULL(i.[ReconciliationHash], '') <> ISNULL(d.[ReconciliationHash], '')
+                              OR ISNULL(CONVERT(nvarchar(36), i.[PreparedById]), '') <> ISNULL(CONVERT(nvarchar(36), d.[PreparedById]), '')
+                          ))
+                          OR (d.[Status] = 'PendingApproval' AND (
+                              i.[OriginalContractValue] <> d.[OriginalContractValue]
+                              OR i.[ApprovedBoqValue] <> d.[ApprovedBoqValue]
+                              OR i.[ApprovedVariationAmount] <> d.[ApprovedVariationAmount]
+                              OR i.[ApprovedClaimAmount] <> d.[ApprovedClaimAmount]
+                              OR i.[ApprovedEscalationAmount] <> d.[ApprovedEscalationAmount]
+                              OR i.[AdvanceRecoveryAmount] <> d.[AdvanceRecoveryAmount]
+                              OR i.[MaterialDeductionAmount] <> d.[MaterialDeductionAmount]
+                              OR i.[OtherDeductionAmount] <> d.[OtherDeductionAmount]
+                              OR i.[FinalAccountValue] <> d.[FinalAccountValue]
+                          ))
+                      ))
+                    THROW 51862, 'Governed QS final-account source, policy, commercial, and subject lineage is immutable.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[ConfigurationProfileId] IS NOT NULL
+                      AND NOT (
+                          (d.[Status] = 'Draft' AND i.[Status] IN ('Draft', 'PendingApproval'))
+                          OR (d.[Status] = 'Rejected' AND i.[Status] = 'Draft')
+                          OR (d.[Status] = 'PendingApproval' AND i.[Status] IN ('Approved', 'Rejected'))
+                          OR (d.[Status] = 'Approved' AND i.[Status] = 'Closed')
+                      ))
+                    THROW 51863, 'Invalid governed QS final-account lifecycle transition.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[ConfigurationProfileId] IS NOT NULL
+                      AND (
+                          i.[ContractId] IS NULL
+                          OR i.[ApprovedBoqVersionId] IS NULL
+                          OR i.[ContractControlsDecisionId] IS NULL
+                          OR i.[ApprovalWorkflowDefinitionId] IS NULL
+                          OR i.[PreparedById] IS NULL
+                          OR i.[PreparedAt] IS NULL
+                          OR i.[ClientRequestId] = '00000000-0000-0000-0000-000000000000'
+                          OR LEN(ISNULL(i.[ApprovedBoqSnapshotHash], '')) <> 64
+                          OR LEN(ISNULL(i.[RequestHash], '')) <> 64
+                          OR LEN(ISNULL(i.[PolicyHash], '')) <> 64
+                          OR LEN(ISNULL(i.[ReconciliationHash], '')) <> 64
+                          OR NOT (
+                              (i.[Status] = 'Draft' AND i.[ApprovalStatus] = 'Draft')
+                              OR (i.[Status] = 'PendingApproval' AND i.[ApprovalStatus] = 'Pending' AND i.[SubmittedById] IS NOT NULL AND i.[SubmittedAt] IS NOT NULL)
+                              OR (i.[Status] = 'Approved' AND i.[ApprovalStatus] = 'Approved' AND i.[ApprovedById] IS NOT NULL AND i.[ApprovedAt] IS NOT NULL)
+                              OR (i.[Status] = 'Rejected' AND i.[ApprovalStatus] = 'Rejected' AND i.[RejectionReason] IS NOT NULL)
+                              OR (i.[Status] = 'Closed' AND i.[ApprovalStatus] = 'Approved' AND i.[ApprovedById] IS NOT NULL AND i.[ApprovedAt] IS NOT NULL AND i.[ClosureReason] IS NOT NULL)
+                          )
+                          OR ABS(i.[FinalAccountValue] - (
+                              i.[OriginalContractValue] + i.[ApprovedVariationAmount] + i.[ApprovedClaimAmount]
+                              + i.[ApprovedEscalationAmount] - i.[AdvanceRecoveryAmount]
+                              - i.[MaterialDeductionAmount] - i.[OtherDeductionAmount])) > 0.01
+                      ))
+                    THROW 51864, 'Governed QS final-account policy, source, request, or arithmetic evidence is incomplete.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[ConfigurationProfileId] IS NOT NULL
+                      AND (
+                          NOT EXISTS (SELECT 1 FROM [dbo].[Projects] p WHERE p.[Id] = i.[ProjectId] AND p.[TenantId] = i.[TenantId] AND p.[IsDeleted] = 0)
+                          OR NOT EXISTS (SELECT 1 FROM [dbo].[Contracts] c WHERE c.[Id] = i.[ContractId] AND c.[TenantId] = i.[TenantId] AND c.[IsDeleted] = 0 AND c.[ContractType] = 'Works')
+                          OR NOT EXISTS (SELECT 1 FROM [dbo].[ProjectBoqVersions] b WHERE b.[Id] = i.[ApprovedBoqVersionId] AND b.[ProjectId] = i.[ProjectId] AND b.[TenantId] = i.[TenantId] AND b.[IsDeleted] = 0)
+                          OR NOT EXISTS (SELECT 1 FROM [dbo].[QuantitySurveyConfigurationProfiles] p WHERE p.[Id] = i.[ConfigurationProfileId] AND p.[TenantId] = i.[TenantId] AND p.[IsDeleted] = 0)
+                          OR NOT EXISTS (SELECT 1 FROM [dbo].[QuantitySurveyConfigurationDecisions] d WHERE d.[Id] = i.[ContractControlsDecisionId] AND d.[ProfileId] = i.[ConfigurationProfileId] AND d.[TenantId] = i.[TenantId] AND d.[DecisionKey] = 'QS-DEC-012' AND d.[IsDeleted] = 0)
+                          OR NOT EXISTS (
+                              SELECT 1 FROM [dbo].[WorkflowDefinitions] w
+                              JOIN [dbo].[WorkflowEntityTypes] e ON e.[Id] = w.[EntityTypeId]
+                              WHERE w.[Id] = i.[ApprovalWorkflowDefinitionId] AND w.[TenantId] = i.[TenantId]
+                                AND w.[IsDeleted] = 0 AND w.[IsActive] = 1 AND e.[Code] = 'QS_FINAL_ACCOUNT')
+                      ))
+                    THROW 51865, 'Governed QS final-account tenant or controlled-source lineage is invalid.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[ConfigurationProfileId] IS NOT NULL
+                      AND i.[Status] IN ('PendingApproval', 'Approved', 'Rejected', 'Closed')
+                      AND (
+                          i.[WorkflowInstanceId] IS NULL
+                          OR NOT EXISTS (
+                              SELECT 1 FROM [dbo].[WorkflowInstances] w
+                              WHERE w.[Id] = i.[WorkflowInstanceId] AND w.[TenantId] = i.[TenantId]
+                                AND w.[EntityId] = i.[Id])
+                      ))
+                    THROW 51866, 'Governed QS final-account workflow lineage is invalid.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[ConfigurationProfileId] IS NOT NULL
+                      AND i.[Status] IN ('Approved', 'Closed')
+                      AND (i.[ApprovedById] IS NULL OR i.[ApprovedById] = i.[PreparedById]
+                           OR i.[ApprovedById] = i.[SubmittedById]))
+                    THROW 51867, 'Governed QS final accounts require an independent approver.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[ConfigurationProfileId] IS NOT NULL AND i.[Status] = 'Closed'
+                      AND (i.[ClosedById] IS NULL OR i.[ClosedAt] IS NULL
+                           OR i.[RetentionReleasedAmount] + 0.01 < i.[RetentionHeldAmount]
+                           OR i.[PaidToDateAmount] + 0.01 < i.[FinalAccountValue]))
+                    THROW 51868, 'Governed QS final accounts cannot close before retention and Finance settlement.', 1;
+            END;
+            """);
+        // TRIGGER TR_ProjectPaymentCertificates_QS0505AdvanceRecoveryGuard from 20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_ProjectPaymentCertificates_QS0505AdvanceRecoveryGuard]
+            ON [dbo].[ProjectPaymentCertificates]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[Id] IS NOT NULL
+                      AND
+                      (
+                          ISNULL(i.[QuantitySurveyAdvanceRecoveryAgreementId], '00000000-0000-0000-0000-000000000000')
+                            <> ISNULL(d.[QuantitySurveyAdvanceRecoveryAgreementId], '00000000-0000-0000-0000-000000000000')
+                          OR i.[AdvanceRecoveryAmount] <> d.[AdvanceRecoveryAmount]
+                      )
+                )
+                    THROW 55055, 'QS-0505 certificate advance-recovery agreement and amount are immutable.', 1;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    LEFT JOIN [dbo].[QuantitySurveyAdvanceRecoveryAgreements] a
+                      ON a.[Id] = i.[QuantitySurveyAdvanceRecoveryAgreementId]
+                     AND a.[TenantId] = i.[TenantId]
+                     AND a.[ProjectId] = i.[ProjectId]
+                     AND a.[ContractId] = i.[ContractId]
+                     AND a.[Status] IN ('Approved', 'Closed')
+                     AND a.[IsDeleted] = 0
+                    OUTER APPLY
+                    (
+                        SELECT ISNULL(SUM(pc.[AdvanceRecoveryAmount]), 0) AS [CommittedBefore]
+                        FROM [dbo].[ProjectPaymentCertificates] pc
+                        WHERE pc.[TenantId] = i.[TenantId]
+                          AND pc.[QuantitySurveyAdvanceRecoveryAgreementId] = i.[QuantitySurveyAdvanceRecoveryAgreementId]
+                          AND pc.[Id] <> i.[Id]
+                          AND pc.[Status] <> 'Cancelled'
+                          AND pc.[IsDeleted] = 0
+                    ) totals
+                    WHERE
+                        (d.[Id] IS NULL OR i.[AdvanceRecoveryAmount] <> d.[AdvanceRecoveryAmount]
+                         OR ISNULL(i.[QuantitySurveyAdvanceRecoveryAgreementId], '00000000-0000-0000-0000-000000000000')
+                            <> ISNULL(d.[QuantitySurveyAdvanceRecoveryAgreementId], '00000000-0000-0000-0000-000000000000'))
+                        AND
+                        (
+                        (
+                            (
+                                (i.[AdvanceRecoveryAmount] = 0 AND i.[QuantitySurveyAdvanceRecoveryAgreementId] IS NOT NULL)
+                                OR (i.[AdvanceRecoveryAmount] > 0 AND i.[QuantitySurveyAdvanceRecoveryAgreementId] IS NULL)
+                            )
+                        )
+                        OR
+                        (
+                            i.[QuantitySurveyAdvanceRecoveryAgreementId] IS NOT NULL
+                            AND
+                            (
+                                i.[AdvanceRecoveryAmount] <= 0 OR a.[Id] IS NULL
+                                OR totals.[CommittedBefore] + i.[AdvanceRecoveryAmount] > a.[OriginalAdvanceAmount] + 0.01
+                                OR ABS
+                                   (
+                                       i.[AdvanceRecoveryAmount] -
+                                       CASE
+                                           WHEN a.[OriginalAdvanceAmount] - totals.[CommittedBefore]
+                                                < ROUND(i.[GrossCertifiedAmount] * a.[RecoveryPercentage] / 100.0, 2)
+                                           THEN a.[OriginalAdvanceAmount] - totals.[CommittedBefore]
+                                           ELSE ROUND(i.[GrossCertifiedAmount] * a.[RecoveryPercentage] / 100.0, 2)
+                                       END
+                                   ) > 0.01
+                            )
+                        )
+                        )
+                )
+                    THROW 55056, 'QS-0505 certificate recovery must use the approved same-contract agreement, governed percentage and remaining balance.', 1;
+            END
+            """);
         // TRIGGER TR_ProjectPaymentCertificates_QsLifecycle from 20260810154236_AddQuantitySurveyPaymentCertificateLifecycle:0 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_ProjectPaymentCertificates_QsLifecycle]
@@ -14544,6 +16119,345 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51934, 'Invalid Civil design-input request lifecycle transition.', 1;
             END;
             """);
+        // TRIGGER TR_PurchaseOrderItems_ApprovedCommercialCapacity from 20260730204500_TDC0403CommercialCapacityHardStops:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_PurchaseOrderItems_ApprovedCommercialCapacity]
+            ON [PurchaseOrderItems]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                SELECT
+                    purchaseOrder.Id AS PurchaseOrderId,
+                    CASE
+                        WHEN rfqItem.InventoryItemId IS NOT NULL
+                            THEN CONCAT(
+                                'inventory:',
+                                LOWER(CONVERT(
+                                    varchar(36),
+                                    rfqItem.InventoryItemId)))
+                        ELSE CONCAT(
+                            'description:',
+                            LOWER(LTRIM(RTRIM(
+                                ISNULL(rfqItem.Description, '')))))
+                    END AS LineIdentity,
+                    ISNULL(NULLIF(
+                        UPPER(LTRIM(RTRIM(rfqItem.UnitOfMeasure))),
+                        ''), 'EA') AS UnitOfMeasure,
+                    ROUND(awardLine.UnitPrice, 4) AS UnitPrice,
+                    ROUND(SUM(rfqItem.Quantity), 4) AS Quantity,
+                    ROUND(SUM(awardLine.LineTotal), 2) AS LineTotal
+                INTO #AffectedRfqApproved
+                FROM PurchaseOrders purchaseOrder
+                JOIN (
+                    SELECT PurchaseOrderId FROM inserted
+                    UNION
+                    SELECT PurchaseOrderId FROM deleted
+                ) affected ON affected.PurchaseOrderId = purchaseOrder.Id
+                JOIN RequestForQuotationAwardLines awardLine
+                  ON awardLine.TenantId = purchaseOrder.TenantId
+                 AND awardLine.RfqId =
+                     purchaseOrder.ProcurementSourceId
+                 AND awardLine.BusinessPartnerId =
+                     purchaseOrder.BusinessPartnerId
+                 AND awardLine.IsDeleted = 0
+                JOIN RequestForQuotationItems rfqItem
+                  ON rfqItem.Id = awardLine.RfqItemId
+                 AND rfqItem.RfqId = awardLine.RfqId
+                 AND rfqItem.TenantId = awardLine.TenantId
+                 AND rfqItem.IsDeleted = 0
+                WHERE purchaseOrder.ProcurementSourceType = 0
+                  AND purchaseOrder.Status IN (
+                      'Submitted', 'Pending Approval', 'Approved',
+                      'Sent', 'Acknowledged')
+                GROUP BY
+                    purchaseOrder.Id,
+                    CASE
+                        WHEN rfqItem.InventoryItemId IS NOT NULL
+                            THEN CONCAT(
+                                'inventory:',
+                                LOWER(CONVERT(
+                                    varchar(36),
+                                    rfqItem.InventoryItemId)))
+                        ELSE CONCAT(
+                            'description:',
+                            LOWER(LTRIM(RTRIM(
+                                ISNULL(rfqItem.Description, '')))))
+                    END,
+                    ISNULL(NULLIF(
+                        UPPER(LTRIM(RTRIM(rfqItem.UnitOfMeasure))),
+                        ''), 'EA'),
+                    ROUND(awardLine.UnitPrice, 4);
+
+                SELECT
+                    purchaseOrder.Id AS PurchaseOrderId,
+                    CASE
+                        WHEN item.InventoryItemId IS NOT NULL
+                            THEN CONCAT(
+                                'inventory:',
+                                LOWER(CONVERT(
+                                    varchar(36),
+                                    item.InventoryItemId)))
+                        ELSE CONCAT(
+                            'description:',
+                            LOWER(LTRIM(RTRIM(
+                                ISNULL(item.ItemDescription, '')))))
+                    END AS LineIdentity,
+                    ISNULL(NULLIF(
+                        UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
+                        ''), 'EA') AS UnitOfMeasure,
+                    ROUND(item.UnitPrice, 4) AS UnitPrice,
+                    ROUND(SUM(item.OrderedQuantity), 4) AS Quantity,
+                    ROUND(SUM(ROUND(
+                        item.OrderedQuantity * item.UnitPrice, 2)), 2)
+                        AS LineTotal
+                INTO #AffectedRfqActual
+                FROM PurchaseOrders purchaseOrder
+                JOIN (
+                    SELECT PurchaseOrderId FROM inserted
+                    UNION
+                    SELECT PurchaseOrderId FROM deleted
+                ) affected ON affected.PurchaseOrderId = purchaseOrder.Id
+                JOIN PurchaseOrderItems item
+                  ON item.PurchaseOrderId = purchaseOrder.Id
+                 AND item.TenantId = purchaseOrder.TenantId
+                 AND item.IsDeleted = 0
+                WHERE purchaseOrder.ProcurementSourceType = 0
+                  AND purchaseOrder.Status IN (
+                      'Submitted', 'Pending Approval', 'Approved',
+                      'Sent', 'Acknowledged')
+                GROUP BY
+                    purchaseOrder.Id,
+                    CASE
+                        WHEN item.InventoryItemId IS NOT NULL
+                            THEN CONCAT(
+                                'inventory:',
+                                LOWER(CONVERT(
+                                    varchar(36),
+                                    item.InventoryItemId)))
+                        ELSE CONCAT(
+                            'description:',
+                            LOWER(LTRIM(RTRIM(
+                                ISNULL(item.ItemDescription, '')))))
+                    END,
+                    ISNULL(NULLIF(
+                        UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
+                        ''), 'EA'),
+                    ROUND(item.UnitPrice, 4);
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM PurchaseOrderItems changed
+                    JOIN (
+                        SELECT PurchaseOrderId FROM inserted
+                        UNION
+                        SELECT PurchaseOrderId FROM deleted
+                    ) affected ON affected.PurchaseOrderId =
+                                  changed.PurchaseOrderId
+                    JOIN PurchaseOrders purchaseOrder
+                      ON purchaseOrder.Id = changed.PurchaseOrderId
+                     AND purchaseOrder.TenantId = changed.TenantId
+                    WHERE changed.IsDeleted = 0
+                      AND (
+                          (
+                              purchaseOrder.ProcurementSourceType = 0
+                              AND purchaseOrder.Status IN (
+                                  'Submitted', 'Pending Approval', 'Approved',
+                                  'Sent', 'Acknowledged')
+                          )
+                          OR (
+                              purchaseOrder.ProcurementSourceType = 2
+                              AND purchaseOrder.Status NOT IN (
+                                  'Cancelled', 'Rejected')
+                          ))
+                      AND ROUND(changed.LineTotal, 2) <>
+                          ROUND(
+                              changed.OrderedQuantity *
+                              changed.UnitPrice,
+                              2))
+                    THROW 51226, 'A governed purchase-order line total differs from its quantity and awarded unit price.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM #AffectedRfqApproved approved
+                    FULL OUTER JOIN #AffectedRfqActual actual
+                      ON actual.PurchaseOrderId = approved.PurchaseOrderId
+                     AND actual.LineIdentity = approved.LineIdentity
+                     AND actual.UnitOfMeasure = approved.UnitOfMeasure
+                     AND actual.UnitPrice = approved.UnitPrice
+                    WHERE approved.PurchaseOrderId IS NULL
+                       OR actual.PurchaseOrderId IS NULL
+                       OR actual.Quantity <> approved.Quantity
+                       OR actual.LineTotal <> approved.LineTotal)
+                    THROW 51227, 'Protected RFQ purchase-order lines must exactly match the awarded commercial terms.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM PurchaseOrders purchaseOrder
+                    JOIN (
+                        SELECT PurchaseOrderId FROM inserted
+                        UNION
+                        SELECT PurchaseOrderId FROM deleted
+                    ) affected ON affected.PurchaseOrderId =
+                                  purchaseOrder.Id
+                    WHERE purchaseOrder.ProcurementSourceType = 0
+                      AND purchaseOrder.Status IN (
+                          'Submitted', 'Pending Approval', 'Approved',
+                          'Sent', 'Acknowledged')
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM #AffectedRfqApproved approved
+                          WHERE approved.PurchaseOrderId =
+                                purchaseOrder.Id))
+                    THROW 51227, 'Protected RFQ purchase orders require authoritative awarded commercial lines.', 1;
+
+                -- Contract line changes are checked across every non-terminal
+                -- order for the same contract, not only the current PO.
+                IF EXISTS (
+                    SELECT 1
+                    FROM (
+                        SELECT
+                            purchaseOrder.TenantId,
+                            purchaseOrder.ProcurementSourceId AS ContractId,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, '')))))
+                                AS LineIdentity,
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
+                                ''), 'EA') AS UnitOfMeasure,
+                            ROUND(item.UnitPrice, 4) AS UnitPrice,
+                            ROUND(SUM(item.OrderedQuantity), 4) AS Quantity,
+                            ROUND(SUM(ROUND(
+                                item.OrderedQuantity * item.UnitPrice, 2)), 2)
+                                AS LineTotal
+                        FROM PurchaseOrders purchaseOrder
+                        JOIN PurchaseOrderItems item
+                          ON item.PurchaseOrderId = purchaseOrder.Id
+                         AND item.TenantId = purchaseOrder.TenantId
+                         AND item.IsDeleted = 0
+                        WHERE purchaseOrder.ProcurementSourceType = 2
+                          AND purchaseOrder.IsDeleted = 0
+                          AND purchaseOrder.Status NOT IN (
+                              'Cancelled', 'Rejected')
+                          AND purchaseOrder.ProcurementSourceId IN (
+                              SELECT changedOrder.ProcurementSourceId
+                              FROM PurchaseOrders changedOrder
+                              JOIN (
+                                  SELECT PurchaseOrderId FROM inserted
+                                  UNION
+                                  SELECT PurchaseOrderId FROM deleted
+                              ) affected
+                                ON affected.PurchaseOrderId =
+                                   changedOrder.Id
+                              WHERE changedOrder.ProcurementSourceType = 2)
+                        GROUP BY
+                            purchaseOrder.TenantId,
+                            purchaseOrder.ProcurementSourceId,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, ''))))),
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
+                                ''), 'EA'),
+                            ROUND(item.UnitPrice, 4)
+                    ) actual
+                    LEFT JOIN (
+                        SELECT
+                            contract.TenantId,
+                            contract.Id AS ContractId,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(tenderItem.Description, '')))))
+                                AS LineIdentity,
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(
+                                    tenderItem.UnitOfMeasure))),
+                                ''), 'EA') AS UnitOfMeasure,
+                            ROUND(COALESCE(
+                                negotiationItem.NegotiatedUnitPrice,
+                                bidItem.UnitPrice), 4) AS UnitPrice,
+                            ROUND(SUM(CASE
+                                WHEN negotiationItem.Quantity > 0
+                                    THEN negotiationItem.Quantity
+                                ELSE bidItem.OfferedQuantity
+                            END), 4) AS Quantity,
+                            ROUND(SUM(COALESCE(
+                                negotiationItem.NegotiatedTotalPrice,
+                                ROUND(
+                                    (CASE
+                                        WHEN negotiationItem.Quantity > 0
+                                            THEN negotiationItem.Quantity
+                                        ELSE bidItem.OfferedQuantity
+                                     END) *
+                                    COALESCE(
+                                        negotiationItem.NegotiatedUnitPrice,
+                                        bidItem.UnitPrice),
+                                    2))), 2) AS LineTotal
+                        FROM Contracts contract WITH (UPDLOCK, HOLDLOCK)
+                        JOIN TenderAwards award
+                          ON award.Id = contract.TenderAwardId
+                         AND award.TenantId = contract.TenantId
+                         AND award.IsDeleted = 0
+                        JOIN TenderBidItems bidItem
+                          ON bidItem.TenderBidId = award.TenderBidId
+                         AND bidItem.TenantId = award.TenantId
+                         AND bidItem.IsDeleted = 0
+                         AND (
+                             award.BidLotId IS NULL OR
+                             bidItem.BidLotId = award.BidLotId)
+                        JOIN TenderItems tenderItem
+                          ON tenderItem.Id = bidItem.TenderItemId
+                         AND tenderItem.TenantId = bidItem.TenantId
+                         AND tenderItem.IsDeleted = 0
+                        LEFT JOIN TenderNegotiationItems negotiationItem
+                          ON negotiationItem.NegotiationId =
+                             award.NegotiationId
+                         AND negotiationItem.TenderBidItemId = bidItem.Id
+                         AND negotiationItem.TenantId = bidItem.TenantId
+                         AND negotiationItem.IsDeleted = 0
+                        WHERE contract.IsDeleted = 0
+                          AND contract.Id IN (
+                              SELECT changedOrder.ProcurementSourceId
+                              FROM PurchaseOrders changedOrder
+                              JOIN (
+                                  SELECT PurchaseOrderId FROM inserted
+                                  UNION
+                                  SELECT PurchaseOrderId FROM deleted
+                              ) affected
+                                ON affected.PurchaseOrderId =
+                                   changedOrder.Id
+                              WHERE changedOrder.ProcurementSourceType = 2)
+                        GROUP BY
+                            contract.TenantId,
+                            contract.Id,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(tenderItem.Description, ''))))),
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(
+                                    tenderItem.UnitOfMeasure))),
+                                ''), 'EA'),
+                            ROUND(COALESCE(
+                                negotiationItem.NegotiatedUnitPrice,
+                                bidItem.UnitPrice), 4)
+                    ) approved
+                      ON approved.TenantId = actual.TenantId
+                     AND approved.ContractId = actual.ContractId
+                     AND approved.LineIdentity = actual.LineIdentity
+                     AND approved.UnitOfMeasure = actual.UnitOfMeasure
+                     AND approved.UnitPrice = actual.UnitPrice
+                    WHERE approved.ContractId IS NULL
+                       OR actual.Quantity > approved.Quantity
+                       OR actual.LineTotal > approved.LineTotal)
+                    THROW 51228, 'The cumulative contract purchase-order lines exceed the awarded quantities or values.', 1;
+            END
+            """);
         // TRIGGER TR_PurchaseOrderItems_FrameworkCallOffProtected from 20260729124416_TDC0402FrameworkCallOffs:5 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [TR_PurchaseOrderItems_FrameworkCallOffProtected]
@@ -14569,6 +16483,33 @@ internal static class ArchivedGovernanceBaselineSql
                        AND callOff.TenantId = affected.TenantId
                     WHERE callOff.Status <> 0)
                     THROW 51152, 'New purchase-order lines cannot be added after a framework call-off leaves Draft.', 1;
+            END
+            """);
+        // TRIGGER TR_PurchaseOrderItems_TDC0502AcceptedQuantity from 20260731140000_TDC0502ReceiptInspectionClosure:5 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_PurchaseOrderItems_TDC0502AcceptedQuantity]
+            ON [dbo].[PurchaseOrderItems]
+            AFTER UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i JOIN deleted d ON d.Id = i.Id
+                    LEFT JOIN ProcurementReceiptInspectionCases c
+                      ON c.Id = TRY_CONVERT(uniqueidentifier, SESSION_CONTEXT(N'TDC0502_RECEIPT_INSPECTION_CASE_ID'))
+                     AND c.TenantId = i.TenantId AND c.IsDeleted = 0
+                    LEFT JOIN PurchaseOrderReceipts r ON r.Id = c.PurchaseOrderReceiptId AND r.PurchaseOrderId = i.PurchaseOrderId AND r.TenantId = i.TenantId
+                    OUTER APPLY (
+                        SELECT COALESCE(SUM(l.AcceptedQuantity),0) Quantity
+                        FROM ProcurementReceiptInspectionLines l
+                        JOIN PurchaseOrderReceiptItems ri ON ri.Id = l.PurchaseOrderReceiptItemId AND ri.PurchaseOrderItemId = i.Id AND ri.TenantId = i.TenantId
+                        WHERE l.InspectionCaseId = c.Id AND l.TenantId = i.TenantId AND l.IsDeleted = 0
+                    ) accepted
+                    WHERE i.ReceivedQuantity > d.ReceivedQuantity
+                      AND (c.Id IS NULL OR r.Id IS NULL OR c.Status <> 1
+                           OR i.ReceivedQuantity - d.ReceivedQuantity <> accepted.Quantity))
+                    THROW 51542, 'RCV_PO_ACCEPTED_QUANTITY_BLOCKED: PO received quantity may increase only by the exact governed accepted quantity.', 1;
             END
             """);
         // TRIGGER TR_PurchaseOrderReceiptItems_GovernedCapacity from 20260731123000_TDC0501ReceiptSourceControl:1 (ARCHIVED_FINAL_DEFINITION)
@@ -14673,6 +16614,30 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51113, 'RCV_LINE_TENANT_MISMATCH: receipt line source is not in the same tenant and purchase order.', 1;
             END
             """);
+        // TRIGGER TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected from 20260731140000_TDC0502ReceiptInspectionClosure:4 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected]
+            ON [dbo].[PurchaseOrderReceiptItems]
+            AFTER UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i JOIN deleted d ON d.Id = i.Id
+                    LEFT JOIN ProcurementReceiptInspectionCases c
+                      ON c.Id = TRY_CONVERT(uniqueidentifier, SESSION_CONTEXT(N'TDC0502_RECEIPT_INSPECTION_CASE_ID'))
+                     AND c.TenantId = i.TenantId AND c.PurchaseOrderReceiptId = i.ReceiptId AND c.IsDeleted = 0
+                    LEFT JOIN ProcurementReceiptInspectionLines l
+                      ON l.InspectionCaseId = c.Id AND l.PurchaseOrderReceiptItemId = i.Id AND l.TenantId = i.TenantId AND l.IsDeleted = 0
+                    LEFT JOIN WorkflowInstances wi ON wi.Id = c.WorkflowInstanceId AND wi.TenantId = c.TenantId
+                    WHERE (i.AcceptedQuantity <> d.AcceptedQuantity OR i.RejectedQuantity <> d.RejectedQuantity)
+                      AND (c.Id IS NULL OR l.Id IS NULL OR wi.Id IS NULL OR wi.Status <> 2
+                           OR c.Status <> 1 OR i.AcceptedQuantity <> l.AcceptedQuantity
+                           OR i.RejectedQuantity <> l.RejectedQuantity))
+                    THROW 51541, 'RCV_DIRECT_ACCEPTANCE_BLOCKED: receipt acceptance requires the exact approved TDC-0502 inspection context.', 1;
+            END
+            """);
         // TRIGGER TR_PurchaseOrderReceipts_GovernedSource from 20260731123000_TDC0501ReceiptSourceControl:0 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_PurchaseOrderReceipts_GovernedSource]
@@ -14728,6 +16693,582 @@ internal static class ArchivedGovernanceBaselineSql
                     WHERE i.IsDeleted = 0
                       AND po.Id IS NULL)
                     THROW 51103, 'RCV_SOURCE_TENANT_MISMATCH: purchase-order receipt source is not in the same tenant.', 1;
+            END
+            """);
+        // TRIGGER TR_PurchaseOrderReceipts_INVREQFU001Waybill from 20260812195409_INVREQFU001GovernedReceiptSourceEvidence:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_PurchaseOrderReceipts_INVREQFU001Waybill]
+            ON [dbo].[PurchaseOrderReceipts]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted receipt
+                    WHERE receipt.IsDeleted=0 AND receipt.Status IN ('Accepted','Partially Accepted')
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM [dbo].[ProcurementReceiptSourceEvidence] evidence
+                          JOIN [dbo].[FileUploadRecords] upload
+                            ON upload.Id=evidence.FileUploadRecordId AND upload.TenantId=evidence.TenantId
+                           AND upload.IsDeleted=0 AND upload.VirusScanStatus=2
+                           AND upload.Category='procurement-receipt-source-evidence'
+                          JOIN [dbo].[CentralDocumentRecords] record
+                            ON record.Id=evidence.CentralDocumentRecordId AND record.TenantId=evidence.TenantId
+                           AND record.IsDeleted=0 AND record.LifecycleStatus='Active'
+                           AND record.SourceEntityType='ProcurementReceiptSourceEvidence'
+                           AND record.SourceRecordId=evidence.Id
+                           AND record.MetadataTemplateCode='TDC-PROC-RECEIPT-SOURCE'
+                          JOIN [dbo].[CentralDocumentVersions] version
+                            ON version.Id=evidence.CentralDocumentVersionId AND version.TenantId=evidence.TenantId
+                           AND version.IsDeleted=0 AND version.DocumentRecordId=record.Id
+                           AND version.FileUploadRecordId=upload.Id
+                          WHERE evidence.TenantId=receipt.TenantId
+                            AND evidence.PurchaseOrderReceiptId=receipt.Id
+                            AND evidence.EvidenceKind=1 AND evidence.IsCurrent=1 AND evidence.IsDeleted=0))
+                    THROW 51944, 'RCV_WAYBILL_REQUIRED: accepted goods receipt requires current clean governed Waybill evidence.', 1;
+            END;
+            """);
+        // TRIGGER TR_PurchaseOrderReceipts_SodHardStop from 20260730020000_TDC0405PurchaseOrderSodHardStops:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_PurchaseOrderReceipts_SodHardStop]
+            ON [PurchaseOrderReceipts]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted receipt
+                    LEFT JOIN PurchaseOrders purchaseOrder
+                      ON purchaseOrder.Id = receipt.PurchaseOrderId
+                     AND purchaseOrder.TenantId = receipt.TenantId
+                     AND purchaseOrder.IsDeleted = 0
+                    WHERE receipt.IsDeleted = 0
+                      AND (
+                           purchaseOrder.Id IS NULL
+                        OR receipt.ReceivedById IS NULL
+                        OR purchaseOrder.CreatedById IS NULL
+                        OR receipt.ReceivedById = purchaseOrder.CreatedById
+                      ))
+                    THROW 51261, 'A purchase-order receipt requires a confirmer distinct from the purchase-order creator.', 1;
+            END
+            """);
+        // TRIGGER TR_PurchaseOrders_ApprovedCommercialCapacity from 20260730204500_TDC0403CommercialCapacityHardStops:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_PurchaseOrders_ApprovedCommercialCapacity]
+            ON [PurchaseOrders]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                -- Serialize every contract family touched by this statement so
+                -- concurrent direct integrations cannot both observe the same
+                -- remaining capacity.
+                IF EXISTS (
+                    SELECT 1
+                    FROM Contracts contract WITH (UPDLOCK, HOLDLOCK)
+                    JOIN inserted i
+                      ON i.TenantId = contract.TenantId
+                     AND i.ProcurementSourceType = 2
+                     AND i.ProcurementSourceId = contract.Id
+                    WHERE contract.IsDeleted = 0)
+                BEGIN
+                    -- The lock acquired above is intentionally held until the
+                    -- surrounding transaction commits.
+                    SET NOCOUNT ON;
+                END;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted prior
+                      ON prior.Id = i.Id
+                     AND prior.TenantId = i.TenantId
+                    LEFT JOIN RequestForQuotations rfq
+                      ON rfq.Id = i.ProcurementSourceId
+                     AND rfq.TenantId = i.TenantId
+                     AND rfq.IsDeleted = 0
+                    WHERE i.ProcurementSourceType = 0
+                      -- A retained source may legitimately become stale after
+                      -- the order was created. Always validate inserts, but do
+                      -- not prevent an existing order from entering a terminal
+                      -- state solely so that it can be contained.
+                      AND (
+                          prior.Id IS NULL OR
+                          i.Status NOT IN ('Cancelled', 'Rejected'))
+                      AND (
+                           rfq.Id IS NULL
+                        OR UPPER(LTRIM(RTRIM(ISNULL(i.Currency, '')))) <>
+                           UPPER(LTRIM(RTRIM(ISNULL(rfq.Currency, ''))))
+                        OR ROUND(i.TotalAmount, 2) <> ISNULL((
+                            SELECT ROUND(SUM(awardLine.LineTotal), 2)
+                            FROM RequestForQuotationAwardLines awardLine
+                            WHERE awardLine.TenantId = i.TenantId
+                              AND awardLine.RfqId = rfq.Id
+                              AND awardLine.BusinessPartnerId =
+                                  i.BusinessPartnerId
+                              AND awardLine.IsDeleted = 0), -1)))
+                    THROW 51222, 'The RFQ purchase-order currency or total differs from the awarded commercial terms.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.ProcurementSourceType = 0
+                      AND i.Status IN (
+                          'Submitted', 'Pending Approval', 'Approved',
+                          'Sent', 'Acknowledged')
+                      AND (
+                          EXISTS (
+                              SELECT
+                                  approved.LineIdentity,
+                                  approved.UnitOfMeasure,
+                                  approved.UnitPrice,
+                                  approved.Quantity,
+                                  approved.LineTotal
+                              FROM (
+                                  SELECT
+                                      awardLine.TenantId,
+                                      awardLine.RfqId,
+                                      awardLine.BusinessPartnerId,
+                                      CASE
+                                          WHEN rfqItem.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      rfqItem.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      rfqItem.Description,
+                                                      '')))))
+                                      END AS LineIdentity,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              rfqItem.UnitOfMeasure))),
+                                          ''), 'EA') AS UnitOfMeasure,
+                                      ROUND(awardLine.UnitPrice, 4) AS UnitPrice,
+                                      ROUND(SUM(rfqItem.Quantity), 4) AS Quantity,
+                                      ROUND(SUM(awardLine.LineTotal), 2)
+                                          AS LineTotal
+                                  FROM RequestForQuotationAwardLines awardLine
+                                  JOIN RequestForQuotationItems rfqItem
+                                    ON rfqItem.Id = awardLine.RfqItemId
+                                   AND rfqItem.RfqId = awardLine.RfqId
+                                   AND rfqItem.TenantId = awardLine.TenantId
+                                   AND rfqItem.IsDeleted = 0
+                                  WHERE awardLine.IsDeleted = 0
+                                  GROUP BY
+                                      awardLine.TenantId,
+                                      awardLine.RfqId,
+                                      awardLine.BusinessPartnerId,
+                                      CASE
+                                          WHEN rfqItem.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      rfqItem.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      rfqItem.Description,
+                                                      '')))))
+                                      END,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              rfqItem.UnitOfMeasure))),
+                                          ''), 'EA'),
+                                      ROUND(awardLine.UnitPrice, 4)
+                              ) approved
+                              WHERE approved.TenantId = i.TenantId
+                                AND approved.RfqId = i.ProcurementSourceId
+                                AND approved.BusinessPartnerId =
+                                    i.BusinessPartnerId
+                              EXCEPT
+                              SELECT
+                                  ordered.LineIdentity,
+                                  ordered.UnitOfMeasure,
+                                  ordered.UnitPrice,
+                                  ordered.Quantity,
+                                  ordered.LineTotal
+                              FROM (
+                                  SELECT
+                                      item.TenantId,
+                                      item.PurchaseOrderId,
+                                      CASE
+                                          WHEN item.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      item.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      item.ItemDescription,
+                                                      '')))))
+                                      END AS LineIdentity,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              item.UnitOfMeasure))),
+                                          ''), 'EA') AS UnitOfMeasure,
+                                      ROUND(item.UnitPrice, 4) AS UnitPrice,
+                                      ROUND(SUM(item.OrderedQuantity), 4)
+                                          AS Quantity,
+                                      ROUND(SUM(ROUND(
+                                          item.OrderedQuantity *
+                                          item.UnitPrice, 2)), 2)
+                                          AS LineTotal
+                                  FROM PurchaseOrderItems item
+                                  WHERE item.IsDeleted = 0
+                                  GROUP BY
+                                      item.TenantId,
+                                      item.PurchaseOrderId,
+                                      CASE
+                                          WHEN item.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      item.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      item.ItemDescription,
+                                                      '')))))
+                                      END,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              item.UnitOfMeasure))),
+                                          ''), 'EA'),
+                                      ROUND(item.UnitPrice, 4)
+                              ) ordered
+                              WHERE ordered.TenantId = i.TenantId
+                                AND ordered.PurchaseOrderId = i.Id)
+                       OR EXISTS (
+                              SELECT
+                                  ordered.LineIdentity,
+                                  ordered.UnitOfMeasure,
+                                  ordered.UnitPrice,
+                                  ordered.Quantity,
+                                  ordered.LineTotal
+                              FROM (
+                                  SELECT
+                                      item.TenantId,
+                                      item.PurchaseOrderId,
+                                      CASE
+                                          WHEN item.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      item.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      item.ItemDescription,
+                                                      '')))))
+                                      END AS LineIdentity,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              item.UnitOfMeasure))),
+                                          ''), 'EA') AS UnitOfMeasure,
+                                      ROUND(item.UnitPrice, 4) AS UnitPrice,
+                                      ROUND(SUM(item.OrderedQuantity), 4)
+                                          AS Quantity,
+                                      ROUND(SUM(ROUND(
+                                          item.OrderedQuantity *
+                                          item.UnitPrice, 2)), 2)
+                                          AS LineTotal
+                                  FROM PurchaseOrderItems item
+                                  WHERE item.IsDeleted = 0
+                                  GROUP BY
+                                      item.TenantId,
+                                      item.PurchaseOrderId,
+                                      CASE
+                                          WHEN item.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      item.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      item.ItemDescription,
+                                                      '')))))
+                                      END,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              item.UnitOfMeasure))),
+                                          ''), 'EA'),
+                                      ROUND(item.UnitPrice, 4)
+                              ) ordered
+                              WHERE ordered.TenantId = i.TenantId
+                                AND ordered.PurchaseOrderId = i.Id
+                              EXCEPT
+                              SELECT
+                                  approved.LineIdentity,
+                                  approved.UnitOfMeasure,
+                                  approved.UnitPrice,
+                                  approved.Quantity,
+                                  approved.LineTotal
+                              FROM (
+                                  SELECT
+                                      awardLine.TenantId,
+                                      awardLine.RfqId,
+                                      awardLine.BusinessPartnerId,
+                                      CASE
+                                          WHEN rfqItem.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      rfqItem.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      rfqItem.Description,
+                                                      '')))))
+                                      END AS LineIdentity,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              rfqItem.UnitOfMeasure))),
+                                          ''), 'EA') AS UnitOfMeasure,
+                                      ROUND(awardLine.UnitPrice, 4) AS UnitPrice,
+                                      ROUND(SUM(rfqItem.Quantity), 4) AS Quantity,
+                                      ROUND(SUM(awardLine.LineTotal), 2)
+                                          AS LineTotal
+                                  FROM RequestForQuotationAwardLines awardLine
+                                  JOIN RequestForQuotationItems rfqItem
+                                    ON rfqItem.Id = awardLine.RfqItemId
+                                   AND rfqItem.RfqId = awardLine.RfqId
+                                   AND rfqItem.TenantId = awardLine.TenantId
+                                   AND rfqItem.IsDeleted = 0
+                                  WHERE awardLine.IsDeleted = 0
+                                  GROUP BY
+                                      awardLine.TenantId,
+                                      awardLine.RfqId,
+                                      awardLine.BusinessPartnerId,
+                                      CASE
+                                          WHEN rfqItem.InventoryItemId IS NOT NULL
+                                              THEN CONCAT(
+                                                  'inventory:',
+                                                  LOWER(CONVERT(
+                                                      varchar(36),
+                                                      rfqItem.InventoryItemId)))
+                                          ELSE CONCAT(
+                                              'description:',
+                                              LOWER(LTRIM(RTRIM(
+                                                  ISNULL(
+                                                      rfqItem.Description,
+                                                      '')))))
+                                      END,
+                                      ISNULL(NULLIF(
+                                          UPPER(LTRIM(RTRIM(
+                                              rfqItem.UnitOfMeasure))),
+                                          ''), 'EA'),
+                                      ROUND(awardLine.UnitPrice, 4)
+                              ) approved
+                              WHERE approved.TenantId = i.TenantId
+                                AND approved.RfqId = i.ProcurementSourceId
+                                AND approved.BusinessPartnerId =
+                                    i.BusinessPartnerId)
+                       OR EXISTS (
+                              SELECT 1
+                              FROM PurchaseOrderItems item
+                              WHERE item.TenantId = i.TenantId
+                                AND item.PurchaseOrderId = i.Id
+                                AND item.IsDeleted = 0
+                                AND ROUND(item.LineTotal, 2) <>
+                                    ROUND(
+                                        item.OrderedQuantity *
+                                        item.UnitPrice,
+                                        2))))
+                    THROW 51223, 'The RFQ purchase-order lines differ from the awarded commercial terms.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN Contracts contract WITH (UPDLOCK, HOLDLOCK)
+                      ON contract.Id = i.ProcurementSourceId
+                     AND contract.TenantId = i.TenantId
+                     AND contract.IsDeleted = 0
+                    WHERE i.ProcurementSourceType = 2
+                      AND (
+                           UPPER(LTRIM(RTRIM(ISNULL(i.Currency, '')))) <>
+                           UPPER(LTRIM(RTRIM(
+                               ISNULL(contract.Currency, ''))))
+                        OR (
+                            SELECT ROUND(SUM(existing.TotalAmount), 2)
+                            FROM PurchaseOrders existing
+                            WHERE existing.TenantId = i.TenantId
+                              AND existing.ProcurementSourceType = 2
+                              AND existing.ProcurementSourceId = contract.Id
+                              AND existing.IsDeleted = 0
+                              AND existing.Status NOT IN (
+                                  'Cancelled', 'Rejected')
+                        ) > ROUND(contract.ContractValue, 2)
+                        OR EXISTS (
+                            SELECT 1
+                            FROM PurchaseOrders existing
+                            JOIN PurchaseOrderItems item
+                              ON item.PurchaseOrderId = existing.Id
+                             AND item.TenantId = existing.TenantId
+                             AND item.IsDeleted = 0
+                            WHERE existing.TenantId = i.TenantId
+                              AND existing.ProcurementSourceType = 2
+                              AND existing.ProcurementSourceId =
+                                  contract.Id
+                              AND existing.IsDeleted = 0
+                              AND existing.Status NOT IN (
+                                  'Cancelled', 'Rejected')
+                              AND ROUND(item.LineTotal, 2) <>
+                                  ROUND(
+                                      item.OrderedQuantity *
+                                      item.UnitPrice,
+                                      2))))
+                    THROW 51224, 'The contract purchase orders exceed the contract value or use a different currency.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM (
+                        SELECT
+                            purchaseOrder.TenantId,
+                            purchaseOrder.ProcurementSourceId AS ContractId,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, '')))))
+                                AS LineIdentity,
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
+                                ''), 'EA') AS UnitOfMeasure,
+                            ROUND(item.UnitPrice, 4) AS UnitPrice,
+                            ROUND(SUM(item.OrderedQuantity), 4) AS Quantity,
+                            ROUND(SUM(ROUND(
+                                item.OrderedQuantity * item.UnitPrice, 2)), 2)
+                                AS LineTotal
+                        FROM PurchaseOrders purchaseOrder
+                        JOIN PurchaseOrderItems item
+                          ON item.PurchaseOrderId = purchaseOrder.Id
+                         AND item.TenantId = purchaseOrder.TenantId
+                         AND item.IsDeleted = 0
+                        WHERE purchaseOrder.ProcurementSourceType = 2
+                          AND purchaseOrder.IsDeleted = 0
+                          AND purchaseOrder.Status NOT IN (
+                              'Cancelled', 'Rejected')
+                          AND purchaseOrder.ProcurementSourceId IN (
+                              SELECT changed.ProcurementSourceId
+                              FROM inserted changed
+                              WHERE changed.ProcurementSourceType = 2)
+                        GROUP BY
+                            purchaseOrder.TenantId,
+                            purchaseOrder.ProcurementSourceId,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(item.ItemDescription, ''))))),
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(item.UnitOfMeasure))),
+                                ''), 'EA'),
+                            ROUND(item.UnitPrice, 4)
+                    ) actual
+                    LEFT JOIN (
+                        SELECT
+                            contract.TenantId,
+                            contract.Id AS ContractId,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(tenderItem.Description, '')))))
+                                AS LineIdentity,
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(
+                                    tenderItem.UnitOfMeasure))),
+                                ''), 'EA') AS UnitOfMeasure,
+                            ROUND(COALESCE(
+                                negotiationItem.NegotiatedUnitPrice,
+                                bidItem.UnitPrice), 4) AS UnitPrice,
+                            ROUND(SUM(CASE
+                                WHEN negotiationItem.Quantity > 0
+                                    THEN negotiationItem.Quantity
+                                ELSE bidItem.OfferedQuantity
+                            END), 4) AS Quantity,
+                            ROUND(SUM(COALESCE(
+                                negotiationItem.NegotiatedTotalPrice,
+                                ROUND(
+                                    (CASE
+                                        WHEN negotiationItem.Quantity > 0
+                                            THEN negotiationItem.Quantity
+                                        ELSE bidItem.OfferedQuantity
+                                     END) *
+                                    COALESCE(
+                                        negotiationItem.NegotiatedUnitPrice,
+                                        bidItem.UnitPrice),
+                                    2))), 2) AS LineTotal
+                        FROM Contracts contract WITH (UPDLOCK, HOLDLOCK)
+                        JOIN TenderAwards award
+                          ON award.Id = contract.TenderAwardId
+                         AND award.TenantId = contract.TenantId
+                         AND award.IsDeleted = 0
+                        JOIN TenderBidItems bidItem
+                          ON bidItem.TenderBidId = award.TenderBidId
+                         AND bidItem.TenantId = award.TenantId
+                         AND bidItem.IsDeleted = 0
+                         AND (
+                             award.BidLotId IS NULL OR
+                             bidItem.BidLotId = award.BidLotId)
+                        JOIN TenderItems tenderItem
+                          ON tenderItem.Id = bidItem.TenderItemId
+                         AND tenderItem.TenantId = bidItem.TenantId
+                         AND tenderItem.IsDeleted = 0
+                        LEFT JOIN TenderNegotiationItems negotiationItem
+                          ON negotiationItem.NegotiationId =
+                             award.NegotiationId
+                         AND negotiationItem.TenderBidItemId = bidItem.Id
+                         AND negotiationItem.TenantId = bidItem.TenantId
+                         AND negotiationItem.IsDeleted = 0
+                        WHERE contract.IsDeleted = 0
+                          AND contract.Id IN (
+                              SELECT changed.ProcurementSourceId
+                              FROM inserted changed
+                              WHERE changed.ProcurementSourceType = 2)
+                        GROUP BY
+                            contract.TenantId,
+                            contract.Id,
+                            CONCAT(
+                                'description:',
+                                LOWER(LTRIM(RTRIM(
+                                    ISNULL(tenderItem.Description, ''))))),
+                            ISNULL(NULLIF(
+                                UPPER(LTRIM(RTRIM(
+                                    tenderItem.UnitOfMeasure))),
+                                ''), 'EA'),
+                            ROUND(COALESCE(
+                                negotiationItem.NegotiatedUnitPrice,
+                                bidItem.UnitPrice), 4)
+                    ) approved
+                      ON approved.TenantId = actual.TenantId
+                     AND approved.ContractId = actual.ContractId
+                     AND approved.LineIdentity = actual.LineIdentity
+                     AND approved.UnitOfMeasure = actual.UnitOfMeasure
+                     AND approved.UnitPrice = actual.UnitPrice
+                    WHERE approved.ContractId IS NULL
+                       OR actual.Quantity > approved.Quantity
+                       OR actual.LineTotal > approved.LineTotal)
+                    THROW 51225, 'The cumulative contract purchase-order lines exceed the awarded quantities or values.', 1;
             END
             """);
         // TRIGGER TR_PurchaseOrders_ApprovedSourceProtected from 20260729153000_TDC0403MandatoryPurchaseOrderSources:1 (ARCHIVED_FINAL_DEFINITION)
@@ -15109,6 +17650,392 @@ internal static class ArchivedGovernanceBaselineSql
                        OR (callOff.Status = 4 AND i.Status <> 'Rejected')
                        OR (callOff.Status = 5 AND i.Status <> 'Cancelled'))
                     THROW 51143, 'The linked purchase-order status must agree with the framework call-off lifecycle.', 1;
+            END
+            """);
+        // TRIGGER TR_PurchaseOrders_GovernedCommitment from 20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_PurchaseOrders_GovernedCommitment]
+            ON [dbo].[PurchaseOrders] AFTER INSERT, UPDATE AS
+            BEGIN
+              SET NOCOUNT ON;
+              IF EXISTS (
+                SELECT 1
+                FROM inserted i
+                JOIN deleted d ON d.Id = i.Id AND d.TenantId = i.TenantId
+                WHERE ISNULL(d.ProcurementSourceType, -1) <> 5
+                  AND ISNULL(d.Status, N'') IN
+                      (N'Approved', N'Open', N'Sent', N'Acknowledged',
+                       N'Partially Received', N'PartiallyReceived', N'Received')
+                  AND ISNULL(i.Status, N'') NOT IN
+                      (N'Approved', N'Open', N'Sent', N'Acknowledged',
+                       N'Partially Received', N'PartiallyReceived', N'Received',
+                       N'Amendment Pending Approval')
+              )
+                THROW 52041, 'A final purchase order requires an atomic formal-commitment reversal before leaving exposure status.', 1;
+
+              IF EXISTS (
+                SELECT 1
+                FROM inserted i
+                LEFT JOIN deleted d ON d.Id = i.Id
+                LEFT JOIN dbo.ProcurementRequisitionSourcingReleases r ON r.Id = i.SourcingReleaseId
+                 AND r.TenantId = i.TenantId
+                 AND r.PurchaseRequisitionId = i.SourceRequisitionId
+                 AND r.IsDeleted = 0
+                LEFT JOIN dbo.PurchaseRequisitions pr ON pr.Id = i.SourceRequisitionId
+                 AND pr.TenantId = i.TenantId AND pr.IsDeleted = 0
+                LEFT JOIN dbo.ProcurementBudgetCommitments c ON c.PurchaseRequisitionId = i.SourceRequisitionId
+                 AND c.TenantId = i.TenantId AND c.IsDeleted = 0
+                 AND (r.BudgetCommitmentId IS NULL OR r.BudgetCommitmentId = c.Id)
+                LEFT JOIN dbo.ProcurementBudgets b ON b.Id = c.ProcurementBudgetId
+                 AND b.TenantId = i.TenantId AND b.IsDeleted = 0
+                WHERE ISNULL(i.ProcurementSourceType, -1) <> 5
+                  AND i.Status IN
+                      (N'Approved', N'Open', N'Sent', N'Acknowledged',
+                       N'Partially Received', N'PartiallyReceived', N'Received')
+                  AND (d.Id IS NULL OR
+                       (ISNULL(d.Status, N'') NOT IN
+                          (N'Approved', N'Open', N'Sent', N'Acknowledged',
+                           N'Partially Received', N'PartiallyReceived', N'Received')
+                        AND ISNULL(d.Status, N'') <> N'Amendment Pending Approval'))
+                  AND
+                  (
+                    r.Id IS NULL OR pr.Id IS NULL
+                    OR
+                    (
+                      i.ContractId IS NULL
+                      AND
+                      (
+                        c.Id IS NULL OR b.Id IS NULL OR pr.BudgetId IS NULL
+                        OR (r.BudgetCommitmentReference IS NOT NULL
+                            AND r.BudgetCommitmentReference <> c.ReservationReference)
+                        OR pr.BudgetId <> c.ProcurementBudgetId
+                        OR c.Status <> 1 OR c.ReservedAmount <= 0
+                        OR UPPER(LTRIM(RTRIM(c.Currency))) <> UPPER(LTRIM(RTRIM(i.Currency)))
+                        OR UPPER(LTRIM(RTRIM(c.Currency))) <> UPPER(LTRIM(RTRIM(b.Currency)))
+                        OR b.Status NOT IN (N'Approved', N'Active')
+                        OR b.ApprovedById IS NULL OR b.ApprovedDate IS NULL
+                        OR (b.EffectiveDate IS NOT NULL AND b.EffectiveDate > SYSUTCDATETIME())
+                        OR (b.ExpiryDate IS NOT NULL AND b.ExpiryDate < SYSUTCDATETIME())
+                        OR b.ReservedAmount + c.FormallyCommittedAmount < c.ReservedAmount
+                        OR c.FormallyCommittedAmount > c.ReservedAmount
+                        OR NOT EXISTS
+                        (
+                          SELECT 1
+                          FROM dbo.ProcurementBudgetCommitmentLedgerEntries l
+                          WHERE l.TenantId = i.TenantId
+                            AND l.ProcurementBudgetCommitmentId = c.Id
+                            AND l.PurchaseRequisitionId = i.SourceRequisitionId
+                            AND l.EntryType = 1
+                            AND l.SourceType = N'PurchaseOrder'
+                            AND l.SourceId = i.Id
+                            AND l.Amount +
+                                (SELECT COALESCE(SUM(adjustment.DeltaAmount), 0)
+                                 FROM dbo.ProcurementPurchaseOrderCommitmentAdjustments adjustment
+                                 WHERE adjustment.TenantId = i.TenantId
+                                   AND adjustment.PurchaseOrderId = i.Id
+                                   AND adjustment.PurchaseRequisitionId = i.SourceRequisitionId
+                                   AND adjustment.BudgetCommitmentId = l.ProcurementBudgetCommitmentId
+                                   AND UPPER(LTRIM(RTRIM(adjustment.Currency))) =
+                                       UPPER(LTRIM(RTRIM(i.Currency)))
+                                   AND adjustment.IsDeleted = 0) = i.TotalAmount
+                            AND UPPER(LTRIM(RTRIM(l.Currency))) = UPPER(LTRIM(RTRIM(i.Currency)))
+                            AND l.IsDeleted = 0
+                        )
+                      )
+                    )
+                    OR
+                    (
+                      i.ContractId IS NOT NULL
+                      AND NOT EXISTS
+                      (
+                        SELECT 1
+                        FROM dbo.ProcurementBudgetCommitmentLedgerEntries allocation
+                        JOIN dbo.ProcurementBudgetCommitmentLedgerEntries parent
+                          ON parent.Id = allocation.FormalCommitmentEntryId
+                         AND parent.TenantId = allocation.TenantId
+                         AND parent.ProcurementBudgetCommitmentId = allocation.ProcurementBudgetCommitmentId
+                         AND parent.EntryType = 1
+                         AND parent.SourceType = N'Contract'
+                         AND parent.SourceId = i.ContractId
+                         AND parent.IsDeleted = 0
+                        JOIN dbo.Contracts contract
+                          ON contract.Id = i.ContractId
+                         AND contract.TenantId = i.TenantId
+                         AND contract.Status = N'Active'
+                         AND contract.IsDeleted = 0
+                        JOIN dbo.ProcurementBudgetCommitments parentCommitment
+                          ON parentCommitment.Id = parent.ProcurementBudgetCommitmentId
+                         AND parentCommitment.TenantId = i.TenantId
+                         AND parentCommitment.PurchaseRequisitionId = i.SourceRequisitionId
+                         AND parentCommitment.IsDeleted = 0
+                        WHERE allocation.TenantId = i.TenantId
+                          AND allocation.PurchaseRequisitionId = i.SourceRequisitionId
+                          AND allocation.EntryType = 4
+                          AND allocation.SourceType = N'PurchaseOrder'
+                          AND allocation.SourceId = i.Id
+                          AND allocation.Amount +
+                              (SELECT COALESCE(SUM(adjustment.DeltaAmount), 0)
+                               FROM dbo.ProcurementPurchaseOrderCommitmentAdjustments adjustment
+                               WHERE adjustment.TenantId = i.TenantId
+                                 AND adjustment.PurchaseOrderId = i.Id
+                                 AND adjustment.PurchaseRequisitionId = i.SourceRequisitionId
+                                 AND adjustment.BudgetCommitmentId = allocation.ProcurementBudgetCommitmentId
+                                 AND UPPER(LTRIM(RTRIM(adjustment.Currency))) =
+                                     UPPER(LTRIM(RTRIM(i.Currency)))
+                                 AND adjustment.IsDeleted = 0) = i.TotalAmount
+                          AND allocation.IsDeleted = 0
+                          AND parent.PurchaseRequisitionId = i.SourceRequisitionId
+                          AND parent.ProcurementBudgetId = pr.BudgetId
+                          AND UPPER(LTRIM(RTRIM(parent.Currency))) = UPPER(LTRIM(RTRIM(i.Currency)))
+                          AND UPPER(LTRIM(RTRIM(allocation.Currency))) = UPPER(LTRIM(RTRIM(i.Currency)))
+                          AND (r.BudgetCommitmentId IS NULL
+                               OR r.BudgetCommitmentId = parent.ProcurementBudgetCommitmentId)
+                          AND (r.BudgetCommitmentReference IS NULL
+                               OR r.BudgetCommitmentReference = parentCommitment.ReservationReference)
+                          AND (SELECT COALESCE(SUM(existingAllocation.Amount), 0)
+                               FROM dbo.ProcurementBudgetCommitmentLedgerEntries existingAllocation
+                               WHERE existingAllocation.TenantId = i.TenantId
+                                 AND existingAllocation.EntryType = 4
+                                 AND existingAllocation.FormalCommitmentEntryId = parent.Id
+                                 AND existingAllocation.IsDeleted = 0)
+                              + (SELECT COALESCE(SUM(existingAdjustment.DeltaAmount), 0)
+                                 FROM dbo.ProcurementPurchaseOrderCommitmentAdjustments existingAdjustment
+                                 JOIN dbo.ProcurementBudgetCommitmentLedgerEntries existingAllocation
+                                   ON existingAllocation.TenantId = existingAdjustment.TenantId
+                                  AND existingAllocation.SourceType = N'PurchaseOrder'
+                                  AND existingAllocation.SourceId = existingAdjustment.PurchaseOrderId
+                                  AND existingAllocation.EntryType = 4
+                                  AND existingAllocation.FormalCommitmentEntryId = parent.Id
+                                  AND existingAllocation.IsDeleted = 0
+                                 WHERE existingAdjustment.TenantId = i.TenantId
+                                   AND existingAdjustment.BudgetCommitmentId = parent.ProcurementBudgetCommitmentId
+                                   AND existingAdjustment.IsDeleted = 0) <=
+                              parent.Amount -
+                              (SELECT COALESCE(SUM(parentRelease.Amount), 0)
+                               FROM dbo.ProcurementBudgetCommitmentLedgerEntries parentRelease
+                               WHERE parentRelease.TenantId = parent.TenantId
+                                 AND parentRelease.EntryType = 3
+                                 AND parentRelease.FormalCommitmentEntryId = parent.Id
+                                 AND parentRelease.IsDeleted = 0)
+                      )
+                    )
+                  )
+              )
+                THROW 52041, 'A final purchase-order exposure requires its exact active reservation and immutable formal ledger entry.', 1;
+
+              IF EXISTS (
+                SELECT 1
+                FROM inserted i
+                WHERE ISNULL(i.ProcurementSourceType, -1) <> 5
+                  AND i.Status IN
+                      (N'Approved', N'Open', N'Sent', N'Acknowledged',
+                       N'Partially Received', N'PartiallyReceived', N'Received')
+                  AND NOT EXISTS
+                  (
+                    SELECT 1
+                    FROM dbo.ProcurementBudgetCommitments c
+                    JOIN dbo.ProcurementBudgets b
+                      ON b.Id = c.ProcurementBudgetId
+                     AND b.TenantId = c.TenantId
+                     AND b.IsDeleted = 0
+                    WHERE c.TenantId = i.TenantId
+                      AND c.PurchaseRequisitionId = i.SourceRequisitionId
+                      AND c.IsDeleted = 0
+                      AND c.Status = 1
+                      AND c.ReservedAmount > 0
+                      AND c.FormallyCommittedAmount =
+                      (SELECT COALESCE(SUM(formal.Amount), 0)
+                       FROM dbo.ProcurementBudgetCommitmentLedgerEntries formal
+                       WHERE formal.TenantId = c.TenantId
+                         AND formal.ProcurementBudgetCommitmentId = c.Id
+                         AND formal.EntryType = 1
+                         AND formal.IsDeleted = 0)
+                      -
+                      (SELECT COALESCE(SUM(released.Amount), 0)
+                       FROM dbo.ProcurementBudgetCommitmentLedgerEntries released
+                       WHERE released.TenantId = c.TenantId
+                         AND released.ProcurementBudgetCommitmentId = c.Id
+                         AND released.EntryType = 3
+                         AND released.FormalCommitmentEntryId IS NOT NULL
+                         AND released.IsDeleted = 0)
+                      +
+                      (SELECT COALESCE(SUM(adjustment.DeltaAmount), 0)
+                       FROM dbo.ProcurementPurchaseOrderCommitmentAdjustments adjustment
+                       JOIN dbo.ProcurementBudgetCommitmentLedgerEntries directFormal
+                         ON directFormal.TenantId = adjustment.TenantId
+                        AND directFormal.ProcurementBudgetCommitmentId = adjustment.BudgetCommitmentId
+                        AND directFormal.EntryType = 1
+                        AND directFormal.SourceType = N'PurchaseOrder'
+                        AND directFormal.SourceId = adjustment.PurchaseOrderId
+                        AND directFormal.IsDeleted = 0
+                       WHERE adjustment.TenantId = c.TenantId
+                          AND adjustment.BudgetCommitmentId = c.Id
+                          AND adjustment.PurchaseRequisitionId = c.PurchaseRequisitionId
+                          AND adjustment.IsDeleted = 0)
+                      AND c.UtilizedAmount =
+                       (SELECT COALESCE(SUM(utilization.Amount), 0)
+                        FROM dbo.ProcurementBudgetCommitmentLedgerEntries utilization
+                        WHERE utilization.TenantId = c.TenantId
+                          AND utilization.ProcurementBudgetCommitmentId = c.Id
+                          AND utilization.EntryType = 2
+                          AND utilization.IsDeleted = 0)
+                      AND b.ReservedAmount >=
+                       (SELECT COALESCE(SUM(
+                          CASE
+                            WHEN projectionCommitment.ReservedAmount >
+                                 projectionCommitment.FormallyCommittedAmount
+                              THEN projectionCommitment.ReservedAmount -
+                                   projectionCommitment.FormallyCommittedAmount
+                            ELSE 0
+                          END), 0)
+                        FROM dbo.ProcurementBudgetCommitments projectionCommitment
+                        WHERE projectionCommitment.TenantId = b.TenantId
+                          AND projectionCommitment.ProcurementBudgetId = b.Id
+                          AND projectionCommitment.IsDeleted = 0)
+                      AND b.CommittedAmount >=
+                       (SELECT COALESCE(SUM(
+                          CASE
+                            WHEN projectionCommitment.FormallyCommittedAmount >
+                                 projectionCommitment.UtilizedAmount
+                              THEN projectionCommitment.FormallyCommittedAmount -
+                                   projectionCommitment.UtilizedAmount
+                            ELSE 0
+                          END), 0)
+                        FROM dbo.ProcurementBudgetCommitments projectionCommitment
+                        WHERE projectionCommitment.TenantId = b.TenantId
+                          AND projectionCommitment.ProcurementBudgetId = b.Id
+                          AND projectionCommitment.IsDeleted = 0)
+                      AND b.UtilizedAmount >=
+                       (SELECT COALESCE(SUM(projectionCommitment.UtilizedAmount), 0)
+                        FROM dbo.ProcurementBudgetCommitments projectionCommitment
+                        WHERE projectionCommitment.TenantId = b.TenantId
+                          AND projectionCommitment.ProcurementBudgetId = b.Id
+                          AND projectionCommitment.IsDeleted = 0)
+                  )
+              )
+                THROW 52041, 'A final purchase-order exposure requires exact aggregate and Finance projection of the immutable formal ledger.', 1;
+
+              IF EXISTS (
+                SELECT 1
+                FROM inserted i
+                JOIN deleted d ON d.Id = i.Id AND d.TenantId = i.TenantId
+                WHERE ISNULL(i.ProcurementSourceType, -1) <> 5
+                  AND i.Status IN
+                      (N'Approved', N'Open', N'Sent', N'Acknowledged',
+                       N'Partially Received', N'PartiallyReceived', N'Received')
+                  AND
+                  (
+                    ISNULL(d.Status, N'') = N'Amendment Pending Approval'
+                    OR
+                    (
+                      ISNULL(d.Status, N'') IN
+                        (N'Approved', N'Open', N'Sent', N'Acknowledged',
+                         N'Partially Received', N'PartiallyReceived', N'Received')
+                      AND
+                      (
+                        d.TotalAmount <> i.TotalAmount
+                        OR UPPER(LTRIM(RTRIM(ISNULL(d.Currency, N'')))) <>
+                           UPPER(LTRIM(RTRIM(ISNULL(i.Currency, N''))))
+                        OR ISNULL(d.SourceRequisitionId,
+                                  '00000000-0000-0000-0000-000000000000') <>
+                           ISNULL(i.SourceRequisitionId,
+                                  '00000000-0000-0000-0000-000000000000')
+                        OR ISNULL(d.ContractId,
+                                  '00000000-0000-0000-0000-000000000000') <>
+                           ISNULL(i.ContractId,
+                                  '00000000-0000-0000-0000-000000000000')
+                        OR ISNULL(d.ProcurementSourceType, -1) <>
+                           ISNULL(i.ProcurementSourceType, -1)
+                        OR ISNULL(d.ProcurementSourceId,
+                                  '00000000-0000-0000-0000-000000000000') <>
+                           ISNULL(i.ProcurementSourceId,
+                                  '00000000-0000-0000-0000-000000000000')
+                      )
+                    )
+                  )
+                  AND NOT EXISTS
+                  (
+                    SELECT 1
+                    FROM dbo.ProcurementBudgetCommitmentLedgerEntries exposure
+                    WHERE exposure.TenantId = i.TenantId
+                      AND exposure.SourceType = N'PurchaseOrder'
+                      AND exposure.SourceId = i.Id
+                      AND exposure.PurchaseRequisitionId = i.SourceRequisitionId
+                      AND exposure.IsDeleted = 0
+                      AND UPPER(LTRIM(RTRIM(exposure.Currency))) =
+                          UPPER(LTRIM(RTRIM(i.Currency)))
+                      AND
+                      (
+                        (i.ContractId IS NULL AND exposure.EntryType = 1)
+                        OR
+                        (i.ContractId IS NOT NULL AND exposure.EntryType = 4
+                         AND EXISTS
+                         (
+                           SELECT 1
+                           FROM dbo.ProcurementBudgetCommitmentLedgerEntries parent
+                           WHERE parent.Id = exposure.FormalCommitmentEntryId
+                             AND parent.TenantId = i.TenantId
+                             AND parent.EntryType = 1
+                             AND parent.SourceType = N'Contract'
+                             AND parent.SourceId = i.ContractId
+                             AND parent.IsDeleted = 0
+                         ))
+                      )
+                      AND exposure.Amount +
+                          (SELECT COALESCE(SUM(adjustment.DeltaAmount), 0)
+                           FROM dbo.ProcurementPurchaseOrderCommitmentAdjustments adjustment
+                           WHERE adjustment.TenantId = i.TenantId
+                             AND adjustment.PurchaseOrderId = i.Id
+                             AND adjustment.PurchaseRequisitionId = i.SourceRequisitionId
+                             AND adjustment.BudgetCommitmentId = exposure.ProcurementBudgetCommitmentId
+                             AND UPPER(LTRIM(RTRIM(adjustment.Currency))) =
+                                 UPPER(LTRIM(RTRIM(i.Currency)))
+                             AND adjustment.IsDeleted = 0) = i.TotalAmount
+                      AND NOT EXISTS
+                      (
+                        SELECT 1
+                        FROM dbo.ProcurementPurchaseOrderCommitmentAdjustments invalidAdjustment
+                        WHERE invalidAdjustment.TenantId = i.TenantId
+                          AND invalidAdjustment.PurchaseOrderId = i.Id
+                          AND invalidAdjustment.IsDeleted = 0
+                          AND
+                          (
+                            invalidAdjustment.PurchaseRequisitionId <> i.SourceRequisitionId
+                            OR invalidAdjustment.BudgetCommitmentId <>
+                               exposure.ProcurementBudgetCommitmentId
+                            OR UPPER(LTRIM(RTRIM(invalidAdjustment.Currency))) <>
+                               UPPER(LTRIM(RTRIM(i.Currency)))
+                          )
+                      )
+                  )
+              )
+                THROW 52041, 'A final purchase-order amendment requires an exact immutable effective exposure ledger.', 1;
+            END;
+            """);
+        // TRIGGER TR_PurchaseOrders_SodHardStop from 20260730020000_TDC0405PurchaseOrderSodHardStops:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_PurchaseOrders_SodHardStop]
+            ON [PurchaseOrders]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted purchaseOrder
+                    WHERE purchaseOrder.IsDeleted = 0
+                      AND UPPER(LTRIM(RTRIM(purchaseOrder.Status))) = 'APPROVED'
+                      AND (
+                           purchaseOrder.ApprovedById IS NULL
+                        OR purchaseOrder.RequestedById IS NULL
+                        OR purchaseOrder.CreatedById IS NULL
+                        OR purchaseOrder.ApprovedById =
+                           purchaseOrder.RequestedById
+                        OR purchaseOrder.ApprovedById =
+                           purchaseOrder.CreatedById
+                      ))
+                    THROW 51260, 'An Approved purchase order requires an independent approver distinct from its requester and creator.', 1;
             END
             """);
         // TRIGGER TR_PurchaseRequisitions_LinkageGuard from 20260722023908_AddProcurementRequisitionBudgetCommitments:3 (ARCHIVED_FINAL_DEFINITION)
@@ -15861,6 +18788,28 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 52002, 'QS_DAYWORK_TRANSITION_INVALID: identity, frozen valuation or signature transition is invalid.', 1;
             END
             """);
+        // TRIGGER TR_QS0510_VariationDayworkEligibility from 20260811013838_AddQuantitySurveyDayworkLifecycle:4 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QS0510_VariationDayworkEligibility]
+            ON [dbo].[ProjectVariationOrders]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.IsQuantitySurveyGoverned = 1 AND i.VariationType IN ('Daywork','AdditionalWork')
+                      AND i.Status IN ('PendingApproval','Approved')
+                      AND (NOT EXISTS (SELECT 1 FROM dbo.QuantitySurveyDayworkSheets s
+                            WHERE s.TenantId = i.TenantId AND s.VariationOrderId = i.Id AND s.IsDeleted = 0)
+                           OR EXISTS (SELECT 1 FROM dbo.QuantitySurveyDayworkSheets s
+                            WHERE s.TenantId = i.TenantId AND s.VariationOrderId = i.Id AND s.IsDeleted = 0 AND s.Status <> 2)
+                           OR ISNULL((SELECT ROUND(SUM(s.TotalAmount), 2) FROM dbo.QuantitySurveyDayworkSheets s
+                            WHERE s.TenantId = i.TenantId AND s.VariationOrderId = i.Id AND s.IsDeleted = 0), 0)
+                              <> ROUND(ISNULL(i.EstimatedAmount, 0), 2)))
+                    THROW 52009, 'QS_DAYWORK_VARIATION_NOT_READY: Verified detail must reconcile exactly before variation approval.', 1;
+            END
+            """);
         // TRIGGER TR_QS0511_VariationApplication_Governance from 20260811022852_AddQuantitySurveyVariationApplications:0 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_QS0511_VariationApplication_Governance]
@@ -15918,6 +18867,74 @@ internal static class ArchivedGovernanceBaselineSql
                         OR ROUND((SELECT COALESCE(SUM(l.LineAmount), 0) FROM dbo.ProjectBoqVersionLines l WHERE l.ProjectBoqVersionId = bv.Id AND l.TenantId = i.TenantId AND l.IsDeleted = 0)
                            - (SELECT COALESCE(SUM(l.LineAmount), 0) FROM dbo.ProjectBoqVersionLines l WHERE l.ProjectBoqVersionId = i.ApprovedBoqVersionId AND l.TenantId = i.TenantId AND l.IsDeleted = 0), 2) <> i.ApprovedAmount))
                     THROW 51932, 'Approved variation downstream contract, BoQ, budget or forecast lineage is incomplete or inconsistent.', 1;
+            END
+            """);
+        // TRIGGER TR_QS0521_SubcontractCertificates_Governance from 20260811061000_HardenQuantitySurveySubcontractCertificates:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QS0521_SubcontractCertificates_Governance]
+            ON [dbo].[ProjectPaymentCertificates]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.Id = d.Id
+                    WHERE d.QuantitySurveySubcontractValuationId IS NOT NULL AND i.Id IS NULL)
+                    THROW 52031, 'Governed QS subcontract certificates cannot be physically deleted.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN dbo.QuantitySurveySubcontractValuations v ON v.Id = i.QuantitySurveySubcontractValuationId
+                        AND v.TenantId = i.TenantId AND v.IsDeleted = 0
+                    LEFT JOIN dbo.QuantitySurveySubcontracts s ON s.Id = v.SubcontractId
+                        AND s.TenantId = i.TenantId AND s.IsDeleted = 0
+                    WHERE i.QuantitySurveySubcontractValuationId IS NOT NULL AND (
+                        v.Id IS NULL OR s.Id IS NULL OR i.ProjectId <> s.ProjectId OR i.ContractId <> s.ContractId
+                        OR i.SubcontractorBusinessPartnerId <> s.SubcontractorBusinessPartnerId
+                        OR i.ConfigurationProfileId <> v.ConfigurationProfileId OR i.ValuationDecisionId <> v.ValuationDecisionId
+                        OR i.ApprovalWorkflowDefinitionId <> v.ApprovalWorkflowDefinitionId OR i.WorkflowInstanceId <> v.WorkflowInstanceId
+                        OR i.PaymentTermId <> s.PaymentTermId OR i.PolicyHash <> v.PolicyHash
+                        OR i.CertifiedToDateAmount <> v.AssessedToDateAmount OR i.PreviouslyCertifiedAmount <> v.PreviouslyCertifiedAmount
+                        OR i.GrossCertifiedAmount <> v.CurrentCertifiedAmount OR i.RetentionHeldAmount <> v.RetentionHeldAmount
+                        OR i.RetentionReleasedAmount <> v.RetentionReleasedAmount
+                        OR i.OtherDeductionsAmount <> v.ApprovedBackChargeAmount + v.ApprovedContraChargeAmount
+                        OR i.TaxAmount <> v.TaxAmount OR i.NetCertifiedAmount <> v.NetCertifiedAmount))
+                    THROW 52032, 'QS subcontract certificate source, project, supplier, policy or financial lineage is invalid.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.QuantitySurveySubcontractValuationId IS NOT NULL
+                      AND ROUND(i.NetCertifiedAmount, 2) <> ROUND(
+                        i.GrossCertifiedAmount + i.RetentionReleasedAmount
+                        + CASE WHEN i.TaxHandling = 'Inclusive' THEN 0 ELSE i.TaxAmount END
+                        - i.RetentionHeldAmount - i.AdvanceRecoveryAmount - i.MaterialDeductionAmount - i.OtherDeductionsAmount, 2))
+                    THROW 52033, 'QS subcontract certificate totals do not reconcile.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d ON d.Id = i.Id
+                    WHERE d.QuantitySurveySubcontractValuationId IS NOT NULL AND (
+                        i.TenantId <> d.TenantId OR i.ProjectId <> d.ProjectId
+                        OR i.QuantitySurveySubcontractValuationId <> d.QuantitySurveySubcontractValuationId
+                        OR i.ContractId <> d.ContractId OR i.SubcontractorBusinessPartnerId <> d.SubcontractorBusinessPartnerId
+                        OR i.ConfigurationProfileId <> d.ConfigurationProfileId OR i.ValuationDecisionId <> d.ValuationDecisionId
+                        OR i.ApprovalWorkflowDefinitionId <> d.ApprovalWorkflowDefinitionId OR i.WorkflowInstanceId <> d.WorkflowInstanceId
+                        OR i.ExpenseAccountId <> d.ExpenseAccountId OR i.AccountsPayableAccountId <> d.AccountsPayableAccountId
+                        OR i.PaymentTermId <> d.PaymentTermId OR i.TaxGroupId <> d.TaxGroupId
+                        OR ISNULL(i.WithholdingTaxId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.WithholdingTaxId, '00000000-0000-0000-0000-000000000000')
+                        OR i.CertificateNumber <> d.CertificateNumber OR i.ClientRequestId <> d.ClientRequestId
+                        OR i.RequestHash <> d.RequestHash OR i.PolicyHash <> d.PolicyHash OR i.Currency <> d.Currency
+                        OR i.CertifiedToDateAmount <> d.CertifiedToDateAmount OR i.PreviouslyCertifiedAmount <> d.PreviouslyCertifiedAmount
+                        OR i.GrossCertifiedAmount <> d.GrossCertifiedAmount OR i.RetentionHeldAmount <> d.RetentionHeldAmount
+                        OR i.RetentionReleasedAmount <> d.RetentionReleasedAmount OR i.OtherDeductionsAmount <> d.OtherDeductionsAmount
+                        OR i.TaxAmount <> d.TaxAmount OR i.NetCertifiedAmount <> d.NetCertifiedAmount))
+                    THROW 52034, 'Approved QS subcontract certificate source, policy and financial lineage is immutable.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.QuantitySurveySubcontractValuationId IS NOT NULL AND i.VendorInvoiceId IS NOT NULL
+                      AND NOT EXISTS (SELECT 1 FROM dbo.VendorInvoice v WHERE v.Id = i.VendorInvoiceId AND v.TenantId = i.TenantId AND v.IsDeleted = 0))
+                    THROW 52035, 'The linked Finance AP invoice must belong to the same tenant.', 1;
             END
             """);
         // TRIGGER TR_QS0521_SubcontractEvidence_AppendOnly from 20260811050412_AddQuantitySurveySubcontractLifecycle:2 (ARCHIVED_FINAL_DEFINITION)
@@ -16137,6 +19154,970 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 52046, 'Issued QS subcontract charge commercial and policy lineage is immutable.', 1;
             END
             """);
+        // TRIGGER TR_QsAdvanceRecoveryAgreements_QS0505Guard from 20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QsAdvanceRecoveryAgreements_QS0505Guard]
+            ON [dbo].[QuantitySurveyAdvanceRecoveryAgreements]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id] = d.[Id] WHERE i.[Id] IS NULL)
+                    THROW 55051, 'QS-0505 advance-recovery agreements cannot be deleted.', 1;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE i.[TenantId] <> d.[TenantId]
+                       OR i.[ProjectId] <> d.[ProjectId]
+                       OR i.[ContractId] <> d.[ContractId]
+                       OR i.[VendorPaymentId] <> d.[VendorPaymentId]
+                       OR i.[ClientRequestId] <> d.[ClientRequestId]
+                       OR i.[RequestHash] <> d.[RequestHash]
+                       OR i.[RecoveryNumber] <> d.[RecoveryNumber]
+                       OR i.[ContractNumberSnapshot] <> d.[ContractNumberSnapshot]
+                       OR i.[ContractorNameSnapshot] <> d.[ContractorNameSnapshot]
+                       OR i.[PaymentNumberSnapshot] <> d.[PaymentNumberSnapshot]
+                       OR i.[PaymentDateSnapshot] <> d.[PaymentDateSnapshot]
+                       OR i.[CurrencyCodeSnapshot] <> d.[CurrencyCodeSnapshot]
+                       OR i.[OriginalAdvanceAmount] <> d.[OriginalAdvanceAmount]
+                       OR i.[RecoveryPercentage] <> d.[RecoveryPercentage]
+                       OR i.[ConfigurationProfileId] <> d.[ConfigurationProfileId]
+                       OR i.[ValuationDecisionId] <> d.[ValuationDecisionId]
+                       OR i.[PolicyHash] <> d.[PolicyHash]
+                       OR i.[PreparedById] <> d.[PreparedById]
+                       OR i.[PreparedAt] <> d.[PreparedAt]
+                       OR i.[CorrelationId] <> d.[CorrelationId]
+                       OR i.[IsDeleted] <> d.[IsDeleted]
+                )
+                    THROW 55052, 'QS-0505 source, commercial terms, policy lineage and preparer evidence are immutable.', 1;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN [dbo].[Projects] p
+                      ON p.[Id] = i.[ProjectId] AND p.[TenantId] = i.[TenantId] AND p.[IsDeleted] = 0
+                    LEFT JOIN [dbo].[Contracts] c
+                      ON c.[Id] = i.[ContractId] AND c.[TenantId] = i.[TenantId] AND c.[IsDeleted] = 0
+                     AND UPPER(c.[ContractType]) = 'WORKS' AND UPPER(c.[Status]) = 'ACTIVE'
+                    LEFT JOIN [dbo].[BusinessPartners] bp
+                      ON bp.[Id] = c.[BusinessPartnerId] AND bp.[TenantId] = i.[TenantId] AND bp.[IsDeleted] = 0
+                    LEFT JOIN [dbo].[VendorPayment] vp
+                      ON vp.[Id] = i.[VendorPaymentId] AND vp.[TenantId] = i.[TenantId] AND vp.[IsDeleted] = 0
+                     AND vp.[IsSupplierAdvance] = 1 AND vp.[JournalEntryId] IS NOT NULL
+                     AND vp.[Status] NOT IN (6, 7, 9)
+                    LEFT JOIN [dbo].[Suppliers] s
+                      ON s.[Id] = vp.[SupplierId] AND s.[TenantId] = i.[TenantId] AND s.[IsDeleted] = 0
+                    LEFT JOIN [dbo].[QuantitySurveyConfigurationProfiles] cp
+                      ON cp.[Id] = i.[ConfigurationProfileId] AND cp.[TenantId] = i.[TenantId]
+                     AND cp.[LifecycleStatus] = 1 AND cp.[IsDeleted] = 0
+                     AND cp.[EffectiveFrom] <= i.[PreparedAt]
+                     AND (cp.[EffectiveTo] IS NULL OR cp.[EffectiveTo] >= i.[PreparedAt])
+                    LEFT JOIN [dbo].[QuantitySurveyConfigurationDecisions] cd
+                      ON cd.[Id] = i.[ValuationDecisionId] AND cd.[TenantId] = i.[TenantId]
+                     AND cd.[ProfileId] = cp.[Id] AND cd.[DecisionKey] = 'QS-DEC-008'
+                     AND cd.[Status] = 2 AND cd.[ApprovalStatus] = 1 AND cd.[EvidenceStatus] = 2
+                     AND cd.[IsDeleted] = 0
+                     AND (cd.[EffectiveFrom] IS NULL OR cd.[EffectiveFrom] <= i.[PreparedAt])
+                     AND (cd.[EffectiveTo] IS NULL OR cd.[EffectiveTo] >= i.[PreparedAt])
+                    WHERE p.[Id] IS NULL OR c.[Id] IS NULL OR bp.[Id] IS NULL OR vp.[Id] IS NULL OR s.[Id] IS NULL
+                       OR NOT
+                          (
+                              s.[Id] = bp.[Id]
+                              OR (NULLIF(LTRIM(RTRIM(s.[SupplierCode])), '') IS NOT NULL
+                                  AND s.[SupplierCode] = bp.[PartnerCode])
+                              OR (NULLIF(LTRIM(RTRIM(s.[Name])), '') IS NOT NULL AND s.[Name] = bp.[PartnerName])
+                          )
+                       OR UPPER(vp.[CurrencyCode]) <> UPPER(c.[Currency])
+                       OR UPPER(i.[CurrencyCodeSnapshot]) <> UPPER(vp.[CurrencyCode])
+                       OR i.[OriginalAdvanceAmount] <> vp.[TotalAmount]
+                       OR vp.[TotalAmount] <= vp.[AllocatedAmount]
+                       OR cp.[Id] IS NULL OR cd.[Id] IS NULL
+                       OR NOT EXISTS
+                          (
+                              SELECT 1 FROM [dbo].[ProjectInterimValuations] v
+                              WHERE v.[TenantId] = i.[TenantId] AND v.[ProjectId] = i.[ProjectId]
+                                AND v.[ContractId] = i.[ContractId] AND v.[IsDeleted] = 0
+                              UNION ALL
+                              SELECT 1 FROM [dbo].[ProjectPaymentCertificates] pc
+                              WHERE pc.[TenantId] = i.[TenantId] AND pc.[ProjectId] = i.[ProjectId]
+                                AND pc.[ContractId] = i.[ContractId] AND pc.[IsDeleted] = 0
+                          )
+                )
+                    THROW 55053, 'QS-0505 requires same-tenant project, active Works contract, Finance-owned posted supplier advance and DEC-008 lineage.', 1;
+
+                IF EXISTS
+                (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE (d.[Id] IS NULL AND (i.[Status] <> 'Draft' OR i.[ApprovalStatus] <> 'Draft'))
+                       OR (d.[Id] IS NOT NULL AND i.[Status] <> d.[Status] AND NOT
+                          (
+                              (d.[Status] = 'Draft' AND i.[Status] = 'PendingApproval')
+                              OR (d.[Status] = 'PendingApproval' AND i.[Status] IN ('Approved', 'Rejected'))
+                              OR (d.[Status] = 'Approved' AND i.[Status] = 'Closed')
+                          ))
+                       OR (i.[Status] IN ('Approved', 'Rejected') AND
+                          (i.[ApprovedById] = i.[PreparedById] OR i.[ApprovedById] = i.[SubmittedById]))
+                )
+                    THROW 55054, 'QS-0505 lifecycle transition or maker-checker separation is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsAdvanceRecoveryRevisions_QS0505AppendOnly from 20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QsAdvanceRecoveryRevisions_QS0505AppendOnly]
+            ON [dbo].[QuantitySurveyAdvanceRecoveryRevisions]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                THROW 55057, 'QS-0505 advance-recovery audit revisions are append-only.', 1;
+            END
+            """);
+        // TRIGGER TR_QsConfigurationRevisions_AppendOnly from 20260807202000_AddQuantitySurveyConfigurationRegister:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsConfigurationRevisions_AppendOnly] ON [QuantitySurveyConfigurationRevisions] INSTEAD OF UPDATE, DELETE AS BEGIN SET NOCOUNT ON; THROW 51000, 'Quantity-survey configuration history is append-only.', 1; END
+            """);
+        // TRIGGER TR_QsDesignRevisionImpactLines_Guard from 20260810103259_AddQuantitySurveyDesignRevisionImpacts:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QsDesignRevisionImpactLines_Guard]
+            ON [dbo].[QuantitySurveyDesignRevisionImpactLines]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted) THROW 51136, 'QS design impact line history is immutable.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN [dbo].[QuantitySurveyDesignRevisionImpacts] h ON h.[Id] = i.[ImpactId]
+                    LEFT JOIN [dbo].[ProjectBoqVersionLines] l ON l.[Id] = i.[ProjectBoqVersionLineId]
+                    LEFT JOIN [dbo].[ProjectBoqVersions] v ON v.[Id] = i.[ProjectBoqVersionId]
+                    WHERE h.[Id] IS NULL OR l.[Id] IS NULL OR v.[Id] IS NULL OR h.[Status] <> 'Draft' OR
+                          h.[TenantId] <> i.[TenantId] OR l.[TenantId] <> i.[TenantId] OR v.[TenantId] <> i.[TenantId] OR
+                          h.[ProjectId] <> l.[ProjectId] OR l.[ProjectBoqVersionId] <> v.[Id] OR l.[LineKey] <> i.[BoqLineKey] OR
+                          v.[ProjectId] <> h.[ProjectId] OR v.[Status] <> 'Approved' OR v.[PublishedAt] IS NULL OR
+                          l.[Quantity] <> i.[PreviousQuantity] OR
+                          (h.[Route] = 0 AND i.[ImpactType] IN (3,4,5)) OR
+                          (h.[Route] = 1 AND i.[ImpactType] = 0) OR
+                          (i.[ImpactType] = 1 AND (i.[IndicativeQuantity] IS NULL OR i.[IndicativeQuantity] <= i.[PreviousQuantity])) OR
+                          (i.[ImpactType] = 2 AND (i.[IndicativeQuantity] IS NULL OR i.[IndicativeQuantity] >= i.[PreviousQuantity])) OR
+                          (i.[ImpactType] = 4 AND ISNULL(i.[IndicativeQuantity], 0) <> 0)
+                ) THROW 51137, 'Invalid approved-BoQ or route lineage for QS design impact line.', 1;
+            END
+            """);
+        // TRIGGER TR_QsDesignRevisionImpactRevisions_Immutable from 20260810103259_AddQuantitySurveyDesignRevisionImpacts:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QsDesignRevisionImpactRevisions_Immutable]
+            ON [dbo].[QuantitySurveyDesignRevisionImpactRevisions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted) THROW 51138, 'QS design impact audit revisions are append-only.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN [dbo].[QuantitySurveyDesignRevisionImpacts] h ON h.[Id] = i.[ImpactId]
+                    LEFT JOIN [dbo].[Users] u ON u.[Id] = i.[ActorUserId]
+                    WHERE h.[Id] IS NULL OR u.[Id] IS NULL OR h.[TenantId] <> i.[TenantId] OR u.[TenantId] <> i.[TenantId]
+                ) THROW 51139, 'Invalid tenant or actor lineage for QS design impact audit revision.', 1;
+            END
+            """);
+        // TRIGGER TR_QsDesignRevisionImpacts_Guard from 20260810103259_AddQuantitySurveyDesignRevisionImpacts:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QsDesignRevisionImpacts_Guard]
+            ON [dbo].[QuantitySurveyDesignRevisionImpacts]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id] = d.[Id] WHERE i.[Id] IS NULL)
+                    THROW 51133, 'QS design revision impacts cannot be deleted.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN [dbo].[ProjectDrawings] p ON p.[Id] = i.[PreviousDrawingId]
+                    LEFT JOIN [dbo].[ProjectDrawings] r ON r.[Id] = i.[RevisedDrawingId]
+                    LEFT JOIN [dbo].[QuantitySurveyConfigurationProfiles] cp ON cp.[Id] = i.[ConfigurationProfileId]
+                    LEFT JOIN [dbo].[QuantitySurveyConfigurationDecisions] cd ON cd.[Id] = i.[ConfigurationDecisionId]
+                    LEFT JOIN [dbo].[WorkflowDefinitions] wd ON wd.[Id] = i.[ApprovalWorkflowDefinitionId]
+                    LEFT JOIN [dbo].[WorkflowEntityTypes] wet ON wet.[Id] = wd.[EntityTypeId]
+                    WHERE p.[Id] IS NULL OR r.[Id] IS NULL OR cp.[Id] IS NULL OR cd.[Id] IS NULL OR wd.[Id] IS NULL OR wet.[Id] IS NULL OR
+                          p.[TenantId] <> i.[TenantId] OR r.[TenantId] <> i.[TenantId] OR cp.[TenantId] <> i.[TenantId] OR
+                          cd.[TenantId] <> i.[TenantId] OR wd.[TenantId] <> i.[TenantId] OR wet.[TenantId] <> i.[TenantId] OR
+                          p.[ProjectId] <> i.[ProjectId] OR r.[ProjectId] <> i.[ProjectId] OR r.[SupersedesDrawingId] <> p.[Id] OR
+                          UPPER(LTRIM(RTRIM(p.[DrawingNumber]))) <> UPPER(LTRIM(RTRIM(r.[DrawingNumber]))) OR
+                          p.[DrawingNumber] <> i.[PreviousDrawingNumberSnapshot] OR ISNULL(p.[Revision], '') <> ISNULL(i.[PreviousRevisionSnapshot], '') OR
+                          r.[DrawingNumber] <> i.[RevisedDrawingNumberSnapshot] OR r.[Revision] <> i.[RevisedRevisionSnapshot] OR
+                          cd.[ProfileId] <> cp.[Id] OR
+                          (i.[Route] = 0 AND (cd.[DecisionKey] <> 'QS-DEC-007' OR wet.[Code] <> 'QS_MEASUREMENT' OR i.[WorkflowEntityTypeCode] <> 'QS_MEASUREMENT')) OR
+                          (i.[Route] = 1 AND (cd.[DecisionKey] <> 'QS-DEC-011' OR wet.[Code] <> 'QS_VARIATION' OR i.[WorkflowEntityTypeCode] <> 'QS_VARIATION')) OR
+                          NOT EXISTS (SELECT 1 FROM [dbo].[Users] u WHERE u.[Id] = i.[CreatedByUserId] AND u.[TenantId] = i.[TenantId]) OR
+                          (i.[SubmittedById] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [dbo].[Users] u WHERE u.[Id] = i.[SubmittedById] AND u.[TenantId] = i.[TenantId])) OR
+                          (i.[ApprovedById] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [dbo].[Users] u WHERE u.[Id] = i.[ApprovedById] AND u.[TenantId] = i.[TenantId]))
+                ) THROW 51134, 'Invalid tenant, drawing, configuration, workflow, or actor lineage for QS design impact.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE i.[TenantId] <> d.[TenantId] OR i.[ProjectId] <> d.[ProjectId] OR
+                          i.[PreviousDrawingId] <> d.[PreviousDrawingId] OR i.[RevisedDrawingId] <> d.[RevisedDrawingId] OR
+                          i.[ClientRequestId] <> d.[ClientRequestId] OR i.[RequestHash] <> d.[RequestHash] OR
+                          i.[Route] <> d.[Route] OR i.[ConfigurationProfileId] <> d.[ConfigurationProfileId] OR
+                          i.[ConfigurationDecisionId] <> d.[ConfigurationDecisionId] OR
+                          i.[ApprovalWorkflowDefinitionId] <> d.[ApprovalWorkflowDefinitionId] OR
+                          i.[WorkflowEntityTypeCode] <> d.[WorkflowEntityTypeCode] OR i.[PolicyHash] <> d.[PolicyHash] OR
+                          i.[PreviousDrawingNumberSnapshot] <> d.[PreviousDrawingNumberSnapshot] OR
+                          ISNULL(i.[PreviousRevisionSnapshot], '') <> ISNULL(d.[PreviousRevisionSnapshot], '') OR
+                          i.[RevisedDrawingNumberSnapshot] <> d.[RevisedDrawingNumberSnapshot] OR
+                          i.[RevisedRevisionSnapshot] <> d.[RevisedRevisionSnapshot] OR
+                          NOT ((d.[Status] = i.[Status]) OR (d.[Status] = 'Draft' AND i.[Status] = 'PendingApproval') OR
+                               (d.[Status] = 'PendingApproval' AND i.[Status] IN ('Approved','Rejected')))
+                ) THROW 51135, 'QS design impact lineage or lifecycle transition is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationCalculationLines_Guard from 20260809221500_AddQuantitySurveyEscalationCalculationRuns:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationCalculationLines_Guard]
+            ON [QuantitySurveyEscalationCalculationLines]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted)
+                    THROW 51062, 'Escalation calculation component snapshots are immutable.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN [QuantitySurveyEscalationCalculationRuns] r ON r.[Id] = i.[CalculationRunId]
+                    WHERE r.[TenantId] <> i.[TenantId] OR r.[Status] <> 'Draft'
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyPriceIndexFamilies] f WHERE f.[Id] = i.[IndexFamilyId] AND f.[TenantId] = i.[TenantId] AND f.[Code] = i.[IndexFamilyCodeSnapshot] AND f.[IsActive] = 1 AND f.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyPriceIndexValues] v WHERE v.[Id] = i.[BaseIndexValueId] AND v.[IndexFamilyId] = i.[IndexFamilyId] AND v.[TenantId] = i.[TenantId] AND v.[IndexPeriod] = r.[BaseIndexPeriod] AND v.[IndexValue] = i.[BaseIndexValue] AND v.[Status] = 'Approved' AND v.[IsCurrent] = 1 AND v.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyPriceIndexValues] v WHERE v.[Id] = i.[CurrentIndexValueId] AND v.[IndexFamilyId] = i.[IndexFamilyId] AND v.[TenantId] = i.[TenantId] AND v.[IndexPeriod] = r.[CurrentIndexPeriod] AND v.[IndexValue] = i.[CurrentIndexValue] AND v.[Status] = 'Approved' AND v.[IsCurrent] = 1 AND v.[IsDeleted] = 0))
+                    THROW 51062, 'Escalation calculation component tenant or approved-index lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationCalculationRevisions_Guard from 20260809221500_AddQuantitySurveyEscalationCalculationRuns:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationCalculationRevisions_Guard]
+            ON [QuantitySurveyEscalationCalculationRevisions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted)
+                    THROW 51063, 'Escalation calculation revision history is append-only.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN [QuantitySurveyEscalationCalculationRuns] r ON r.[Id] = i.[CalculationRunId] AND r.[TenantId] = i.[TenantId]
+                    WHERE r.[Id] IS NULL OR i.[IsDeleted] = 1)
+                    THROW 51063, 'Escalation calculation revision tenant lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationCalculationRuns_Guard from 20260809221500_AddQuantitySurveyEscalationCalculationRuns:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationCalculationRuns_Guard]
+            ON [QuantitySurveyEscalationCalculationRuns]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id] = d.[Id] WHERE i.[Id] IS NULL)
+                    THROW 51060, 'Escalation calculation runs cannot be deleted; retain their governed history.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE (d.[Id] IS NULL AND (i.[Status] <> 'Draft' OR i.[ApprovalStatus] <> 'Draft' OR i.[IsDeleted] = 1))
+                       OR (d.[Id] IS NOT NULL AND NOT (
+                              (d.[Status] = i.[Status] AND d.[Status] IN ('PendingApproval','ApprovedPendingApplication'))
+                           OR (d.[Status] = 'Draft' AND i.[Status] IN ('PendingApproval','Rejected'))
+                           OR (d.[Status] = 'Rejected' AND i.[Status] = 'PendingApproval')
+                           OR (d.[Status] = 'PendingApproval' AND i.[Status] IN ('ApprovedPendingApplication','Rejected')))))
+                    THROW 51060, 'Invalid escalation calculation lifecycle transition.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE EXISTS (
+                        SELECT d.[TenantId],d.[RunReference],d.[ClientRequestId],d.[RequestHash],d.[FormulaId],d.[FormulaKeySnapshot],d.[FormulaVersionSnapshot],d.[FormulaCodeSnapshot],
+                               d.[ProjectId],d.[ContractId],d.[ContractNumberSnapshot],d.[BaseIndexPeriod],d.[CurrentIndexPeriod],d.[CalculationDate],d.[ImpactTargetType],
+                               d.[PaymentCertificateId],d.[FinalAccountId],d.[ImpactTargetReferenceSnapshot],d.[ImpactTargetStatusSnapshot],d.[ImpactTargetSnapshotHash],d.[CurrencyCode],
+                               d.[BaseRate],d.[RevisedRate],d.[AdjustmentFactor],d.[CalculatedFluctuationAmount],d.[AuthorityRoleId],d.[AuthorityRoleNameSnapshot],
+                               d.[ConfigurationProfileId],d.[ConfigurationDecisionId],d.[ApprovalWorkflowDefinitionId],d.[PreparedById],d.[PreparedAt],d.[CreatedAt],d.[CreatedById],d.[IsDeleted]
+                        EXCEPT
+                        SELECT i.[TenantId],i.[RunReference],i.[ClientRequestId],i.[RequestHash],i.[FormulaId],i.[FormulaKeySnapshot],i.[FormulaVersionSnapshot],i.[FormulaCodeSnapshot],
+                               i.[ProjectId],i.[ContractId],i.[ContractNumberSnapshot],i.[BaseIndexPeriod],i.[CurrentIndexPeriod],i.[CalculationDate],i.[ImpactTargetType],
+                               i.[PaymentCertificateId],i.[FinalAccountId],i.[ImpactTargetReferenceSnapshot],i.[ImpactTargetStatusSnapshot],i.[ImpactTargetSnapshotHash],i.[CurrencyCode],
+                               i.[BaseRate],i.[RevisedRate],i.[AdjustmentFactor],i.[CalculatedFluctuationAmount],i.[AuthorityRoleId],i.[AuthorityRoleNameSnapshot],
+                               i.[ConfigurationProfileId],i.[ConfigurationDecisionId],i.[ApprovalWorkflowDefinitionId],i.[PreparedById],i.[PreparedAt],i.[CreatedAt],i.[CreatedById],i.[IsDeleted]))
+                    THROW 51061, 'Escalation calculation source, target, formula, policy, authority and preparer lineage is immutable.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE (i.[ReviewedById] IS NOT NULL AND i.[ReviewedById] = i.[PreparedById])
+                       OR (i.[ApprovedById] IS NOT NULL AND i.[ApprovedById] = i.[PreparedById])
+                       OR NOT EXISTS (
+                            SELECT 1 FROM [QuantitySurveyEscalationFormulas] f
+                            WHERE f.[Id] = i.[FormulaId] AND f.[TenantId] = i.[TenantId]
+                              AND f.[FormulaKey] = i.[FormulaKeySnapshot] AND f.[Version] = i.[FormulaVersionSnapshot]
+                              AND f.[Code] = i.[FormulaCodeSnapshot] AND f.[ProjectId] = i.[ProjectId]
+                              AND f.[ContractId] = i.[ContractId] AND f.[AuthorityRoleId] = i.[AuthorityRoleId]
+                              AND f.[ConfigurationProfileId] = i.[ConfigurationProfileId]
+                              AND f.[ConfigurationDecisionId] = i.[ConfigurationDecisionId]
+                              AND f.[ApprovalWorkflowDefinitionId] = i.[ApprovalWorkflowDefinitionId]
+                              AND f.[Status] = 'Approved' AND f.[ApprovalStatus] = 'Approved'
+                              AND f.[EffectiveFrom] <= i.[CurrentIndexPeriod]
+                              AND (f.[EffectiveTo] IS NULL OR f.[EffectiveTo] >= i.[CurrentIndexPeriod])
+                              AND f.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [Projects] p WHERE p.[Id] = i.[ProjectId] AND p.[TenantId] = i.[TenantId] AND p.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [Contracts] c WHERE c.[Id] = i.[ContractId] AND c.[TenantId] = i.[TenantId] AND c.[ContractNumber] = i.[ContractNumberSnapshot] AND c.[Currency] = i.[CurrencyCode] AND c.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [AspNetRoles] r WHERE r.[Id] = i.[AuthorityRoleId] AND r.[Name] = i.[AuthorityRoleNameSnapshot])
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyConfigurationProfiles] p WHERE p.[Id] = i.[ConfigurationProfileId] AND p.[TenantId] = i.[TenantId] AND p.[LifecycleStatus] = 1 AND p.[EffectiveFrom] <= i.[CalculationDate] AND (p.[EffectiveTo] IS NULL OR p.[EffectiveTo] >= i.[CalculationDate]) AND p.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyConfigurationDecisions] d WHERE d.[Id] = i.[ConfigurationDecisionId] AND d.[ProfileId] = i.[ConfigurationProfileId] AND d.[TenantId] = i.[TenantId] AND d.[DecisionKey] = 'QS-DEC-006' AND d.[Status] = 2 AND d.[ApprovalStatus] = 1 AND d.[EvidenceStatus] = 2 AND (d.[EffectiveFrom] IS NULL OR d.[EffectiveFrom] <= i.[CalculationDate]) AND (d.[EffectiveTo] IS NULL OR d.[EffectiveTo] >= i.[CalculationDate]) AND TRY_CONVERT(uniqueidentifier, JSON_VALUE(d.[ValueJson], '$.approvalWorkflowDefinitionId')) = i.[ApprovalWorkflowDefinitionId] AND d.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [WorkflowDefinitions] w JOIN [WorkflowEntityTypes] wet ON wet.[Id] = w.[EntityTypeId] WHERE w.[Id] = i.[ApprovalWorkflowDefinitionId] AND w.[TenantId] = i.[TenantId] AND w.[LifecycleStatus] = 1 AND w.[IsActive] = 1 AND w.[IsDeleted] = 0 AND wet.[TenantId] = i.[TenantId] AND wet.[Code] = 'QS_ESCALATION' AND wet.[IsActive] = 1 AND wet.[IsDeleted] = 0)
+                       OR (i.[ImpactTargetType] = 0 AND NOT EXISTS (SELECT 1 FROM [ProjectPaymentCertificates] t WHERE t.[Id] = i.[PaymentCertificateId] AND t.[TenantId] = i.[TenantId] AND t.[ProjectId] = i.[ProjectId] AND t.[ContractId] = i.[ContractId] AND t.[Status] = i.[ImpactTargetStatusSnapshot] AND t.[Status] IN ('Draft','Issued') AND t.[Currency] = i.[CurrencyCode] AND t.[IsDeleted] = 0))
+                       OR (i.[ImpactTargetType] = 1 AND NOT EXISTS (SELECT 1 FROM [ProjectFinalAccounts] t WHERE t.[Id] = i.[FinalAccountId] AND t.[TenantId] = i.[TenantId] AND t.[ProjectId] = i.[ProjectId] AND t.[ContractId] = i.[ContractId] AND t.[Status] = i.[ImpactTargetStatusSnapshot] AND t.[Status] IN ('Draft','UnderReview') AND t.[Currency] = i.[CurrencyCode] AND t.[IsDeleted] = 0)))
+                    THROW 51061, 'Escalation calculation tenant, policy, workflow, formula or impact-target lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationDisputeAttachments_Guard from 20260810005756_AddQuantitySurveyEscalationDisputes:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationDisputeAttachments_Guard]
+            ON [QuantitySurveyEscalationDisputeAttachments]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted)
+                    THROW 51072, 'Escalation dispute evidence is append-only.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.[IsDeleted] = 1
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyEscalationDisputes] d WHERE d.[Id] = i.[DisputeId] AND d.[TenantId] = i.[TenantId] AND d.[Status] <> 'Resolved' AND d.[IsDeleted] = 0)
+                       OR (SELECT COUNT_BIG(*) FROM [QuantitySurveyEscalationDisputeAttachments] a WHERE a.[TenantId] = i.[TenantId] AND a.[DisputeId] = i.[DisputeId] AND a.[IsDeleted] = 0) > 10
+                       OR NOT EXISTS (SELECT 1 FROM [FileUploadRecords] f WHERE f.[Id] = i.[FileUploadRecordId] AND f.[TenantId] = i.[TenantId] AND f.[Category] = 'quantity-survey-escalation-dispute-evidence' AND f.[VirusScanStatus] = 2 AND f.[FileSize] = i.[FileSize] AND f.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [CentralDocumentRecords] r JOIN [CentralDocumentVersions] v ON v.[DocumentRecordId] = r.[Id] AND v.[TenantId] = r.[TenantId] WHERE r.[Id] = i.[CentralDocumentRecordId] AND r.[TenantId] = i.[TenantId] AND r.[SourceModule] = 'QuantitySurvey' AND r.[SourceEntityType] = 'QuantitySurveyEscalationDisputeAttachment' AND r.[SourceRecordId] = i.[Id] AND r.[LifecycleStatus] = 'Active' AND r.[IsDeleted] = 0 AND v.[Id] = i.[CentralDocumentVersionId] AND v.[FileUploadRecordId] = i.[FileUploadRecordId] AND v.[FileSize] = i.[FileSize] AND v.[Status] = 'Validated' AND v.[VersionNumber] = r.[CurrentVersion] AND v.[IsDeleted] = 0))
+                    THROW 51072, 'Escalation dispute evidence tenant, clean-upload or central-DMS lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationDisputeRevisions_Guard from 20260810005756_AddQuantitySurveyEscalationDisputes:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationDisputeRevisions_Guard]
+            ON [QuantitySurveyEscalationDisputeRevisions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted)
+                    THROW 51072, 'Escalation dispute revision history is append-only.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[IsDeleted] = 1 OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyEscalationDisputes] d WHERE d.[Id] = i.[DisputeId] AND d.[TenantId] = i.[TenantId] AND d.[IsDeleted] = 0))
+                    THROW 51072, 'Escalation dispute revision tenant lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationDisputes_Guard from 20260810005756_AddQuantitySurveyEscalationDisputes:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationDisputes_Guard]
+            ON [QuantitySurveyEscalationDisputes]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id] = d.[Id] WHERE i.[Id] IS NULL)
+                    THROW 51070, 'Escalation disputes cannot be deleted; retain their governed history.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE (d.[Id] IS NULL AND (i.[Status] <> 'Open' OR i.[IsDeleted] = 1))
+                       OR (d.[Id] IS NOT NULL AND NOT ((d.[Status] = 'Open' AND i.[Status] = 'ContractorResponded') OR (d.[Status] = 'ContractorResponded' AND i.[Status] = 'Resolved'))))
+                    THROW 51071, 'Invalid escalation dispute lifecycle transition.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE EXISTS (
+                        SELECT d.[TenantId],d.[CalculationRunId],d.[ProjectId],d.[ContractId],d.[ContractorBusinessPartnerId],d.[ContractorNameSnapshot],d.[DisputeReference],d.[ClientRequestId],d.[RequestHash],d.[CalculationSnapshotHash],d.[Subject],d.[DisputeReason],d.[OpenedById],d.[OpenedAt],d.[CreatedAt],d.[CreatedById],d.[IsDeleted]
+                        EXCEPT
+                        SELECT i.[TenantId],i.[CalculationRunId],i.[ProjectId],i.[ContractId],i.[ContractorBusinessPartnerId],i.[ContractorNameSnapshot],i.[DisputeReference],i.[ClientRequestId],i.[RequestHash],i.[CalculationSnapshotHash],i.[Subject],i.[DisputeReason],i.[OpenedById],i.[OpenedAt],i.[CreatedAt],i.[CreatedById],i.[IsDeleted]))
+                    THROW 51070, 'Escalation dispute calculation, project, Works contract, contractor and opening lineage is immutable.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (SELECT 1 FROM [QuantitySurveyEscalationCalculationRuns] r WHERE r.[Id] = i.[CalculationRunId] AND r.[TenantId] = i.[TenantId] AND r.[ProjectId] = i.[ProjectId] AND r.[ContractId] = i.[ContractId] AND r.[SnapshotHash] = i.[CalculationSnapshotHash] AND r.[Status] = 'ApprovedPendingApplication' AND r.[ApprovalStatus] = 'Approved' AND r.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [Projects] p WHERE p.[Id] = i.[ProjectId] AND p.[TenantId] = i.[TenantId] AND p.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [Contracts] c WHERE c.[Id] = i.[ContractId] AND c.[TenantId] = i.[TenantId] AND c.[BusinessPartnerId] = i.[ContractorBusinessPartnerId] AND c.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [BusinessPartners] bp WHERE bp.[Id] = i.[ContractorBusinessPartnerId] AND bp.[TenantId] = i.[TenantId] AND bp.[IsDeleted] = 0)
+                       OR (NOT EXISTS (SELECT 1 FROM deleted d WHERE d.[Id] = i.[Id]) AND NOT EXISTS (SELECT 1 FROM [BusinessPartners] bp WHERE bp.[Id] = i.[ContractorBusinessPartnerId] AND bp.[TenantId] = i.[TenantId] AND bp.[PartnerName] = i.[ContractorNameSnapshot] AND bp.[IsDeleted] = 0))
+                       OR (i.[ResolvedById] IS NOT NULL AND (i.[ResolvedById] = i.[OpenedById] OR i.[ResolvedById] = i.[ContractorRespondedById])))
+                    THROW 51070, 'Escalation dispute tenant, approved calculation, Works contract, contractor or separation-of-duties lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationFormulaComponents_Guard from 20260809152905_AddQuantitySurveyEscalationFormulaRegister:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationFormulaComponents_Guard]
+            ON [QuantitySurveyEscalationFormulaComponents]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (
+                        SELECT 1
+                        FROM [QuantitySurveyEscalationFormulas] f
+                        JOIN [QuantitySurveyPriceIndexFamilies] p ON p.[Id] = i.[IndexFamilyId]
+                        WHERE f.[Id] = i.[FormulaId]
+                          AND f.[TenantId] = i.[TenantId]
+                          AND f.[Status] IN ('Draft','Rejected')
+                          AND f.[IsDeleted] = 0
+                          AND p.[TenantId] = i.[TenantId]
+                          AND p.[Source] = i.[IndexSourceSnapshot]
+                          AND p.[Code] = i.[IndexFamilyCodeSnapshot]
+                          AND p.[Name] = i.[IndexFamilyNameSnapshot]
+                          AND p.[IsActive] = 1 AND p.[IsDeleted] = 0))
+                    THROW 51026, 'Formula components require an editable same-tenant formula and an active matching index-family snapshot.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM deleted d
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyEscalationFormulas] f
+                        WHERE f.[Id] = d.[FormulaId] AND f.[TenantId] = d.[TenantId]
+                          AND f.[Status] IN ('Draft','Rejected') AND f.[IsDeleted] = 0))
+                    THROW 51026, 'Components of submitted, Approved, or Retired formulas are immutable.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationFormulaRevisions_AppendOnly from 20260809152905_AddQuantitySurveyEscalationFormulaRegister:4 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationFormulaRevisions_AppendOnly]
+            ON [QuantitySurveyEscalationFormulaRevisions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted)
+                    THROW 51028, 'Formula revision history is append-only.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyEscalationFormulas] f
+                        WHERE f.[Id] = i.[FormulaId] AND f.[TenantId] = i.[TenantId]))
+                    THROW 51029, 'Formula revision history must match the formula tenant.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationFormulas_ApprovedImmutable from 20260809152905_AddQuantitySurveyEscalationFormulaRegister:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationFormulas_ApprovedImmutable]
+            ON [QuantitySurveyEscalationFormulas]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM deleted d
+                    LEFT JOIN inserted i ON i.[Id] = d.[Id]
+                    WHERE d.[Status] = 'Retired'
+                       OR (d.[Status] = 'Approved' AND i.[Id] IS NULL)
+                       OR (d.[Status] = 'Approved' AND i.[Status] NOT IN ('Approved','Retired'))
+                       OR (d.[Status] = 'Approved' AND EXISTS (
+                           SELECT d.[FormulaKey],d.[Code],d.[Name],d.[Version],d.[ProjectId],d.[ContractId],
+                                  d.[ContractClauseReference],d.[FormulaType],d.[BaseDate],d.[EffectiveFrom],d.[EffectiveTo],
+                                  d.[AuthorityRoleId],d.[AuthorityRoleNameSnapshot],d.[ConfigurationProfileId],
+                                  d.[ConfigurationDecisionId],d.[ApprovalWorkflowDefinitionId],d.[WorkflowInstanceId],
+                                  d.[CentralDocumentRecordId],d.[CentralDocumentVersionId],d.[SupersedesFormulaId],
+                                  d.[ClientRequestId],d.[RequestHash],d.[SnapshotHash],d.[PreparedById],d.[PreparedAt],
+                                  d.[SubmittedById],d.[SubmittedAt],d.[ApprovedById],d.[ApprovedAt],d.[IsDeleted],d.[TenantId]
+                           EXCEPT
+                           SELECT i.[FormulaKey],i.[Code],i.[Name],i.[Version],i.[ProjectId],i.[ContractId],
+                                  i.[ContractClauseReference],i.[FormulaType],i.[BaseDate],i.[EffectiveFrom],i.[EffectiveTo],
+                                  i.[AuthorityRoleId],i.[AuthorityRoleNameSnapshot],i.[ConfigurationProfileId],
+                                  i.[ConfigurationDecisionId],i.[ApprovalWorkflowDefinitionId],i.[WorkflowInstanceId],
+                                  i.[CentralDocumentRecordId],i.[CentralDocumentVersionId],i.[SupersedesFormulaId],
+                                  i.[ClientRequestId],i.[RequestHash],i.[SnapshotHash],i.[PreparedById],i.[PreparedAt],
+                                  i.[SubmittedById],i.[SubmittedAt],i.[ApprovedById],i.[ApprovedAt],i.[IsDeleted],i.[TenantId])))
+                    THROW 51025, 'Approved formula inputs are immutable; retire and create a governed revision.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEscalationFormulas_TenantAndLineageGuard from 20260809152905_AddQuantitySurveyEscalationFormulaRegister:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEscalationFormulas_TenantAndLineageGuard]
+            ON [QuantitySurveyEscalationFormulas]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[Id] IS NULL AND i.[Status] <> 'Draft')
+                    THROW 51020, 'A price-adjustment formula must be created as Draft.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE (d.[Status] = 'Draft' AND i.[Status] NOT IN ('Draft','PendingApproval','Rejected'))
+                       OR (d.[Status] = 'Rejected' AND i.[Status] NOT IN ('Draft','PendingApproval','Rejected'))
+                       OR (d.[Status] = 'PendingApproval' AND i.[Status] NOT IN ('PendingApproval','Approved','Rejected'))
+                       OR (d.[Status] = 'Approved' AND i.[Status] NOT IN ('Approved','Retired'))
+                       OR d.[Status] = 'Retired')
+                    THROW 51021, 'Invalid price-adjustment formula lifecycle transition.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE (i.[Status] = 'Draft' AND i.[ApprovalStatus] <> 'Draft')
+                       OR (i.[Status] = 'PendingApproval' AND i.[ApprovalStatus] <> 'Pending')
+                       OR (i.[Status] = 'Approved' AND i.[ApprovalStatus] <> 'Approved')
+                       OR (i.[Status] = 'Rejected' AND i.[ApprovalStatus] <> 'Rejected')
+                       OR (i.[Status] = 'Retired' AND i.[ApprovalStatus] <> 'Approved'))
+                    THROW 51021, 'Formula lifecycle and approval statuses are inconsistent.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE i.[Status] IN ('Draft','PendingApproval','Approved')
+                      AND (
+                        NOT EXISTS (
+                            SELECT 1 FROM [Projects] p
+                            WHERE p.[Id] = i.[ProjectId] AND p.[TenantId] = i.[TenantId]
+                              AND p.[IsDeleted] = 0)
+                        OR NOT EXISTS (
+                            SELECT 1 FROM [Contracts] c
+                            WHERE c.[Id] = i.[ContractId] AND c.[TenantId] = i.[TenantId]
+                              AND c.[IsDeleted] = 0 AND UPPER(c.[ContractType]) = 'WORKS')
+                        OR NOT EXISTS (
+                            SELECT 1 FROM [Projects] p
+                            WHERE p.[Id] = i.[ProjectId] AND p.[TenantId] = i.[TenantId]
+                              AND p.[IsDeleted] = 0
+                              AND (p.[ContractId] = i.[ContractId] OR EXISTS (
+                                  SELECT 1 FROM [ProjectPackages] pp
+                                  WHERE pp.[TenantId] = i.[TenantId]
+                                    AND pp.[ProjectId] = i.[ProjectId]
+                                    AND pp.[ContractId] = i.[ContractId]
+                                    AND pp.[IsDeleted] = 0)))
+                        OR NOT EXISTS (
+                            SELECT 1 FROM [QuantitySurveyConfigurationProfiles] p
+                            WHERE p.[Id] = i.[ConfigurationProfileId]
+                              AND p.[TenantId] = i.[TenantId]
+                              AND p.[LifecycleStatus] = 1
+                              AND p.[IsDeleted] = 0
+                              AND p.[EffectiveFrom] <= i.[EffectiveFrom]
+                              AND (p.[EffectiveTo] IS NULL OR p.[EffectiveTo] >= COALESCE(i.[EffectiveTo], i.[EffectiveFrom])))
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM [QuantitySurveyConfigurationDecisions] d6
+                            WHERE d6.[Id] = i.[ConfigurationDecisionId]
+                              AND d6.[ProfileId] = i.[ConfigurationProfileId]
+                              AND d6.[TenantId] = i.[TenantId]
+                              AND d6.[DecisionKey] = 'QS-DEC-006'
+                              AND d6.[Status] = 2 AND d6.[ApprovalStatus] = 1 AND d6.[EvidenceStatus] = 2
+                              AND d6.[IsDeleted] = 0
+                              AND TRY_CONVERT(uniqueidentifier, JSON_VALUE(d6.[ValueJson], '$.approvalWorkflowDefinitionId')) = i.[ApprovalWorkflowDefinitionId]
+                              AND ((LOWER(JSON_VALUE(d6.[ValueJson], '$.formula')) = 'fixedcoefficientindexratio' AND i.[FormulaType] = 0)
+                                OR (LOWER(JSON_VALUE(d6.[ValueJson], '$.formula')) = 'contractdefinedformula' AND i.[FormulaType] = 1)))
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM [QuantitySurveyConfigurationDecisions] d1
+                            CROSS APPLY OPENJSON(JSON_QUERY(d1.[ValueJson], '$.approverRoleIds')) roles
+                            WHERE d1.[ProfileId] = i.[ConfigurationProfileId]
+                              AND d1.[TenantId] = i.[TenantId]
+                              AND d1.[DecisionKey] = 'QS-DEC-001'
+                              AND d1.[Status] = 2 AND d1.[ApprovalStatus] = 1 AND d1.[EvidenceStatus] = 2
+                              AND d1.[IsDeleted] = 0
+                              AND TRY_CONVERT(uniqueidentifier, roles.[value]) = i.[AuthorityRoleId])
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM [AspNetRoles] r
+                            WHERE r.[Id] = i.[AuthorityRoleId] AND r.[Name] = i.[AuthorityRoleNameSnapshot])
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM [WorkflowDefinitions] wd
+                            JOIN [WorkflowEntityTypes] wet ON wet.[Id] = wd.[EntityTypeId]
+                            WHERE wd.[Id] = i.[ApprovalWorkflowDefinitionId]
+                              AND wd.[TenantId] = i.[TenantId]
+                              AND wd.[LifecycleStatus] = 1 AND wd.[IsActive] = 1 AND wd.[IsDeleted] = 0
+                              AND wet.[TenantId] = i.[TenantId] AND wet.[Code] = 'QS_ESCALATION'
+                              AND wet.[IsActive] = 1 AND wet.[IsDeleted] = 0)
+                        OR NOT EXISTS (
+                            SELECT 1
+                            FROM [CentralDocumentRecords] dr
+                            JOIN [CentralDocumentVersions] dv
+                              ON dv.[Id] = i.[CentralDocumentVersionId]
+                             AND dv.[DocumentRecordId] = dr.[Id]
+                             AND dv.[TenantId] = dr.[TenantId]
+                            WHERE dr.[Id] = i.[CentralDocumentRecordId]
+                              AND dr.[TenantId] = i.[TenantId]
+                              AND dr.[SourceRecordId] = i.[ContractId]
+                              AND dr.[LifecycleStatus] = 'Active'
+                              AND dr.[VersionStatus] = 'Published'
+                              AND dr.[CurrentVersion] = dv.[VersionNumber]
+                              AND dr.[IsDeleted] = 0
+                              AND dv.[Status] = 'Published' AND dv.[PublishedAt] IS NOT NULL
+                              AND dv.[IsDeleted] = 0)
+                        OR (i.[SupersedesFormulaId] IS NOT NULL AND NOT EXISTS (
+                            SELECT 1 FROM [QuantitySurveyEscalationFormulas] s
+                            WHERE s.[Id] = i.[SupersedesFormulaId]
+                              AND s.[TenantId] = i.[TenantId]
+                              AND s.[FormulaKey] = i.[FormulaKey]
+                              AND s.[ProjectId] = i.[ProjectId]
+                              AND s.[ContractId] = i.[ContractId]
+                              AND s.[Code] = i.[Code]
+                              AND s.[Version] < i.[Version]
+                              AND s.[Status] = 'Approved'
+                              AND s.[IsDeleted] = 0))
+                        OR (i.[WorkflowInstanceId] IS NOT NULL AND NOT EXISTS (
+                            SELECT 1 FROM [WorkflowInstances] wi
+                            WHERE wi.[Id] = i.[WorkflowInstanceId]
+                              AND wi.[TenantId] = i.[TenantId]
+                              AND wi.[WorkflowDefinitionId] = i.[ApprovalWorkflowDefinitionId]
+                              AND wi.[EntityId] = i.[Id]
+                              AND wi.[IsDeleted] = 0))))
+                    THROW 51022, 'Invalid tenant, project, Works contract, policy, authority, workflow, DMS, or revision lineage.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[Status] = 'Approved'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM [WorkflowInstances] wi
+                          WHERE wi.[Id] = i.[WorkflowInstanceId]
+                            AND wi.[TenantId] = i.[TenantId]
+                            AND wi.[WorkflowDefinitionId] = i.[ApprovalWorkflowDefinitionId]
+                            AND wi.[EntityId] = i.[Id]
+                            AND wi.[Status] = 2
+                            AND wi.[IsDeleted] = 0))
+                    THROW 51022, 'An Approved formula requires a completed matching workflow instance.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    WHERE i.[Status] IN ('PendingApproval','Approved')
+                      AND (
+                        (SELECT COUNT_BIG(*) FROM [QuantitySurveyEscalationFormulaComponents] c
+                         WHERE c.[FormulaId] = i.[Id] AND c.[TenantId] = i.[TenantId] AND c.[IsDeleted] = 0) <> 4
+                        OR (SELECT COUNT_BIG(DISTINCT c.[Component]) FROM [QuantitySurveyEscalationFormulaComponents] c
+                            WHERE c.[FormulaId] = i.[Id] AND c.[TenantId] = i.[TenantId] AND c.[IsDeleted] = 0) <> 4
+                        OR COALESCE((SELECT SUM(c.[Coefficient]) FROM [QuantitySurveyEscalationFormulaComponents] c
+                                     WHERE c.[FormulaId] = i.[Id] AND c.[TenantId] = i.[TenantId] AND c.[IsDeleted] = 0), 0) <> 100
+                        OR EXISTS (
+                            SELECT 1
+                            FROM [QuantitySurveyEscalationFormulaComponents] c
+                            LEFT JOIN [QuantitySurveyPriceIndexFamilies] f ON f.[Id] = c.[IndexFamilyId]
+                            LEFT JOIN [QuantitySurveyConfigurationDecisions] d6 ON d6.[Id] = i.[ConfigurationDecisionId]
+                            WHERE c.[FormulaId] = i.[Id] AND c.[TenantId] = i.[TenantId] AND c.[IsDeleted] = 0
+                              AND (f.[Id] IS NULL OR f.[TenantId] <> i.[TenantId] OR f.[IsDeleted] = 1 OR f.[IsActive] = 0
+                                OR f.[Source] <> c.[IndexSourceSnapshot]
+                                OR f.[Code] <> c.[IndexFamilyCodeSnapshot]
+                                OR f.[Name] <> c.[IndexFamilyNameSnapshot]
+                                OR d6.[Id] IS NULL
+                                OR c.[Coefficient] <> CASE c.[Component]
+                                    WHEN 0 THEN TRY_CONVERT(decimal(9,4), JSON_VALUE(d6.[ValueJson], '$.materialCoefficient'))
+                                    WHEN 1 THEN TRY_CONVERT(decimal(9,4), JSON_VALUE(d6.[ValueJson], '$.labourCoefficient'))
+                                    WHEN 2 THEN TRY_CONVERT(decimal(9,4), JSON_VALUE(d6.[ValueJson], '$.plantCoefficient'))
+                                    WHEN 3 THEN TRY_CONVERT(decimal(9,4), JSON_VALUE(d6.[ValueJson], '$.otherCoefficient')) END
+                                OR NOT EXISTS (
+                                    SELECT 1
+                                    FROM OPENJSON(JSON_QUERY(d6.[ValueJson], '$.indexSources')) allowed
+                                    WHERE LOWER(allowed.[value]) = CASE f.[Source]
+                                        WHEN 0 THEN 'gsspbci'
+                                        WHEN 1 THEN 'roadsinfrastructure'
+                                        WHEN 2 THEN 'controlledmanualimport' END)))))
+                    THROW 51023, 'Pending or Approved formulas require exactly four policy-matching controlled index components totaling 100 percent.', 1;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted i
+                    JOIN [QuantitySurveyEscalationFormulas] x
+                      ON x.[TenantId] = i.[TenantId]
+                     AND x.[ProjectId] = i.[ProjectId]
+                     AND x.[ContractId] = i.[ContractId]
+                     AND x.[Code] = i.[Code]
+                     AND x.[Id] <> i.[Id]
+                     AND x.[Status] = 'Approved' AND x.[IsDeleted] = 0
+                     AND x.[FormulaKey] <> i.[FormulaKey]
+                     AND x.[EffectiveFrom] <= COALESCE(i.[EffectiveTo], CONVERT(datetime2, '9999-12-31'))
+                     AND COALESCE(x.[EffectiveTo], CONVERT(datetime2, '9999-12-31')) >= i.[EffectiveFrom]
+                    WHERE i.[Status] = 'Approved')
+                    THROW 51024, 'Approved formula periods cannot overlap for the same project, contract, and code.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEstimateAssumptions_ParentAndImmutableGuard from 20260809002001_AddQuantitySurveyEstimateVersions:4 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEstimateAssumptions_ParentAndImmutableGuard]
+            ON [QuantitySurveyEstimateAssumptions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (SELECT 1 FROM [QuantitySurveyEstimateVersions] e WHERE e.[Id] = i.[EstimateVersionId] AND e.[TenantId] = i.[TenantId] AND e.[IsDeleted] = 0)
+                ) THROW 51003, 'Estimate snapshot child rows must belong to the same tenant as their estimate.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM (SELECT [EstimateVersionId] FROM inserted UNION SELECT [EstimateVersionId] FROM deleted) x
+                    JOIN [QuantitySurveyEstimateVersions] e ON e.[Id] = x.[EstimateVersionId]
+                    WHERE e.[Status] IN ('Approved','Retired')
+                ) THROW 51004, 'Approved or retired estimate snapshot rows are immutable.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEstimateLines_LineageGuard from 20260809002001_AddQuantitySurveyEstimateVersions:6 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEstimateLines_LineageGuard]
+            ON [QuantitySurveyEstimateLines]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN [QuantitySurveyEstimateVersions] e ON e.[Id] = i.[EstimateVersionId]
+                    WHERE NOT EXISTS (SELECT 1 FROM [ProjectBoqVersionLines] l WHERE l.[Id] = i.[ProjectBoqVersionLineId] AND l.[ProjectBoqVersionId] = e.[ProjectBoqVersionId] AND l.[TenantId] = i.[TenantId] AND l.[IsDeleted] = 0)
+                       OR (i.[SourceRateId] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [QuantitySurveyRateLibraryRates] r WHERE r.[Id] = i.[SourceRateId] AND r.[TenantId] = i.[TenantId] AND r.[IsDeleted] = 0))
+                ) THROW 51005, 'Estimate line BoQ or rate lineage is invalid for the tenant.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEstimateLines_ParentAndImmutableGuard from 20260809002001_AddQuantitySurveyEstimateVersions:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEstimateLines_ParentAndImmutableGuard]
+            ON [QuantitySurveyEstimateLines]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (SELECT 1 FROM [QuantitySurveyEstimateVersions] e WHERE e.[Id] = i.[EstimateVersionId] AND e.[TenantId] = i.[TenantId] AND e.[IsDeleted] = 0)
+                ) THROW 51003, 'Estimate snapshot child rows must belong to the same tenant as their estimate.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM (SELECT [EstimateVersionId] FROM inserted UNION SELECT [EstimateVersionId] FROM deleted) x
+                    JOIN [QuantitySurveyEstimateVersions] e ON e.[Id] = x.[EstimateVersionId]
+                    WHERE e.[Status] IN ('Approved','Retired')
+                ) THROW 51004, 'Approved or retired estimate snapshot rows are immutable.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEstimateMarkups_ParentAndImmutableGuard from 20260809002001_AddQuantitySurveyEstimateVersions:5 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEstimateMarkups_ParentAndImmutableGuard]
+            ON [QuantitySurveyEstimateMarkups]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (SELECT 1 FROM [QuantitySurveyEstimateVersions] e WHERE e.[Id] = i.[EstimateVersionId] AND e.[TenantId] = i.[TenantId] AND e.[IsDeleted] = 0)
+                ) THROW 51003, 'Estimate snapshot child rows must belong to the same tenant as their estimate.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM (SELECT [EstimateVersionId] FROM inserted UNION SELECT [EstimateVersionId] FROM deleted) x
+                    JOIN [QuantitySurveyEstimateVersions] e ON e.[Id] = x.[EstimateVersionId]
+                    WHERE e.[Status] IN ('Approved','Retired')
+                ) THROW 51004, 'Approved or retired estimate snapshot rows are immutable.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEstimateRevisions_Immutable from 20260809002001_AddQuantitySurveyEstimateVersions:7 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEstimateRevisions_Immutable]
+            ON [QuantitySurveyEstimateRevisions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE NOT EXISTS (SELECT 1 FROM [QuantitySurveyEstimateVersions] e WHERE e.[Id] = i.[EstimateVersionId] AND e.[TenantId] = i.[TenantId]))
+                    THROW 51006, 'Estimate revision history must belong to the same tenant as its estimate.', 1;
+                IF EXISTS (SELECT 1 FROM deleted)
+                    THROW 51007, 'Estimate revision history is append-only.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEstimateVersions_ApprovedImmutable from 20260809002001_AddQuantitySurveyEstimateVersions:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEstimateVersions_ApprovedImmutable]
+            ON [QuantitySurveyEstimateVersions]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id] = d.[Id] WHERE d.[Status] = 'Retired' OR (d.[Status] = 'Approved' AND i.[Id] IS NULL))
+                    THROW 51001, 'Approved or retired estimate versions cannot be deleted and retired versions cannot be changed.', 1;
+
+                IF EXISTS (
+                    SELECT d.[Id],d.[ProjectId],d.[ProjectBoqVersionId],d.[SourceEstimateVersionId],d.[ClientRequestId],d.[VersionNumber],d.[EstimateType],d.[Name],d.[EstimateDate],d.[CurrencyId],d.[CurrencyCodeSnapshot],d.[DirectCost],d.[MarkupTotal],d.[TotalAmount],d.[ApprovalStatus],d.[WorkflowInstanceId],d.[WorkflowDefinitionId],d.[SubmittedById],d.[SubmittedAt],d.[ApprovedById],d.[ApprovedAt],d.[RejectionReason],d.[ChangeReason],d.[SnapshotHash],d.[LineCount],d.[AssumptionCount],d.[MarkupCount],d.[ConfigurationProfileId],d.[ConfigurationDecisionId],d.[ConfigurationProfileVersion],d.[CentralDocumentRecordId],d.[CentralDocumentVersionId],d.[CreatedAt],d.[CreatedBy],d.[CreatedById],d.[IsDeleted],d.[DeletedAt],d.[DeletedBy],d.[TenantId]
+                    FROM deleted d WHERE d.[Status] = 'Approved'
+                    EXCEPT
+                    SELECT i.[Id],i.[ProjectId],i.[ProjectBoqVersionId],i.[SourceEstimateVersionId],i.[ClientRequestId],i.[VersionNumber],i.[EstimateType],i.[Name],i.[EstimateDate],i.[CurrencyId],i.[CurrencyCodeSnapshot],i.[DirectCost],i.[MarkupTotal],i.[TotalAmount],i.[ApprovalStatus],i.[WorkflowInstanceId],i.[WorkflowDefinitionId],i.[SubmittedById],i.[SubmittedAt],i.[ApprovedById],i.[ApprovedAt],i.[RejectionReason],i.[ChangeReason],i.[SnapshotHash],i.[LineCount],i.[AssumptionCount],i.[MarkupCount],i.[ConfigurationProfileId],i.[ConfigurationDecisionId],i.[ConfigurationProfileVersion],i.[CentralDocumentRecordId],i.[CentralDocumentVersionId],i.[CreatedAt],i.[CreatedBy],i.[CreatedById],i.[IsDeleted],i.[DeletedAt],i.[DeletedBy],i.[TenantId]
+                    FROM inserted i WHERE i.[Status] = 'Retired'
+                ) THROW 51002, 'An approved estimate is immutable; only the controlled Approved to Retired transition is allowed.', 1;
+            END
+            """);
+        // TRIGGER TR_QsEstimateVersions_TenantAndLineageGuard from 20260809002001_AddQuantitySurveyEstimateVersions:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsEstimateVersions_TenantAndLineageGuard]
+            ON [QuantitySurveyEstimateVersions]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (SELECT 1 FROM [Projects] p WHERE p.[Id] = i.[ProjectId] AND p.[TenantId] = i.[TenantId] AND p.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [ProjectBoqVersions] b WHERE b.[Id] = i.[ProjectBoqVersionId] AND b.[ProjectId] = i.[ProjectId] AND b.[TenantId] = i.[TenantId] AND b.[Status] = 'Approved' AND b.[PublishedAt] IS NOT NULL AND b.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [Currencies] c WHERE c.[Id] = i.[CurrencyId] AND c.[TenantId] = i.[TenantId] AND c.[IsActive] = 1 AND c.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyConfigurationProfiles] p WHERE p.[Id] = i.[ConfigurationProfileId] AND p.[TenantId] = i.[TenantId] AND p.[IsDeleted] = 0)
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyConfigurationDecisions] d WHERE d.[Id] = i.[ConfigurationDecisionId] AND d.[ProfileId] = i.[ConfigurationProfileId] AND d.[TenantId] = i.[TenantId] AND d.[IsDeleted] = 0)
+                       OR (i.[CentralDocumentVersionId] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [CentralDocumentVersions] v WHERE v.[Id] = i.[CentralDocumentVersionId] AND v.[DocumentRecordId] = i.[CentralDocumentRecordId] AND v.[TenantId] = i.[TenantId] AND v.[IsDeleted] = 0))
+                       OR (i.[SourceEstimateVersionId] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [QuantitySurveyEstimateVersions] s WHERE s.[Id] = i.[SourceEstimateVersionId] AND s.[TenantId] = i.[TenantId] AND s.[ProjectId] = i.[ProjectId] AND s.[EstimateType] = i.[EstimateType] AND s.[VersionNumber] < i.[VersionNumber] AND s.[Status] IN ('Approved','Retired') AND s.[IsDeleted] = 0))
+                ) THROW 51000, 'Invalid tenant, approved BoQ, controlled master, DMS, or estimate lineage.', 1;
+            END
+            """);
+        // TRIGGER TR_QsJointEndorsement_Guard from 20260810041753_AddQuantitySurveyJointMeasurements:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsJointEndorsement_Guard] ON [QuantitySurveyJointMeasurementEndorsements]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted) THROW 51130, 'Joint-measurement endorsements are append-only.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[IsDeleted]=1 OR NOT EXISTS (
+                    SELECT 1 FROM [QuantitySurveyJointMeasurementParticipants] p JOIN [QuantitySurveyJointMeasurementRequests] r ON r.[Id]=p.[RequestId] AND r.[TenantId]=p.[TenantId]
+                    WHERE p.[Id]=i.[ParticipantId] AND p.[RequestId]=i.[RequestId] AND p.[TenantId]=i.[TenantId]
+                      AND p.[ParticipantType]=i.[SignerType] AND p.[AttendanceStatus]='Attended' AND p.[AttendedByUserId]=i.[SignedByUserId]
+                      AND ISNULL(p.[BusinessPartnerId],'00000000-0000-0000-0000-000000000000')=ISNULL(i.[BusinessPartnerId],'00000000-0000-0000-0000-000000000000')
+                      AND r.[MeasurementSheetId] IS NOT NULL AND r.[Status] IN ('AwaitingAttendance','AwaitingEndorsements','ReadyForReview') AND r.[IsDeleted]=0))
+                    THROW 51131, 'Joint-measurement endorsement attendance, actor, partner or measurement lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsJointEvidence_Guard from 20260810041753_AddQuantitySurveyJointMeasurements:4 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsJointEvidence_Guard] ON [QuantitySurveyJointMeasurementEvidence]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted) THROW 51132, 'Joint-measurement evidence is append-only.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[IsDeleted]=1
+                    OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyJointMeasurementRequests] r WHERE r.[Id]=i.[RequestId] AND r.[TenantId]=i.[TenantId] AND r.[Status] NOT IN ('Applied','Rejected','Cancelled') AND r.[IsDeleted]=0)
+                    OR (SELECT COUNT_BIG(*) FROM [QuantitySurveyJointMeasurementEvidence] e WHERE e.[TenantId]=i.[TenantId] AND e.[RequestId]=i.[RequestId] AND e.[IsDeleted]=0)>30
+                    OR NOT EXISTS (SELECT 1 FROM [FileUploadRecords] f WHERE f.[Id]=i.[FileUploadRecordId] AND f.[TenantId]=i.[TenantId] AND f.[Category]='quantity-survey-joint-measurement-evidence' AND f.[VirusScanStatus]=2 AND f.[FileSize]=i.[FileSize] AND f.[IsDeleted]=0)
+                    OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyJointMeasurementRequests] r JOIN [CentralDocumentRecords] d ON d.[TenantId]=r.[TenantId]
+                        JOIN [CentralDocumentVersions] v ON v.[DocumentRecordId]=d.[Id] AND v.[TenantId]=d.[TenantId]
+                        WHERE r.[Id]=i.[RequestId] AND d.[Id]=i.[CentralDocumentRecordId] AND d.[SourceModule]='QuantitySurvey'
+                          AND d.[SourceEntityType]='QuantitySurveyJointMeasurementEvidence' AND d.[SourceRecordId]=i.[Id]
+                          AND d.[MetadataTemplateCode]=r.[EvidenceMetadataTemplateCodeSnapshot] AND d.[LifecycleStatus]='Active' AND d.[IsDeleted]=0
+                          AND v.[Id]=i.[CentralDocumentVersionId] AND v.[FileUploadRecordId]=i.[FileUploadRecordId] AND v.[FileSize]=i.[FileSize]
+                          AND v.[Status]='Validated' AND v.[VersionNumber]=d.[CurrentVersion] AND v.[IsDeleted]=0))
+                    THROW 51133, 'Joint-measurement evidence tenant, clean-upload or central-DMS lineage is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsJointParticipant_Guard from 20260810041753_AddQuantitySurveyJointMeasurements:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsJointParticipant_Guard] ON [QuantitySurveyJointMeasurementParticipants]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id]=d.[Id] WHERE i.[Id] IS NULL)
+                    THROW 51126, 'Joint-measurement participant history cannot be deleted.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[IsDeleted]=1 OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyJointMeasurementRequests] r WHERE r.[Id]=i.[RequestId] AND r.[TenantId]=i.[TenantId] AND r.[IsDeleted]=0)
+                    OR (i.[BusinessPartnerId] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [BusinessPartners] b WHERE b.[Id]=i.[BusinessPartnerId] AND b.[TenantId]=i.[TenantId] AND b.[IsActive]=1 AND b.[IsDeleted]=0)))
+                    THROW 51127, 'Joint-measurement participant tenant or assignment lineage is invalid.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id] WHERE i.[TenantId]<>d.[TenantId] OR i.[RequestId]<>d.[RequestId]
+                    OR i.[ParticipantType]<>d.[ParticipantType] OR ISNULL(i.[BusinessPartnerId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[BusinessPartnerId],'00000000-0000-0000-0000-000000000000')
+                    OR ISNULL(i.[RequiredRoleId],'00000000-0000-0000-0000-000000000000')<>ISNULL(d.[RequiredRoleId],'00000000-0000-0000-0000-000000000000')
+                    OR d.[AttendanceStatus]='Attended' OR (d.[AttendanceStatus]='Invited' AND i.[AttendanceStatus] NOT IN ('Invited','Attended','Absent')))
+                    THROW 51128, 'Joint-measurement participant assignment and recorded attendance are immutable.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[AttendanceStatus]='Attended' AND NOT EXISTS (SELECT 1 FROM [Users] u WHERE u.[Id]=i.[AttendedByUserId] AND u.[TenantId]=i.[TenantId] AND u.[IsActive]=1))
+                    THROW 51129, 'Joint-measurement attendance actor is invalid.', 1;
+            END
+            """);
+        // TRIGGER TR_QsJointRequest_Guard from 20260810041753_AddQuantitySurveyJointMeasurements:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsJointRequest_Guard] ON [QuantitySurveyJointMeasurementRequests]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id]=d.[Id] WHERE i.[Id] IS NULL)
+                    THROW 51120, 'Joint-measurement requests cannot be deleted; retain their governed history.', 1;
+                IF EXISTS (SELECT 1 FROM inserted WHERE [IsDeleted]=1)
+                    THROW 51120, 'Joint-measurement requests cannot be soft-deleted.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (SELECT 1 FROM [Projects] p WHERE p.[Id]=i.[ProjectId] AND p.[TenantId]=i.[TenantId] AND p.[IsDeleted]=0)
+                       OR NOT EXISTS (SELECT 1 FROM [ProjectBoqVersionLines] l JOIN [ProjectBoqVersions] v ON v.[Id]=l.[ProjectBoqVersionId] AND v.[TenantId]=l.[TenantId]
+                           WHERE l.[Id]=i.[ProjectBoqVersionLineId] AND l.[TenantId]=i.[TenantId] AND l.[ProjectId]=i.[ProjectId]
+                             AND l.[ProjectBoqVersionId]=i.[ProjectBoqVersionId] AND l.[LineKey]=i.[BoqLineKey] AND l.[Quantity]=i.[PreviousQuantity]
+                             AND l.[IsDeleted]=0 AND v.[Status]='Approved' AND v.[PublishedAt] IS NOT NULL AND v.[IsDeleted]=0)
+                       OR NOT EXISTS (SELECT 1 FROM [BusinessPartners] b WHERE b.[Id]=i.[ContractorBusinessPartnerId] AND b.[TenantId]=i.[TenantId]
+                             AND b.[IsActive]=1 AND b.[IsBlacklisted]=0 AND b.[RegistrationStatus]='Approved' AND b.[PartnerType] IN ('Contractor','Both') AND b.[IsDeleted]=0)
+                       OR (i.[ConsultantBusinessPartnerId] IS NOT NULL AND (i.[ConsultantBusinessPartnerId]=i.[ContractorBusinessPartnerId]
+                             OR NOT EXISTS (SELECT 1 FROM [BusinessPartners] b WHERE b.[Id]=i.[ConsultantBusinessPartnerId] AND b.[TenantId]=i.[TenantId]
+                                 AND b.[IsActive]=1 AND b.[IsBlacklisted]=0 AND b.[RegistrationStatus]='Approved' AND b.[IsDeleted]=0)))
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyConfigurationProfiles] p WHERE p.[Id]=i.[ConfigurationProfileId] AND p.[TenantId]=i.[TenantId]
+                             AND p.[LifecycleStatus]=1 AND p.[PublishedAt] IS NOT NULL AND p.[IsDeleted]=0)
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyConfigurationDecisions] d WHERE d.[Id]=i.[MeasurementDecisionId] AND d.[TenantId]=i.[TenantId]
+                             AND d.[ProfileId]=i.[ConfigurationProfileId] AND d.[DecisionKey]='QS-DEC-007' AND d.[Status]=2 AND d.[ApprovalStatus]=1 AND d.[EvidenceStatus]=2 AND d.[IsDeleted]=0)
+                       OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyConfigurationDecisions] d WHERE d.[Id]=i.[ExternalSubmissionDecisionId] AND d.[TenantId]=i.[TenantId]
+                             AND d.[ProfileId]=i.[ConfigurationProfileId] AND d.[DecisionKey]='QS-DEC-013' AND d.[Status]=2 AND d.[ApprovalStatus]=1 AND d.[EvidenceStatus]=2 AND d.[IsDeleted]=0)
+                       OR NOT EXISTS (SELECT 1 FROM [WorkflowDefinitions] w JOIN [WorkflowEntityTypes] e ON e.[Id]=w.[EntityTypeId]
+                             WHERE w.[Id]=i.[ApprovalWorkflowDefinitionId] AND w.[TenantId]=i.[TenantId] AND w.[LifecycleStatus]=1 AND w.[IsActive]=1 AND w.[IsDeleted]=0 AND e.[Code]='QS_MEASUREMENT')
+                       OR NOT EXISTS (SELECT 1 FROM [CentralDocumentMetadataTemplates] t WHERE t.[Id]=i.[EvidenceMetadataTemplateId] AND t.[TenantId]=i.[TenantId]
+                             AND t.[TemplateCode]=i.[EvidenceMetadataTemplateCodeSnapshot] AND t.[IsActive]=1 AND t.[PublishedAt] IS NOT NULL AND t.[IsDeleted]=0)
+                       OR (i.[MeasurementSheetId] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [QuantitySurveyMeasurementSheets] m WHERE m.[Id]=i.[MeasurementSheetId]
+                             AND m.[TenantId]=i.[TenantId] AND m.[ProjectId]=i.[ProjectId] AND m.[ProjectBoqVersionLineId]=i.[ProjectBoqVersionLineId] AND m.[Status]='Recorded' AND m.[IsDeleted]=0))
+                       OR (i.[RemeasurementVersionId] IS NOT NULL AND NOT EXISTS (SELECT 1 FROM [ProjectBoqVersions] r WHERE r.[Id]=i.[RemeasurementVersionId]
+                             AND r.[TenantId]=i.[TenantId] AND r.[ProjectId]=i.[ProjectId] AND r.[VersionType]=4 AND r.[SourceVersionId]=i.[ProjectBoqVersionId] AND r.[IsDeleted]=0))
+                ) THROW 51121, 'Joint-measurement tenant, BoQ, partner, policy, workflow, DMS, measurement or remeasurement lineage is invalid.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+                    WHERE i.[TenantId]<>d.[TenantId] OR i.[ProjectId]<>d.[ProjectId] OR i.[ProjectBoqVersionId]<>d.[ProjectBoqVersionId]
+                       OR i.[ProjectBoqVersionLineId]<>d.[ProjectBoqVersionLineId] OR i.[BoqLineKey]<>d.[BoqLineKey]
+                       OR i.[ContractorBusinessPartnerId]<>d.[ContractorBusinessPartnerId] OR i.[ClientRequestId]<>d.[ClientRequestId]
+                       OR (d.[ConsultantBusinessPartnerId] IS NOT NULL AND (i.[ConsultantBusinessPartnerId] IS NULL OR i.[ConsultantBusinessPartnerId]<>d.[ConsultantBusinessPartnerId]))
+                       OR i.[RequestHash]<>d.[RequestHash] OR i.[RequestNumber]<>d.[RequestNumber] OR i.[PreviousQuantity]<>d.[PreviousQuantity]
+                       OR i.[ConfigurationProfileId]<>d.[ConfigurationProfileId] OR i.[MeasurementDecisionId]<>d.[MeasurementDecisionId]
+                       OR i.[ExternalSubmissionDecisionId]<>d.[ExternalSubmissionDecisionId] OR i.[ApprovalWorkflowDefinitionId]<>d.[ApprovalWorkflowDefinitionId]
+                       OR i.[EvidenceMetadataTemplateId]<>d.[EvidenceMetadataTemplateId] OR i.[PolicyHash]<>d.[PolicyHash]
+                       OR i.[RequestedByUserId]<>d.[RequestedByUserId] OR i.[RemeasurementClientRequestId]<>d.[RemeasurementClientRequestId]
+                       OR (d.[MeasurementSheetId] IS NOT NULL AND (i.[MeasurementSheetId] IS NULL OR i.[MeasurementSheetId]<>d.[MeasurementSheetId]))
+                       OR (d.[RemeasurementVersionId] IS NOT NULL AND (i.[RemeasurementVersionId] IS NULL OR i.[RemeasurementVersionId]<>d.[RemeasurementVersionId]))
+                ) THROW 51122, 'Joint-measurement subject, policy and approved lineage is immutable.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i JOIN deleted d ON d.[Id]=i.[Id]
+                    WHERE i.[Status]<>d.[Status] AND NOT (
+                        (d.[Status]='Draft' AND i.[Status] IN ('Submitted','Cancelled')) OR
+                        (d.[Status]='Submitted' AND i.[Status] IN ('Scheduled','Cancelled')) OR
+                        (d.[Status]='Scheduled' AND i.[Status] IN ('AwaitingAttendance','AwaitingEndorsements','ReadyForReview','Cancelled')) OR
+                        (d.[Status]='AwaitingAttendance' AND i.[Status] IN ('AwaitingEndorsements','ReadyForReview','Cancelled')) OR
+                        (d.[Status]='AwaitingEndorsements' AND i.[Status] IN ('AwaitingAttendance','ReadyForReview','Cancelled')) OR
+                        (d.[Status]='ReadyForReview' AND i.[Status] IN ('PendingApproval','Cancelled')) OR
+                        (d.[Status]='PendingApproval' AND i.[Status] IN ('ApprovedPendingBoqRevision','Rejected')) OR
+                        (d.[Status]='ApprovedPendingBoqRevision' AND i.[Status]='BoqWorkflowPending') OR
+                        (d.[Status]='BoqWorkflowPending' AND i.[Status]='Applied')
+                    )
+                ) THROW 51123, 'Invalid joint-measurement lifecycle transition.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[Status]='PendingApproval' AND (i.[WorkflowInstanceId] IS NULL OR i.[ReviewedById] IS NULL OR i.[ReviewedAt] IS NULL OR i.[ApprovalStatus]<>'Pending'))
+                    THROW 51124, 'Pending joint measurement requires workflow and review lineage.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[Status] IN ('ApprovedPendingBoqRevision','BoqWorkflowPending','Applied') AND
+                    (i.[ApprovedById] IS NULL OR i.[ApprovedAt] IS NULL OR i.[ApprovalStatus]<>'Approved' OR i.[ApprovedById]=i.[ReviewedById] OR i.[ApprovedById]=i.[RequestedByUserId]))
+                    THROW 51125, 'Approved joint measurement requires independent maker-checker lineage.', 1;
+            END
+            """);
+        // TRIGGER TR_QsJointRevision_Guard from 20260810041753_AddQuantitySurveyJointMeasurements:5 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsJointRevision_Guard] ON [QuantitySurveyJointMeasurementRevisions]
+            AFTER INSERT, UPDATE, DELETE AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted) THROW 51134, 'Joint-measurement revision history is append-only.', 1;
+                IF EXISTS (SELECT 1 FROM inserted i WHERE i.[IsDeleted]=1 OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyJointMeasurementRequests] r WHERE r.[Id]=i.[RequestId] AND r.[TenantId]=i.[TenantId] AND r.[IsDeleted]=0)
+                    OR NOT EXISTS (SELECT 1 FROM [Users] u WHERE u.[Id]=i.[ActorUserId] AND u.[TenantId]=i.[TenantId]))
+                    THROW 51135, 'Joint-measurement revision tenant, request or actor lineage is invalid.', 1;
+            END
+            """);
         // TRIGGER TR_QsMeasurementAttachments_Guard from 20260810023000_AddQuantitySurveyMeasurementSheets:3 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [TR_QsMeasurementAttachments_Guard]
@@ -16228,6 +20209,302 @@ internal static class ArchivedGovernanceBaselineSql
                        OR (i.[Status]='Recorded' AND (NOT EXISTS (SELECT 1 FROM [QuantitySurveyMeasurementLines] l WHERE l.[TenantId]=i.[TenantId] AND l.[MeasurementSheetId]=i.[Id] AND l.[IsDeleted]=0) OR i.[TotalMeasuredQuantity]<>(SELECT ROUND(SUM(l.[CalculatedQuantity]),4) FROM [QuantitySurveyMeasurementLines] l WHERE l.[TenantId]=i.[TenantId] AND l.[MeasurementSheetId]=i.[Id] AND l.[IsDeleted]=0) OR NOT EXISTS (SELECT 1 FROM [QuantitySurveyMeasurementAttachments] a WHERE a.[TenantId]=i.[TenantId] AND a.[MeasurementSheetId]=i.[Id] AND a.[IsDeleted]=0))))
                     THROW 51080, 'Measurement tenant, approved BoQ, drawing, effective QS-DEC-007, metadata-template or recorded-evidence lineage is invalid.', 1;
             END
+            """);
+        // TRIGGER TR_QsPriceIndexFamilies_ImportInUseGuard from 20260809165157_AddQuantitySurveyPriceIndexImportWorkflow:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsPriceIndexFamilies_ImportInUseGuard]
+            ON [QuantitySurveyPriceIndexFamilies]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM deleted d
+                    LEFT JOIN inserted i ON i.[Id] = d.[Id]
+                    WHERE (i.[Id] IS NULL OR i.[IsDeleted] = 1 OR i.[IsActive] = 0 OR i.[Source] <> d.[Source])
+                      AND EXISTS (
+                        SELECT 1 FROM [QuantitySurveyPriceIndexImportBatches] b
+                        WHERE b.[IndexFamilyId] = d.[Id] AND b.[TenantId] = d.[TenantId]
+                          AND b.[IsDeleted] = 0 AND b.[Status] <> 'Invalid'))
+                    THROW 51035, 'An index family with retained import history cannot be deleted, deactivated or reassigned to another source.', 1;
+            END
+            """);
+        // TRIGGER TR_QsPriceIndexFamilies_InUseGuard from 20260809152905_AddQuantitySurveyEscalationFormulaRegister:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsPriceIndexFamilies_InUseGuard]
+            ON [QuantitySurveyPriceIndexFamilies]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1
+                    FROM deleted d
+                    LEFT JOIN inserted i ON i.[Id] = d.[Id]
+                    WHERE (i.[Id] IS NULL OR i.[IsDeleted] = 1 OR i.[IsActive] = 0)
+                      AND EXISTS (
+                          SELECT 1
+                          FROM [QuantitySurveyEscalationFormulaComponents] c
+                          JOIN [QuantitySurveyEscalationFormulas] f ON f.[Id] = c.[FormulaId]
+                          WHERE c.[IndexFamilyId] = d.[Id] AND c.[TenantId] = d.[TenantId]
+                            AND c.[IsDeleted] = 0 AND f.[TenantId] = d.[TenantId]
+                            AND f.[Status] <> 'Retired' AND f.[IsDeleted] = 0))
+                    THROW 51027, 'An index family used by a current formula cannot be deleted or deactivated.', 1;
+            END
+            """);
+        // TRIGGER TR_QsPriceIndexImportBatches_Guard from 20260809165157_AddQuantitySurveyPriceIndexImportWorkflow:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsPriceIndexImportBatches_Guard]
+            ON [QuantitySurveyPriceIndexImportBatches]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id] = d.[Id] WHERE i.[Id] IS NULL)
+                    THROW 51030, 'Price-index import batches cannot be deleted; retain their governed history.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE (d.[Id] IS NULL AND (i.[IsDeleted] = 1 OR NOT ((i.[Status] = 'Staged' AND i.[ApprovalStatus] = 'Draft' AND i.[ErrorCount] = 0 AND i.[LineCount] > 0)
+                                                   OR (i.[Status] = 'Invalid' AND i.[ApprovalStatus] = 'Draft' AND i.[ErrorCount] > 0))))
+                       OR (d.[Id] IS NOT NULL AND NOT (
+                              (d.[Status] = 'Staged' AND i.[Status] IN ('PendingApproval','Rejected'))
+                           OR (d.[Status] = 'PendingApproval' AND i.[Status] IN ('Approved','Rejected')))))
+                    THROW 51030, 'Invalid price-index import lifecycle transition.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[Id] IS NOT NULL AND EXISTS (
+                        SELECT d.[TenantId],d.[IndexFamilyId],d.[IndexSource],d.[ImportFormat],d.[OriginalFileName],d.[FileHash],
+                               d.[NormalizedPayloadHash],d.[NormalizedPayloadJson],d.[IssuesJson],d.[CentralDocumentRecordId],
+                               d.[CentralDocumentVersionId],d.[FileUploadRecordId],d.[ConfigurationProfileId],d.[ConfigurationDecisionId],
+                               d.[ApprovalWorkflowDefinitionId],d.[AuthorityRoleId],d.[AuthorityRoleNameSnapshot],d.[ClientRequestId],
+                               d.[LineCount],d.[ErrorCount],d.[PreparedById],d.[PreparedAt],d.[CreatedAt],d.[CreatedById],d.[IsDeleted]
+                        EXCEPT
+                        SELECT i.[TenantId],i.[IndexFamilyId],i.[IndexSource],i.[ImportFormat],i.[OriginalFileName],i.[FileHash],
+                               i.[NormalizedPayloadHash],i.[NormalizedPayloadJson],i.[IssuesJson],i.[CentralDocumentRecordId],
+                               i.[CentralDocumentVersionId],i.[FileUploadRecordId],i.[ConfigurationProfileId],i.[ConfigurationDecisionId],
+                               i.[ApprovalWorkflowDefinitionId],i.[AuthorityRoleId],i.[AuthorityRoleNameSnapshot],i.[ClientRequestId],
+                               i.[LineCount],i.[ErrorCount],i.[PreparedById],i.[PreparedAt],i.[CreatedAt],i.[CreatedById],i.[IsDeleted]))
+                    THROW 51031, 'Price-index source, policy, authority, evidence and preparer inputs are immutable after staging.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE (i.[Status] IN ('Staged','Invalid') AND (i.[ApprovalStatus] <> 'Draft' OR i.[WorkflowInstanceId] IS NOT NULL OR i.[SubmittedById] IS NOT NULL OR i.[SubmittedAt] IS NOT NULL OR i.[ApprovedById] IS NOT NULL OR i.[ApprovedAt] IS NOT NULL OR i.[RejectionReason] IS NOT NULL))
+                       OR (i.[Status] = 'PendingApproval' AND (i.[ApprovalStatus] <> 'Pending' OR i.[WorkflowInstanceId] IS NULL OR i.[SubmittedById] IS NULL OR i.[SubmittedAt] IS NULL OR i.[SubmittedById] <> i.[LastModifiedById] OR i.[ApprovedById] IS NOT NULL OR i.[ApprovedAt] IS NOT NULL OR i.[RejectionReason] IS NOT NULL))
+                       OR (i.[Status] = 'Approved' AND (i.[ApprovalStatus] <> 'Approved' OR i.[WorkflowInstanceId] IS NULL OR i.[SubmittedById] IS NULL OR i.[SubmittedAt] IS NULL OR i.[ApprovedById] IS NULL OR i.[ApprovedAt] IS NULL OR i.[ApprovedById] <> i.[LastModifiedById] OR i.[RejectionReason] IS NOT NULL))
+                       OR (i.[Status] = 'Rejected' AND (i.[ApprovalStatus] <> 'Rejected' OR i.[WorkflowInstanceId] IS NULL OR i.[SubmittedById] IS NULL OR i.[SubmittedAt] IS NULL OR i.[LastModifiedById] IS NULL OR NULLIF(LTRIM(RTRIM(i.[RejectionReason])), '') IS NULL OR i.[ApprovedById] IS NOT NULL OR i.[ApprovedAt] IS NOT NULL)))
+                    THROW 51030, 'Price-index lifecycle, workflow and approval state are inconsistent.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[Status] = 'PendingApproval'
+                      AND i.[Status] IN ('Approved','Rejected')
+                      AND (i.[LastModifiedById] IS NULL OR i.[LastModifiedById] = i.[PreparedById]))
+                    THROW 51030, 'Price-index approval and rejection require an independent checker.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE (i.[Status] <> 'Rejected' AND (
+                       NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyPriceIndexFamilies] f
+                        WHERE f.[Id] = i.[IndexFamilyId] AND f.[TenantId] = i.[TenantId]
+                          AND f.[Source] = i.[IndexSource] AND f.[IsActive] = 1 AND f.[IsDeleted] = 0)
+                       OR NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyConfigurationProfiles] p
+                        WHERE p.[Id] = i.[ConfigurationProfileId] AND p.[TenantId] = i.[TenantId]
+                          AND p.[LifecycleStatus] = 1 AND p.[IsDeleted] = 0
+                          AND p.[EffectiveFrom] <= CASE WHEN i.[Status] IN ('PendingApproval','Approved') THEN CONVERT(date, SYSUTCDATETIME()) ELSE CONVERT(date, i.[PreparedAt]) END
+                          AND (p.[EffectiveTo] IS NULL OR p.[EffectiveTo] >= CASE WHEN i.[Status] IN ('PendingApproval','Approved') THEN CONVERT(date, SYSUTCDATETIME()) ELSE CONVERT(date, i.[PreparedAt]) END))
+                       OR NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyConfigurationDecisions] d6
+                        WHERE d6.[Id] = i.[ConfigurationDecisionId]
+                          AND d6.[ProfileId] = i.[ConfigurationProfileId]
+                          AND d6.[TenantId] = i.[TenantId]
+                          AND d6.[DecisionKey] = 'QS-DEC-006'
+                          AND d6.[Status] = 2 AND d6.[ApprovalStatus] = 1 AND d6.[EvidenceStatus] = 2 AND d6.[IsDeleted] = 0
+                          AND (d6.[EffectiveFrom] IS NULL OR d6.[EffectiveFrom] <= CASE WHEN i.[Status] IN ('PendingApproval','Approved') THEN CONVERT(date, SYSUTCDATETIME()) ELSE CONVERT(date, i.[PreparedAt]) END)
+                          AND (d6.[EffectiveTo] IS NULL OR d6.[EffectiveTo] >= CASE WHEN i.[Status] IN ('PendingApproval','Approved') THEN CONVERT(date, SYSUTCDATETIME()) ELSE CONVERT(date, i.[PreparedAt]) END)
+                          AND TRY_CONVERT(uniqueidentifier, JSON_VALUE(d6.[ValueJson], '$.approvalWorkflowDefinitionId')) = i.[ApprovalWorkflowDefinitionId]
+                          AND LOWER(JSON_VALUE(d6.[ValueJson], '$.importFormat')) = LOWER(i.[ImportFormat])
+                          AND EXISTS (
+                            SELECT 1 FROM OPENJSON(JSON_QUERY(d6.[ValueJson], '$.indexSources')) allowed
+                            WHERE LOWER(allowed.[value]) = CASE i.[IndexSource]
+                                WHEN 0 THEN 'gsspbci' WHEN 1 THEN 'roadsinfrastructure' WHEN 2 THEN 'controlledmanualimport' END))
+                       OR NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyConfigurationDecisions] d1
+                        CROSS APPLY OPENJSON(JSON_QUERY(d1.[ValueJson], '$.approverRoleIds')) roles
+                        WHERE d1.[ProfileId] = i.[ConfigurationProfileId] AND d1.[TenantId] = i.[TenantId]
+                          AND d1.[DecisionKey] = 'QS-DEC-001'
+                          AND d1.[Status] = 2 AND d1.[ApprovalStatus] = 1 AND d1.[EvidenceStatus] = 2 AND d1.[IsDeleted] = 0
+                          AND (d1.[EffectiveFrom] IS NULL OR d1.[EffectiveFrom] <= CASE WHEN i.[Status] IN ('PendingApproval','Approved') THEN CONVERT(date, SYSUTCDATETIME()) ELSE CONVERT(date, i.[PreparedAt]) END)
+                          AND (d1.[EffectiveTo] IS NULL OR d1.[EffectiveTo] >= CASE WHEN i.[Status] IN ('PendingApproval','Approved') THEN CONVERT(date, SYSUTCDATETIME()) ELSE CONVERT(date, i.[PreparedAt]) END)
+                          AND TRY_CONVERT(uniqueidentifier, roles.[value]) = i.[AuthorityRoleId])
+                       OR NOT EXISTS (
+                        SELECT 1 FROM [AspNetRoles] r
+                        WHERE r.[Id] = i.[AuthorityRoleId] AND r.[Name] = i.[AuthorityRoleNameSnapshot])
+                       OR NOT EXISTS (
+                        SELECT 1 FROM [WorkflowDefinitions] wd
+                        JOIN [WorkflowEntityTypes] wet ON wet.[Id] = wd.[EntityTypeId]
+                        WHERE wd.[Id] = i.[ApprovalWorkflowDefinitionId] AND wd.[TenantId] = i.[TenantId]
+                          AND wd.[LifecycleStatus] = 1 AND wd.[IsActive] = 1 AND wd.[IsDeleted] = 0
+                          AND wet.[TenantId] = i.[TenantId] AND wet.[Code] = 'QS_ESCALATION'
+                          AND wet.[IsActive] = 1 AND wet.[IsDeleted] = 0)
+                       OR NOT EXISTS (
+                        SELECT 1 FROM [CentralDocumentRecords] dr
+                        JOIN [CentralDocumentVersions] dv ON dv.[Id] = i.[CentralDocumentVersionId]
+                          AND dv.[DocumentRecordId] = dr.[Id] AND dv.[TenantId] = dr.[TenantId]
+                          AND dv.[FileUploadRecordId] = i.[FileUploadRecordId]
+                          AND ((i.[Status] = 'Invalid' AND dv.[Status] = 'Validation failed')
+                               OR (i.[Status] <> 'Invalid' AND dv.[Status] = 'Validated'))
+                          AND dv.[IsDeleted] = 0
+                        JOIN [FileUploadRecords] fu ON fu.[Id] = i.[FileUploadRecordId]
+                          AND fu.[TenantId] = i.[TenantId] AND fu.[VirusScanStatus] = 2 AND fu.[IsDeleted] = 0
+                        WHERE dr.[Id] = i.[CentralDocumentRecordId] AND dr.[TenantId] = i.[TenantId]
+                          AND dr.[SourceModule] = 'QuantitySurvey'
+                          AND dr.[SourceEntityType] = 'QuantitySurveyPriceIndexImportBatch'
+                          AND dr.[Notes] LIKE 'Document type: PriceIndexSource%'
+                          AND dr.[CurrentVersion] = dv.[VersionNumber]
+                          AND ((i.[Status] = 'Invalid' AND dr.[VersionStatus] = 'Validation failed')
+                               OR (i.[Status] <> 'Invalid' AND dr.[VersionStatus] = 'Validated'))
+                          AND dr.[SourceRecordId] = i.[Id] AND dr.[LifecycleStatus] = 'Active' AND dr.[IsDeleted] = 0)))
+                       OR (i.[WorkflowInstanceId] IS NOT NULL AND NOT EXISTS (
+                        SELECT 1 FROM [WorkflowInstances] wi
+                        WHERE wi.[Id] = i.[WorkflowInstanceId] AND wi.[TenantId] = i.[TenantId]
+                          AND wi.[WorkflowDefinitionId] = i.[ApprovalWorkflowDefinitionId]
+                          AND wi.[EntityId] = i.[Id] AND wi.[IsDeleted] = 0)))
+                    THROW 51031, 'Invalid price-index tenant, family, policy, authority, workflow or clean central-DMS evidence.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.[Status] IN ('PendingApproval','Approved','Rejected')
+                      AND (i.[ErrorCount] <> 0 OR i.[LineCount] <= 0 OR
+                           (SELECT COUNT_BIG(*) FROM [QuantitySurveyPriceIndexValues] v
+                            WHERE v.[ImportBatchId] = i.[Id] AND v.[TenantId] = i.[TenantId] AND v.[IsDeleted] = 0) <> i.[LineCount]))
+                    THROW 51031, 'Submitted price-index imports require an unchanged, error-free staged row set.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN [WorkflowInstances] wi ON wi.[Id] = i.[WorkflowInstanceId]
+                    WHERE (i.[Status] = 'Approved' AND wi.[Status] <> 2)
+                       OR (i.[Status] = 'Rejected' AND wi.[Status] NOT IN (3,4)))
+                    THROW 51030, 'Approved and rejected index imports must match the final shared-workflow outcome.', 1;
+            END
+            """);
+        // TRIGGER TR_QsPriceIndexImportRevisions_AppendOnly from 20260809165157_AddQuantitySurveyPriceIndexImportWorkflow:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsPriceIndexImportRevisions_AppendOnly]
+            ON [QuantitySurveyPriceIndexImportRevisions]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted)
+                    THROW 51034, 'Price-index import revision history is append-only.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.[IsDeleted] = 1 OR NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyPriceIndexImportBatches] b
+                        WHERE b.[Id] = i.[ImportBatchId] AND b.[TenantId] = i.[TenantId]))
+                    THROW 51034, 'Price-index import revision history must remain tenant-bound to its batch.', 1;
+            END
+            """);
+        // TRIGGER TR_QsPriceIndexValues_Guard from 20260809165157_AddQuantitySurveyPriceIndexImportWorkflow:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [TR_QsPriceIndexValues_Guard]
+            ON [QuantitySurveyPriceIndexValues]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyPriceIndexImportBatches] b
+                        JOIN [QuantitySurveyPriceIndexFamilies] f ON f.[Id] = i.[IndexFamilyId]
+                        WHERE b.[Id] = i.[ImportBatchId] AND b.[TenantId] = i.[TenantId]
+                          AND b.[IndexFamilyId] = i.[IndexFamilyId] AND b.[IndexSource] = f.[Source]
+                          AND f.[TenantId] = i.[TenantId] AND f.[IsDeleted] = 0))
+                    THROW 51032, 'Price-index values must remain tenant-bound to their import family and lifecycle.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE d.[Id] IS NULL AND (i.[IsDeleted] = 1 OR NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyPriceIndexImportBatches] b
+                        WHERE b.[Id] = i.[ImportBatchId] AND b.[TenantId] = i.[TenantId]
+                          AND b.[Status] IN ('Staged','Invalid')
+                          AND i.[Status] = 'Staged' AND i.[IsCurrent] = 0)))
+                    THROW 51032, 'New price-index values can be staged only through an editable import batch.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN deleted d ON d.[Id] = i.[Id]
+                    WHERE EXISTS (
+                        SELECT d.[TenantId],d.[ImportBatchId],d.[IndexFamilyId],d.[Sequence],d.[IndexPeriod],d.[IndexValue],
+                               d.[PublicationDate],d.[SourceReference],d.[CreatedAt],d.[CreatedById],d.[IsDeleted]
+                        EXCEPT
+                        SELECT i.[TenantId],i.[ImportBatchId],i.[IndexFamilyId],i.[Sequence],i.[IndexPeriod],i.[IndexValue],
+                               i.[PublicationDate],i.[SourceReference],i.[CreatedAt],i.[CreatedById],i.[IsDeleted])
+                       OR NOT (
+                            (d.[Status] = 'Staged' AND i.[Status] = 'Approved' AND i.[IsCurrent] = 1 AND EXISTS (
+                                SELECT 1 FROM [QuantitySurveyPriceIndexImportBatches] b
+                                WHERE b.[Id] = i.[ImportBatchId] AND b.[TenantId] = i.[TenantId] AND b.[Status] = 'Approved'))
+                         OR (d.[Status] = 'Staged' AND i.[Status] = 'Rejected' AND i.[IsCurrent] = 0 AND EXISTS (
+                                SELECT 1 FROM [QuantitySurveyPriceIndexImportBatches] b
+                                WHERE b.[Id] = i.[ImportBatchId] AND b.[TenantId] = i.[TenantId] AND b.[Status] = 'Rejected'))
+                         OR (d.[Status] = 'Approved' AND d.[IsCurrent] = 1 AND i.[Status] = 'Superseded' AND i.[IsCurrent] = 0
+                             AND d.[ValueKey] = i.[ValueKey] AND d.[Version] = i.[Version] AND
+                             (d.[SupersedesValueId] = i.[SupersedesValueId] OR (d.[SupersedesValueId] IS NULL AND i.[SupersedesValueId] IS NULL)))))
+                    THROW 51032, 'Submitted or Approved price-index input rows are immutable.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.[Id] = d.[Id]
+                    WHERE i.[Id] IS NULL AND NOT EXISTS (
+                        SELECT 1 FROM [QuantitySurveyPriceIndexImportBatches] b
+                        WHERE b.[Id] = d.[ImportBatchId] AND b.[TenantId] = d.[TenantId]
+                          AND b.[Status] IN ('Staged','Invalid')))
+                    THROW 51032, 'Values belonging to submitted index imports cannot be deleted.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE i.[Status] = 'Approved' AND i.[IsCurrent] = 1 AND
+                      ((i.[SupersedesValueId] IS NULL AND i.[Version] <> 1)
+                       OR (i.[SupersedesValueId] IS NOT NULL AND NOT EXISTS (
+                            SELECT 1 FROM [QuantitySurveyPriceIndexValues] p
+                            WHERE p.[Id] = i.[SupersedesValueId] AND p.[TenantId] = i.[TenantId]
+                              AND p.[IndexFamilyId] = i.[IndexFamilyId] AND p.[IndexPeriod] = i.[IndexPeriod]
+                              AND p.[ValueKey] = i.[ValueKey] AND p.[Version] + 1 = i.[Version]
+                              AND p.[Status] = 'Superseded' AND p.[IsCurrent] = 0 AND p.[IsDeleted] = 0))))
+                    THROW 51033, 'Approved index revisions must preserve the prior family, period, value key and version lineage.', 1;
+            END
+            """);
+        // TRIGGER TR_QsRateBuildUpLines_Immutable from 20260808231322_AddQuantitySurveyRateBuildUps:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QsRateBuildUpLines_Immutable]
+            ON [dbo].[QuantitySurveyRateBuildUpLines]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                THROW 51000, 'Quantity Survey rate build-up line snapshots are immutable.', 1;
+            END;
+            """);
+        // TRIGGER TR_QsRateBuildUps_Immutable from 20260808231322_AddQuantitySurveyRateBuildUps:0 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_QsRateBuildUps_Immutable]
+            ON [dbo].[QuantitySurveyRateBuildUps]
+            AFTER UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                THROW 51000, 'Quantity Survey rate build-up snapshots are immutable.', 1;
+            END;
             """);
         // TRIGGER TR_QsValuationWorksheetEvidence_AppendOnly from 20260810134646_AddQuantitySurveyInterimValuationWorkflow:2 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
@@ -16773,6 +21050,139 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51689, 'INV_ADJUSTMENT_REVERSAL_FINANCE_LINEAGE: reversal must reference its successful Finance posting and journal.', 1;
             END
             """);
+        // TRIGGER TR_StockMovements_GovernedInventoryReturnAdjustment from 20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments:8 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_StockMovements_GovernedInventoryReturnAdjustment]
+            ON [dbo].[StockMovements]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i INNER JOIN deleted d ON d.Id = i.Id
+                    WHERE (i.MovementType IN (N'Return', N'ReturnReversal', N'Adjustment+', N'Adjustment-', N'AdjustmentReversal')
+                        OR d.MovementType IN (N'Return', N'ReturnReversal', N'Adjustment+', N'Adjustment-', N'AdjustmentReversal'))
+                      AND (i.TenantId <> d.TenantId OR i.InventoryItemId <> d.InventoryItemId OR i.WarehouseId <> d.WarehouseId
+                        OR ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.LocationId, '00000000-0000-0000-0000-000000000000')
+                        OR i.MovementType <> d.MovementType OR i.Quantity <> d.Quantity OR i.UnitCost <> d.UnitCost OR i.TotalValue <> d.TotalValue
+                        OR i.ReferenceType <> d.ReferenceType OR ISNULL(i.ReferenceNumber, N'') <> ISNULL(d.ReferenceNumber, N'')
+                        OR ISNULL(i.ReferenceId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.ReferenceId, '00000000-0000-0000-0000-000000000000')
+                        OR ISNULL(i.InventoryReturnVoucherId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.InventoryReturnVoucherId, '00000000-0000-0000-0000-000000000000')
+                        OR ISNULL(i.ProcessedById, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.ProcessedById, '00000000-0000-0000-0000-000000000000')))
+                    THROW 51721, 'INV_CONTROLLED_MOVEMENT_IMMUTABLE: governed return and adjustment movement lineage is immutable.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN InventoryReturnVouchers v ON v.Id = i.InventoryReturnVoucherId AND v.TenantId = i.TenantId AND v.IsDeleted = 0
+                    OUTER APPLY (
+                        SELECT COALESCE(SUM(line.Quantity), 0) Quantity, COALESCE(SUM(line.TotalValue), 0) TotalValue
+                        FROM InventoryReturnVoucherLines line
+                        WHERE line.InventoryReturnVoucherId = i.InventoryReturnVoucherId AND line.TenantId = i.TenantId
+                          AND line.InventoryItemId = i.InventoryItemId
+                          AND ISNULL(line.LocationId, '00000000-0000-0000-0000-000000000000') = ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000')) allowed
+                    OUTER APPLY (
+                        SELECT COALESCE(SUM(ABS(m.Quantity)), 0) Quantity, COALESCE(SUM(ABS(m.TotalValue)), 0) TotalValue
+                        FROM StockMovements m WITH (UPDLOCK, HOLDLOCK)
+                        WHERE m.InventoryReturnVoucherId = i.InventoryReturnVoucherId AND m.TenantId = i.TenantId
+                          AND m.InventoryItemId = i.InventoryItemId AND m.MovementType = i.MovementType
+                          AND ISNULL(m.LocationId, '00000000-0000-0000-0000-000000000000') = ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000')
+                          AND m.IsDeleted = 0) posted
+                    WHERE i.IsDeleted = 0 AND i.MovementType IN (N'Return', N'ReturnReversal')
+                      AND (v.Id IS NULL OR i.ReferenceType <> 11 OR i.ReferenceId <> v.InventoryRequisitionId
+                           OR i.ReferenceNumber <> v.VoucherNumber OR i.WarehouseId <> v.WarehouseId
+                           OR (i.MovementType = N'Return' AND (v.Status <> 4 OR i.Quantity <= 0 OR i.ProcessedById <> v.PostedById))
+                           OR (i.MovementType = N'ReturnReversal' AND (v.Status <> 5 OR i.Quantity >= 0 OR i.ProcessedById <> v.ReversedById))
+                           OR posted.Quantity > allowed.Quantity OR posted.TotalValue > allowed.TotalValue))
+                    THROW 51722, 'INV_RETURN_POSTED_VOUCHER_REQUIRED: return movements require matching controlled voucher value, quantity and actor.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN StockAdjustments a ON a.Id = i.ReferenceId AND a.TenantId = i.TenantId AND a.IsDeleted = 0
+                    OUTER APPLY (
+                        SELECT COALESCE(SUM(ABS(line.AdjustmentQuantity)), 0) Quantity,
+                               COALESCE(SUM(ABS(line.AdjustmentValue)), 0) TotalValue
+                        FROM StockAdjustmentItems line
+                        WHERE line.AdjustmentId = i.ReferenceId AND line.TenantId = i.TenantId
+                          AND line.InventoryItemId = i.InventoryItemId
+                          AND ISNULL(line.LocationId, '00000000-0000-0000-0000-000000000000') = ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000')
+                          AND line.IsDeleted = 0) allowed
+                    OUTER APPLY (
+                        SELECT COALESCE(SUM(ABS(m.Quantity)), 0) Quantity, COALESCE(SUM(ABS(m.TotalValue)), 0) TotalValue
+                        FROM StockMovements m WITH (UPDLOCK, HOLDLOCK)
+                        WHERE m.ReferenceType = 5 AND m.ReferenceId = i.ReferenceId AND m.TenantId = i.TenantId
+                          AND m.InventoryItemId = i.InventoryItemId AND m.MovementType = i.MovementType
+                          AND ISNULL(m.LocationId, '00000000-0000-0000-0000-000000000000') = ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000')
+                          AND m.IsDeleted = 0) posted
+                    WHERE i.IsDeleted = 0 AND i.MovementType IN (N'Adjustment+', N'Adjustment-', N'AdjustmentReversal')
+                      AND (a.Id IS NULL OR i.ReferenceType <> 5 OR i.ReferenceNumber <> a.AdjustmentNumber
+                           OR i.InventoryReturnVoucherId IS NOT NULL
+                           OR (i.MovementType IN (N'Adjustment+', N'Adjustment-') AND (a.Status <> N'Posted' OR i.ProcessedById <> a.PostedById))
+                           OR (i.MovementType = N'AdjustmentReversal' AND (a.Status <> N'Reversed' OR i.ProcessedById <> a.ReversedById))
+                           OR posted.Quantity > allowed.Quantity OR posted.TotalValue > allowed.TotalValue))
+                    THROW 51723, 'INV_ADJUSTMENT_POSTED_CONTROL_REQUIRED: adjustment movements require finance-backed controlled parent value, quantity and actor.', 1;
+            END
+            """);
+        // TRIGGER TR_StockMovements_GovernedInventoryTransfer from 20260802095353_TDC0608ControlledInventoryTransfers:6 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_StockMovements_GovernedInventoryTransfer]
+            ON [dbo].[StockMovements]
+            AFTER INSERT, UPDATE, DELETE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (SELECT 1 FROM deleted d LEFT JOIN inserted i ON i.Id = d.Id WHERE i.Id IS NULL AND d.MovementType IN (N'TransferOut', N'TransferIn', N'TransferReversal', N'TransferDiscrepancyReturn', N'TransferReplacementIn'))
+                    THROW 51861, 'INV_TRANSFER_MOVEMENT_DELETE_BLOCKED: governed transfer movements cannot be deleted.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i INNER JOIN deleted d ON d.Id = i.Id
+                    WHERE (i.MovementType IN (N'TransferOut', N'TransferIn', N'TransferReversal', N'TransferDiscrepancyReturn', N'TransferReplacementIn')
+                        OR d.MovementType IN (N'TransferOut', N'TransferIn', N'TransferReversal', N'TransferDiscrepancyReturn', N'TransferReplacementIn'))
+                      AND (i.TenantId <> d.TenantId OR i.InventoryItemId <> d.InventoryItemId OR i.WarehouseId <> d.WarehouseId
+                        OR ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.LocationId, '00000000-0000-0000-0000-000000000000')
+                        OR i.MovementType <> d.MovementType OR i.Quantity <> d.Quantity OR i.UnitCost <> d.UnitCost OR i.TotalValue <> d.TotalValue
+                        OR i.ReferenceType <> d.ReferenceType OR ISNULL(i.ReferenceNumber, N'') <> ISNULL(d.ReferenceNumber, N'')
+                        OR ISNULL(i.ReferenceId, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.ReferenceId, '00000000-0000-0000-0000-000000000000')
+                        OR ISNULL(i.ProcessedById, '00000000-0000-0000-0000-000000000000') <> ISNULL(d.ProcessedById, '00000000-0000-0000-0000-000000000000') OR i.IsDeleted <> d.IsDeleted))
+                    THROW 51862, 'INV_TRANSFER_MOVEMENT_IMMUTABLE: governed transfer movement lineage is immutable.', 1;
+
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN InventoryTransfers t ON t.Id = i.ReferenceId AND t.TenantId = i.TenantId AND t.IsDeleted = 0
+                    OUTER APPLY (
+                        SELECT CASE
+                            WHEN i.MovementType IN (N'TransferOut', N'TransferReversal') THEN COALESCE(SUM(al.DispatchedQuantity), 0)
+                            WHEN i.MovementType = N'TransferIn' THEN COALESCE(SUM(al.ReceivedQuantity), 0)
+                            ELSE COALESCE(SUM(al.DamagedQuantity + al.ShortageQuantity), 0) END Quantity
+                        FROM InventoryTransferActionLines al
+                        INNER JOIN InventoryTransferActions a ON a.Id = al.InventoryTransferActionId AND a.TenantId = al.TenantId AND a.IsDeleted = 0
+                        INNER JOIN InventoryTransferItems line ON line.Id = al.InventoryTransferItemId AND line.TenantId = al.TenantId
+                        WHERE a.InventoryTransferId = i.ReferenceId AND a.TenantId = i.TenantId AND line.InventoryItemId = i.InventoryItemId
+                          AND ISNULL(CASE WHEN i.MovementType IN (N'TransferOut', N'TransferReversal', N'TransferDiscrepancyReturn') THEN line.SourceLocationId ELSE line.DestinationLocationId END, '00000000-0000-0000-0000-000000000000') = ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000')
+                          AND ((i.MovementType = N'TransferOut' AND a.ActionType = 5) OR (i.MovementType = N'TransferIn' AND a.ActionType = 6)
+                            OR (i.MovementType = N'TransferReversal' AND a.ActionType = 9)
+                            OR (i.MovementType = N'TransferDiscrepancyReturn' AND a.ActionType = 7 AND JSON_VALUE(a.SnapshotJson, '$.Metadata.ResolutionCode') = N'RETURNED_TO_SOURCE')
+                            OR (i.MovementType = N'TransferReplacementIn' AND a.ActionType = 7 AND JSON_VALUE(a.SnapshotJson, '$.Metadata.ResolutionCode') = N'REPLACEMENT_RECEIVED'))) allowed
+                    OUTER APPLY (
+                        SELECT COALESCE(SUM(ABS(m.Quantity)), 0) Quantity
+                        FROM StockMovements m WITH (UPDLOCK, HOLDLOCK)
+                        WHERE m.ReferenceType = 4 AND m.ReferenceId = i.ReferenceId AND m.TenantId = i.TenantId AND m.InventoryItemId = i.InventoryItemId
+                          AND m.MovementType = i.MovementType AND ISNULL(m.LocationId, '00000000-0000-0000-0000-000000000000') = ISNULL(i.LocationId, '00000000-0000-0000-0000-000000000000') AND m.IsDeleted = 0) posted
+                    WHERE i.MovementType IN (N'TransferOut', N'TransferIn', N'TransferReversal', N'TransferDiscrepancyReturn', N'TransferReplacementIn')
+                      AND (t.Id IS NULL OR i.ReferenceType <> 4 OR i.ReferenceNumber <> t.TransferNumber OR i.ProcessedById IS NULL
+                        OR (i.MovementType = N'TransferOut' AND (i.Quantity >= 0 OR i.WarehouseId <> t.SourceWarehouseId))
+                        OR (i.MovementType = N'TransferIn' AND (i.Quantity <= 0 OR i.WarehouseId <> t.DestinationWarehouseId))
+                        OR (i.MovementType IN (N'TransferReversal', N'TransferDiscrepancyReturn') AND (i.Quantity <= 0 OR i.WarehouseId <> t.SourceWarehouseId))
+                        OR (i.MovementType = N'TransferReplacementIn' AND (i.Quantity <= 0 OR i.WarehouseId <> t.DestinationWarehouseId))
+                        OR NOT EXISTS (SELECT 1 FROM InventoryTransferActions actor INNER JOIN InventoryTransferActionLines actorLine ON actorLine.InventoryTransferActionId = actor.Id
+                            INNER JOIN InventoryTransferItems transferLine ON transferLine.Id = actorLine.InventoryTransferItemId
+                            WHERE actor.InventoryTransferId = i.ReferenceId AND actor.TenantId = i.TenantId AND actor.ActorUserId = i.ProcessedById AND transferLine.InventoryItemId = i.InventoryItemId
+                              AND ((i.MovementType = N'TransferOut' AND actor.ActionType = 5) OR (i.MovementType = N'TransferIn' AND actor.ActionType = 6) OR (i.MovementType = N'TransferReversal' AND actor.ActionType = 9)
+                                OR (i.MovementType IN (N'TransferDiscrepancyReturn', N'TransferReplacementIn') AND actor.ActionType = 7)))
+                        OR posted.Quantity > allowed.Quantity))
+                    THROW 51863, 'INV_TRANSFER_MOVEMENT_UNGOVERNED: transfer movements require matching action quantity, actor, scope and lineage.', 1;
+            END
+            """);
         // TRIGGER TR_StockMovements_GovernedPurchaseReceipt from 20260731123000_TDC0501ReceiptSourceControl:5 (ARCHIVED_FINAL_DEFINITION)
         migrationBuilder.Sql("""
             CREATE OR ALTER TRIGGER [dbo].[TR_StockMovements_GovernedPurchaseReceipt]
@@ -16928,6 +21338,58 @@ internal static class ArchivedGovernanceBaselineSql
                                         AND ISNULL(i.LocationId,'00000000-0000-0000-0000-000000000000')=ISNULL(ai.LocationId,'00000000-0000-0000-0000-000000000000')
                                         AND i.Quantity=ai.AdjustmentQuantity AND i.ProcessedById=p.FinanceApprovedById))
                     THROW 51943, 'INV_COUNT_MOVEMENT_FROZEN: stock movement requires the linked approved count adjustment and Finance actor.', 1;
+            END
+            """);
+        // TRIGGER TR_StockMovements_TDC0502InspectionContext from 20260731140000_TDC0502ReceiptInspectionClosure:8 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_StockMovements_TDC0502InspectionContext]
+            ON [dbo].[StockMovements]
+            AFTER INSERT
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    JOIN GoodsReceiptNotes g ON g.Id = i.ReferenceId AND g.TenantId = i.TenantId AND g.PurchaseOrderReceiptId IS NOT NULL
+                    LEFT JOIN ProcurementReceiptInspectionCases c
+                      ON c.Id = TRY_CONVERT(uniqueidentifier, SESSION_CONTEXT(N'TDC0502_RECEIPT_INSPECTION_CASE_ID'))
+                     AND c.TenantId = i.TenantId AND c.PurchaseOrderReceiptId = g.PurchaseOrderReceiptId AND c.IsDeleted = 0
+                    WHERE i.IsDeleted = 0 AND i.MovementType = N'Receipt' AND i.ReferenceType = 1 AND c.Id IS NULL)
+                    THROW 51552, 'RCV_GRN_STOCK_INSPECTION_CONTEXT_REQUIRED: linked GRN stock movement requires the exact TDC-0502 context.', 1;
+            END
+            """);
+        // TRIGGER TR_StockMovements_TDC0503ReceiptSod from 20260731153000_TDC0503ReceiptSodClosure:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_StockMovements_TDC0503ReceiptSod]
+            ON [dbo].[StockMovements]
+            AFTER INSERT
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+
+                IF EXISTS (
+                    SELECT 1
+                    FROM inserted movement
+                    LEFT JOIN GoodsReceiptNotes grn
+                      ON grn.Id = movement.ReferenceId
+                     AND grn.TenantId = movement.TenantId
+                     AND grn.IsDeleted = 0
+                    LEFT JOIN PurchaseOrders purchaseOrder
+                      ON purchaseOrder.Id = grn.PurchaseOrderId
+                     AND purchaseOrder.TenantId = movement.TenantId
+                     AND purchaseOrder.IsDeleted = 0
+                    WHERE movement.IsDeleted = 0
+                      AND movement.MovementType = N'Receipt'
+                      AND movement.ReferenceType = 1
+                      AND grn.PurchaseOrderId IS NOT NULL
+                      AND (
+                           grn.Id IS NULL
+                        OR purchaseOrder.Id IS NULL
+                        OR purchaseOrder.CreatedById IS NULL
+                        OR movement.ProcessedById IS NULL
+                        OR movement.ProcessedById = purchaseOrder.CreatedById
+                      ))
+                    THROW 51565, 'RCV_STOCK_SOD_BLOCKED: purchase GRN stock posting requires an actor distinct from the purchase-order creator.', 1;
             END
             """);
         // TRIGGER TR_TDC0501_GoodsReceiptIdempotencyFingerprint from 20260801140000_TDC0502ReceiptReplayAndReplacementLineage:0 (ARCHIVED_FINAL_DEFINITION)
@@ -17207,6 +21669,84 @@ internal static class ArchivedGovernanceBaselineSql
                     WHERE i.[ValuationMethod] = 4 AND i.[StandardCost] <= 0
                 )
                     THROW 51126, 'INV_ITEM_STANDARD_COST_REQUIRED', 1;
+            END;
+            """);
+        // TRIGGER TR_TenderAwardVerificationItemDocuments_TDC0808DmsLineage from 20260806091039_TDC0808ProcurementCentralDmsAdoption:3 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_TenderAwardVerificationItemDocuments_TDC0808DmsLineage]
+            ON [dbo].[TenderAwardVerificationItemDocuments]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE (i.FileUploadRecordId IS NOT NULL OR i.CentralDocumentRecordId IS NOT NULL OR i.CentralDocumentVersionId IS NOT NULL)
+                      AND (i.FileUploadRecordId IS NULL OR i.CentralDocumentRecordId IS NULL OR i.CentralDocumentVersionId IS NULL))
+                    THROW 51884, 'PROC_DMS_LINEAGE_INCOMPLETE: award-verification document DMS identifiers must be supplied together.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN FileUploadRecords upload ON upload.Id = i.FileUploadRecordId AND upload.TenantId = i.TenantId AND upload.IsDeleted = 0
+                    LEFT JOIN CentralDocumentRecords record ON record.Id = i.CentralDocumentRecordId AND record.TenantId = i.TenantId AND record.IsDeleted = 0
+                    LEFT JOIN CentralDocumentVersions version ON version.Id = i.CentralDocumentVersionId AND version.TenantId = i.TenantId AND version.IsDeleted = 0
+                    WHERE i.CentralDocumentRecordId IS NOT NULL
+                      AND (upload.Id IS NULL OR upload.VirusScanStatus <> 2 OR record.Id IS NULL OR version.Id IS NULL
+                           OR version.DocumentRecordId <> record.Id OR version.FileUploadRecordId <> upload.Id
+                           OR record.SourceModule <> 'Procurement' OR record.SourceRecordId <> i.ItemResultId
+                           OR record.MetadataTemplateCode <> 'TDC-PROC-APPROVAL'))
+                    THROW 51885, 'PROC_DMS_LINEAGE_INVALID: award-verification document DMS lineage must match tenant, source, record, version, and clean-upload registration.', 1;
+            END;
+            """);
+        // TRIGGER TR_TenderBidDocuments_TDC0808DmsLineage from 20260806091039_TDC0808ProcurementCentralDmsAdoption:2 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_TenderBidDocuments_TDC0808DmsLineage]
+            ON [dbo].[TenderBidDocuments]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE (i.FileUploadRecordId IS NOT NULL OR i.CentralDocumentRecordId IS NOT NULL OR i.CentralDocumentVersionId IS NOT NULL)
+                      AND (i.FileUploadRecordId IS NULL OR i.CentralDocumentRecordId IS NULL OR i.CentralDocumentVersionId IS NULL))
+                    THROW 51882, 'PROC_DMS_LINEAGE_INCOMPLETE: tender-bid document DMS identifiers must be supplied together.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN FileUploadRecords upload ON upload.Id = i.FileUploadRecordId AND upload.TenantId = i.TenantId AND upload.IsDeleted = 0
+                    LEFT JOIN CentralDocumentRecords record ON record.Id = i.CentralDocumentRecordId AND record.TenantId = i.TenantId AND record.IsDeleted = 0
+                    LEFT JOIN CentralDocumentVersions version ON version.Id = i.CentralDocumentVersionId AND version.TenantId = i.TenantId AND version.IsDeleted = 0
+                    WHERE i.CentralDocumentRecordId IS NOT NULL
+                      AND (upload.Id IS NULL OR upload.VirusScanStatus <> 2 OR record.Id IS NULL OR version.Id IS NULL
+                           OR version.DocumentRecordId <> record.Id OR version.FileUploadRecordId <> upload.Id
+                           OR record.SourceModule <> 'Procurement' OR record.SourceRecordId <> i.TenderBidId
+                           OR record.MetadataTemplateCode <> 'TDC-PROC-TENDER'))
+                    THROW 51883, 'PROC_DMS_LINEAGE_INVALID: tender-bid document DMS lineage must match tenant, source, record, version, and clean-upload registration.', 1;
+            END;
+            """);
+        // TRIGGER TR_TenderDocuments_TDC0808DmsLineage from 20260806091039_TDC0808ProcurementCentralDmsAdoption:1 (ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION)
+        migrationBuilder.Sql("""
+            CREATE OR ALTER TRIGGER [dbo].[TR_TenderDocuments_TDC0808DmsLineage]
+            ON [dbo].[TenderDocuments]
+            AFTER INSERT, UPDATE
+            AS
+            BEGIN
+                SET NOCOUNT ON;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    WHERE (i.FileUploadRecordId IS NOT NULL OR i.CentralDocumentRecordId IS NOT NULL OR i.CentralDocumentVersionId IS NOT NULL)
+                      AND (i.FileUploadRecordId IS NULL OR i.CentralDocumentRecordId IS NULL OR i.CentralDocumentVersionId IS NULL))
+                    THROW 51880, 'PROC_DMS_LINEAGE_INCOMPLETE: tender document DMS identifiers must be supplied together.', 1;
+                IF EXISTS (
+                    SELECT 1 FROM inserted i
+                    LEFT JOIN FileUploadRecords upload ON upload.Id = i.FileUploadRecordId AND upload.TenantId = i.TenantId AND upload.IsDeleted = 0
+                    LEFT JOIN CentralDocumentRecords record ON record.Id = i.CentralDocumentRecordId AND record.TenantId = i.TenantId AND record.IsDeleted = 0
+                    LEFT JOIN CentralDocumentVersions version ON version.Id = i.CentralDocumentVersionId AND version.TenantId = i.TenantId AND version.IsDeleted = 0
+                    WHERE i.CentralDocumentRecordId IS NOT NULL
+                      AND (upload.Id IS NULL OR upload.VirusScanStatus <> 2 OR record.Id IS NULL OR version.Id IS NULL
+                           OR version.DocumentRecordId <> record.Id OR version.FileUploadRecordId <> upload.Id
+                           OR record.SourceModule <> 'Procurement' OR record.SourceRecordId <> i.TenderId
+                           OR record.MetadataTemplateCode <> 'TDC-PROC-TENDER'))
+                    THROW 51881, 'PROC_DMS_LINEAGE_INVALID: tender document DMS lineage must match tenant, source, record, version, and clean-upload registration.', 1;
             END;
             """);
         // TRIGGER TR_TenderEvaluations_CommitteeScoreProjection from 20260723214709_AddProcurementEvaluationCommitteeControls:9 (ARCHIVED_FINAL_DEFINITION)
@@ -19229,6 +23769,72 @@ internal static class ArchivedGovernanceBaselineSql
                 CHARINDEX(N'TRIGGER', UPPER(@definition));
             IF @triggerKeywordPosition = 0
                 THROW 51444, 'The approved-source trigger declaration could not be altered safely.', 1;
+            SET @definition =
+                N'ALTER ' + SUBSTRING(
+                    @definition,
+                    @triggerKeywordPosition,
+                    LEN(@definition));
+            EXEC sys.sp_executesql @definition;
+            """);
+        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedCommercialCapacity from 20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster:1
+        migrationBuilder.Sql("""
+            DECLARE @definition nvarchar(max) =
+                OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_PurchaseOrders_ApprovedCommercialCapacity]', N'TR'));
+            IF @definition IS NULL
+                THROW 51980, 'The RFQ commercial-capacity trigger is required before receipt item-master alignment.', 1;
+
+            DECLARE @fromIdentity nvarchar(max) = N'WHEN item.InventoryItemId IS NOT NULL';
+            DECLARE @toIdentity nvarchar(max) = N'-- TDC0502_RFQ_ITEM_MASTER_LINEAGE
+            WHEN item.SourceRfqItemId IS NOT NULL
+                                                THEN dbo.fn_ProcurementRfqSourceLineIdentity(
+                                                    item.TenantId,
+                                                    item.SourceRfqItemId)
+                                                WHEN item.InventoryItemId IS NOT NULL';
+            DECLARE @identityCount int =
+                (LEN(@definition) - LEN(REPLACE(@definition, @fromIdentity, N''))) /
+                NULLIF(LEN(@fromIdentity), 0);
+            IF @identityCount <> 4
+                THROW 51981, 'The RFQ commercial-capacity trigger has drifted from the verified baseline.', 1;
+
+            SET @definition = REPLACE(@definition, @fromIdentity, @toIdentity);
+
+            DECLARE @triggerKeywordPosition int =
+                CHARINDEX(N'TRIGGER', UPPER(@definition));
+            IF @triggerKeywordPosition = 0
+                THROW 51982, 'The RFQ commercial-capacity trigger declaration could not be altered safely.', 1;
+            SET @definition =
+                N'ALTER ' + SUBSTRING(
+                    @definition,
+                    @triggerKeywordPosition,
+                    LEN(@definition));
+            EXEC sys.sp_executesql @definition;
+            """);
+        // POST-DEFINITION PATCH TR_PurchaseOrderItems_ApprovedCommercialCapacity from 20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster:2
+        migrationBuilder.Sql("""
+            DECLARE @definition nvarchar(max) =
+                OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_PurchaseOrderItems_ApprovedCommercialCapacity]', N'TR'));
+            IF @definition IS NULL
+                THROW 51980, 'The RFQ commercial-capacity trigger is required before receipt item-master alignment.', 1;
+
+            DECLARE @fromIdentity nvarchar(max) = N'WHEN item.InventoryItemId IS NOT NULL';
+            DECLARE @toIdentity nvarchar(max) = N'-- TDC0502_RFQ_ITEM_MASTER_LINEAGE
+            WHEN item.SourceRfqItemId IS NOT NULL
+                                                THEN dbo.fn_ProcurementRfqSourceLineIdentity(
+                                                    item.TenantId,
+                                                    item.SourceRfqItemId)
+                                                WHEN item.InventoryItemId IS NOT NULL';
+            DECLARE @identityCount int =
+                (LEN(@definition) - LEN(REPLACE(@definition, @fromIdentity, N''))) /
+                NULLIF(LEN(@fromIdentity), 0);
+            IF @identityCount <> 2
+                THROW 51981, 'The RFQ commercial-capacity trigger has drifted from the verified baseline.', 1;
+
+            SET @definition = REPLACE(@definition, @fromIdentity, @toIdentity);
+
+            DECLARE @triggerKeywordPosition int =
+                CHARINDEX(N'TRIGGER', UPPER(@definition));
+            IF @triggerKeywordPosition = 0
+                THROW 51982, 'The RFQ commercial-capacity trigger declaration could not be altered safely.', 1;
             SET @definition =
                 N'ALTER ' + SUBSTRING(
                     @definition,

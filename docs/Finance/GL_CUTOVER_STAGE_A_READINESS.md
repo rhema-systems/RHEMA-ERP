@@ -59,8 +59,9 @@ Its current final-cutover invariant snapshot includes row content for C2 balance
 authority and material journal/transaction/posting-event state. Active legacy currency links force pre-backup
 `REVIEW`, and backup creation uses atomic `FileMode.CreateNew` reservation plus no-overwrite SQL media identity.
 The D3 baseline correction also restores the complete current database-trigger contract: deterministic archive
-evaluation selects 355/355 snapshot trigger names, preserves 22 later chronological definition patches, and adds
-the separate 15-trigger C5-C8 authority set for 370 unique triggers. The audited final non-trigger definitions are
+evaluation selects 355/355 snapshot trigger names plus 89 still-active non-model triggers, preserves 24 later
+chronological definition patches, and adds the separate 15-trigger C5-C8 authority set for 459 unique triggers.
+The audited final non-trigger definitions are
 one function and one view, with no final archived procedures, synonyms, security policies, or sequences. Each
 definition is an isolated migration SQL operation and the generated zero-to-current SQL is checked against the
 same exact name/object set. This repository-only result does not authorize a reset retry.

@@ -12,6 +12,17 @@ const string ImmutableLotTrigger = "TR_ProcurementSourcingCaseLots_Immutable";
 const string ImmutableLotItemTrigger = "TR_ProcurementSourcingCaseLotItems_Immutable";
 const string ModelLotTrigger = "TR_ProcurementSourcingCaseLots_NoMutation";
 const string ModelLotItemTrigger = "TR_ProcurementSourcingCaseLotItems_NoMutation";
+var separateFinanceAuthorityTriggers = new HashSet<string>(new[]
+{
+    "TR_AccountingBookApplicabilityPolicies_C5Authority", "TR_AccountingBookApplicabilityRules_C5Immutable",
+    "TR_AccountingBookApplicabilityRuleBooks_C5Immutable", "TR_AccountingBookSelectionEvidence_C5Immutable",
+    "TR_AccountingBookSelectionEvidenceBooks_C5Immutable", "TR_AccountingEvents_C6Authority",
+    "TR_AccountingEventPostings_C6Authority", "TR_AccountingEventAttempts_C6AppendOnly",
+    "TR_AccountingEventProducerReceipts_C7Immutable", "TR_AccountingEvents_C7ProducerDecision",
+    "TR_ProducerIntentGroupMembers_C8Immutable", "TR_ProducerIntentGroupReceipts_C8Immutable",
+    "TR_ProducerIntentGroupAttempts_C8Immutable", "TR_ProducerIntentGroupAttempts_C8NoMutation",
+    "TR_ProducerIntentGroups_C8Authority"
+}, StringComparer.Ordinal);
 
 var repositoryRoot = FindRepositoryRoot();
 var snapshotPath = Path.Combine(repositoryRoot, SnapshotRelativePath.Replace('/', Path.DirectorySeparatorChar));
@@ -61,12 +72,32 @@ if (snapshotTriggers.Count != 355 || selectedTriggers.Count != 355 || missingTri
     throw new InvalidOperationException(
         $"Trigger parity failed. Snapshot={snapshotTriggers.Count}; selected={selectedTriggers.Count}; missing={string.Join(',', missingTriggers)}.");
 }
+var modelTriggerNames = selectedTriggers.Keys.ToHashSet(StringComparer.Ordinal);
+var baselineTableColumns = ParseBaselineTableColumns(File.ReadAllText(baselinePath));
+var aliasSources = new HashSet<string>(new[] { ImmutableLotTrigger, ImmutableLotItemTrigger }, StringComparer.Ordinal);
+var triggerDisposition = new Dictionary<string, string>(StringComparer.Ordinal);
+foreach (var group in triggerCandidates.GroupBy(item => item.Name, StringComparer.Ordinal))
+{
+    if (selectedTriggers.ContainsKey(group.Key)) { triggerDisposition.Add(group.Key, "CURRENT_MODEL"); continue; }
+    if (separateFinanceAuthorityTriggers.Contains(group.Key)) { triggerDisposition.Add(group.Key, "SEPARATE_FINANCE_AUTHORITY"); continue; }
+    if (aliasSources.Contains(group.Key)) { triggerDisposition.Add(group.Key, "SUPERSEDED_BY_EXACT_MODEL_ALIAS"); continue; }
+    var finalDefinition = group.OrderBy(item => item.MigrationId, StringComparer.Ordinal).ThenBy(item => item.OperationIndex).Last();
+    var targetTable = ParseTriggerTargetTable(finalDefinition.Sql);
+    if (!baselineTableColumns.ContainsKey(targetTable)) { triggerDisposition.Add(group.Key, "TARGET_TABLE_ABSENT"); continue; }
+    if (HasLaterExplicitTriggerDrop(finalDefinition, sqlOperations)) { triggerDisposition.Add(group.Key, "EXPLICITLY_DROPPED_AFTER_FINAL_DEFINITION"); continue; }
+    selectedTriggers.Add(group.Key, finalDefinition with { Derivation = "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION" });
+    triggerDisposition.Add(group.Key, "ACTIVE_NON_MODEL");
+}
+var archivedUniqueTriggerCount = triggerCandidates.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count();
+if (triggerDisposition.Count != archivedUniqueTriggerCount)
+    throw new InvalidOperationException($"Archived trigger audit is not exhaustive: {triggerDisposition.Count}/{archivedUniqueTriggerCount} names classified.");
+var nonModelTriggerNames = selectedTriggers.Keys.Except(modelTriggerNames, StringComparer.Ordinal).OrderBy(value => value, StringComparer.Ordinal).ToArray();
 
 foreach (var selected in selectedTriggers.Values)
 {
-    var expectedTable = snapshotTriggers[selected.Name];
     var actualTable = ParseTriggerTargetTable(selected.Sql);
-    if (!string.Equals(expectedTable, actualTable, StringComparison.Ordinal))
+    if (snapshotTriggers.TryGetValue(selected.Name, out var expectedTable) &&
+        !string.Equals(expectedTable, actualTable, StringComparison.Ordinal))
     {
         throw new InvalidOperationException(
             $"Trigger {selected.Name} targets {actualTable}, but the snapshot binds it to {expectedTable}.");
@@ -76,7 +107,6 @@ foreach (var selected in selectedTriggers.Values)
         throw new InvalidOperationException($"Trigger {selected.Name} is not one isolated definition.");
     }
 }
-var baselineTableColumns = ParseBaselineTableColumns(File.ReadAllText(baselinePath));
 var staticallyValidatedColumnReferenceCount = ValidateStaticTriggerColumnReferences(selectedTriggers.Values, baselineTableColumns);
 
 var patches = SelectPostDefinitionPatches(sqlOperations, selectedTriggers);
@@ -84,11 +114,13 @@ var programmableDefinitions = SelectProgrammableDefinitions(sqlOperations);
 var audit = AuditGovernanceObjects(sqlOperations, triggerCandidates);
 var manifest = new
 {
-    schema = "RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V1",
+    schema = "RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V2",
     archiveMigrationCount = migrations.Length,
     archiveSqlOperationCount = sqlOperations.Length,
+    archivedUniqueTriggerCount,
     modelTriggerCount = snapshotTriggers.Count,
-    selectedTriggerCount = selectedTriggers.Count,
+    selectedModelTriggerCount = modelTriggerNames.Count,
+    activeNonModelTriggerCount = nonModelTriggerNames.Length,
     additionalFinanceAuthorityTriggerCount = 15,
     finalUniqueTriggerCount = selectedTriggers.Count + 15,
     baselineTableCount = baselineTableColumns.Count,
@@ -96,12 +128,15 @@ var manifest = new
     triggerDefinitions = selectedTriggers.Values.OrderBy(item => item.Name, StringComparer.Ordinal).Select(item => new
     {
         item.Name,
-        table = snapshotTriggers[item.Name],
+        table = ParseTriggerTargetTable(item.Sql),
         item.MigrationId,
         item.OperationIndex,
         item.Derivation,
         bodySha256 = Sha256(item.Sql)
     }),
+    modelTriggerNames = modelTriggerNames.OrderBy(value => value, StringComparer.Ordinal),
+    activeNonModelTriggerNames = nonModelTriggerNames,
+    archivedTriggerDisposition = triggerDisposition.OrderBy(item => item.Key, StringComparer.Ordinal).Select(item => new { name=item.Key, disposition=item.Value }),
     postDefinitionPatches = patches.Select(patch => new
     {
         patch.MigrationId,
@@ -127,7 +162,11 @@ if (args.Length == 0 || args[0] == "--summary")
     Console.WriteLine($"directTriggerDefinitions={triggerCandidates.Length}");
     Console.WriteLine($"directTriggerNames={triggerCandidates.Select(item => item.Name).Distinct(StringComparer.Ordinal).Count()}");
     Console.WriteLine($"modelTriggerNames={snapshotTriggers.Count}");
-    Console.WriteLine($"selectedModelTriggers={selectedTriggers.Count}");
+    Console.WriteLine($"selectedModelTriggers={modelTriggerNames.Count}");
+    Console.WriteLine($"activeNonModelTriggers={nonModelTriggerNames.Length}");
+    Console.WriteLine($"finalUniqueTriggers={selectedTriggers.Count + 15}");
+    foreach (var group in triggerDisposition.GroupBy(item => item.Value).OrderBy(group => group.Key, StringComparer.Ordinal))
+        Console.WriteLine($"triggerDisposition={group.Key}|count={group.Count()}");
     Console.WriteLine($"postDefinitionPatchOperations={patches.Length}");
     Console.WriteLine($"baselineTables={baselineTableColumns.Count}");
     Console.WriteLine($"staticallyValidatedInsertedDeletedColumnReferences={staticallyValidatedColumnReferenceCount}");
@@ -327,6 +366,16 @@ static int CountTriggerDefinitions(string sql) => Regex.Matches(sql,
     @"(?:CREATE\s+OR\s+ALTER|CREATE|ALTER)\s+TRIGGER\b",
     RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count;
 
+static bool HasLaterExplicitTriggerDrop(SqlDefinition definition, IEnumerable<ArchivedSql> operations)
+{
+    var escapedName = Regex.Escape(definition.Name);
+    var dropPattern = @"\bDROP\s+TRIGGER(?:\s+IF\s+EXISTS)?\s+(?:(?:\[dbo\]|dbo)\.)?\[?" + escapedName + @"\]?\b";
+    return operations.Any(operation =>
+        (string.CompareOrdinal(operation.MigrationId, definition.MigrationId) > 0 ||
+         operation.MigrationId == definition.MigrationId && operation.OperationIndex > definition.OperationIndex) &&
+        Regex.IsMatch(operation.Sql, dropPattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant));
+}
+
 static ArchivedSql[] SelectPostDefinitionPatches(IReadOnlyCollection<ArchivedSql> operations,
     IReadOnlyDictionary<string, SqlDefinition> selected)
 {
@@ -395,7 +444,7 @@ static string RenderHelper(IReadOnlyCollection<SqlDefinition> programmable, IEnu
     builder.AppendLine(); builder.AppendLine("namespace ErpSystem.Data.Migrations;"); builder.AppendLine();
     builder.AppendLine("/// <summary>");
     builder.AppendLine("/// Deterministically extracted from the archived 456-migration Up operations.");
-    builder.AppendLine("/// Contains all 355 current-model triggers, later exact definition patches, and final programmable dependencies.");
+    builder.AppendLine("/// Contains all current-model and still-active non-model triggers, later exact definition patches, and final programmable dependencies.");
     builder.AppendLine("/// </summary>");
     builder.AppendLine("internal static class ArchivedGovernanceBaselineSql"); builder.AppendLine("{");
     builder.AppendLine("    internal static void Apply(MigrationBuilder migrationBuilder)"); builder.AppendLine("    {");

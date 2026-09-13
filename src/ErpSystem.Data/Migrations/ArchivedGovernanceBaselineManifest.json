@@ -1,13 +1,15 @@
 {
-  "schema": "RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V1",
+  "schema": "RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V2",
   "archiveMigrationCount": 456,
   "archiveSqlOperationCount": 922,
+  "archivedUniqueTriggerCount": 454,
   "modelTriggerCount": 355,
-  "selectedTriggerCount": 355,
+  "selectedModelTriggerCount": 355,
+  "activeNonModelTriggerCount": 89,
   "additionalFinanceAuthorityTriggerCount": 15,
-  "finalUniqueTriggerCount": 370,
+  "finalUniqueTriggerCount": 459,
   "baselineTableCount": 1556,
-  "staticallyValidatedColumnReferenceCount": 12627,
+  "staticallyValidatedColumnReferenceCount": 15294,
   "triggerDefinitions": [
     {
       "Name": "TR_AuditLogs_AppendOnly",
@@ -32,6 +34,14 @@
       "OperationIndex": 0,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "4686FE98B6F0FBBBABE08D3F57E7930F4ECE4A8B7BD958B4B50169BA2CB6788D"
+    },
+    {
+      "Name": "TR_CivilEngineeringConfigurationRevisions_AppendOnly",
+      "table": "CivilEngineeringConfigurationRevisions",
+      "MigrationId": "20260814205757_AddCivilEngineeringConfigurationLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "0A04C59AB27B39CE37C57303E28EA71C731430176B529A62F5C882E3867BC47B"
     },
     {
       "Name": "TR_CivilEngineeringMaintenanceAssessmentRevisions_AppendOnly",
@@ -178,6 +188,14 @@
       "bodySha256": "85D2D207BFD04CD606174DF2B35DCAB1A5195BEEC85F62945637F71850E9376E"
     },
     {
+      "Name": "TR_CivilEngineeringMaintenanceIntakes_Lifecycle",
+      "table": "CivilEngineeringMaintenanceIntakes",
+      "MigrationId": "20260821033000_AddCivilEngineeringMaintenanceIntakes",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "837435E8487876AF7FB0DE7C8711AD6B5E3F6BAEEB42332199598CCF2DB0607A"
+    },
+    {
       "Name": "TR_CivilEngineeringMaintenanceIntakes_Lineage",
       "table": "CivilEngineeringMaintenanceIntakes",
       "MigrationId": "20260821033000_AddCivilEngineeringMaintenanceIntakes",
@@ -242,12 +260,28 @@
       "bodySha256": "DA3640C78519A98EA75204196BC4FE2C7BFB9F2E29FD436EA85E6E30E4350F07"
     },
     {
+      "Name": "TR_GoodsReceiptNoteItems_TDC0502AcceptanceProtected",
+      "table": "GoodsReceiptNoteItems",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 6,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CA27BF1E3D15DCAE6B497F464A32AF526F4C10DF616816BC514D8A2DB55524E1"
+    },
+    {
       "Name": "TR_GoodsReceiptNotes_GovernedSource",
       "table": "GoodsReceiptNotes",
       "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
       "OperationIndex": 2,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "9B1E7F2B655D321F23EAB9A54A379246E511B9E55F23D6A6A18D87A121462FA2"
+    },
+    {
+      "Name": "TR_GoodsReceiptNotes_TDC0503SodHardStop",
+      "table": "GoodsReceiptNotes",
+      "MigrationId": "20260731153000_TDC0503ReceiptSodClosure",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9A808020D78C194ECC34B032DB0836AE14CF69FF992C334DC6AFAFE7144E4771"
     },
     {
       "Name": "TR_HrIdentityReconciliationItems_NoMutation",
@@ -328,6 +362,22 @@
       "OperationIndex": 0,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "7320208938F78FCD837338B22F5F5473CCC295AADF708DAD19A572AFE4EED2E8"
+    },
+    {
+      "Name": "TR_InventoryDirectedTaskActions_AppendOnly",
+      "table": "InventoryDirectedTaskActions",
+      "MigrationId": "20260802023830_TDC0605DirectedWarehouseOperations",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E5138094A578C854103F180669ED6BAAEC07F588B7D248666286CA829D3793DE"
+    },
+    {
+      "Name": "TR_InventoryDirectedTasks_Integrity",
+      "table": "InventoryDirectedTasks",
+      "MigrationId": "20260802023830_TDC0605DirectedWarehouseOperations",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F0A02969B671DF9E3921B1795985495DB4507804A54750045A9C26593CA078CD"
     },
     {
       "Name": "TR_InventoryDisposalActions_AppendOnly",
@@ -448,6 +498,46 @@
       "OperationIndex": 4,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "A284D0857B287DAE9BC9972D50362E239479C5EC35A83CBDBF23F48FAD322289"
+    },
+    {
+      "Name": "TR_InventoryMovements_TDC0502InspectionContext",
+      "table": "InventoryMovements",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 7,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A21A6379C670574A308C2B7259704D200D19BA155B4C785A0DABA15E3E06F746"
+    },
+    {
+      "Name": "TR_InventoryMovements_TDC0503ReceiptSod",
+      "table": "InventoryMovements",
+      "MigrationId": "20260731153000_TDC0503ReceiptSodClosure",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8F78644205F5BB236EF38588A85F06AFEC13B81CC1DAFAFBF84E34B5ECA90000"
+    },
+    {
+      "Name": "TR_InventoryProjectReservationActions_Immutable",
+      "table": "InventoryProjectReservationActions",
+      "MigrationId": "20260802160000_TDC0611ProjectInventoryReservations",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CA5F2E3FF1BC4FBC27A8E3FB762FC7802C917E23BE58A66C7F4101755975CB3B"
+    },
+    {
+      "Name": "TR_InventoryReplenishmentActions_Immutable",
+      "table": "InventoryReplenishmentActions",
+      "MigrationId": "20260802162449_TDC0612InventoryReplenishment",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9A82267B8D059AC10FB8EC1A2924E906A18627B9F2905B6C5A031E22256488EC"
+    },
+    {
+      "Name": "TR_InventoryReplenishmentRecommendations_Guard",
+      "table": "InventoryReplenishmentRecommendations",
+      "MigrationId": "20260802162449_TDC0612InventoryReplenishment",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8A7C5A8EC4EE74899B5D0E2369F1CD812A5F622D3609F0AF928285B55D2FE8A5"
     },
     {
       "Name": "TR_InventoryReturnVoucherActions_AppendOnly",
@@ -610,6 +700,14 @@
       "bodySha256": "23CDFFF922E253E4447C6594F26E8CAB7DA533AAA8C91DA14D6829ABD9F7F38F"
     },
     {
+      "Name": "TR_ProcurementAppSubmissions_LifecycleGuard",
+      "table": "ProcurementAppSubmissions",
+      "MigrationId": "20260721134533_AddProcurementAppSubmissionRegister",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DBC7F0EADDA2BF5C387A1E284A22CE4023F9AE156132FE774D5B872C7314BF10"
+    },
+    {
       "Name": "TR_ProcurementAppSubmissions_NoDelete",
       "table": "ProcurementAppSubmissions",
       "MigrationId": "20260721134533_AddProcurementAppSubmissionRegister",
@@ -696,6 +794,14 @@
       "OperationIndex": 7,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "66901FCDEC326581F7A2014D8084AC026703D4C956A982892C9CAD6BB713A03D"
+    },
+    {
+      "Name": "TR_ProcurementBudgetCommitments_DownstreamExposure",
+      "table": "ProcurementBudgetCommitments",
+      "MigrationId": "20260812100000_HardenProcurementCommitmentLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6BF551ACFA970F2BFFA3F83431AECFAB3EE902928E9F722DAC444222C124357C"
     },
     {
       "Name": "TR_ProcurementBudgetCommitments_LifecycleGuard",
@@ -1034,6 +1140,14 @@
       "bodySha256": "977A17B3F79176A7D73FD9F6C25E8661B562DB3F554BC7D9E5B5CE9A2FC9A774"
     },
     {
+      "Name": "TR_ProcurementPrequalificationExercises_PolicyLineage",
+      "table": "ProcurementPrequalificationExercises",
+      "MigrationId": "20260723161619_AddProcurementPrequalificationPolicyLineage",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "FE5C6C65D5870D120DC8232E22C996FD5EB1D5892E195E44E2C54BC9AD832D68"
+    },
+    {
       "Name": "TR_ProcurementPrequalificationScores_Immutable",
       "table": "ProcurementPrequalificationScores",
       "MigrationId": "20260723145650_AddProcurementPrequalificationLifecycle",
@@ -1112,6 +1226,14 @@
       "OperationIndex": 3,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "B73E2EA42211B64206513E3490C9E585AD1BC9789DA89A42EE312BF216B2862F"
+    },
+    {
+      "Name": "TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop",
+      "table": "ProcurementReceiptInspectionActions",
+      "MigrationId": "20260731153000_TDC0503ReceiptSodClosure",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "857BD5CC65E811DAE918E9E68D4AAA859D6E447A60FC1136526D369220F37BD2"
     },
     {
       "Name": "TR_ProcurementReceiptInspectionCases_TDC0502Protected",
@@ -1194,6 +1316,14 @@
       "bodySha256": "159009C7B4252EEC2FBA38BEBDF3A3C239E0024D1931533D82B0CC9D579DD8DC"
     },
     {
+      "Name": "TR_ProcurementResponsibilityLocations_ValidateScope",
+      "table": "ProcurementResponsibilityLocations",
+      "MigrationId": "20260802012523_TDC0604InventoryAccessLocations",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B6EF84C4B2EB9996F20E57826692DCD5228D29E348FB21FFB76C6A4D1ACA8DC1"
+    },
+    {
       "Name": "TR_ProcurementRfqEvaluationLines_Lifecycle",
       "table": "ProcurementRfqEvaluationLines",
       "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
@@ -1226,12 +1356,28 @@
       "bodySha256": "09F4C9DD7AFDE259B6F026846B70A128EDCAE5FF14BCB75367395DF0E343B3D9"
     },
     {
+      "Name": "TR_ProcurementRfqOpeningRegisters_EffectiveDeadline",
+      "table": "ProcurementRfqOpeningRegisters",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 11,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "39D9C59326D0ED8F3C835E4CEC236B0ABCF2DA1002A43417B6901F0A75D2BC98"
+    },
+    {
       "Name": "TR_ProcurementRfqOpeningRegisters_Immutable",
       "table": "ProcurementRfqOpeningRegisters",
       "MigrationId": "20260723025539_AddProcurementRfqStatutoryControls",
       "OperationIndex": 1,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "626A3EACD6889C83BE736FB7D85254A3C032EA1B49D544ED218250E722674763"
+    },
+    {
+      "Name": "TR_ProcurementRfqReceipts_EffectiveDeadline",
+      "table": "ProcurementRfqReceipts",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 10,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "581029FD8C612B809766314F9605437D9FAB985C9883E0D58D95C360FD613A59"
     },
     {
       "Name": "TR_ProcurementRfqReceipts_Immutable",
@@ -1272,6 +1418,14 @@
       "OperationIndex": 0,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "349102F9AA8DFB76687BF4344B046A53BC69F1DC31BEB713D8885F65061E0C72"
+    },
+    {
+      "Name": "TR_ProcurementSourcingCases_MethodSelection",
+      "table": "ProcurementSourcingCases",
+      "MigrationId": "20260722173828_AddProcurementMethodSelectionControls",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CFEB0CE2CBDE7FB0B6F13D18C3F8D2283042D33EA93E533840E9071DC8D5810F"
     },
     {
       "Name": "TR_ProcurementSpecificationTemplates_LifecycleGuard",
@@ -1434,6 +1588,14 @@
       "bodySha256": "0604FE6808C87CC64615AEC762B314264C7645F4170277FA1CCEB31D3AD8F68C"
     },
     {
+      "Name": "TR_ProcurementTenderControls_CommitteeScoreProjection",
+      "table": "ProcurementTenderControls",
+      "MigrationId": "20260723214709_AddProcurementEvaluationCommitteeControls",
+      "OperationIndex": 12,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C489ED02FF7595745AE11B73604BC685501AE82B09795D931C1856F28481E544"
+    },
+    {
       "Name": "TR_ProcurementTenderControls_Lifecycle",
       "table": "ProcurementTenderControls",
       "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
@@ -1522,6 +1684,14 @@
       "bodySha256": "C0D18F5351EFA34BBE8A27EBDB038352FF8C2E4B55D950B8171D7202BC53E3DE"
     },
     {
+      "Name": "TR_ProcurementTenderSubmissionReceipts_EffectiveDeadline",
+      "table": "ProcurementTenderSubmissionReceipts",
+      "MigrationId": "20260723184003_AddProcurementTenderDocumentControls",
+      "OperationIndex": 9,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D0D6D4150717CBBA6E518FB8884F0C08E080213EA05D01A35758B6D021B6C780"
+    },
+    {
       "Name": "TR_ProcurementTenderSubmissionReceipts_Immutable",
       "table": "ProcurementTenderSubmissionReceipts",
       "MigrationId": "20260723071908_AddProcurementTenderStatutoryControls",
@@ -1554,12 +1724,76 @@
       "bodySha256": "D0F6C2D4DD26F33BA14DD2D3E2A89891C7004882436D1E722C30A9F12620641E"
     },
     {
+      "Name": "TR_ProjectAssetLinks_ReconciliationLineage",
+      "table": "ProjectAssetLinks",
+      "MigrationId": "20260822003500_AddProjectAssetLinkFixedAssetReconciliation",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4847A52645017FCC2A007AB0F319E3AA3592FA5E268964C32C37E83E2F2AEE10"
+    },
+    {
+      "Name": "TR_ProjectBoqRemeasurementLines_Guard",
+      "table": "ProjectBoqRemeasurementLines",
+      "MigrationId": "20260810040000_AddProjectBoqRemeasurementWorkflow",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4310D1C62791BDAD0A3AC782179A82EB96F9C85B4D82D9675F7D6CBA7E9E9065"
+    },
+    {
+      "Name": "TR_ProjectBoqRemeasurementRevisions_Guard",
+      "table": "ProjectBoqRemeasurementRevisions",
+      "MigrationId": "20260810040000_AddProjectBoqRemeasurementWorkflow",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AFD934B80EFC02A212EC5719F8599D11E88198C9AAE3BC18E51409F107C048C7"
+    },
+    {
+      "Name": "TR_ProjectBoqRemeasurementSources_Guard",
+      "table": "ProjectBoqRemeasurementSources",
+      "MigrationId": "20260810040000_AddProjectBoqRemeasurementWorkflow",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2C715BB6BFCEBBB7C2D699AB44F11B30777FAC57E381F9851AF9CE4FCC59E9FB"
+    },
+    {
+      "Name": "TR_ProjectBoqVersionLines_ImmutablePublished",
+      "table": "ProjectBoqVersionLines",
+      "MigrationId": "20260808124500_AddProjectBoqApprovalPublication",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "479FA5BD38685EEF48D900BE563661D20C731FB5BB6B58F791840EE5734F6844"
+    },
+    {
+      "Name": "TR_ProjectBoqVersions_ImmutablePublished",
+      "table": "ProjectBoqVersions",
+      "MigrationId": "20260808124500_AddProjectBoqApprovalPublication",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A4BEF8C96F6C79BF1953E1B6E2952108B4CED1355B29A9AA40F817A924EECDC9"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignCases_InitiationLineage",
+      "table": "ProjectCivilDesignCases",
+      "MigrationId": "20260821230000_AddCivilEngineeringWorksCaseInitiation",
+      "OperationIndex": 5,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "58F04AD3903AF720B7B32AAD8E4CF18A7151DD472635F290FF9C3A730EC9B9A4"
+    },
+    {
       "Name": "TR_ProjectCivilDesignCases_Lifecycle",
       "table": "ProjectCivilDesignCases",
       "MigrationId": "20260814234022_AddCivilEngineeringDesignWorkflow",
       "OperationIndex": 0,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "EFC52F43D9F707A1A5D058F7748212EB95428129C98FC54F8C244D901520112B"
+    },
+    {
+      "Name": "TR_ProjectCivilDesignCases_PlanningGisGate",
+      "table": "ProjectCivilDesignCases",
+      "MigrationId": "20260822000000_AddCivilEngineeringPlanningGisValidation",
+      "OperationIndex": 8,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "278E7C43B1A34254A8E43281DDB1D93F03F29B511E68EFB76B67A92A7C5B1667"
     },
     {
       "Name": "TR_ProjectCivilDesignEvidence_AppendOnly",
@@ -1640,6 +1874,14 @@
       "OperationIndex": 3,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "61A8057E85A9AB86554D57E5B7BA24A24872B052FDB7D99EA69B73B5CF34BEE6"
+    },
+    {
+      "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_HodDecisionProjection",
+      "table": "ProjectCivilDevelopmentApprovalEngineeringReviews",
+      "MigrationId": "20260821153000_AddCivilEngineeringPermittingHodDecisions",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "176C82F91B106582303BCA188369D8EFD8F2EB73B24AD925C95E972FCD302F35"
     },
     {
       "Name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lifecycle",
@@ -1776,6 +2018,14 @@
       "OperationIndex": 3,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "DFCA864F453E0839790DB9857BED63689B034C1BEF95E19125C8AEBC4E645F5F"
+    },
+    {
+      "Name": "TR_ProjectCivilDirectTaskFeedbackEntries_FieldCapture",
+      "table": "ProjectCivilDirectTaskFeedbackEntries",
+      "MigrationId": "20260821200000_AddCivilEngineeringMobileFieldFeedback",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3EC45AA050B7420D6A4585097F9B4FB41EBF4843B6F2E5DC9886F946826A9C23"
     },
     {
       "Name": "TR_ProjectCivilDirectTaskFeedbackEntries_Lineage",
@@ -2114,6 +2364,14 @@
       "bodySha256": "08606E4D8CDC597AD2CF128BBD2EF70B1A8F6F47D225E678A212463421C2A89B"
     },
     {
+      "Name": "TR_ProjectCivilReconnaissanceReports_Delete",
+      "table": "ProjectCivilReconnaissanceReports",
+      "MigrationId": "20260815005453_AddCivilEngineeringReconnaissance",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "15E18B85FAC96E9EB110C713F06C48F2B5579684658E1B5DDE3C68A355A297C8"
+    },
+    {
       "Name": "TR_ProjectCivilReconnaissanceReports_Lifecycle",
       "table": "ProjectCivilReconnaissanceReports",
       "MigrationId": "20260815005453_AddCivilEngineeringReconnaissance",
@@ -2306,6 +2564,46 @@
       "bodySha256": "D2F7A8B13814489B2EF6A14D2843900DE5FAC0B582BA52DF71BDB14EED0B44D7"
     },
     {
+      "Name": "TR_ProjectDrawings_QsRevisionLineage",
+      "table": "ProjectDrawings",
+      "MigrationId": "20260810103259_AddQuantitySurveyDesignRevisionImpacts",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2D1FB749FF949FAEC46CA374F17A8BBD3DD4B6F916262FE8CD02EE7EE5C07C8B"
+    },
+    {
+      "Name": "TR_ProjectExtensionOfTimeRequests_CivilControl",
+      "table": "ProjectExtensionOfTimeRequests",
+      "MigrationId": "20260822003400_AddCivilEngineeringExtensionOfTimeControls",
+      "OperationIndex": 5,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "ED14A1BB99BCAC6F45CA7D07AEF52C39B845D75CB29DBC743ED8F6202FB6EE85"
+    },
+    {
+      "Name": "TR_ProjectFinalAccountRevisions_QS0506AppendOnly",
+      "table": "ProjectFinalAccountRevisions",
+      "MigrationId": "20260810202208_AddQuantitySurveyFinalAccountLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EACCDD1D8EF22936181B5E8A70C1D2D9B25CE2EE7E8EC101E55D5F43DCC0ABB3"
+    },
+    {
+      "Name": "TR_ProjectFinalAccounts_QS0506Guard",
+      "table": "ProjectFinalAccounts",
+      "MigrationId": "20260810202208_AddQuantitySurveyFinalAccountLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "99FC80369611B6318888A3825853C4DF92990230D8D87D5F71A165BB78208BB8"
+    },
+    {
+      "Name": "TR_ProjectPaymentCertificates_QS0505AdvanceRecoveryGuard",
+      "table": "ProjectPaymentCertificates",
+      "MigrationId": "20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "70976189A0D1C3EAA28EB422BC98B65EB3B4E304FBDBB8FCA5B619D35F18EA3C"
+    },
+    {
       "Name": "TR_ProjectPaymentCertificates_QsLifecycle",
       "table": "ProjectPaymentCertificates",
       "MigrationId": "20260810154236_AddQuantitySurveyPaymentCertificateLifecycle",
@@ -2322,12 +2620,28 @@
       "bodySha256": "59370FDEEB8AC9943EC50A757506E4C8F4EDC9E2A5DA5D341C8BAD681449F70F"
     },
     {
+      "Name": "TR_PurchaseOrderItems_ApprovedCommercialCapacity",
+      "table": "PurchaseOrderItems",
+      "MigrationId": "20260730204500_TDC0403CommercialCapacityHardStops",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9038DBBBA6696FCB342ED4B7E1E8BEB9371E6E2041055F033D8340236F02F749"
+    },
+    {
       "Name": "TR_PurchaseOrderItems_FrameworkCallOffProtected",
       "table": "PurchaseOrderItems",
       "MigrationId": "20260729124416_TDC0402FrameworkCallOffs",
       "OperationIndex": 5,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "D37E1890684CE7DA41163FF2080A7F03C9B47DB51404EABE1DEF6B1A525A9DDE"
+    },
+    {
+      "Name": "TR_PurchaseOrderItems_TDC0502AcceptedQuantity",
+      "table": "PurchaseOrderItems",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 5,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F9A5E047B673EB8C591026095A317A85022D913B33DBBCD91C9FF149C90791A9"
     },
     {
       "Name": "TR_PurchaseOrderReceiptItems_GovernedCapacity",
@@ -2338,12 +2652,44 @@
       "bodySha256": "AF8220A7508A5089E7C7821024DDC9DA8F44737C1E68F571264AA888261CBE63"
     },
     {
+      "Name": "TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected",
+      "table": "PurchaseOrderReceiptItems",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 4,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E77671F4A43FB0F0AFA02112B3776A814867E6F2485F06F44C186DD8452FE9D1"
+    },
+    {
       "Name": "TR_PurchaseOrderReceipts_GovernedSource",
       "table": "PurchaseOrderReceipts",
       "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
       "OperationIndex": 0,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "90BB0191DB9527D25389AFFBB2B6C1021348FB34DA492732D3B3EFE12DF50756"
+    },
+    {
+      "Name": "TR_PurchaseOrderReceipts_INVREQFU001Waybill",
+      "table": "PurchaseOrderReceipts",
+      "MigrationId": "20260812195409_INVREQFU001GovernedReceiptSourceEvidence",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "752E66968753ACD9B9929269368A645C4737C1ED4E2522AE47407848EA722308"
+    },
+    {
+      "Name": "TR_PurchaseOrderReceipts_SodHardStop",
+      "table": "PurchaseOrderReceipts",
+      "MigrationId": "20260730020000_TDC0405PurchaseOrderSodHardStops",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C8F519FEF403494DB167E46912E10AD0DEA0093F4921FED7AC2B663D698A2DDC"
+    },
+    {
+      "Name": "TR_PurchaseOrders_ApprovedCommercialCapacity",
+      "table": "PurchaseOrders",
+      "MigrationId": "20260730204500_TDC0403CommercialCapacityHardStops",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "335301A2C8C313209B7835BB181AA45B64F481A7B36E4EA459F62968B8A8DB0D"
     },
     {
       "Name": "TR_PurchaseOrders_ApprovedSourceProtected",
@@ -2360,6 +2706,22 @@
       "OperationIndex": 4,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "09DBE3DD800DE542340ACCDCD641EF20E42AA5E088A4C45FD2423708245F0DE9"
+    },
+    {
+      "Name": "TR_PurchaseOrders_GovernedCommitment",
+      "table": "PurchaseOrders",
+      "MigrationId": "20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "AF971CFBEF4095B384B9093935D9A90491E8554E236A346B82C323D1944CCDDA"
+    },
+    {
+      "Name": "TR_PurchaseOrders_SodHardStop",
+      "table": "PurchaseOrders",
+      "MigrationId": "20260730020000_TDC0405PurchaseOrderSodHardStops",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "211CD1B5444AA41EBB2DF0CC014819A5EFF092BB79250B4610EF83D75AFBF851"
     },
     {
       "Name": "TR_PurchaseRequisitions_LinkageGuard",
@@ -2490,12 +2852,28 @@
       "bodySha256": "1DA22C7B058482BB741540572B609690C5BEB6075053168C1BA4A61B146FFE5F"
     },
     {
+      "Name": "TR_QS0510_VariationDayworkEligibility",
+      "table": "ProjectVariationOrders",
+      "MigrationId": "20260811013838_AddQuantitySurveyDayworkLifecycle",
+      "OperationIndex": 4,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D207C87334105BB49E65B4E1C8A9322456201003A8CAB4727119382E1B65EB79"
+    },
+    {
       "Name": "TR_QS0511_VariationApplication_Governance",
       "table": "ProjectVariationOrders",
       "MigrationId": "20260811022852_AddQuantitySurveyVariationApplications",
       "OperationIndex": 0,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "E51605019E62A64BADDD9DC82458E4C8D1E3AA4E743DA44DC25115E96691B81E"
+    },
+    {
+      "Name": "TR_QS0521_SubcontractCertificates_Governance",
+      "table": "ProjectPaymentCertificates",
+      "MigrationId": "20260811061000_HardenQuantitySurveySubcontractCertificates",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B4F16249643777B693D07F6CE5F4320C41F9E0BD60A82F892CBFF9EF69E50CF1"
     },
     {
       "Name": "TR_QS0521_SubcontractEvidence_AppendOnly",
@@ -2554,6 +2932,230 @@
       "bodySha256": "9FC04F7641B0A960994CD2D6CD39F5E2FBFF156DCAD559739489CFFC5D54E9A7"
     },
     {
+      "Name": "TR_QsAdvanceRecoveryAgreements_QS0505Guard",
+      "table": "QuantitySurveyAdvanceRecoveryAgreements",
+      "MigrationId": "20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5A3EFD6F866C948498FAA40590E9354907CF521A79BE9766C94B79394B783346"
+    },
+    {
+      "Name": "TR_QsAdvanceRecoveryRevisions_QS0505AppendOnly",
+      "table": "QuantitySurveyAdvanceRecoveryRevisions",
+      "MigrationId": "20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1794A773D8303D303440571706F4CE34100F1BD2F0038525FFFFC856ED53A2B7"
+    },
+    {
+      "Name": "TR_QsConfigurationRevisions_AppendOnly",
+      "table": "QuantitySurveyConfigurationRevisions",
+      "MigrationId": "20260807202000_AddQuantitySurveyConfigurationRegister",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C9FF9738421F43E77522741CB14CE7193C6495B26435C82D7F164FF7BD03C158"
+    },
+    {
+      "Name": "TR_QsDesignRevisionImpactLines_Guard",
+      "table": "QuantitySurveyDesignRevisionImpactLines",
+      "MigrationId": "20260810103259_AddQuantitySurveyDesignRevisionImpacts",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EE2CE2CF7C36B08CBADD910B9A3BD6230E9212FFE6134571C56B0457B8B0CF85"
+    },
+    {
+      "Name": "TR_QsDesignRevisionImpactRevisions_Immutable",
+      "table": "QuantitySurveyDesignRevisionImpactRevisions",
+      "MigrationId": "20260810103259_AddQuantitySurveyDesignRevisionImpacts",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3933CD91035A11EA32645468446B19BF5870FD8F11D2BDF86C3BA9D7573B2817"
+    },
+    {
+      "Name": "TR_QsDesignRevisionImpacts_Guard",
+      "table": "QuantitySurveyDesignRevisionImpacts",
+      "MigrationId": "20260810103259_AddQuantitySurveyDesignRevisionImpacts",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1C2CEAC1A82FC4E69430C0AC61136C3E8A51F693B31F86B322C7DD3835966A28"
+    },
+    {
+      "Name": "TR_QsEscalationCalculationLines_Guard",
+      "table": "QuantitySurveyEscalationCalculationLines",
+      "MigrationId": "20260809221500_AddQuantitySurveyEscalationCalculationRuns",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DE41047AD120C5452FED878D04950A09F048EE7D61E08D3B7287BB5A2FDA4EFC"
+    },
+    {
+      "Name": "TR_QsEscalationCalculationRevisions_Guard",
+      "table": "QuantitySurveyEscalationCalculationRevisions",
+      "MigrationId": "20260809221500_AddQuantitySurveyEscalationCalculationRuns",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "555E4AEC866327C990CA6C16D1266DD3FCAAE848C99437EAD9EF4D046C93D8AA"
+    },
+    {
+      "Name": "TR_QsEscalationCalculationRuns_Guard",
+      "table": "QuantitySurveyEscalationCalculationRuns",
+      "MigrationId": "20260809221500_AddQuantitySurveyEscalationCalculationRuns",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6F5824C38D2E854BFCEF8155010BBDDEDAE912482EFC018DFAF24A3A9D735EF4"
+    },
+    {
+      "Name": "TR_QsEscalationDisputeAttachments_Guard",
+      "table": "QuantitySurveyEscalationDisputeAttachments",
+      "MigrationId": "20260810005756_AddQuantitySurveyEscalationDisputes",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BAACBAACED5DEBFC7D8C17C30EF0C416F002E471E5B8A9EAB78A8AEC2027E80A"
+    },
+    {
+      "Name": "TR_QsEscalationDisputeRevisions_Guard",
+      "table": "QuantitySurveyEscalationDisputeRevisions",
+      "MigrationId": "20260810005756_AddQuantitySurveyEscalationDisputes",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "9F939AFCB32640D115E4497E118C83A58FB8F3FF881BBAC2EDE1AE4383291618"
+    },
+    {
+      "Name": "TR_QsEscalationDisputes_Guard",
+      "table": "QuantitySurveyEscalationDisputes",
+      "MigrationId": "20260810005756_AddQuantitySurveyEscalationDisputes",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "3436F7498D36BCD68119DD19084393191F30610059A0CE64177572FEFA3233DB"
+    },
+    {
+      "Name": "TR_QsEscalationFormulaComponents_Guard",
+      "table": "QuantitySurveyEscalationFormulaComponents",
+      "MigrationId": "20260809152905_AddQuantitySurveyEscalationFormulaRegister",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E75A91144A66F77DC62D3CFC956106AF0837A7360DA861A0B94ADB4DCB915CA0"
+    },
+    {
+      "Name": "TR_QsEscalationFormulaRevisions_AppendOnly",
+      "table": "QuantitySurveyEscalationFormulaRevisions",
+      "MigrationId": "20260809152905_AddQuantitySurveyEscalationFormulaRegister",
+      "OperationIndex": 4,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "34AA0A3476D76C827118B6D8EE345417FD539CB66433B1E0A70C8249DE95FD8A"
+    },
+    {
+      "Name": "TR_QsEscalationFormulas_ApprovedImmutable",
+      "table": "QuantitySurveyEscalationFormulas",
+      "MigrationId": "20260809152905_AddQuantitySurveyEscalationFormulaRegister",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DCB7D4D40345A3D6106B1C4EA2F33D9361567A80384446F9CA5DFD035EB6BFC5"
+    },
+    {
+      "Name": "TR_QsEscalationFormulas_TenantAndLineageGuard",
+      "table": "QuantitySurveyEscalationFormulas",
+      "MigrationId": "20260809152905_AddQuantitySurveyEscalationFormulaRegister",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BC40469723D2D12493BAB88CD0821DC968BF10350DEAAFD672F3D3A68DD4FB01"
+    },
+    {
+      "Name": "TR_QsEstimateAssumptions_ParentAndImmutableGuard",
+      "table": "QuantitySurveyEstimateAssumptions",
+      "MigrationId": "20260809002001_AddQuantitySurveyEstimateVersions",
+      "OperationIndex": 4,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "F67261DF1495A44FD2BEB62FFCDD8AFAF904F22840CE9A18DBF4992FF6ACE140"
+    },
+    {
+      "Name": "TR_QsEstimateLines_LineageGuard",
+      "table": "QuantitySurveyEstimateLines",
+      "MigrationId": "20260809002001_AddQuantitySurveyEstimateVersions",
+      "OperationIndex": 6,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E595CD2ABBEFD89E0FC49671C1D14122009E85BD57E762EFDB8007C1E31D8264"
+    },
+    {
+      "Name": "TR_QsEstimateLines_ParentAndImmutableGuard",
+      "table": "QuantitySurveyEstimateLines",
+      "MigrationId": "20260809002001_AddQuantitySurveyEstimateVersions",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "CA483AC235B45C6375E07CE2377388646F39DC809386C2EBF663C737D7EFF7D3"
+    },
+    {
+      "Name": "TR_QsEstimateMarkups_ParentAndImmutableGuard",
+      "table": "QuantitySurveyEstimateMarkups",
+      "MigrationId": "20260809002001_AddQuantitySurveyEstimateVersions",
+      "OperationIndex": 5,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "513B70243BF065FA03381D53BB7F28167B90A4668ADF6ED5485EEABE212CD3BD"
+    },
+    {
+      "Name": "TR_QsEstimateRevisions_Immutable",
+      "table": "QuantitySurveyEstimateRevisions",
+      "MigrationId": "20260809002001_AddQuantitySurveyEstimateVersions",
+      "OperationIndex": 7,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "772B74D64DDD8218A89CD9B432967BBBA5B696A512845FBEB9FAC1D69D297F9E"
+    },
+    {
+      "Name": "TR_QsEstimateVersions_ApprovedImmutable",
+      "table": "QuantitySurveyEstimateVersions",
+      "MigrationId": "20260809002001_AddQuantitySurveyEstimateVersions",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "8751111EE7FD479254E970C7F850EC7361884879185FBD8D45DC980D21FFAB94"
+    },
+    {
+      "Name": "TR_QsEstimateVersions_TenantAndLineageGuard",
+      "table": "QuantitySurveyEstimateVersions",
+      "MigrationId": "20260809002001_AddQuantitySurveyEstimateVersions",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "45560B9339FBCDEF77E3432ABCDD1AAB20EAC1B6A609F7E5AF1CE6AE6AF1DB09"
+    },
+    {
+      "Name": "TR_QsJointEndorsement_Guard",
+      "table": "QuantitySurveyJointMeasurementEndorsements",
+      "MigrationId": "20260810041753_AddQuantitySurveyJointMeasurements",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B841B371B3D61ED4F8D0E43333B24CFD41AAD7F692117D08C8F0304B3837770F"
+    },
+    {
+      "Name": "TR_QsJointEvidence_Guard",
+      "table": "QuantitySurveyJointMeasurementEvidence",
+      "MigrationId": "20260810041753_AddQuantitySurveyJointMeasurements",
+      "OperationIndex": 4,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "7AC2B376F993382930B9F90159900653FD81070429C957FC2F60BBA12C44D6A6"
+    },
+    {
+      "Name": "TR_QsJointParticipant_Guard",
+      "table": "QuantitySurveyJointMeasurementParticipants",
+      "MigrationId": "20260810041753_AddQuantitySurveyJointMeasurements",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "E39319C5580AA9484ABDDE312BB8AD3EF6D447C5D21ED3100453792CDBE348F7"
+    },
+    {
+      "Name": "TR_QsJointRequest_Guard",
+      "table": "QuantitySurveyJointMeasurementRequests",
+      "MigrationId": "20260810041753_AddQuantitySurveyJointMeasurements",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "ABE62A9C0728F21839D461BF9C803D36FD1DD3E66C64C635A1838739F836F314"
+    },
+    {
+      "Name": "TR_QsJointRevision_Guard",
+      "table": "QuantitySurveyJointMeasurementRevisions",
+      "MigrationId": "20260810041753_AddQuantitySurveyJointMeasurements",
+      "OperationIndex": 5,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "824DC799EF9BA7BA74FAC033072D5233E9C7D7E232A52A2884B5705D91140C77"
+    },
+    {
       "Name": "TR_QsMeasurementAttachments_Guard",
       "table": "QuantitySurveyMeasurementAttachments",
       "MigrationId": "20260810023000_AddQuantitySurveyMeasurementSheets",
@@ -2584,6 +3186,62 @@
       "OperationIndex": 1,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "7BEC2C7B5E1AD98B0A0BCD82C313171991E82D0D4E5AFDB26821717E2FFCE00C"
+    },
+    {
+      "Name": "TR_QsPriceIndexFamilies_ImportInUseGuard",
+      "table": "QuantitySurveyPriceIndexFamilies",
+      "MigrationId": "20260809165157_AddQuantitySurveyPriceIndexImportWorkflow",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "2F1333DB77C7ABE90583E3A4CC3981C9B515303652993D8705956D7C07D9864A"
+    },
+    {
+      "Name": "TR_QsPriceIndexFamilies_InUseGuard",
+      "table": "QuantitySurveyPriceIndexFamilies",
+      "MigrationId": "20260809152905_AddQuantitySurveyEscalationFormulaRegister",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "D15D60B2762E91A81F39867DFFECB1630AC5CD4FFB1ABA6E41A4197DBDD01DDA"
+    },
+    {
+      "Name": "TR_QsPriceIndexImportBatches_Guard",
+      "table": "QuantitySurveyPriceIndexImportBatches",
+      "MigrationId": "20260809165157_AddQuantitySurveyPriceIndexImportWorkflow",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B1AD697D819EA0D9035567286A48CA94D082EF5E047B763CCA0747732C256FD2"
+    },
+    {
+      "Name": "TR_QsPriceIndexImportRevisions_AppendOnly",
+      "table": "QuantitySurveyPriceIndexImportRevisions",
+      "MigrationId": "20260809165157_AddQuantitySurveyPriceIndexImportWorkflow",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "BDF59E1D23AA92654E31DB5071A34A6FF0ACA75B72E0BDADA1F68BE4C45EDB88"
+    },
+    {
+      "Name": "TR_QsPriceIndexValues_Guard",
+      "table": "QuantitySurveyPriceIndexValues",
+      "MigrationId": "20260809165157_AddQuantitySurveyPriceIndexImportWorkflow",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "1C98B05A61D6C0925A23CF0AB02F06E69FA4EC7FA25E269EB9BD8D9FBEBD770C"
+    },
+    {
+      "Name": "TR_QsRateBuildUpLines_Immutable",
+      "table": "QuantitySurveyRateBuildUpLines",
+      "MigrationId": "20260808231322_AddQuantitySurveyRateBuildUps",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "6CEE8F2399973397F8C0CF85E09C3F8648A5C045D0B103E01F87842A909BC0DD"
+    },
+    {
+      "Name": "TR_QsRateBuildUps_Immutable",
+      "table": "QuantitySurveyRateBuildUps",
+      "MigrationId": "20260808231322_AddQuantitySurveyRateBuildUps",
+      "OperationIndex": 0,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "EDD6137C5896698FABAE3D4A2BAE4A228DCF5535DC4DA61BC30D26849A5C9400"
     },
     {
       "Name": "TR_QsValuationWorksheetEvidence_AppendOnly",
@@ -2674,6 +3332,22 @@
       "bodySha256": "A6D860294952B55E0DF7DC151000E0FABDF13B879AEE8100F621EFABEF59960D"
     },
     {
+      "Name": "TR_StockMovements_GovernedInventoryReturnAdjustment",
+      "table": "StockMovements",
+      "MigrationId": "20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments",
+      "OperationIndex": 8,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "DDD36ADE50CC7DF4559726398CEE4EFCC3A6D9D02D79CC868E6D0BE55E884E52"
+    },
+    {
+      "Name": "TR_StockMovements_GovernedInventoryTransfer",
+      "table": "StockMovements",
+      "MigrationId": "20260802095353_TDC0608ControlledInventoryTransfers",
+      "OperationIndex": 6,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "4D1DED1D8A8B7D26D912A0A1B835331DAB9B29554C02A9DC80FBC139AA6E83BF"
+    },
+    {
       "Name": "TR_StockMovements_GovernedPurchaseReceipt",
       "table": "StockMovements",
       "MigrationId": "20260731123000_TDC0501ReceiptSourceControl",
@@ -2696,6 +3370,22 @@
       "OperationIndex": 6,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "5E3CCFE32015EC30F0B6D535880731E10F429CEAF9EC02EAAABB44F810983139"
+    },
+    {
+      "Name": "TR_StockMovements_TDC0502InspectionContext",
+      "table": "StockMovements",
+      "MigrationId": "20260731140000_TDC0502ReceiptInspectionClosure",
+      "OperationIndex": 8,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A77DD862B36C587B1C88C55C0DE688911B2E86B9002B1EB566C98E2116B5669E"
+    },
+    {
+      "Name": "TR_StockMovements_TDC0503ReceiptSod",
+      "table": "StockMovements",
+      "MigrationId": "20260731153000_TDC0503ReceiptSodClosure",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "B5EADA1221921A59B260A795CEF1545465E540DA8D5256D644D9E70F4D2E30E1"
     },
     {
       "Name": "TR_TDC0501_GoodsReceiptIdempotencyFingerprint",
@@ -2736,6 +3426,30 @@
       "OperationIndex": 1,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "7168A1FB19BF729D0EC14CB4DD6D96AC3BF58E8FA347ADB753F66956B054467C"
+    },
+    {
+      "Name": "TR_TenderAwardVerificationItemDocuments_TDC0808DmsLineage",
+      "table": "TenderAwardVerificationItemDocuments",
+      "MigrationId": "20260806091039_TDC0808ProcurementCentralDmsAdoption",
+      "OperationIndex": 3,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "C0E866C643C7512A4196FA23B157A345B08F4675759435AA88406E8DC41E3A74"
+    },
+    {
+      "Name": "TR_TenderBidDocuments_TDC0808DmsLineage",
+      "table": "TenderBidDocuments",
+      "MigrationId": "20260806091039_TDC0808ProcurementCentralDmsAdoption",
+      "OperationIndex": 2,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "A986B66BDDB3373EE76D762F5FF57A70A79AD8CED22CD11AB7BBE4606C84FE3B"
+    },
+    {
+      "Name": "TR_TenderDocuments_TDC0808DmsLineage",
+      "table": "TenderDocuments",
+      "MigrationId": "20260806091039_TDC0808ProcurementCentralDmsAdoption",
+      "OperationIndex": 1,
+      "Derivation": "ACTIVE_NON_MODEL_ARCHIVED_FINAL_DEFINITION",
+      "bodySha256": "5013BC780004C2BD1934ED5DFB845CEC1D20376E53789F23A4220BE91CB6A2F2"
     },
     {
       "Name": "TR_TenderEvaluations_CommitteeScoreProjection",
@@ -2848,6 +3562,2272 @@
       "OperationIndex": 2,
       "Derivation": "ARCHIVED_FINAL_DEFINITION",
       "bodySha256": "FCB914613C5238AE3F59EC05B2E754F2C2992D058066D4DA91EFA645D978B78F"
+    }
+  ],
+  "modelTriggerNames": [
+    "TR_AuditLogs_AppendOnly",
+    "TR_AuditRecordLifecycleEvents_AppendOnly",
+    "TR_BusinessPartnerRegistrationDocuments_ControlledFileGuard",
+    "TR_CivilEngineeringMaintenanceAssessmentRevisions_AppendOnly",
+    "TR_CivilEngineeringMaintenanceAssessmentRevisions_Lineage",
+    "TR_CivilEngineeringMaintenanceAssessments_Lifecycle",
+    "TR_CivilEngineeringMaintenanceAssessments_Lineage",
+    "TR_CivilEngineeringMaintenanceCompletionControls_Lifecycle",
+    "TR_CivilEngineeringMaintenanceCompletionControls_Lineage",
+    "TR_CivilEngineeringMaintenanceCompletionRevisions_AppendOnly",
+    "TR_CivilEngineeringMaintenanceCompletionRevisions_Lineage",
+    "TR_CivilEngineeringMaintenanceCostingHandoffRevisions_AppendOnly",
+    "TR_CivilEngineeringMaintenanceCostingHandoffRevisions_Lineage",
+    "TR_CivilEngineeringMaintenanceCostingHandoffs_Lifecycle",
+    "TR_CivilEngineeringMaintenanceCostingHandoffs_Lineage",
+    "TR_CivilEngineeringMaintenanceExecutionLinkRevisions_AppendOnly",
+    "TR_CivilEngineeringMaintenanceExecutionLinkRevisions_Lineage",
+    "TR_CivilEngineeringMaintenanceExecutionLinks_Lifecycle",
+    "TR_CivilEngineeringMaintenanceExecutionLinks_Lineage",
+    "TR_CivilEngineeringMaintenanceIntakeRevisions_AppendOnly",
+    "TR_CivilEngineeringMaintenanceIntakeRevisions_Lineage",
+    "TR_CivilEngineeringMaintenanceIntakes_Lineage",
+    "TR_ContractDocuments_TDC0407DmsRequired",
+    "TR_Contracts_QS0520CommercialTerms",
+    "TR_Contracts_TDC0407ActivationGuard",
+    "TR_Contracts_TDC0409CloseoutGuard",
+    "TR_EmergencyProcurementPlans_Governance",
+    "TR_FileUploadRecords_RegistrationEvidenceDeleteGuard",
+    "TR_GoodsReceiptNoteItems_GovernedCapacity",
+    "TR_GoodsReceiptNotes_GovernedSource",
+    "TR_HrIdentityReconciliationItems_NoMutation",
+    "TR_HrIdentityReconciliationItems_TenantGuard",
+    "TR_HrIdentityReconciliationRuns_CompletedImmutable",
+    "TR_HrIdentityReconciliationRuns_TenantGuard",
+    "TR_HrIdentityReconciliationStates_TenantGuard",
+    "TR_HrIdentityWorkflowIssues_TenantGuard",
+    "TR_InventoryAllocations_ProjectReservationGuard",
+    "TR_InventoryAllocations_WorkOrderReservationGuard",
+    "TR_InventoryBalances_ExactBinNegativeStockGuard",
+    "TR_InventoryCycleCountSchedules_ControlledLifecycle",
+    "TR_InventoryDisposalActions_AppendOnly",
+    "TR_InventoryDisposalCases_Guard",
+    "TR_InventoryDisposalCommitteeMembers_Guard",
+    "TR_InventoryDisposalEvidence_AppendOnly",
+    "TR_InventoryDisposalLines_Immutable",
+    "TR_InventoryIssueAccountingRules_TenantOwner",
+    "TR_InventoryIssueFinanceLineages_Lifecycle",
+    "TR_InventoryIssueReturnAllocations_Immutable",
+    "TR_InventoryIssueVoucherActions_AppendOnly",
+    "TR_InventoryIssueVoucherLines_AppendOnly",
+    "TR_InventoryIssueVouchers_ControlledLifecycle",
+    "TR_InventoryItems_NegativeStockGuard",
+    "TR_InventoryItems_PhysicalCountFreeze",
+    "TR_InventoryLocations_NegativeStockGuard",
+    "TR_InventoryMovements_GovernedPurchaseReceipt",
+    "TR_InventoryReturnVoucherActions_AppendOnly",
+    "TR_InventoryReturnVoucherEvidence_AppendOnly",
+    "TR_InventoryReturnVoucherLines_AppendOnly",
+    "TR_InventoryReturnVouchers_ControlledLifecycle",
+    "TR_InventoryTransferActionLines_AppendOnly",
+    "TR_InventoryTransferActions_AppendOnly",
+    "TR_InventoryTransferDiscrepancies_ControlledLifecycle",
+    "TR_InventoryTransferDiscrepancyEvidence_AppendOnly",
+    "TR_InventoryTransferItems_ControlledMutation",
+    "TR_InventoryTransfers_ControlledLifecycle",
+    "TR_InventoryValuationReconciliationActions_Immutable",
+    "TR_InventoryValuationReconciliations_Guard",
+    "TR_InventoryWorkOrderReservationActions_Immutable",
+    "TR_PaymentBatchInvoice_TDC0505ImmutableSelection",
+    "TR_PaymentBatchInvoice_TDC0505PaymentReadiness",
+    "TR_PaymentBatch_TDC0505Readiness",
+    "TR_PaymentBatch_TDC0506InvoiceProcessorSod",
+    "TR_PhysicalCountActions_AppendOnly",
+    "TR_PhysicalCountItems_ControlledMutation",
+    "TR_PhysicalCounts_ControlledLifecycle",
+    "TR_ProcurementAppSubmissions_NoDelete",
+    "TR_ProcurementAwardReadinessDecisions_Immutable",
+    "TR_ProcurementBidderAppealDecisions_Immutable",
+    "TR_ProcurementBidderAppeals_Immutable",
+    "TR_ProcurementBidderCommunicationAcknowledgements_Immutable",
+    "TR_ProcurementBidderCommunicationDeliveries_Immutable",
+    "TR_ProcurementBidderCommunicationDispatches_Immutable",
+    "TR_ProcurementBidderCommunicationLetterVersions_Immutable",
+    "TR_ProcurementBidderCommunicationRecipients_Immutable",
+    "TR_ProcurementBidderCommunicationRegisters_Immutable",
+    "TR_ProcurementBudgetCommitmentLedgerEntries_Immutable",
+    "TR_ProcurementBudgetCommitments_LifecycleGuard",
+    "TR_ProcurementBudgetCommitments_NoDelete",
+    "TR_ProcurementBudgetCommitments_TenantAndEvidenceGuard",
+    "TR_ProcurementCalendarOccurrences_TenantGuard",
+    "TR_ProcurementCalendarProfiles_LifecycleGuard",
+    "TR_ProcurementCalendarRules_LifecycleGuard",
+    "TR_ProcurementContractActivationEvidence_TDC0407Immutable",
+    "TR_ProcurementContractActivations_TDC0407Protected",
+    "TR_ProcurementControlEventEvidenceLinks_AppendOnly",
+    "TR_ProcurementControlEvents_AppendOnly",
+    "TR_ProcurementEvaluationAttendanceRecords_Immutable",
+    "TR_ProcurementEvaluationCommitteeAppointments_Lifecycle",
+    "TR_ProcurementEvaluationCommitteeControls_Lifecycle",
+    "TR_ProcurementEvaluationCommitteeRoleRequirements_Immutable",
+    "TR_ProcurementEvaluationConflictDeclarations_Immutable",
+    "TR_ProcurementEvaluationMeetings_Lifecycle",
+    "TR_ProcurementEvaluationScoreRecalls_Lifecycle",
+    "TR_ProcurementEvaluationScoreSheets_Immutable",
+    "TR_ProcurementExceptionalSourcingControls_Lifecycle",
+    "TR_ProcurementFrameworkAgreementBalances_Protected",
+    "TR_ProcurementFrameworkAgreementCategories_Protected",
+    "TR_ProcurementFrameworkAgreementDocuments_Protected",
+    "TR_ProcurementFrameworkAgreementExtensions_Lifecycle",
+    "TR_ProcurementFrameworkAgreements_Lifecycle",
+    "TR_ProcurementFrameworkBalanceMovements_AppendOnly",
+    "TR_ProcurementFrameworkCallOffAuthorities_Protected",
+    "TR_ProcurementFrameworkCallOffLines_Protected",
+    "TR_ProcurementFrameworkCallOffs_Lifecycle",
+    "TR_ProcurementFrameworkCallOffs_PurchaseOrderSource",
+    "TR_ProcurementFrameworkPriceListLines_Protected",
+    "TR_ProcurementGhanepsExchangeAcknowledgements_Immutable",
+    "TR_ProcurementGhanepsExchangeAttempts_Immutable",
+    "TR_ProcurementGhanepsExchangeEvents_Guard",
+    "TR_ProcurementGhanepsExchangePayloads_Immutable",
+    "TR_ProcurementGhanepsExchangeReconciliations_Immutable",
+    "TR_ProcurementMasterDataChangeEvidenceLinks_SubmittedGuard",
+    "TR_ProcurementMasterDataChangeRequests_NoDelete",
+    "TR_ProcurementMasterDataChangeRequests_SnapshotGuard",
+    "TR_ProcurementMasterDataControlPolicies_LifecycleGuard",
+    "TR_ProcurementPrequalificationApplications_Lifecycle",
+    "TR_ProcurementPrequalificationCriteria_ImmutableAfterAdvertisement",
+    "TR_ProcurementPrequalificationExercises_Lifecycle",
+    "TR_ProcurementPrequalificationScores_Immutable",
+    "TR_ProcurementPurchaseOrderAmendmentAcknowledgements_Immutable",
+    "TR_ProcurementPurchaseOrderAmendmentDispatches_Immutable",
+    "TR_ProcurementPurchaseOrderAmendments_Protected",
+    "TR_ProcurementPurchaseOrderCommitmentAdjustments_Immutable",
+    "TR_ProcurementQualifiedListEntries_Lifecycle",
+    "TR_ProcurementReceiptDocumentActions_TDC0509Immutable",
+    "TR_ProcurementReceiptDocumentSignatures_TDC0509Immutable",
+    "TR_ProcurementReceiptDocuments_TDC0509Protected",
+    "TR_ProcurementReceiptInspectionActions_TDC0502Immutable",
+    "TR_ProcurementReceiptInspectionCases_TDC0502Protected",
+    "TR_ProcurementReceiptInspectionEvidence_TDC0502Immutable",
+    "TR_ProcurementReceiptInspectionLines_TDC0502Protected",
+    "TR_ProcurementReceiptSourceEvidence_INVREQFU001",
+    "TR_ProcurementRequisitionAuthorityRouteSteps_NoMutation",
+    "TR_ProcurementRequisitionAuthorityRouteSteps_TenantGuard",
+    "TR_ProcurementRequisitionAuthorityRoutes_NoMutation",
+    "TR_ProcurementRequisitionAuthorityRoutes_TenantGuard",
+    "TR_ProcurementRequisitionSourcingReleases_NoMutation",
+    "TR_ProcurementRequisitionSourcingReleases_TenantGuard",
+    "TR_ProcurementRfqEvaluationLines_Lifecycle",
+    "TR_ProcurementRfqEvaluations_Lifecycle",
+    "TR_ProcurementRfqOpeningEntries_Immutable",
+    "TR_ProcurementRfqOpeningParticipants_Immutable",
+    "TR_ProcurementRfqOpeningRegisters_Immutable",
+    "TR_ProcurementRfqReceipts_Immutable",
+    "TR_ProcurementSourcingCaseLotItems_NoMutation",
+    "TR_ProcurementSourcingCaseLots_NoMutation",
+    "TR_ProcurementSourcingCaseSourceRequests_Lifecycle",
+    "TR_ProcurementSourcingCases_Lifecycle",
+    "TR_ProcurementSpecificationTemplates_LifecycleGuard",
+    "TR_ProcurementSpecificationTemplates_NoDelete",
+    "TR_ProcurementSupplierApplicantAccesses_Protected",
+    "TR_ProcurementSupplierApplicantSessions_Protected",
+    "TR_ProcurementSupplierAvlEntries_Protected",
+    "TR_ProcurementSupplierAvlEntryStatusHistories_AppendOnly",
+    "TR_ProcurementSupplierAvlPublicationSnapshots_AppendOnly",
+    "TR_ProcurementSupplierAvlRegisters_Lifecycle",
+    "TR_ProcurementSupplierDueDiligenceChecks_Protected",
+    "TR_ProcurementSupplierDueDiligenceEvidenceLinks_Protected",
+    "TR_ProcurementSupplierDueDiligenceReviews_Lifecycle",
+    "TR_ProcurementSupplierEvidencePackVersions_Lifecycle",
+    "TR_ProcurementSupplierEvidenceRequirements_Protected",
+    "TR_ProcurementSupplierOnboardingExemptions_Protected",
+    "TR_ProcurementSupplierOnboardingPayments_Protected",
+    "TR_ProcurementSupplierOnboardingTokens_Protected",
+    "TR_ProcurementSupplierPerformanceScorecards_AppendOnly",
+    "TR_ProcurementSupplierRegistrationEvidencePackBindings_Immutable",
+    "TR_ProcurementSupplierRiskAlerts_Lifecycle",
+    "TR_ProcurementSupplierRiskAssessments_AppendOnly",
+    "TR_ProcurementTenderControls_Lifecycle",
+    "TR_ProcurementTenderDocumentAcknowledgements_Immutable",
+    "TR_ProcurementTenderDocumentChangeRecipients_Immutable",
+    "TR_ProcurementTenderDocumentChanges_Lifecycle",
+    "TR_ProcurementTenderDocumentIssuances_Immutable",
+    "TR_ProcurementTenderDocumentIssues_Immutable",
+    "TR_ProcurementTenderDocumentRegisters_Immutable",
+    "TR_ProcurementTenderDocumentTemplateMethods_Immutable",
+    "TR_ProcurementTenderDocumentTemplateVersions_Lifecycle",
+    "TR_ProcurementTenderSecurityActions_Immutable",
+    "TR_ProcurementTenderSecurityInstruments_Immutable",
+    "TR_ProcurementTenderSubmissionReceipts_Immutable",
+    "TR_ProcurementWorksCloseoutActions_QS0504RetentionGuard",
+    "TR_ProcurementWorksCloseoutActions_TDC0409Protected",
+    "TR_ProcurementWorksCloseoutEvidence_TDC0409Immutable",
+    "TR_ProjectCivilDesignCases_Lifecycle",
+    "TR_ProjectCivilDesignEvidence_AppendOnly",
+    "TR_ProjectCivilDesignEvidence_Lineage",
+    "TR_ProjectCivilDesignInputResponses_AppendOnly",
+    "TR_ProjectCivilDesignInputResponses_Lineage",
+    "TR_ProjectCivilDesignRevisions_AppendOnly",
+    "TR_ProjectCivilDesignRevisions_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_AppendOnly",
+    "TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalEngineeringReviewRevisions_AppendOnly",
+    "TR_ProjectCivilDevelopmentApprovalEngineeringReviewRevisions_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lifecycle",
+    "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalEvidence_AppendOnly",
+    "TR_ProjectCivilDevelopmentApprovalEvidence_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalFileHandoffs_AppendOnly",
+    "TR_ProjectCivilDevelopmentApprovalFileHandoffs_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalFileRevisions_AppendOnly",
+    "TR_ProjectCivilDevelopmentApprovalFileRevisions_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalFiles_Lifecycle",
+    "TR_ProjectCivilDevelopmentApprovalFiles_Lineage",
+    "TR_ProjectCivilDevelopmentApprovalHandoffEvidence_AppendOnly",
+    "TR_ProjectCivilDevelopmentApprovalHandoffEvidence_Lineage",
+    "TR_ProjectCivilDirectTaskControls_FeedbackLifecycle",
+    "TR_ProjectCivilDirectTaskControls_Lifecycle",
+    "TR_ProjectCivilDirectTaskControls_Lineage",
+    "TR_ProjectCivilDirectTaskControls_UrgentPath",
+    "TR_ProjectCivilDirectTaskFeedbackEntries_AppendOnly",
+    "TR_ProjectCivilDirectTaskFeedbackEntries_Lineage",
+    "TR_ProjectCivilDirectTaskRevisions_AppendOnly",
+    "TR_ProjectCivilDirectTaskRevisions_Lineage",
+    "TR_ProjectCivilEngineeringDocumentRevisions_AppendOnly",
+    "TR_ProjectCivilEngineeringDocumentRevisions_Lineage",
+    "TR_ProjectCivilEngineeringDocuments_Lifecycle",
+    "TR_ProjectCivilEngineeringDocuments_Lineage",
+    "TR_ProjectCivilExtensionOfTimeControls_Lifecycle",
+    "TR_ProjectCivilExtensionOfTimeControls_Lineage",
+    "TR_ProjectCivilExtensionOfTimeRevisions_AppendOnly",
+    "TR_ProjectCivilExtensionOfTimeRevisions_Lineage",
+    "TR_ProjectCivilInspectionControls_Lifecycle",
+    "TR_ProjectCivilInspectionControls_Lineage",
+    "TR_ProjectCivilInspectionControls_Workflow",
+    "TR_ProjectCivilInspectionRevisions_AppendOnly",
+    "TR_ProjectCivilInspectionRevisions_Lineage",
+    "TR_ProjectCivilIpcEndorsementRevisions_AppendOnly",
+    "TR_ProjectCivilIpcEndorsementRevisions_Lineage",
+    "TR_ProjectCivilIpcEndorsements_Lifecycle",
+    "TR_ProjectCivilIpcEndorsements_Lineage",
+    "TR_ProjectCivilMigrationBatches_Lifecycle",
+    "TR_ProjectCivilMigrationBatches_Lineage",
+    "TR_ProjectCivilMigrationRecords_AppendOnly",
+    "TR_ProjectCivilMigrationRecords_Lineage",
+    "TR_ProjectCivilMigrationRevisions_AppendOnly",
+    "TR_ProjectCivilMigrationRevisions_Lineage",
+    "TR_ProjectCivilMigrationValidationIssues_AppendOnly",
+    "TR_ProjectCivilMigrationValidationIssues_Lineage",
+    "TR_ProjectCivilPlanningGisValidationRevisions_AppendOnly",
+    "TR_ProjectCivilPlanningGisValidationRevisions_Lineage",
+    "TR_ProjectCivilPlanningGisValidations_EvidenceBinding",
+    "TR_ProjectCivilPlanningGisValidations_Lifecycle",
+    "TR_ProjectCivilPlanningGisValidations_Lineage",
+    "TR_ProjectCivilProjectEngineerAssignmentRevisions_AppendOnly",
+    "TR_ProjectCivilProjectEngineerAssignmentRevisions_Lineage",
+    "TR_ProjectCivilProjectEngineerAssignments_Lifecycle",
+    "TR_ProjectCivilProjectEngineerAssignments_Lineage",
+    "TR_ProjectCivilQualityTestReports_Lifecycle",
+    "TR_ProjectCivilQualityTestReports_Lineage",
+    "TR_ProjectCivilQualityTestRevisions_AppendOnly",
+    "TR_ProjectCivilQualityTestRevisions_Lineage",
+    "TR_ProjectCivilReconnaissanceItems_Lineage",
+    "TR_ProjectCivilReconnaissanceReports_Lifecycle",
+    "TR_ProjectCivilReconnaissanceRevisions_AppendOnly",
+    "TR_ProjectCivilReconnaissanceRevisions_Lineage",
+    "TR_ProjectCivilRfiEvidence_Lineage",
+    "TR_ProjectCivilRfiResponses_AppendOnly",
+    "TR_ProjectCivilRfiResponses_Lineage",
+    "TR_ProjectCivilRfiRevisions_AppendOnly",
+    "TR_ProjectCivilRfiRevisions_Lineage",
+    "TR_ProjectCivilRfiRoutings_Lifecycle",
+    "TR_ProjectCivilRfiRoutings_Lineage",
+    "TR_ProjectCivilSiteInstructionEvidence_Lineage",
+    "TR_ProjectCivilSiteInstructionResponses_AppendOnly",
+    "TR_ProjectCivilSiteInstructionResponses_Lineage",
+    "TR_ProjectCivilSiteInstructionRevisions_AppendOnly",
+    "TR_ProjectCivilSiteInstructionRevisions_Lineage",
+    "TR_ProjectCivilSiteInstructionRoutings_Lifecycle",
+    "TR_ProjectCivilSiteInstructionRoutings_Lineage",
+    "TR_ProjectCivilWeeklySupervisionActivities_Lineage",
+    "TR_ProjectCivilWeeklySupervisionEvidence_Lineage",
+    "TR_ProjectCivilWeeklySupervisionReports_Lifecycle",
+    "TR_ProjectCivilWeeklySupervisionReports_Lineage",
+    "TR_ProjectCivilWeeklySupervisionReviews_Lineage",
+    "TR_ProjectCivilWeeklySupervisionRevisions_AppendOnly",
+    "TR_ProjectCivilWeeklySupervisionRevisions_Lineage",
+    "TR_ProjectPaymentCertificates_QsLifecycle",
+    "TR_ProjectRfis_CivilDesignInputLifecycle",
+    "TR_PurchaseOrderItems_FrameworkCallOffProtected",
+    "TR_PurchaseOrderReceiptItems_GovernedCapacity",
+    "TR_PurchaseOrderReceipts_GovernedSource",
+    "TR_PurchaseOrders_ApprovedSourceProtected",
+    "TR_PurchaseOrders_FrameworkCallOffProtected",
+    "TR_PurchaseRequisitions_LinkageGuard",
+    "TR_QS0507_MaterialReconciliationLines_Governance",
+    "TR_QS0507_MaterialReconciliationRevisions_AppendOnly",
+    "TR_QS0507_MaterialReconciliation_Governance",
+    "TR_QS0507_PaymentCertificateMaterialLineage",
+    "TR_QS0508_ProjectVariation_Governance",
+    "TR_QS0508_VariationEvidence_AppendOnly",
+    "TR_QS0508_VariationLines_Governance",
+    "TR_QS0508_VariationRevisions_AppendOnly",
+    "TR_QS0509_ContractClaimEvidence_AppendOnly",
+    "TR_QS0509_ContractClaimRevisions_AppendOnly",
+    "TR_QS0509_ContractClaims_Governance",
+    "TR_QS0510_DayworkEvidence_AppendOnly",
+    "TR_QS0510_DayworkLines_Governance",
+    "TR_QS0510_DayworkRevisions_AppendOnly",
+    "TR_QS0510_DayworkSheets_Governance",
+    "TR_QS0511_VariationApplication_Governance",
+    "TR_QS0521_SubcontractEvidence_AppendOnly",
+    "TR_QS0521_SubcontractRevisions_AppendOnly",
+    "TR_QS0521_SubcontractValuations_Governance",
+    "TR_QS0521_Subcontracts_Governance",
+    "TR_QS0522_SubcontractChargeEvidence_AppendOnly",
+    "TR_QS0522_SubcontractChargeRevisions_AppendOnly",
+    "TR_QS0522_SubcontractCharges_Governance",
+    "TR_QsMeasurementAttachments_Guard",
+    "TR_QsMeasurementLines_Guard",
+    "TR_QsMeasurementRevisions_Guard",
+    "TR_QsMeasurementSheets_Guard",
+    "TR_QsValuationWorksheetEvidence_AppendOnly",
+    "TR_QsValuationWorksheetLines_Guard",
+    "TR_QsValuationWorksheetRevisions_AppendOnly",
+    "TR_QsValuationWorksheets_Guard",
+    "TR_QuantitySurveyPaymentCertificateRevisions_AppendOnly",
+    "TR_RequestForQuotations_SourcingReleaseGuard",
+    "TR_RequestForQuotations_StatutoryLifecycleGuard",
+    "TR_StockAdjustmentActions_AppendOnly",
+    "TR_StockAdjustmentEvidence_AppendOnly",
+    "TR_StockAdjustmentItems_ControlledMutation",
+    "TR_StockAdjustments_ControlledLifecycle",
+    "TR_StockMovements_GovernedPurchaseReceipt",
+    "TR_StockMovements_GovernedRequisitionIssue",
+    "TR_StockMovements_PhysicalCountFreeze",
+    "TR_TDC0501_GoodsReceiptIdempotencyFingerprint",
+    "TR_TDC0502_ReceiptReplacementLineage",
+    "TR_TDC0601_InventoryItems_IdentifierIntegrity",
+    "TR_TDC0601_ItemUnitsOfMeasure_IdentifierIntegrity",
+    "TR_TDC0616_InventoryItems_ProfileIntegrity",
+    "TR_TenderEvaluations_CommitteeScoreProjection",
+    "TR_Tenders_SourcingReleaseGuard",
+    "TR_VendorInvoiceLineItem_TDC0504MatchIntegrity",
+    "TR_VendorInvoiceMatchExceptionAction_TDC0507Immutable",
+    "TR_VendorInvoiceMatchExceptionEvidence_TDC0507Immutable",
+    "TR_VendorInvoiceMatchExceptionVariance_TDC0507Immutable",
+    "TR_VendorInvoiceMatchException_TDC0507Protected",
+    "TR_VendorInvoice_AcceptedSupplyProtected",
+    "TR_VendorInvoice_TDC0504MandatoryMatch",
+    "TR_VendorPaymentAllocation_TDC0505PaymentReadiness",
+    "TR_VendorPayment_TDC0506InvoiceProcessorSod",
+    "TR_WarehouseQuantities_NegativeStockGuard",
+    "TR_WarehouseQuantities_PhysicalCountFreeze",
+    "TR_WorkOrderParts_ReservationLineageGuard"
+  ],
+  "activeNonModelTriggerNames": [
+    "TR_CivilEngineeringConfigurationRevisions_AppendOnly",
+    "TR_CivilEngineeringMaintenanceIntakes_Lifecycle",
+    "TR_GoodsReceiptNoteItems_TDC0502AcceptanceProtected",
+    "TR_GoodsReceiptNotes_TDC0503SodHardStop",
+    "TR_InventoryDirectedTaskActions_AppendOnly",
+    "TR_InventoryDirectedTasks_Integrity",
+    "TR_InventoryMovements_TDC0502InspectionContext",
+    "TR_InventoryMovements_TDC0503ReceiptSod",
+    "TR_InventoryProjectReservationActions_Immutable",
+    "TR_InventoryReplenishmentActions_Immutable",
+    "TR_InventoryReplenishmentRecommendations_Guard",
+    "TR_ProcurementAppSubmissions_LifecycleGuard",
+    "TR_ProcurementBudgetCommitments_DownstreamExposure",
+    "TR_ProcurementPrequalificationExercises_PolicyLineage",
+    "TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop",
+    "TR_ProcurementResponsibilityLocations_ValidateScope",
+    "TR_ProcurementRfqOpeningRegisters_EffectiveDeadline",
+    "TR_ProcurementRfqReceipts_EffectiveDeadline",
+    "TR_ProcurementSourcingCases_MethodSelection",
+    "TR_ProcurementTenderControls_CommitteeScoreProjection",
+    "TR_ProcurementTenderSubmissionReceipts_EffectiveDeadline",
+    "TR_ProjectAssetLinks_ReconciliationLineage",
+    "TR_ProjectBoqRemeasurementLines_Guard",
+    "TR_ProjectBoqRemeasurementRevisions_Guard",
+    "TR_ProjectBoqRemeasurementSources_Guard",
+    "TR_ProjectBoqVersionLines_ImmutablePublished",
+    "TR_ProjectBoqVersions_ImmutablePublished",
+    "TR_ProjectCivilDesignCases_InitiationLineage",
+    "TR_ProjectCivilDesignCases_PlanningGisGate",
+    "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_HodDecisionProjection",
+    "TR_ProjectCivilDirectTaskFeedbackEntries_FieldCapture",
+    "TR_ProjectCivilReconnaissanceReports_Delete",
+    "TR_ProjectDrawings_QsRevisionLineage",
+    "TR_ProjectExtensionOfTimeRequests_CivilControl",
+    "TR_ProjectFinalAccountRevisions_QS0506AppendOnly",
+    "TR_ProjectFinalAccounts_QS0506Guard",
+    "TR_ProjectPaymentCertificates_QS0505AdvanceRecoveryGuard",
+    "TR_PurchaseOrderItems_ApprovedCommercialCapacity",
+    "TR_PurchaseOrderItems_TDC0502AcceptedQuantity",
+    "TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected",
+    "TR_PurchaseOrderReceipts_INVREQFU001Waybill",
+    "TR_PurchaseOrderReceipts_SodHardStop",
+    "TR_PurchaseOrders_ApprovedCommercialCapacity",
+    "TR_PurchaseOrders_GovernedCommitment",
+    "TR_PurchaseOrders_SodHardStop",
+    "TR_QS0510_VariationDayworkEligibility",
+    "TR_QS0521_SubcontractCertificates_Governance",
+    "TR_QsAdvanceRecoveryAgreements_QS0505Guard",
+    "TR_QsAdvanceRecoveryRevisions_QS0505AppendOnly",
+    "TR_QsConfigurationRevisions_AppendOnly",
+    "TR_QsDesignRevisionImpactLines_Guard",
+    "TR_QsDesignRevisionImpactRevisions_Immutable",
+    "TR_QsDesignRevisionImpacts_Guard",
+    "TR_QsEscalationCalculationLines_Guard",
+    "TR_QsEscalationCalculationRevisions_Guard",
+    "TR_QsEscalationCalculationRuns_Guard",
+    "TR_QsEscalationDisputeAttachments_Guard",
+    "TR_QsEscalationDisputeRevisions_Guard",
+    "TR_QsEscalationDisputes_Guard",
+    "TR_QsEscalationFormulaComponents_Guard",
+    "TR_QsEscalationFormulaRevisions_AppendOnly",
+    "TR_QsEscalationFormulas_ApprovedImmutable",
+    "TR_QsEscalationFormulas_TenantAndLineageGuard",
+    "TR_QsEstimateAssumptions_ParentAndImmutableGuard",
+    "TR_QsEstimateLines_LineageGuard",
+    "TR_QsEstimateLines_ParentAndImmutableGuard",
+    "TR_QsEstimateMarkups_ParentAndImmutableGuard",
+    "TR_QsEstimateRevisions_Immutable",
+    "TR_QsEstimateVersions_ApprovedImmutable",
+    "TR_QsEstimateVersions_TenantAndLineageGuard",
+    "TR_QsJointEndorsement_Guard",
+    "TR_QsJointEvidence_Guard",
+    "TR_QsJointParticipant_Guard",
+    "TR_QsJointRequest_Guard",
+    "TR_QsJointRevision_Guard",
+    "TR_QsPriceIndexFamilies_ImportInUseGuard",
+    "TR_QsPriceIndexFamilies_InUseGuard",
+    "TR_QsPriceIndexImportBatches_Guard",
+    "TR_QsPriceIndexImportRevisions_AppendOnly",
+    "TR_QsPriceIndexValues_Guard",
+    "TR_QsRateBuildUpLines_Immutable",
+    "TR_QsRateBuildUps_Immutable",
+    "TR_StockMovements_GovernedInventoryReturnAdjustment",
+    "TR_StockMovements_GovernedInventoryTransfer",
+    "TR_StockMovements_TDC0502InspectionContext",
+    "TR_StockMovements_TDC0503ReceiptSod",
+    "TR_TenderAwardVerificationItemDocuments_TDC0808DmsLineage",
+    "TR_TenderBidDocuments_TDC0808DmsLineage",
+    "TR_TenderDocuments_TDC0808DmsLineage"
+  ],
+  "archivedTriggerDisposition": [
+    {
+      "name": "TR_AccountingBookApplicabilityPolicies_C5Authority",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingBookApplicabilityRuleBooks_C5Immutable",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingBookApplicabilityRules_C5Immutable",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingBookSelectionEvidenceBooks_C5Immutable",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingBookSelectionEvidence_C5Immutable",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingEventAttempts_C6AppendOnly",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingEventPostings_C6Authority",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingEventProducerReceipts_C7Immutable",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingEvents_C6Authority",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AccountingEvents_C7ProducerDecision",
+      "disposition": "SEPARATE_FINANCE_AUTHORITY"
+    },
+    {
+      "name": "TR_AuditLogs_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_AuditRecordLifecycleEvents_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_BusinessPartnerRegistrationDocuments_ControlledFileGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringConfigurationRevisions_AppendOnly",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceAssessmentRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceAssessmentRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceAssessments_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceAssessments_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCompletionControls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCompletionControls_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCompletionRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCompletionRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCostingHandoffRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCostingHandoffRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCostingHandoffs_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceCostingHandoffs_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceExecutionLinkRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceExecutionLinkRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceExecutionLinks_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceExecutionLinks_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceIntakeRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceIntakeRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceIntakes_Lifecycle",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_CivilEngineeringMaintenanceIntakes_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ContractDocuments_TDC0407DmsRequired",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_Contracts_QS0520CommercialTerms",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_Contracts_TDC0407ActivationGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_Contracts_TDC0409CloseoutGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_EmergencyProcurementPlans_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_FileUploadRecords_RegistrationEvidenceDeleteGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_GoodsReceiptNoteItems_GovernedCapacity",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_GoodsReceiptNoteItems_TDC0502AcceptanceProtected",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_GoodsReceiptNotes_GovernedSource",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_GoodsReceiptNotes_TDC0503SodHardStop",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_HrIdentityReconciliationItems_NoMutation",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_HrIdentityReconciliationItems_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_HrIdentityReconciliationRuns_CompletedImmutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_HrIdentityReconciliationRuns_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_HrIdentityReconciliationStates_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_HrIdentityWorkflowIssues_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryAllocations_ProjectReservationGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryAllocations_WorkOrderReservationGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryBalances_ExactBinNegativeStockGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryCycleCountSchedules_ControlledLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryDirectedTaskActions_AppendOnly",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_InventoryDirectedTasks_Integrity",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_InventoryDisposalActions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryDisposalCases_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryDisposalCommitteeMembers_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryDisposalEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryDisposalLines_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryIssueAccountingRules_TenantOwner",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryIssueFinanceLineages_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryIssueReturnAllocations_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryIssueVoucherActions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryIssueVoucherLines_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryIssueVouchers_ControlledLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryItems_NegativeStockGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryItems_PhysicalCountFreeze",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryLocations_NegativeStockGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryMovements_GovernedPurchaseReceipt",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryMovements_TDC0502InspectionContext",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_InventoryMovements_TDC0503ReceiptSod",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_InventoryProjectReservationActions_Immutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_InventoryReplenishmentActions_Immutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_InventoryReplenishmentRecommendations_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_InventoryReturnVoucherActions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryReturnVoucherEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryReturnVoucherLines_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryReturnVouchers_ControlledLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryTransferActionLines_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryTransferActions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryTransferDiscrepancies_ControlledLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryTransferDiscrepancyEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryTransferItems_ControlledMutation",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryTransfers_ControlledLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryValuationReconciliationActions_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryValuationReconciliations_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_InventoryWorkOrderReservationActions_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PaymentBatchInvoice_TDC0505ImmutableSelection",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PaymentBatchInvoice_TDC0505PaymentReadiness",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PaymentBatch_TDC0505Readiness",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PaymentBatch_TDC0506InvoiceProcessorSod",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PhysicalCountActions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PhysicalCountItems_ControlledMutation",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PhysicalCounts_ControlledLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementAppSubmissions_LifecycleGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementAppSubmissions_NoDelete",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementAwardReadinessDecisions_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderAppealDecisions_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderAppeals_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderCommunicationAcknowledgements_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderCommunicationDeliveries_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderCommunicationDispatches_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderCommunicationLetterVersions_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderCommunicationRecipients_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBidderCommunicationRegisters_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBudgetCommitmentLedgerEntries_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBudgetCommitments_DownstreamExposure",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBudgetCommitments_LifecycleGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBudgetCommitments_NoDelete",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementBudgetCommitments_TenantAndEvidenceGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementCalendarOccurrences_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementCalendarProfiles_LifecycleGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementCalendarRules_LifecycleGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementContractActivationEvidence_TDC0407Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementContractActivations_TDC0407Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementControlEventEvidenceLinks_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementControlEvents_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationAttendanceRecords_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationCommitteeAppointments_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationCommitteeControls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationCommitteeRoleRequirements_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationConflictDeclarations_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationMeetings_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationScoreRecalls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementEvaluationScoreSheets_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementExceptionalSourcingControls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkAgreementBalances_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkAgreementCategories_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkAgreementDocuments_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkAgreementExtensions_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkAgreements_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkBalanceMovements_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkCallOffAuthorities_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkCallOffLines_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkCallOffs_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkCallOffs_PurchaseOrderSource",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementFrameworkPriceListLines_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementGhanepsExchangeAcknowledgements_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementGhanepsExchangeAttempts_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementGhanepsExchangeEvents_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementGhanepsExchangePayloads_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementGhanepsExchangeReconciliations_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementMasterDataChangeEvidenceLinks_SubmittedGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementMasterDataChangeRequests_NoDelete",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementMasterDataChangeRequests_SnapshotGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementMasterDataControlPolicies_LifecycleGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPrequalificationApplications_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPrequalificationCriteria_ImmutableAfterAdvertisement",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPrequalificationExercises_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPrequalificationExercises_PolicyLineage",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPrequalificationScores_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPurchaseOrderAmendmentAcknowledgements_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPurchaseOrderAmendmentDispatches_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPurchaseOrderAmendments_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementPurchaseOrderCommitmentAdjustments_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementQualifiedListEntries_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptDocumentActions_TDC0509Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptDocumentSignatures_TDC0509Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptDocuments_TDC0509Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptInspectionActions_TDC0502Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptInspectionCases_TDC0502Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptInspectionEvidence_TDC0502Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptInspectionLines_TDC0502Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementReceiptSourceEvidence_INVREQFU001",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRequisitionAuthorityRouteSteps_NoMutation",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRequisitionAuthorityRouteSteps_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRequisitionAuthorityRoutes_NoMutation",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRequisitionAuthorityRoutes_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRequisitionSourcingReleases_NoMutation",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRequisitionSourcingReleases_TenantGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementResponsibilityLocations_ValidateScope",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqEvaluationLines_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqEvaluations_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqOpeningEntries_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqOpeningParticipants_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqOpeningRegisters_EffectiveDeadline",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqOpeningRegisters_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqReceipts_EffectiveDeadline",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementRfqReceipts_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSourcingCaseLotItems_Immutable",
+      "disposition": "SUPERSEDED_BY_EXACT_MODEL_ALIAS"
+    },
+    {
+      "name": "TR_ProcurementSourcingCaseLots_Immutable",
+      "disposition": "SUPERSEDED_BY_EXACT_MODEL_ALIAS"
+    },
+    {
+      "name": "TR_ProcurementSourcingCaseSourceRequests_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSourcingCases_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSourcingCases_MethodSelection",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSpecificationTemplates_LifecycleGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSpecificationTemplates_NoDelete",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierApplicantAccesses_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierApplicantSessions_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierAvlEntries_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierAvlEntryStatusHistories_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierAvlPublicationSnapshots_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierAvlRegisters_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierDueDiligenceChecks_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierDueDiligenceEvidenceLinks_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierDueDiligenceReviews_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierEvidencePackVersions_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierEvidenceRequirements_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierOnboardingExemptions_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierOnboardingPayments_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierOnboardingTokens_Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierPerformanceScorecards_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierRegistrationEvidencePackBindings_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierRiskAlerts_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementSupplierRiskAssessments_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderControls_CommitteeScoreProjection",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderControls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentAcknowledgements_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentChangeRecipients_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentChanges_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentIssuances_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentIssues_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentRegisters_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentTemplateMethods_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderDocumentTemplateVersions_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderSecurityActions_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderSecurityInstruments_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderSubmissionReceipts_EffectiveDeadline",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProcurementTenderSubmissionReceipts_Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementWorksCloseoutActions_QS0504RetentionGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementWorksCloseoutActions_TDC0409Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProcurementWorksCloseoutEvidence_TDC0409Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectAssetLinks_ReconciliationLineage",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectBoqRemeasurementLines_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectBoqRemeasurementRevisions_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectBoqRemeasurementSources_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectBoqVersionLines_ImmutablePublished",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectBoqVersions_ImmutablePublished",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignCases_InitiationLineage",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignCases_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignCases_PlanningGisGate",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignEvidence_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignInputResponses_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignInputResponses_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDesignRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviewRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_HodDecisionProjection",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalEvidence_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalFileHandoffs_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalFileHandoffs_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalFileRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalFileRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalFiles_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalFiles_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalHandoffEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDevelopmentApprovalHandoffEvidence_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskControls_FeedbackLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskControls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskControls_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskControls_UrgentPath",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskFeedbackEntries_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskFeedbackEntries_FieldCapture",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskFeedbackEntries_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilDirectTaskRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilEngineeringDocumentRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilEngineeringDocumentRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilEngineeringDocuments_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilEngineeringDocuments_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilExtensionOfTimeControls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilExtensionOfTimeControls_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilExtensionOfTimeRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilExtensionOfTimeRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilInspectionControls_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilInspectionControls_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilInspectionControls_Workflow",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilInspectionRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilInspectionRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilIpcEndorsementRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilIpcEndorsementRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilIpcEndorsements_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilIpcEndorsements_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationBatches_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationBatches_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationRecords_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationRecords_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationValidationIssues_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilMigrationValidationIssues_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilPlanningGisValidationRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilPlanningGisValidationRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilPlanningGisValidations_EvidenceBinding",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilPlanningGisValidations_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilPlanningGisValidations_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilProjectEngineerAssignmentRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilProjectEngineerAssignmentRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilProjectEngineerAssignments_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilProjectEngineerAssignments_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilQualityTestReports_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilQualityTestReports_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilQualityTestRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilQualityTestRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilReconnaissanceItems_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilReconnaissanceReports_Delete",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilReconnaissanceReports_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilReconnaissanceRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilReconnaissanceRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilRfiEvidence_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilRfiResponses_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilRfiResponses_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilRfiRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilRfiRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilRfiRoutings_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilRfiRoutings_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilSiteInstructionEvidence_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilSiteInstructionResponses_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilSiteInstructionResponses_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilSiteInstructionRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilSiteInstructionRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilSiteInstructionRoutings_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilSiteInstructionRoutings_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilWeeklySupervisionActivities_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilWeeklySupervisionEvidence_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilWeeklySupervisionReports_Lifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilWeeklySupervisionReports_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilWeeklySupervisionReviews_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilWeeklySupervisionRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectCivilWeeklySupervisionRevisions_Lineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectDrawings_QsRevisionLineage",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectExtensionOfTimeRequests_CivilControl",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectFinalAccountRevisions_QS0506AppendOnly",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectFinalAccounts_QS0506Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectPaymentCertificates_QS0505AdvanceRecoveryGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_ProjectPaymentCertificates_QsLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_ProjectRfis_CivilDesignInputLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderItems_ApprovedCommercialCapacity",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderItems_FrameworkCallOffProtected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderItems_TDC0502AcceptedQuantity",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderReceiptItems_GovernedCapacity",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderReceipts_GovernedSource",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderReceipts_INVREQFU001Waybill",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrderReceipts_SodHardStop",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrders_ApprovedCommercialCapacity",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrders_ApprovedSourceProtected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrders_FrameworkCallOffProtected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrders_GovernedCommitment",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseOrders_SodHardStop",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_PurchaseRequisitions_LinkageGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0507_MaterialReconciliationLines_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0507_MaterialReconciliationRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0507_MaterialReconciliation_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0507_PaymentCertificateMaterialLineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0508_ProjectVariation_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0508_VariationEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0508_VariationLines_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0508_VariationRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0509_ContractClaimEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0509_ContractClaimRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0509_ContractClaims_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0510_DayworkEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0510_DayworkLines_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0510_DayworkRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0510_DayworkSheets_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0510_VariationDayworkEligibility",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QS0511_VariationApplication_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0521_SubcontractCertificates_Governance",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QS0521_SubcontractEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0521_SubcontractRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0521_SubcontractValuations_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0521_Subcontracts_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0522_SubcontractChargeEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0522_SubcontractChargeRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QS0522_SubcontractCharges_Governance",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsAdvanceRecoveryAgreements_QS0505Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsAdvanceRecoveryRevisions_QS0505AppendOnly",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsConfigurationRevisions_AppendOnly",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsDesignRevisionImpactLines_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsDesignRevisionImpactRevisions_Immutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsDesignRevisionImpacts_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationCalculationLines_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationCalculationRevisions_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationCalculationRuns_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationDisputeAttachments_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationDisputeRevisions_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationDisputes_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationFormulaComponents_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationFormulaRevisions_AppendOnly",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationFormulas_ApprovedImmutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEscalationFormulas_TenantAndLineageGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEstimateAssumptions_ParentAndImmutableGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEstimateLines_LineageGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEstimateLines_ParentAndImmutableGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEstimateMarkups_ParentAndImmutableGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEstimateRevisions_Immutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEstimateVersions_ApprovedImmutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsEstimateVersions_TenantAndLineageGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsJointEndorsement_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsJointEvidence_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsJointParticipant_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsJointRequest_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsJointRevision_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsMeasurementAttachments_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsMeasurementLines_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsMeasurementRevisions_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsMeasurementSheets_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsPriceIndexFamilies_ImportInUseGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsPriceIndexFamilies_InUseGuard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsPriceIndexImportBatches_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsPriceIndexImportRevisions_AppendOnly",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsPriceIndexValues_Guard",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsRateBuildUpLines_Immutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsRateBuildUps_Immutable",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_QsValuationWorksheetEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsValuationWorksheetLines_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsValuationWorksheetRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QsValuationWorksheets_Guard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_QuantitySurveyPaymentCertificateRevisions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_RequestForQuotations_SourcingReleaseGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_RequestForQuotations_StatutoryLifecycleGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockAdjustmentActions_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockAdjustmentEvidence_AppendOnly",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockAdjustmentItems_ControlledMutation",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockAdjustments_ControlledLifecycle",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockMovements_GovernedInventoryReturnAdjustment",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_StockMovements_GovernedInventoryTransfer",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_StockMovements_GovernedPurchaseReceipt",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockMovements_GovernedRequisitionIssue",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockMovements_PhysicalCountFreeze",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_StockMovements_TDC0502InspectionContext",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_StockMovements_TDC0503ReceiptSod",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_TDC0501_GoodsReceiptIdempotencyFingerprint",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_TDC0502_ReceiptReplacementLineage",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_TDC0601_InventoryItems_IdentifierIntegrity",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_TDC0601_ItemUnitsOfMeasure_IdentifierIntegrity",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_TDC0616_InventoryItems_ProfileIntegrity",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_TenderAwardVerificationItemDocuments_TDC0808DmsLineage",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_TenderBidDocuments_TDC0808DmsLineage",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_TenderDocuments_TDC0808DmsLineage",
+      "disposition": "ACTIVE_NON_MODEL"
+    },
+    {
+      "name": "TR_TenderEvaluations_CommitteeScoreProjection",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_Tenders_SourcingReleaseGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorInvoiceLineItem_TDC0504MatchIntegrity",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorInvoiceMatchExceptionAction_TDC0507Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorInvoiceMatchExceptionEvidence_TDC0507Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorInvoiceMatchExceptionVariance_TDC0507Immutable",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorInvoiceMatchException_TDC0507Protected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorInvoice_AcceptedSupplyProtected",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorInvoice_TDC0504MandatoryMatch",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorPaymentAllocation_TDC0505PaymentReadiness",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_VendorPayment_TDC0506InvoiceProcessorSod",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_WarehouseQuantities_NegativeStockGuard",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_WarehouseQuantities_PhysicalCountFreeze",
+      "disposition": "CURRENT_MODEL"
+    },
+    {
+      "name": "TR_WorkOrderParts_ReservationLineageGuard",
+      "disposition": "CURRENT_MODEL"
     }
   ],
   "postDefinitionPatches": [
@@ -3021,6 +6001,22 @@
         "TR_PurchaseOrders_ApprovedSourceProtected"
       ],
       "sqlSha256": "F503FE21483AFDADF702EBA66D9DFAB22629C9B067E3CDFB42CEDBBAFE270F10"
+    },
+    {
+      "MigrationId": "20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster",
+      "OperationIndex": 1,
+      "TargetNames": [
+        "TR_PurchaseOrders_ApprovedCommercialCapacity"
+      ],
+      "sqlSha256": "00F5A1DE8421069AE425C1D5C4FAC13B726D63BD0E3A93758663F6C0AFC8B8F5"
+    },
+    {
+      "MigrationId": "20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster",
+      "OperationIndex": 2,
+      "TargetNames": [
+        "TR_PurchaseOrderItems_ApprovedCommercialCapacity"
+      ],
+      "sqlSha256": "7F014663802EE86FF86614BC3D70079935ACAECA2535862430C8C13EAFD0F738"
     },
     {
       "MigrationId": "20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage",

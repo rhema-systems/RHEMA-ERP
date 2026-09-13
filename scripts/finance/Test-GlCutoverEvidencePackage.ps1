@@ -260,6 +260,8 @@ if ($PackageKind -eq 'DisposableReset') {
     }
 
     $repositoryIds = @()
+    $validatedTargetHistoryCount = [long]0
+    $validatedTargetHistoryPresent = $false
     if (Test-Path -LiteralPath (Join-Path $root 'migration-discovery.log') -PathType Leaf) {
         $repositoryIds = @(Get-Content -LiteralPath (Join-Path $root 'migration-discovery.log') | ForEach-Object {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
@@ -280,6 +282,8 @@ if ($PackageKind -eq 'DisposableReset') {
                 [long]$reset.finalMigrationCount -ne $targetIds.Count -or [long]$reset.orphanMigrationCount -ne 0) {
                 throw 'Disposable-reset target history is not exactly the repository baseline with zero orphans.'
             }
+            $validatedTargetHistoryPresent = $true
+            $validatedTargetHistoryCount = [long]$targetIds.Count
         }
     }
     $sourceIds = @()
@@ -365,7 +369,9 @@ if ($PackageKind -eq 'DisposableReset') {
             [long]$reset.repositoryMigrationCount -ne 1 -or [long]$reset.orphanMigrationCount -ne 0) {
             throw 'Disposable-reset V2 repository migration count/latest/orphan identity is not the exact baseline contract.'
         }
-        $expectedFinalMigrationCount = if ($phases -ccontains 'MIGRATIONS_APPLIED') { 1 } else { 0 }
+        $expectedFinalMigrationCount = if ($phases -ccontains 'MIGRATIONS_APPLIED' -or $validatedTargetHistoryPresent) {
+            $validatedTargetHistoryCount
+        } else { [long]0 }
         if ([long]$reset.finalMigrationCount -ne $expectedFinalMigrationCount) {
             throw 'Disposable-reset V2 final migration count is inconsistent with its terminal durable phase.'
         }
@@ -392,6 +398,33 @@ if ($PackageKind -eq 'DisposableReset') {
             if (-not (Test-DisposableSourceFingerprintShape ([string]$fingerprintValue)) -or
                 [uint64]$fingerprintParts[0] -ne $sourceIds.Count -or $fingerprintParts[1] -cne $expectedSourceLatest) {
                 throw 'Disposable-reset V2 source fingerprint count/latest disagrees with independently derived source history.'
+            }
+        }
+        if ($reset.status -ceq 'FAILED_NO_AUTOMATIC_RETRY' -and $phases -ccontains 'SOURCE_CAPTURE_COMPLETE') {
+            $sourceFingerprintPath = Join-Path $root 'source-fingerprint-before.txt'
+            $sourceHistoryPath = Join-Path $root 'source-migration-history.txt'
+            if (-not (Test-Path -LiteralPath $sourceFingerprintPath -PathType Leaf) -or
+                -not (Test-Path -LiteralPath $sourceHistoryPath -PathType Leaf)) {
+                throw 'Failed disposable-reset evidence after source capture lacks source history/fingerprint evidence.'
+            }
+            $capturedFingerprint = (Get-Content -Raw -LiteralPath $sourceFingerprintPath).Trim()
+            if ($capturedFingerprint -cne [string]$reset.sourceFingerprint) {
+                throw 'Failed disposable-reset source fingerprint file disagrees with terminal status.'
+            }
+            $capturedParts = @($capturedFingerprint -split '\|')
+            $capturedLatest = if ($sourceIds.Count -eq 0) { 'EMPTY' } else { $sourceIds[-1] }
+            if (-not (Test-DisposableSourceFingerprintShape $capturedFingerprint) -or
+                [uint64]$capturedParts[0] -ne $sourceIds.Count -or $capturedParts[1] -cne $capturedLatest) {
+                throw 'Failed disposable-reset source fingerprint file disagrees with independently derived source history.'
+            }
+            $resetLogPath = Join-Path $root 'reset-database.log'
+            if (Test-Path -LiteralPath $resetLogPath -PathType Leaf) {
+                $expectedFinalFingerprintToken = "SOURCE_FINAL_FINGERPRINT=$capturedFingerprint"
+                $finalFingerprintMarkers = @(Get-SqlEvidenceTokens $resetLogPath |
+                    Where-Object { $_ -ceq $expectedFinalFingerprintToken })
+                if ($finalFingerprintMarkers.Count -ne 1) {
+                    throw 'Failed disposable-reset final destructive-boundary fingerprint disagrees with captured source evidence.'
+                }
             }
         }
     }
@@ -600,7 +633,7 @@ if ($PackageKind -eq 'DisposableReset') {
             throw 'Disposable-reset PASS invariant or DBCC evidence is invalid.'
         }
         $sourceFingerprint = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')).Trim()
-        $resetLines = @(Get-Content -LiteralPath (Join-Path $root 'reset-database.log') | ForEach-Object { $_.Trim() })
+        $resetTokens = @(Get-SqlEvidenceTokens (Join-Path $root 'reset-database.log'))
         $sourceHistory = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
             Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
         $fingerprintParts = @($sourceFingerprint -split '\|')
@@ -608,7 +641,7 @@ if ($PackageKind -eq 'DisposableReset') {
         if (-not (Test-DisposableSourceFingerprintShape $sourceFingerprint) -or
             [uint64]$fingerprintParts[0] -ne $sourceHistory.Count -or $fingerprintParts[1] -cne $expectedLatest -or
             $sourceFingerprint -cne [string]$reset.sourceFingerprint -or
-            $resetLines -cnotcontains "SOURCE_FINAL_FINGERPRINT=$sourceFingerprint") {
+            @($resetTokens | Where-Object { $_ -ceq "SOURCE_FINAL_FINGERPRINT=$sourceFingerprint" }).Count -ne 1) {
             throw 'Disposable-reset PASS does not bind the captured fingerprint to the final quiescent recheck.'
         }
     }

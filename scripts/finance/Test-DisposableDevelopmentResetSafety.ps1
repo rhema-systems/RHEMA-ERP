@@ -130,7 +130,8 @@ try {
         'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
         'Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
         'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
-        'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState')) {
+        'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState',
+        'Get-DisposableTargetMigrationState')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
             $node.Name -eq $functionName }, $true))
         if ($functionAst.Count -ne 1 -or $functionAst[0].Extent.StartOffset -ge $dispatcherOffset) {
@@ -267,6 +268,34 @@ exit 0
         }
     }
     Write-Host 'PASS: durable terminal phase/status and every recovery transition execute under StrictMode'
+
+    $phaseSevenFailureRoot = New-ExternalEvidencePath 'PHASE_07_PUBLICATION_FAILURE'
+    New-Item -ItemType Directory -Path $phaseSevenFailureRoot | Out-Null
+    $phaseSevenNames=@('OFFLINE_GATES_COMPLETE','SOURCE_CAPTURE_COMPLETE','BACKUP_CREATED','BACKUP_VERIFIED','RESET_STARTED','DATABASE_RECREATED')
+    for($index=0;$index -lt $phaseSevenNames.Count;$index++){
+        Write-DisposablePhaseMarker $phaseSevenFailureRoot ($index+1) $phaseSevenNames[$index]
+    }
+    $baselineMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'
+    $baselineMigration | Set-Content -Encoding ascii -LiteralPath (Join-Path $phaseSevenFailureRoot 'target-migration-history.txt')
+    New-Item -ItemType Directory -Path (Join-Path $phaseSevenFailureRoot 'phase-07.json') | Out-Null
+    $phaseSevenPublicationRefused=$false
+    try { Write-DisposablePhaseMarker $phaseSevenFailureRoot 7 'MIGRATIONS_APPLIED' }
+    catch { $phaseSevenPublicationRefused=$true }
+    $reconciledMigrationState=Get-DisposableTargetMigrationState $phaseSevenFailureRoot @($baselineMigration)
+    if(-not $phaseSevenPublicationRefused -or -not $reconciledMigrationState.applied -or
+        $reconciledMigrationState.count -ne 1 -or
+        (Get-DisposableLastDurablePhase $phaseSevenFailureRoot) -cne 'DATABASE_RECREATED'){
+        throw 'Actual phase-07 publication failure did not retain truthful validated target-history state.'
+    }
+    Write-DisposableResetStatus $phaseSevenFailureRoot 'FAILED_NO_AUTOMATIC_RETRY' 'DATABASE_RECREATED' $true $true $true @{
+        failedOperation='PHASE_07_PUBLICATION';repositoryMigrationCount=1;finalMigrationCount=$reconciledMigrationState.count
+        latestMigration=$baselineMigration;orphanMigrationCount=0
+    }
+    $phaseSevenStatus=Get-Content -Raw -LiteralPath (Join-Path $phaseSevenFailureRoot 'reset-status.json')|ConvertFrom-Json
+    if($phaseSevenStatus.finalMigrationCount -ne 1 -or $phaseSevenStatus.phase -cne 'DATABASE_RECREATED'){
+        throw 'Phase-07 publication catch status lost validated applied-baseline evidence.'
+    }
+    Write-Host 'PASS: phase-07 publication failure reports validated baseline history despite earlier durable marker'
 
     $markerFailureRoot = New-ExternalEvidencePath 'MARKER_FAILURE_STATE'
     New-Item -ItemType Directory -Path $markerFailureRoot | Out-Null
@@ -450,7 +479,7 @@ exit 0
         'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT',
         'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET',
         "Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'",
-        'Reset RhemaERP history is not exactly the authoritative disposable-development baseline with zero orphans',
+        'Get-DisposableTargetMigrationState $evidenceDirectory $repositoryMigrations',
         'Second disposable reset seed changed canonical Finance invariants',
         "'FAILED_NO_AUTOMATIC_RETRY'",
         'no retry, restore, or cleanup was attempted',

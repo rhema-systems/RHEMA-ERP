@@ -80,16 +80,19 @@ The unchanged archive contains 656 tracked files; its canonical base tree-entry 
 `EA21CE6DBF118054F5240D7BE837ADDEF9D1A0D8214779697D17E6634C28023F`.
 
 The D3 correction deterministically evaluates all 922 raw-SQL operations from the archived compiled migration
-chain and reconciles them with the current snapshot. The baseline now carries all 355/355 model-declared trigger
-names as isolated SQL operations, followed in original chronological order by the 22 later definition-patch
-operations. Two snapshot names are exact same-table renames of their last archived definitions. The distinct
-15-trigger C5-C8 authority set remains additive, for 370 unique final trigger names with no collision. The same
+chain and reconciles them with the current snapshot. The baseline carries all 355/355 model-declared trigger names
+and an exhaustive 89 still-active non-model archived triggers as isolated SQL operations, followed in original
+chronological order by the 24 later definition-patch operations. Two snapshot names are exact same-table renames of
+their last archived definitions. The distinct 15-trigger C5-C8 authority set remains additive, for 459 unique final
+trigger names with no collision. The same
 audit retains the final `fn_ProcurementRfqSourceLineIdentity` function and
 `vw_ProcurementReceiptDocumentReconciliation` view; archived final definitions contain no procedures, synonyms,
 security policies, or sequences. A checked manifest binds source migration/operation, target table and body hash;
-offline extraction additionally reconciles 12,627 unambiguous inserted/deleted column references against the
-1,556 zero-to-current baseline tables. Generated SQL must reproduce all 370 unique trigger definitions, the
-function, view, 22 isolated patches, and one baseline history identity before a reset can be reviewed.
+offline extraction additionally reconciles 15,294 unambiguous inserted/deleted column references against the
+1,556 zero-to-current baseline tables. The 454 archived trigger names are exhaustively classified as 353 direct
+current-model definitions, 89 active non-model definitions, 10 separately emitted Finance-authority definitions,
+and two exact alias predecessors. Generated SQL must reproduce all 459 unique trigger definitions, the function,
+view, 24 isolated patches, and one baseline history identity before a reset can be reviewed.
 
 The last authorized Stage A read-only fingerprint of configured `RHEMAERP` ended at
 `20260902140000_AddFixedAssetDepreciationConventionEvidence`. On that evidence, the minimum known cutover
@@ -147,6 +150,10 @@ overwrites either automatically. Raw `sqlcmd` output is held only in an outside-
 then deleted; the package validator scans JSON, text, logs, checksums and SQL, independently re-derives pending/
 orphan sets and the exact PASS target-history union, and verifies artifact, identity and ordered backup/restore markers.
 Evidence must be external to the repository or below the dedicated ignored `.artifacts/finance-gl-rehearsal` root.
+If phase-07 marker publication fails after exact target history was already captured and reconciled, failure evidence
+keeps the prior durable phase but reports the validated baseline as materially applied. Failed V2 packages after source
+capture must bind their source fingerprint file, terminal status, source-history count/latest and any final
+destructive-boundary fingerprint exactly; the validator rejects re-manifested divergence.
 The shared sqlcmd transport sets the supported maximum variable-width display and screen width
 (`-y 8000 -w 8000`), omits conflicting `-W`/`-Y`, and fails closed if any emitted line reaches that boundary.
 Canonical rows are `nvarchar(max)` before SQL-side `SHA2_256` hashing and retain only a bounded stable key plus

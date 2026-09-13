@@ -93,14 +93,26 @@ $modelTriggerNames = @([regex]::Matches($snapshotText, 'HasTrigger\("(?<name>[^"
     ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
 $governanceManifest = Get-Content -Raw -LiteralPath $governanceManifestPath | ConvertFrom-Json
 $manifestTriggerNames = @($governanceManifest.triggerDefinitions | ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
-if ($modelTriggerNames.Count -ne 355 -or $manifestTriggerNames.Count -ne 355 -or
-    ($modelTriggerNames -join "`n") -cne ($manifestTriggerNames -join "`n") -or
+$manifestModelTriggerNames=@($governanceManifest.modelTriggerNames|Sort-Object -Unique)
+$activeNonModelTriggerNames=@($governanceManifest.activeNonModelTriggerNames|Sort-Object -Unique)
+if ($governanceManifest.schema -cne 'RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V2' -or
+    $modelTriggerNames.Count -ne 355 -or $manifestModelTriggerNames.Count -ne 355 -or
+    ($modelTriggerNames -join "`n") -cne ($manifestModelTriggerNames -join "`n") -or
+    $manifestTriggerNames.Count -ne 444 -or $activeNonModelTriggerNames.Count -ne 89 -or
     [int]$governanceManifest.archiveMigrationCount -ne 456 -or
     [int]$governanceManifest.archiveSqlOperationCount -ne 922 -or
-    [int]$governanceManifest.finalUniqueTriggerCount -ne 370 -or
+    [int]$governanceManifest.archivedUniqueTriggerCount -ne 454 -or
+    [int]$governanceManifest.finalUniqueTriggerCount -ne 459 -or
     [int]$governanceManifest.baselineTableCount -ne 1556 -or
-    [int]$governanceManifest.staticallyValidatedColumnReferenceCount -ne 12627) {
-    throw 'Archived governance manifest does not have exact 355/355 snapshot parity and 370-trigger final authority.'
+    [int]$governanceManifest.staticallyValidatedColumnReferenceCount -ne 15294) {
+    throw 'Archived governance manifest lacks exact model and active non-model trigger coverage.'
+}
+$dispositions=@($governanceManifest.archivedTriggerDisposition)
+$expectedDispositions=[ordered]@{ACTIVE_NON_MODEL=89;CURRENT_MODEL=353;SEPARATE_FINANCE_AUTHORITY=10;SUPERSEDED_BY_EXACT_MODEL_ALIAS=2}
+foreach($entry in $expectedDispositions.GetEnumerator()){
+    if(@($dispositions|Where-Object disposition -ceq $entry.Key).Count -ne $entry.Value){
+        throw "Archived trigger disposition is not exhaustive for $($entry.Key)."
+    }
 }
 
 $governanceText = Get-Content -Raw -LiteralPath $governancePath
@@ -109,17 +121,17 @@ $governanceBatches = @([regex]::Matches($governanceText,
 $triggerBatches = @($governanceBatches | Where-Object {
     $_.Groups['sql'].Value -match '(?im)^\s*CREATE OR ALTER TRIGGER\s+'
 })
-if ($governanceBatches.Count -ne 379 -or $triggerBatches.Count -ne 355 -or
+if ($governanceBatches.Count -ne 470 -or $triggerBatches.Count -ne 444 -or
     @($governanceBatches | Where-Object {
         [regex]::Matches($_.Groups['sql'].Value,'(?im)^\s*CREATE OR ALTER TRIGGER\s+').Count -gt 1
     }).Count -ne 0) {
-    throw 'Archived governance SQL is not one isolated operation per each of 355 current-model triggers.'
+    throw 'Archived governance SQL is not one isolated operation per active archived trigger.'
 }
 if ([regex]::Matches($governanceText,'(?im)^\s*CREATE OR ALTER FUNCTION\s+').Count -ne 1 -or
     [regex]::Matches($governanceText,'(?im)^\s*CREATE OR ALTER VIEW\s+').Count -ne 1 -or
     @($governanceManifest.programmableObjects).Count -ne 2 -or
-    @($governanceManifest.postDefinitionPatches).Count -ne 22) {
-    throw 'Archived raw-SQL governance audit did not retain the one function, one view, and 22 final trigger patches.'
+    @($governanceManifest.postDefinitionPatches).Count -ne 24) {
+    throw 'Archived raw-SQL governance audit did not retain the one function, one view, and 24 final trigger patches.'
 }
 $representativeHashes = [ordered]@{
     TR_AuditLogs_AppendOnly='CA1BD7583EBD5B50B1637A9DA26F691337CC28AC5FB40A8614122BD133CF00AC'
@@ -128,6 +140,17 @@ $representativeHashes = [ordered]@{
     TR_ProjectCivilDirectTaskControls_Lifecycle='DE3E27771997B240E8780125BFFBE9C7F9721BF0885D098161EA6B53EA3FD6B8'
     TR_VendorPaymentAllocation_TDC0505PaymentReadiness='2EC1FE4A63C27772227B05F1C0602417BF54D893932DD10EBAC3292FDBDF700C'
     TR_ProcurementSourcingCaseLots_NoMutation='FC3DCD2EFE219E37776637383A90EAC62CF087F3D87A28711F6BD4F616F2DEBD'
+    TR_PurchaseOrders_ApprovedCommercialCapacity='335301A2C8C313209B7835BB181AA45B64F481A7B36E4EA459F62968B8A8DB0D'
+    TR_PurchaseOrderItems_ApprovedCommercialCapacity='9038DBBBA6696FCB342ED4B7E1E8BEB9371E6E2041055F033D8340236F02F749'
+}
+$commercialPatchHashes=[ordered]@{
+    TR_PurchaseOrders_ApprovedCommercialCapacity='00F5A1DE8421069AE425C1D5C4FAC13B726D63BD0E3A93758663F6C0AFC8B8F5'
+    TR_PurchaseOrderItems_ApprovedCommercialCapacity='7F014663802EE86FF86614BC3D70079935ACAECA2535862430C8C13EAFD0F738'
+}
+foreach($entry in $commercialPatchHashes.GetEnumerator()){
+    $patch=@($governanceManifest.postDefinitionPatches|Where-Object {$_.TargetNames -contains $entry.Key})
+    if($patch.Count -ne 1 -or $patch[0].MigrationId -cne '20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster' -or
+        $patch[0].sqlSha256 -cne $entry.Value){throw "Commercial-capacity trigger patch provenance changed: $($entry.Key)."}
 }
 foreach ($entry in $representativeHashes.GetEnumerator()) {
     $definition = @($governanceManifest.triggerDefinitions | Where-Object Name -ceq $entry.Key)
@@ -176,11 +199,11 @@ if ($GeneratedSqlPath) {
     $generatedTriggerNames = @($generatedTriggerMatches | ForEach-Object {
         if ($_.Groups['bracketed'].Success) { $_.Groups['bracketed'].Value } else { $_.Groups['plain'].Value }
     })
-    $expectedGeneratedTriggerNames = @($modelTriggerNames + $requiredTriggers | Sort-Object -Unique)
-    if ($generatedTriggerNames.Count -ne 370 -or
-        @($generatedTriggerNames | Sort-Object -Unique).Count -ne 370 -or
+    $expectedGeneratedTriggerNames = @($manifestTriggerNames + $requiredTriggers | Sort-Object -Unique)
+    if ($generatedTriggerNames.Count -ne 459 -or
+        @($generatedTriggerNames | Sort-Object -Unique).Count -ne 459 -or
         (($generatedTriggerNames | Sort-Object) -join "`n") -cne ($expectedGeneratedTriggerNames -join "`n")) {
-        throw 'Generated zero-to-current SQL does not contain the exact 355 model + 15 C5-C8 trigger name set.'
+        throw 'Generated zero-to-current SQL does not contain the exact active archived + C5-C8 trigger set.'
     }
     $generatedBatches = @([regex]::Split($generatedSql, '(?im)^\s*GO\s*$'))
     if (@($generatedBatches | Where-Object {
@@ -190,16 +213,16 @@ if ($GeneratedSqlPath) {
     }
     if ([regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?FUNCTION\s+\[dbo\]\.\[fn_ProcurementRfqSourceLineIdentity\]').Count -ne 1 -or
         [regex]::Matches($generatedSql,'(?im)^\s*CREATE\s+(?:OR\s+ALTER\s+)?VIEW\s+\[dbo\]\.\[vw_ProcurementReceiptDocumentReconciliation\]').Count -ne 1 -or
-        @($generatedBatches | Where-Object { $_ -match 'OBJECT_DEFINITION\s*\(' }).Count -ne 22 -or
+        @($generatedBatches | Where-Object { $_ -match 'OBJECT_DEFINITION\s*\(' }).Count -ne 24 -or
         [regex]::Matches($generatedSql,[regex]::Escape($baselineId)).Count -ne 1) {
         throw 'Generated zero-to-current SQL omits or duplicates audited governance objects, patches, or baseline history.'
     }
-    Write-Host 'PASS: generated zero-to-current SQL has exact isolated 370-trigger and audited object authority'
+    Write-Host 'PASS: generated zero-to-current SQL has exact isolated 459-trigger and audited object authority'
 }
 
 Write-Host "PASS: exactly one compiled EF migration ($baselineId)"
 Write-Host 'PASS: complete 456-migration source chain retained as an uncompiled recoverable archive'
 Write-Host 'PASS: zero-to-current Up has no predecessor-dependent drops/updates'
-Write-Host 'PASS: 355/355 current-model triggers plus 15 distinct C5-C8 triggers are preserved'
+Write-Host 'PASS: 355 current-model, 89 active non-model, and 15 distinct C5-C8 triggers are preserved'
 Write-Host 'PASS: archived governance audit retains the final function, view, and chronological trigger patches'
-Write-Host 'PASS: trigger targets and 12,627 unambiguous inserted/deleted column references match the baseline schema'
+Write-Host 'PASS: trigger targets and 15,294 unambiguous inserted/deleted column references match the baseline schema'

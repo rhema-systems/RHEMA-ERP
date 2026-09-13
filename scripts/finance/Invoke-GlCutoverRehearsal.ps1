@@ -368,6 +368,26 @@ function Get-DiscoveredMigrationIds([string]$path) {
     $ids.ToArray()
 }
 
+function Get-DisposableTargetMigrationState([string]$directory, [string[]]$repositoryMigrations) {
+    $historyPath = Join-Path $directory 'target-migration-history.txt'
+    if (-not (Test-Path -LiteralPath $historyPath -PathType Leaf)) {
+        return [pscustomobject]@{ applied=$false; count=[long]0; historySha256='' }
+    }
+    $targetMigrations = @(Get-Content -LiteralPath $historyPath |
+        ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($targetMigrations.Count -ne $repositoryMigrations.Count -or
+        @($targetMigrations | Where-Object { $_ -notmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0 -or
+        @($targetMigrations | Sort-Object -Unique).Count -ne $targetMigrations.Count -or
+        ($targetMigrations -join "`n") -cne ($repositoryMigrations -join "`n")) {
+        throw 'Reset target-history evidence is not the exact unique ordered repository baseline.'
+    }
+    [pscustomobject]@{
+        applied=$true
+        count=[long]$targetMigrations.Count
+        historySha256=(Get-FileHash -Algorithm SHA256 -LiteralPath $historyPath).Hash
+    }
+}
+
 function Assert-FinalCutoverFlagsDisabled {
     foreach ($variableName in $finalCutoverFlags) {
         $value = [Environment]::GetEnvironmentVariable($variableName, 'Process')
@@ -1149,12 +1169,11 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
         finally { Pop-Location }
         $finalHistory = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
         $finalHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'target-migration-history.txt')
-        if (($finalHistory -join "`n") -ne ($repositoryMigrations -join "`n")) {
-            throw 'Reset RhemaERP history is not exactly the authoritative disposable-development baseline with zero orphans.'
-        }
+        $targetMigrationState = Get-DisposableTargetMigrationState $evidenceDirectory $repositoryMigrations
+        $phase = 'PHASE_07_PUBLICATION'
         Write-DisposablePhaseMarker $evidenceDirectory 7 'MIGRATIONS_APPLIED' @{
-            finalMigrationCount = $finalHistory.Count
-            targetHistorySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'target-migration-history.txt')).Hash
+            finalMigrationCount = $targetMigrationState.count
+            targetHistorySha256 = $targetMigrationState.historySha256
         }
 
         $phase = 'SEED_AND_INVARIANTS'
@@ -1236,12 +1255,14 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
         }
         $durableBackupVerified = $durableOrdinal -ge 4 -and $reconciledBackupState.backupVerified
         $durableResetStarted = $durableOrdinal -ge 5
-        $durableMigrationsApplied = $durableOrdinal -ge 7
+        $targetMigrationState = try { Get-DisposableTargetMigrationState $evidenceDirectory $repositoryMigrations }
+            catch { [pscustomobject]@{ applied=$false; count=[long]0; historySha256='' } }
+        $durableMigrationsApplied = $durableOrdinal -ge 7 -or $targetMigrationState.applied
         Write-DisposableRecoveryInstructions $evidenceDirectory $durableBackupVerified $durablePhase $phase
         Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $durablePhase $durableBackupCreated $durableBackupVerified $durableResetStarted @{
             sourceFingerprint = $sourceFingerprint; failure = $safeFailure; failedOperation = $phase; backupPreserved = $durableBackupCreated
             repositoryMigrationCount = $authoritativeMigrationCount
-            finalMigrationCount = if ($durableMigrationsApplied) { $authoritativeMigrationCount } else { 0 }
+            finalMigrationCount = if ($durableMigrationsApplied) { $targetMigrationState.count } else { 0 }
             latestMigration = $authoritativeLatestMigration; orphanMigrationCount = 0
             backupMediaId = $backupMediaId; backupFileName = $backupFileName
             backupPathSha256 = $backupPathSha256; attemptOwnedBackup = $attemptOwnedBackup
