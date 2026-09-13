@@ -2611,6 +2611,13 @@ policies or sequences. Target tables and 15,294 unambiguous inserted/deleted col
 1,556-table baseline; representative trigger bodies and all provenance are SHA-256 bound in a deterministic manifest.
 The unchanged archive has 656 tracked files and canonical base tree-entry inventory SHA-256
 `EA21CE6DBF118054F5240D7BE837ADDEF9D1A0D8214779697D17E6634C28023F`.
+
+Sol-High D3 evidence correction: a failed disposable reset whose last durable phase and failed operation are both
+`RESET_STARTED` may omit `SOURCE_FINAL_FINGERPRINT` only when retained destructive-boundary evidence contains an
+explicit pre-marker identity/history/fingerprint failure and contains no final-recheck, database-recreated, target
+history, or later-phase claim. Any marker that is present must remain the exact unique captured fingerprint token;
+later completion, mismatch, duplicate, embedded-token, operation-downgrade, and re-manifested missing-token evidence
+is refused.
 `RehearseEmpty` and `RehearseClone` now refuse at process entry, before repository or connection work, and their old
 mutation/history-stamping implementations are absent. DisposableReset and FinalClone validators independently bind
 repository count `1`, latest `20260913162402_DisposableDevelopmentCurrentModelBaseline`, phase-appropriate final
