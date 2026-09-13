@@ -90,6 +90,24 @@ try {
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Valid final baseline preflight NO-GO package was rejected.' }
 
+    foreach ($schemaTamper in @(
+        @{label='singleton-array'; value=[object[]]@('RHEMA_MIGRATION_HISTORY_V1'); expected='exact scalar JSON String'},
+        @{label='multi-array'; value=[object[]]@('RHEMA_MIGRATION_HISTORY_V1','EXTRA'); expected='exact scalar JSON String'},
+        @{label='boolean'; value=$true; expected='exact scalar JSON String'},
+        @{label='number'; value=[long]1; expected='exact scalar JSON String'},
+        @{label='object'; value=[pscustomobject]@{name='RHEMA_MIGRATION_HISTORY_V1'}; expected='exact scalar JSON String'},
+        @{label='null'; value=$null; expected="requires non-null property 'migrationHistoryEvidenceSchema'"},
+        @{label='missing'; missing=$true; expected="requires non-null property 'migrationHistoryEvidenceSchema'"}
+    )) {
+        $summary = Get-Content -Raw -LiteralPath (Join-Path $root 'summary.json') | ConvertFrom-Json
+        if ($schemaTamper.ContainsKey('missing')) { $summary.PSObject.Properties.Remove('migrationHistoryEvidenceSchema') }
+        else { $summary.migrationHistoryEvidenceSchema = $schemaTamper.value }
+        $summary | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'summary.json')
+        Assert-Refused $schemaTamper.expected
+        Write-Summary 'NO_GO_PREFLIGHT' $pending
+    }
+    Write-Host 'PASS: FinalClone migration-history schema requires one exact scalar JSON String'
+
     foreach ($summaryTamper in @(
         @{property='repositoryMigrationCount';value=2;expected='summary repository migration count/latest'},
         @{property='latestMigration';value='20260913162403_Unreviewed';expected='summary repository migration count/latest'},

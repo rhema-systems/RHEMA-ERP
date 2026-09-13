@@ -142,6 +142,24 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Valid early V2 state failed: $($earlyCase.label)" }
     }
     Write-Host 'PASS: V2 NOT_STARTED, OFFLINE, SOURCE_CAPTURE and resolved-path failure states validate truthfully'
+    foreach ($schemaTamper in @(
+        @{label='singleton-array'; value=[object[]]@('RHEMA_MIGRATION_HISTORY_V1')},
+        @{label='multi-array'; value=[object[]]@('RHEMA_MIGRATION_HISTORY_V1','EXTRA')},
+        @{label='boolean'; value=$true},
+        @{label='number'; value=[long]1},
+        @{label='object'; value=[pscustomobject]@{name='RHEMA_MIGRATION_HISTORY_V1'}},
+        @{label='null'; value=$null},
+        @{label='missing'; missing=$true}
+    )) {
+        $tamperRoot = New-PackageRoot ("RESET_HISTORY_SCHEMA_" + $schemaTamper.label)
+        Copy-Item -Path (Join-Path $sourceCapturedEarly '*') -Destination $tamperRoot
+        $tamperStatus = Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json') | ConvertFrom-Json
+        if ($schemaTamper.ContainsKey('missing')) { $tamperStatus.PSObject.Properties.Remove('migrationHistoryEvidenceSchema') }
+        else { $tamperStatus.migrationHistoryEvidenceSchema = $schemaTamper.value }
+        Write-Json (Join-Path $tamperRoot 'reset-status.json') $tamperStatus
+        Invoke-ExpectedRemanifestFailure $tamperRoot "reset migration-history schema $($schemaTamper.label)"
+    }
+    Write-Host 'PASS: reset migration-history schema requires one exact scalar JSON String'
     foreach ($historyTamper in @('missing','empty','missing-marker','wrong-count','wrong-state')) {
         $tamperRoot = New-PackageRoot ("SOURCE_HISTORY_" + $historyTamper)
         Copy-Item -Path (Join-Path $sourceCapturedEarly '*') -Destination $tamperRoot

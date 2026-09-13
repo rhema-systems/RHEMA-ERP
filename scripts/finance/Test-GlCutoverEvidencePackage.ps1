@@ -192,9 +192,14 @@ if ($PackageKind -eq 'DisposableReset') {
         [string]$reset.reviewedTree -ceq '13f1eb03a24af14ff23998de72e3ddac9992981d'
     $allowReviewedLegacyMigrationHistory = $null -eq $historySchemaProperty -and
         ($isReviewedAttempt03Or04EarlyPackage -or $isPotentialReviewed22Legacy)
-    if (-not $allowReviewedLegacyMigrationHistory -and
-        ($null -eq $historySchemaProperty -or [string]$historySchemaProperty.Value -cne $migrationHistoryEvidenceSchema)) {
-        throw 'Disposable-reset migration-history evidence schema is missing or unsupported.'
+    if (-not $allowReviewedLegacyMigrationHistory) {
+        if ($null -eq $historySchemaProperty -or $null -eq $historySchemaProperty.Value) {
+            throw "Disposable-reset status requires non-null property 'migrationHistoryEvidenceSchema'."
+        }
+        if ($historySchemaProperty.Value -isnot [string] -or
+            $historySchemaProperty.Value -cne $migrationHistoryEvidenceSchema) {
+            throw 'Disposable-reset migration-history evidence schema must be the exact scalar JSON String contract.'
+        }
     }
     if (Test-Path -LiteralPath (Join-Path $root 'git-head-tree.txt') -PathType Leaf) {
         $headTree = @(Get-Content -LiteralPath (Join-Path $root 'git-head-tree.txt') |
@@ -787,9 +792,12 @@ if ($PackageKind -eq 'FinalClone') {
     }
     $reviewedState = Get-Content -Raw -LiteralPath (Join-Path $root 'reviewed-git-state.json') | ConvertFrom-Json
     $finalHistorySchemaProperty = $summary.PSObject.Properties['migrationHistoryEvidenceSchema']
-    if ($null -eq $finalHistorySchemaProperty -or
-        [string]$finalHistorySchemaProperty.Value -cne $migrationHistoryEvidenceSchema) {
-        throw 'Final-clone migration-history evidence schema is missing or unsupported.'
+    if ($null -eq $finalHistorySchemaProperty -or $null -eq $finalHistorySchemaProperty.Value) {
+        throw "Final-clone summary requires non-null property 'migrationHistoryEvidenceSchema'."
+    }
+    if ($finalHistorySchemaProperty.Value -isnot [string] -or
+        $finalHistorySchemaProperty.Value -cne $migrationHistoryEvidenceSchema) {
+        throw 'Final-clone migration-history evidence schema must be the exact scalar JSON String contract.'
     }
     $allowReviewedLegacyFinalHistory = $false
     $gitHeadTree = @(Get-Content -LiteralPath (Join-Path $root 'git-head-tree.txt') |
