@@ -2271,3 +2271,13 @@ distinct structured `NOT_REQUIRED`/`ZERO_PENDING_MIGRATIONS` artifact and accept
 independently derives an empty pending set. Normal nonempty pending ranges continue to require actual dotnet
 `SUCCESS`/zero evidence. Positive zero-pending PASS and NO-GO fixtures plus missing/tampered marker refusals are
 required. No database, connection-variable or preserved evidence access is in scope.
+
+The zero-pending compatibility correction completed as clean direct-child commit
+`ee3d9c2837f8c8f752d55a554f5d4bf1bb70cde3`. Fresh zero-pending discovery now emits a distinct structured
+`NOT_REQUIRED` artifact with reason `ZERO_PENDING_MIGRATIONS` and count zero; it does not claim that dotnet ran.
+The validator accepts that schema only after independently deriving an empty pending set, while every nonempty
+pending range still requires unique native dotnet `SUCCESS`/zero evidence and rejects a substituted not-required
+marker. Positive zero-pending PASS and preflight NO-GO packages validate, and missing, count-tampered and fake-
+native zero-pending markers fail closed. PowerShell parsing, the complete rehearsal safety/refusal suite, final
+456/C8 package/tamper suite and diff checks passed. No database, connection variable or preserved evidence
+directory was accessed; Sol High re-review remains required over the ledger-only handoff descendant.
