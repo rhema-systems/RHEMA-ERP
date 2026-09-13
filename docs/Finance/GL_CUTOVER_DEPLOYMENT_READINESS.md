@@ -354,3 +354,10 @@ exact 456 no-connect migration discovery; idempotent SQL artifact checksum; expl
 named deployment, Finance, DBA, independent-review, and rollback owners.
 
 No item in this document authorizes migration application or feature enablement by itself.
+
+The V2 early-state/legacy discriminator correction completed as `5cf447bac84d14a67a77bd955de28176b4a21774`
+(tree `0c43d41ee271a2eab70c33777feb1df4d01541ab`). Empty media/name/path-hash is valid only for unowned,
+uncreated, incomplete pre-phase-03 failures at NOT_STARTED, OFFLINE or SOURCE_CAPTURE. Once path identity is resolved,
+the complete strict tuple is mandatory. Legacy acceptance is limited to the exact documented `22b27ab` commit,
+`13f1eb03` tree, failed SOURCE_CAPTURE outcome and absent V2/ownership fields. Same-basename recovery from another
+full path is refused by path-hash mismatch. Runtime remains prohibited pending approval.

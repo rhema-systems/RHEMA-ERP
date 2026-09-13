@@ -2524,3 +2524,12 @@ historical commit `22b27ab18a19a92fa6b1222c05add817574e74fe` with absent V2 fiel
 Re-manifest tamper tests refuse deleted schema/version/name/path-hash, wrong media/name/phase/hash identity; collision
 flow proves pre-existing bytes/hash unchanged and no backup ownership. All reset and FinalClone offline suites passed.
 No database, connection variable, preserved evidence or backup was accessed. Runtime remains prohibited pending review.
+
+Sol High review of `458b16cd4788070878907709c49f35b0e4d5e41e` required a precise V2 unresolved-path state and a
+stricter legacy discriminator. Direct-child correction `5cf447bac84d14a67a77bd955de28176b4a21774` (tree
+`0c43d41ee271a2eab70c33777feb1df4d01541ab`) permits an empty tuple only for unowned/uncreated/incomplete
+NOT_STARTED, OFFLINE_GATES_COMPLETE or SOURCE_CAPTURE_COMPLETE failures without phase-03, verify or reset state.
+Partial tuple and inconsistent-state tampering refuse. Legacy fallback additionally requires exact commit `22b27ab`,
+tree `13f1eb03`, failed SOURCE_CAPTURE outcome, no phase-03/reset, and absent V2/ownership fields. Recovery refuses the
+same basename under a different full path hash. Reset/FinalClone offline suites passed; no DB or preserved evidence
+access occurred. Runtime remains prohibited pending Sol High review.
