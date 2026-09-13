@@ -282,12 +282,16 @@ if ($PackageKind -eq 'DisposableReset') {
     }
 
     $approvedLegacyCommit = '22b27ab18a19a92fa6b1222c05add817574e74fe'
+    $approvedLegacyTree = '13f1eb03a24af14ff23998de72e3ddac9992981d'
     $identityVersionProperty = $reset.PSObject.Properties['backupIdentityVersion']
     $evidenceSchemaProperty = $reset.PSObject.Properties['evidenceSchema']
-    $isApprovedLegacy = $reset.reviewedCommit -ceq $approvedLegacyCommit -and
+    $isApprovedLegacy = $reset.reviewedCommit -ceq $approvedLegacyCommit -and $reset.reviewedTree -ceq $approvedLegacyTree -and
+        $reset.status -ceq 'FAILED_NO_AUTOMATIC_RETRY' -and $reset.phase -ceq 'SOURCE_CAPTURE_COMPLETE' -and
+        -not $backupPhaseMarkerPublished -and $reset.resetStarted -ne $true -and
         $null -eq $identityVersionProperty -and $null -eq $evidenceSchemaProperty -and
         $null -eq $reset.PSObject.Properties['backupFileName'] -and
-        $null -eq $reset.PSObject.Properties['backupPathSha256']
+        $null -eq $reset.PSObject.Properties['backupPathSha256'] -and
+        $null -eq $reset.PSObject.Properties['attemptOwnedBackup']
     if (-not $isApprovedLegacy -and
         ($null -eq $identityVersionProperty -or [string]$identityVersionProperty.Value -cne 'MEDIA_BOUND_V1' -or
          $null -eq $evidenceSchemaProperty -or [string]$evidenceSchemaProperty.Value -cne 'RHEMA_DISPOSABLE_RESET_EVIDENCE_V2')) {
@@ -304,10 +308,21 @@ if ($PackageKind -eq 'DisposableReset') {
     if (-not $isApprovedLegacy -and $null -eq $backupFileProperty) {
         throw 'Disposable-reset V2 status is missing backupFileName.'
     }
+    $mediaText = [string]$reset.backupMediaId
+    $fileText = if ($null -eq $backupFileProperty) { '' } else { [string]$backupFileProperty.Value }
+    $pathHashProperty = $reset.PSObject.Properties['backupPathSha256']
+    $pathHashText = if ($null -eq $pathHashProperty) { '' } else { [string]$pathHashProperty.Value }
+    $v2PathUnresolved = -not $isApprovedLegacy -and [string]::IsNullOrEmpty($mediaText) -and
+        [string]::IsNullOrEmpty($fileText) -and [string]::IsNullOrEmpty($pathHashText)
+    if ($v2PathUnresolved -and ($reset.backupCreated -eq $true -or $reset.backupCompleted -eq $true -or
+        $reset.attemptOwnedBackup -eq $true -or $backupPhaseMarkerPublished -or $reset.backupVerified -eq $true -or
+        $reset.resetStarted -eq $true -or $reset.phase -notin @('NOT_STARTED','OFFLINE_GATES_COMPLETE','SOURCE_CAPTURE_COMPLETE'))) {
+        throw 'Disposable-reset unresolved V2 backup path is inconsistent with terminal state.'
+    }
     $expectedBackupFileName = if ($isApprovedLegacy) {
         'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
     }
-    elseif ([string]::IsNullOrWhiteSpace([string]$backupFileProperty.Value) -and $reset.backupCreated -ne $true) { '' }
+    elseif ($v2PathUnresolved) { '' }
     else {
         $candidateBackupFileName = [string]$backupFileProperty.Value
         $derivedBackupFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_$($reset.backupMediaId).bak"
@@ -318,8 +333,7 @@ if ($PackageKind -eq 'DisposableReset') {
         }
         $candidateBackupFileName
     }
-    $pathHashProperty = $reset.PSObject.Properties['backupPathSha256']
-    $expectedBackupPathHash = if ($isApprovedLegacy) { '' } else {
+    $expectedBackupPathHash = if ($isApprovedLegacy -or $v2PathUnresolved) { '' } else {
         if ($null -eq $pathHashProperty -or [string]$pathHashProperty.Value -notmatch '^[0-9A-F]{64}$') {
             throw 'Disposable-reset media-bound backup path hash is missing or malformed.'
         }

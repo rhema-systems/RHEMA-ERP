@@ -324,6 +324,15 @@ exit 0
         $reconciledVerified.currentMaterialSha256 -cne $originalState.sha256) {
         throw 'Actual recovery helper did not accept exact unique ordered tokens from coalesced VERIFYONLY evidence.'
     }
+    $otherRoot = New-ExternalEvidencePath 'WRONG_FULL_PATH'
+    New-Item -ItemType Directory -Path $otherRoot | Out-Null
+    $sameNameOtherPath = Join-Path $otherRoot $recoveryBackupFileName
+    Copy-Item -LiteralPath $mutationBackupPath -Destination $sameNameOtherPath
+    $wrongPathRecovery = Get-DisposableBackupRecoveryState $sameNameOtherPath $mutationRoot
+    if ($wrongPathRecovery.backupVerified -ne $false -or $wrongPathRecovery.verifyEvidencePresent -ne $false) {
+        throw 'Recovery trusted the same basename under a different full path despite path-hash mismatch.'
+    }
+    Write-Host 'PASS: recovery refuses same basename under a different full path hash'
     foreach ($case in @(
         @{ label='missing completion'; text=$coalescedVerifyEvidence.Replace(' RESTORE_VERIFYONLY_CHECKSUM_COMPLETE','') },
         @{ label='duplicate completion'; text=$coalescedVerifyEvidence.Replace(

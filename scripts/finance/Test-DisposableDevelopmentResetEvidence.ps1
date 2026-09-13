@@ -53,7 +53,7 @@ function New-Status([string]$terminalStatus, [string]$phase, [bool]$backupCreate
         backupPreserved=$backupCreated; backupCompleted=$backupCreated
         currentMaterialSha256=if($backupCreated){'E' * 64}else{''}
         backupSha256=''; backupHashMatchesVerified=$false; verifyEvidencePresent=$false
-        backupFileName=''; backupPathSha256=('0' * 64); attemptOwnedBackup=$backupCreated
+        backupMediaId=''; backupFileName=''; backupPathSha256=''; attemptOwnedBackup=$backupCreated
         failedOperation=if($terminalStatus -eq 'PASS'){'NOT_APPLICABLE'}else{'SYNTHETIC_OPERATION'}
     }
     $result
@@ -94,6 +94,37 @@ try {
     & pwsh -NoProfile -File $validator -EvidenceDirectory $failed -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Minimal terminal failure package did not validate.' }
     Write-Host 'PASS: terminal failure package validates and writes a manifest'
+
+    foreach ($earlyCase in @(
+        @{ label='OFFLINE'; phase='OFFLINE_GATES_COMPLETE'; count=1; resolved=$false },
+        @{ label='SOURCE'; phase='SOURCE_CAPTURE_COMPLETE'; count=2; resolved=$false },
+        @{ label='PATH_FAILURE'; phase='SOURCE_CAPTURE_COMPLETE'; count=2; resolved=$true }
+    )) {
+        $early = New-PackageRoot $earlyCase.label
+        $null = New-Common $early
+        if ($earlyCase.count -ge 1) { Write-Json (Join-Path $early 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE'}) }
+        if ($earlyCase.count -ge 2) { Write-Json (Join-Path $early 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'}) }
+        $earlyStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' $earlyCase.phase $false $false $false
+        if ($earlyCase.resolved) {
+            $earlyStatus.backupMediaId='4' * 32
+            $earlyStatus.backupFileName="RhemaERP_DISPOSABLE_RESET_COPYONLY_$('4' * 32).bak"
+            $earlyStatus.backupPathSha256='4' * 64
+        }
+        Complete-Status $early $earlyStatus
+        & pwsh -NoProfile -File $validator -EvidenceDirectory $early -PackageKind DisposableReset -WriteManifest
+        if ($LASTEXITCODE -ne 0) { throw "Valid early V2 state failed: $($earlyCase.label)" }
+    }
+    Write-Host 'PASS: V2 NOT_STARTED, OFFLINE, SOURCE_CAPTURE and resolved-path failure states validate truthfully'
+    foreach ($property in @('backupMediaId','backupFileName','backupPathSha256')) {
+        $mixed = New-PackageRoot ("MIXED_" + $property)
+        Copy-Item -Path (Join-Path $failed '*') -Destination $mixed
+        $mixedStatus = Get-Content -Raw -LiteralPath (Join-Path $mixed 'reset-status.json') | ConvertFrom-Json
+        if ($property -eq 'backupMediaId') { $mixedStatus.$property = '5' * 32 }
+        elseif ($property -eq 'backupFileName') { $mixedStatus.$property = "RhemaERP_DISPOSABLE_RESET_COPYONLY_$('5' * 32).bak" }
+        else { $mixedStatus.$property = '5' * 64 }
+        Write-Json (Join-Path $mixed 'reset-status.json') $mixedStatus
+        Invoke-ExpectedRemanifestFailure $mixed "mixed unresolved V2 $property"
+    }
 
     $partialBackup = New-PackageRoot 'VERIFY_FAILURE'
     $null = New-Common $partialBackup
