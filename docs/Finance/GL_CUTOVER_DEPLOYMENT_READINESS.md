@@ -376,3 +376,13 @@ historical exception is encoded entirely by its exact reviewed commit/tree, fail
 fingerprint, and absent V2-only identity fields. The complete reset safety/evidence and FinalClone safety/evidence
 suites passed serially from the clean implementation commit. No database, connection variable, preserved evidence or
 backup was accessed; runtime remains prohibited pending independent Sol High review.
+
+The material-reconciliation state correction completed as `e29e92949da5bd09d5f4b27c69f800c81b655651` (tree
+`5d7530a75dd10a1a49c9bf1173877e510e0d9cc9`). V2 terminal status always records
+`backupMaterialStateReconciled=true`; the validator requires that property to exist, be non-null, have Boolean type,
+and remain true for unresolved, resolved-unowned, owned-empty, and materialized paths. Both non-material resolved
+states also require `backupHashMatchesVerified=false`. The one approved historical package now requires the exact
+recorded source fingerprint and Boolean reconciliation state in addition to its existing fixed identity and outcome.
+Deletion, null, wrong-type, false-reconciliation, false historical identity and contradictory hash-match tampering are
+refused. All reset and FinalClone offline suites passed serially from the clean implementation commit. No database,
+connection variable, preserved evidence or backup was accessed; runtime remains prohibited pending Sol High review.

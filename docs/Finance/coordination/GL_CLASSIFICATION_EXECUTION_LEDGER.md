@@ -2559,3 +2559,18 @@ evidence/tamper suites, FinalClone safety/parser and final evidence/tamper suite
 passed serially from the clean implementation commit. No database, process connection variable, preserved external
 evidence or backup was accessed. Runtime remains prohibited pending independent Sol High re-review of the docs-only
 descendant.
+
+Sol High review of exact `c76f935ddbb33d17a5841701e5de8f982a0b90d6` found a narrow P2 gap: resolved-unowned and
+owned-empty predicates did not state the false verified-hash match invariant directly, and
+`backupMaterialStateReconciled` was not yet a mandatory exact V2 field or fully bound in the historical exception.
+The bounded direct-child implementation completed as `e29e92949da5bd09d5f4b27c69f800c81b655651` (tree
+`5d7530a75dd10a1a49c9bf1173877e510e0d9cc9`). The producer's terminal status base now publishes reconciled material
+state as true. The validator requires its presence, non-null Boolean type and true value across every V2 path state;
+resolved-unowned and owned-empty additionally require `backupHashMatchesVerified=false`. The exact historical 22b
+predicate now requires the recorded fingerprint
+`446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28` and exact Boolean
+`backupMaterialStateReconciled=true`. Tests cover V2 deletion/null/string/false variants, both non-material hash-match
+contradictions, and historical fingerprint removal/mutation plus reconciliation false/wrong-type tampering. Disposable
+reset safety/helper and evidence/tamper suites, FinalClone safety/parser and final evidence/tamper suites passed
+serially from the clean implementation commit. No database, process connection variable, preserved evidence or backup
+was accessed. Runtime remains prohibited pending independent Sol High re-review of the docs-only descendant.
