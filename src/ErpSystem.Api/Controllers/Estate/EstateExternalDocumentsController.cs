@@ -2324,24 +2324,17 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
         }
 
-        if (!request.BusinessPartnerId.HasValue)
-        {
-            return BadRequest(new { success = false, message = "Select the customer account placing this enquiry." });
-        }
-
-        var customer = await FindPortalCustomerAsync(
-            tenantId,
-            portalUserId.Value,
-            request.BusinessPartnerId.Value,
-            cancellationToken);
-        if (customer is null)
-        {
-            return BadRequest(new
-            {
-                success = false,
-                message = "The selected customer account is not linked to your portal login."
-            });
-        }
+        var customer = request.BusinessPartnerId.HasValue
+            ? await FindPortalCustomerAsync(
+                tenantId,
+                portalUserId.Value,
+                request.BusinessPartnerId.Value,
+                cancellationToken)
+            : null;
+        customer ??= await PortalCustomers(tenantId, portalUserId.Value)
+            .OrderBy(item => item.PartnerName)
+            .ThenBy(item => item.CustomerAccountNumber)
+            .FirstOrDefaultAsync(cancellationToken);
 
         var listingType = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
         var listingReference = demarcationListing is null
@@ -2368,7 +2361,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             : requestedType == "Lease"
                 ? "Lease enquiry"
                 : "Property enquiry";
-        var description = $"{enquiryLabel} for {listingReference} - {listingName} by {customer.PartnerName} ({customer.CustomerAccountNumber}).";
+        var requesterName = FirstNonBlank(customer?.PartnerName, _currentUserService.UserName, _currentUserService.Email, "External portal user")!;
+        var requesterReference = FirstNonBlank(customer?.CustomerAccountNumber, _currentUserService.Email, _currentUserService.UserName, "Portal account")!;
+        var description = $"{enquiryLabel} for {listingReference} - {listingName} by {requesterName} ({requesterReference}).";
         var notes = Truncate(string.Join(Environment.NewLine, new[]
         {
             description,
@@ -2378,6 +2373,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             demarcationListing is null ? null : $"Estate demarcation id: {demarcationListing.Id}",
             $"Listing reference: {listingReference}",
             $"Available listing type: {listingType}",
+            customer is null ? "Business partner profile: Not supplied; enquiry captured from authenticated portal login." : $"Business partner id: {customer.Id}",
             requestedType is null ? null : $"Requested transaction: {requestedType}",
             string.IsNullOrWhiteSpace(request.Message) ? null : $"Customer message: {request.Message.Trim()}"
         }.Where(line => !string.IsNullOrWhiteSpace(line))), 2000);
@@ -2388,11 +2384,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             {
                 Name = Truncate($"{enquiryLabel} - {listingName}", 200),
                 Description = Truncate(description, 2000),
-                CustomerId = customer.Id,
+                CustomerId = customer?.Id,
                 Stage = "Prospecting",
                 Probability = 10,
                 Amount = publishedAmount ?? 0m,
-                Currency = string.IsNullOrWhiteSpace(listingCurrency) ? customer.Currency ?? "GHS" : listingCurrency,
+                Currency = string.IsNullOrWhiteSpace(listingCurrency) ? customer?.Currency ?? "GHS" : listingCurrency,
                 ExpectedCloseDate = DateTime.UtcNow.Date.AddDays(30),
                 LeadSource = "External Portal - Estate Listings",
                 OpportunityType = requestedType == "Purchase"
