@@ -2,7 +2,24 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ArrowLeftRight, CalendarCheck, CalendarDays, Coins, DoorOpen, Gift, Hourglass } from 'lucide-react';
+import {
+  ArrowLeftRight,
+  Award,
+  CalendarCheck,
+  CalendarDays,
+  Coins,
+  Compass,
+  DoorOpen,
+  Gavel,
+  Gift,
+  GraduationCap,
+  HeartPulse,
+  Hourglass,
+  Laptop,
+  Plane,
+  Target,
+  Users,
+} from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
@@ -14,6 +31,18 @@ import { leaveService } from '@/services/hr/leave.service';
 import { monthlySummaryService } from '@/services/hr/attendance.service';
 import { employeeBenefitEnrollmentService } from '@/services/hr/benefits.service';
 import { salaryChangeRequestService } from '@/services/hr/salary-change-request.service';
+import { trainingCompletionService } from '@/services/hr/training-completion.service';
+import { trainingNominationService } from '@/services/hr/training-nomination.service';
+import { performanceAppraisalService } from '@/services/hr/appraisal-run.service';
+import { employeeGoalService } from '@/services/hr/goals.service';
+import { disciplineService } from '@/services/hr/discipline.service';
+import { awardsService } from '@/services/hr/awards.service';
+import { assetRegisterService } from '@/services/hr/asset-register.service';
+import { medicalHealthService } from '@/services/hr/medical-health.service';
+import { medicalClaimService } from '@/services/hr/medical-claims.service';
+import { travelService } from '@/services/hr/travel.service';
+import { employeeOrientationService } from '@/services/hr/employee-orientation.service';
+import { successionCandidateService } from '@/services/hr/succession.service';
 import { SALARY_CHANGE_STATUS_LABELS, type SalaryChangeRequest } from '@/types/hr/salary-change-request';
 import type { StaffMovementSummary } from '@/types/hr/movements';
 import type { ProbationPeriodSummary } from '@/types/hr/probation';
@@ -21,6 +50,16 @@ import type { SeparationListItem } from '@/types/hr/separation';
 import type { LeaveRequest } from '@/types/hr/leave-request';
 import type { StaffMonthlyAttendanceSummary } from '@/types/hr/attendance';
 import type { EmployeeBenefitEnrollmentListItem } from '@/types/hr/benefits';
+import type { TrainingCompletion, TrainingNominationSummary } from '@/types/hr/training-delivery';
+import type { PerformanceAppraisal } from '@/types/hr/appraisal-run';
+import type { EmployeeGoal } from '@/types/hr/goals';
+import type { DisciplinaryCaseSummary } from '@/types/hr/discipline';
+import type { EmployeeAwardSummary } from '@/types/hr/awards';
+import type { AssetAssignmentSummary } from '@/types/hr/assets';
+import type { MedicalExpenseClaimSummary } from '@/types/hr/medical';
+import type { StaffTravelRequestSummary } from '@/types/hr/travel';
+import type { EmployeeOrientationSummary } from '@/types/hr/orientation';
+import type { SuccessionCandidate } from '@/types/hr/succession';
 import { RecordSummaryTab, dash } from './RecordSummaryTab';
 
 /**
@@ -289,6 +328,321 @@ export function SalaryChangesRecordTab({ employeeId }: { employeeId: string }) {
         { key: 'result', header: 'Monthly basic', render: (r) => money(r.resultingMonthlyBasicPay), className: 'w-[140px]' },
         { key: 'effective', header: 'Effective', render: (r) => formatDate(r.effectiveDate), className: 'w-[120px]' },
         { key: 'status', header: 'Status', render: (r) => <StatusBadge status={SALARY_CHANGE_STATUS_LABELS[r.status] ?? r.status} />, className: 'w-[170px]' },
+      ]}
+    />
+  );
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Lane T3: Training, Appraisals & goals, Discipline, Awards, Assets, Medical, Travel, Orientation,
+// Succession — the same shape, over each module's own by-employee read.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// ── Training ─────────────────────────────────────────────────────────────────
+
+export function TrainingRecordTab({ employeeId }: { employeeId: string }) {
+  const { data: nominations } = useQuery({
+    queryKey: ['hr', 'employees', employeeId, 'record', 'training-nominations'],
+    queryFn: () => trainingNominationService.getByEmployee(employeeId),
+  });
+  const pending = (nominations ?? []).filter((n) => String(n.status) !== 'Completed' && String(n.status) !== 'Cancelled');
+  return (
+    <RecordSummaryTab<TrainingCompletion>
+      title="Training"
+      description="Programmes completed, with scores and the manager's verification; nominations still in flight above. Nominate, schedule and record completions on the training screens."
+      queryKey={['hr', 'employees', employeeId, 'record', 'training-completions']}
+      queryFn={() => trainingCompletionService.getByEmployee(employeeId)}
+      rowKey={(c) => c.id}
+      emptyIcon={GraduationCap}
+      emptyTitle="No training completed"
+      emptyDescription="No completion has been recorded for this employee."
+      openHref={`/hr/training/completions?employeeId=${employeeId}`}
+      openLabel="Open in Training"
+      toolbar={
+        pending.length > 0 ? (
+          <div className="flex flex-wrap gap-2" data-testid="training-nominations">
+            {pending.map((n) => (
+              <div key={n.id} className="rounded-md border px-3 py-1.5 text-sm">
+                <span className="font-medium">{n.programName}</span>
+                <span className="ml-2 text-muted-foreground">
+                  {formatDate(n.trainingStartDate)} · {String(n.status)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null
+      }
+      columns={[
+        { key: 'program', header: 'Programme', render: (c) => c.programName },
+        { key: 'date', header: 'Completed', render: (c) => formatDate(c.completionDate), className: 'w-[120px]' },
+        { key: 'score', header: 'Score', render: (c) => (c.finalScore == null ? '—' : c.finalScore), className: 'w-[80px]' },
+        { key: 'passed', header: 'Passed', render: (c) => (c.isPassed ? 'Yes' : 'No'), className: 'w-[80px]' },
+        {
+          key: 'verified',
+          header: 'Verified',
+          render: (c) => (c.isVerifiedByManager ? <Badge variant="outline">By {c.verifiedByName ?? 'manager'}</Badge> : <span className="text-muted-foreground">Not yet</span>),
+          className: 'w-[170px]',
+        },
+        { key: 'status', header: 'Status', render: (c) => <StatusBadge status={String(c.status)} />, className: 'w-[130px]' },
+      ]}
+    />
+  );
+}
+
+// ── Appraisals & goals ───────────────────────────────────────────────────────
+
+export function AppraisalsRecordTab({ employeeId }: { employeeId: string }) {
+  const { data: goals } = useQuery({
+    queryKey: ['hr', 'employees', employeeId, 'record', 'goals'],
+    queryFn: () => employeeGoalService.getByEmployee(employeeId),
+  });
+  const openGoals = (goals ?? []).filter((g) => !['Completed', 'Cancelled', 'Closed'].includes(String(g.status)));
+  return (
+    <RecordSummaryTab<PerformanceAppraisal>
+      title="Appraisals & goals"
+      description="Every appraisal on record with its score; the goals still open are listed above. Scoring, calibration and goal-setting happen on the performance screens."
+      queryKey={['hr', 'employees', employeeId, 'record', 'appraisals']}
+      queryFn={() => performanceAppraisalService.getByEmployee(employeeId)}
+      rowKey={(a) => a.id}
+      rowHref={(a) => `/hr/performance/hr-review/${a.id}`}
+      emptyIcon={Target}
+      emptyTitle="No appraisals"
+      emptyDescription="No appraisal has been opened for this employee in any cycle."
+      openHref={`/hr/performance/employee-goals?employeeId=${employeeId}`}
+      openLabel="Open in Performance"
+      toolbar={
+        openGoals.length > 0 ? (
+          <div className="space-y-1" data-testid="open-goals">
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Open goals</p>
+            <div className="flex flex-wrap gap-2">
+              {openGoals.map((g) => (
+                <a key={g.id} href={`/hr/performance/employee-goals/${g.id}`} className="rounded-md border px-3 py-1.5 text-sm hover:bg-muted">
+                  <span className="font-medium">{g.title}</span>
+                  <span className="ml-2 text-muted-foreground">{g.weight}% · {String(g.status)}</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        ) : null
+      }
+      columns={[
+        { key: 'number', header: 'Appraisal', render: (a) => `${a.appraisalNumber}${a.appraisalCycleCode ? ` · ${a.appraisalCycleCode}` : ''}` },
+        { key: 'period', header: 'Period', render: (a) => `${formatDate(a.startDate)} — ${formatDate(a.endDate)}`, className: 'w-[220px]' },
+        { key: 'score', header: 'Score', render: (a) => (a.adjustedScore ?? a.overallScore ?? '—'), className: 'w-[90px]' },
+        { key: 'rank', header: 'Rank in unit', render: (a) => dash(a.rankInUnit), className: 'w-[110px]' },
+        { key: 'status', header: 'Status', render: (a) => <StatusBadge status={String(a.status)} />, className: 'w-[140px]' },
+      ]}
+    />
+  );
+}
+
+// ── Discipline ───────────────────────────────────────────────────────────────
+
+export function DisciplineRecordTab({ employeeId }: { employeeId: string }) {
+  return (
+    <RecordSummaryTab<DisciplinaryCaseSummary>
+      title="Discipline"
+      description="Disciplinary cases against this employee and their outcome. Cases are opened, heard and closed on the discipline screen."
+      queryKey={['hr', 'employees', employeeId, 'record', 'discipline']}
+      queryFn={() => disciplineService.getByEmployee(employeeId)}
+      rowKey={(c) => c.id}
+      rowHref={(c) => `/hr/discipline/${c.id}`}
+      emptyIcon={Gavel}
+      emptyTitle="No disciplinary cases"
+      emptyDescription="No case has been opened against this employee."
+      openHref={`/hr/discipline?employeeId=${employeeId}`}
+      openLabel="Open in Discipline"
+      columns={[
+        { key: 'number', header: 'Case', render: (c) => c.caseNumber },
+        { key: 'offense', header: 'Offence', render: (c) => `${c.offenseName} · ${c.severityName}` },
+        { key: 'incident', header: 'Incident', render: (c) => formatDate(c.incidentDate), className: 'w-[120px]' },
+        {
+          key: 'outcome',
+          header: 'Outcome',
+          render: (c) => {
+            const parts = [c.hasWarning && 'Warning', c.hasSuspension && 'Suspension', c.hasFine && 'Fine', c.hasTermination && 'Termination'].filter(Boolean);
+            return parts.length ? parts.join(', ') : '—';
+          },
+          className: 'w-[200px]',
+        },
+        { key: 'status', header: 'Status', render: (c) => <StatusBadge status={c.statusName} />, className: 'w-[140px]' },
+      ]}
+    />
+  );
+}
+
+// ── Awards ───────────────────────────────────────────────────────────────────
+
+export function AwardsRecordTab({ employeeId }: { employeeId: string }) {
+  return (
+    <RecordSummaryTab<EmployeeAwardSummary>
+      title="Awards"
+      description="Awards conferred on this employee. Nominations, committee decisions and presentations are on the awards screen."
+      queryKey={['hr', 'employees', employeeId, 'record', 'awards']}
+      queryFn={() => awardsService.getForEmployee(employeeId)}
+      rowKey={(a) => a.id}
+      rowHref={(a) => `/hr/awards/${a.id}`}
+      emptyIcon={Award}
+      emptyTitle="No awards"
+      emptyDescription="No award has been conferred on this employee."
+      openHref={`/hr/awards?employeeId=${employeeId}`}
+      openLabel="Open in Awards"
+      columns={[
+        { key: 'number', header: 'Award', render: (a) => a.awardNumber },
+        { key: 'type', header: 'Type', render: (a) => `${a.awardTypeName}${a.awardLevelName ? ` · ${a.awardLevelName}` : ''}` },
+        { key: 'date', header: 'Awarded', render: (a) => formatDate(a.awardDate), className: 'w-[120px]' },
+        { key: 'amount', header: 'Amount', render: (a) => money(a.monetaryAmount), className: 'w-[130px]' },
+        { key: 'presented', header: 'Presented', render: (a) => (a.presentationDate ? formatDate(a.presentationDate) : 'Not yet'), className: 'w-[120px]' },
+      ]}
+    />
+  );
+}
+
+// ── Assets ───────────────────────────────────────────────────────────────────
+
+export function AssetsRecordTab({ employeeId }: { employeeId: string }) {
+  return (
+    <RecordSummaryTab<AssetAssignmentSummary>
+      title="Assets"
+      description="Company assets currently in this employee's hands. Issue, transfer and return them on the assets screens."
+      queryKey={['hr', 'employees', employeeId, 'record', 'assets']}
+      queryFn={() => assetRegisterService.getActiveAssignmentsForEmployee(employeeId)}
+      rowKey={(a) => a.id}
+      rowHref={(a) => `/hr/assets/assignments/${a.id}`}
+      emptyIcon={Laptop}
+      emptyTitle="No assets assigned"
+      emptyDescription="No company asset is assigned to this employee at the moment."
+      openHref={`/hr/assets/assignments?employeeId=${employeeId}`}
+      openLabel="Open in Assets"
+      columns={[
+        { key: 'asset', header: 'Asset', render: (a) => `${a.assetName} · ${a.assetNumber}` },
+        { key: 'type', header: 'Type', render: (a) => `${a.assetTypeName}${a.isBenefitInKind ? ' · benefit in kind' : ''}` },
+        { key: 'since', header: 'Since', render: (a) => formatDate(a.assignmentDate), className: 'w-[120px]' },
+        { key: 'due', header: 'Return due', render: (a) => (a.expectedReturnDate ? formatDate(a.expectedReturnDate) : '—'), className: 'w-[120px]' },
+        { key: 'ack', header: 'Acknowledged', render: (a) => (a.employeeAcknowledged ? 'Yes' : 'No'), className: 'w-[120px]' },
+        { key: 'status', header: 'Status', render: (a) => <StatusBadge status={a.statusName} />, className: 'w-[130px]' },
+      ]}
+    />
+  );
+}
+
+// ── Medical ──────────────────────────────────────────────────────────────────
+
+export function MedicalRecordTab({ employeeId }: { employeeId: string }) {
+  const { data: profile } = useQuery({
+    queryKey: ['hr', 'employees', employeeId, 'record', 'health-profile'],
+    queryFn: () => medicalHealthService.getProfileByEmployee(employeeId),
+  });
+  return (
+    <RecordSummaryTab<MedicalExpenseClaimSummary>
+      title="Medical"
+      description="The health profile in brief and the expense claims filed. Clinical records stay on the medical screens, where access is narrower than this page's."
+      queryKey={['hr', 'employees', employeeId, 'record', 'medical-claims']}
+      queryFn={() => medicalClaimService.getByEmployee(employeeId)}
+      rowKey={(c) => c.id}
+      rowHref={(c) => `/hr/medical/claims/${c.id}`}
+      emptyIcon={HeartPulse}
+      emptyTitle="No medical claims"
+      emptyDescription="No expense claim has been filed by or for this employee."
+      openHref={profile ? `/hr/medical/health/${profile.id}` : `/hr/medical/claims?employeeId=${employeeId}`}
+      openLabel="Open in Medical"
+      toolbar={
+        profile ? (
+          <div className="flex flex-wrap gap-2 text-sm" data-testid="health-profile">
+            <span className="rounded-md border px-3 py-1.5">Blood group <span className="font-medium">{String(profile.bloodGroup)}</span></span>
+            {profile.preferredFacilityName && <span className="rounded-md border px-3 py-1.5">Facility <span className="font-medium">{profile.preferredFacilityName}</span></span>}
+            {profile.emergencyContactName && <span className="rounded-md border px-3 py-1.5">Emergency <span className="font-medium">{profile.emergencyContactName}</span>{profile.emergencyContactPhone ? ` · ${profile.emergencyContactPhone}` : ''}</span>}
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground">No health profile on file.</p>
+        )
+      }
+      columns={[
+        { key: 'number', header: 'Claim', render: (c) => `${c.claimNumber}${c.isForDependent && c.dependentName ? ` · for ${c.dependentName}` : ''}` },
+        { key: 'type', header: 'Expense', render: (c) => `${c.expenseTypeName ?? String(c.expenseType)} · ${c.facilityName}` },
+        { key: 'date', header: 'Service', render: (c) => formatDate(c.serviceDate), className: 'w-[120px]' },
+        { key: 'amount', header: 'Requested / approved', render: (c) => `${money(c.amountRequested)}${c.amountApproved != null ? ` / ${money(c.amountApproved)}` : ''}`, className: 'w-[220px]' },
+        { key: 'status', header: 'Status', render: (c) => <StatusBadge status={c.statusName ?? String(c.status)} />, className: 'w-[140px]' },
+      ]}
+    />
+  );
+}
+
+// ── Travel ───────────────────────────────────────────────────────────────────
+
+export function TravelRecordTab({ employeeId }: { employeeId: string }) {
+  return (
+    <RecordSummaryTab<StaffTravelRequestSummary>
+      title="Travel"
+      description="Travel requested by or for this employee, with its budget and risk level. Requests, bookings and claims are on the travel screens."
+      queryKey={['hr', 'employees', employeeId, 'record', 'travel']}
+      queryFn={() => travelService.getByEmployee(employeeId)}
+      rowKey={(t) => t.id}
+      rowHref={(t) => `/hr/travel/${t.id}`}
+      emptyIcon={Plane}
+      emptyTitle="No travel"
+      emptyDescription="No travel request has been raised for this employee."
+      openHref={`/hr/travel?employeeId=${employeeId}`}
+      openLabel="Open in Travel"
+      columns={[
+        { key: 'number', header: 'Request', render: (t) => t.requestNumber },
+        { key: 'where', header: 'Destination', render: (t) => `${t.destinationCity}, ${t.destinationCountryName}${t.isInternational ? ' · international' : ''}` },
+        { key: 'when', header: 'Dates', render: (t) => `${formatDate(t.travelStartDate)} — ${formatDate(t.travelEndDate)}`, className: 'w-[220px]' },
+        { key: 'cost', header: 'Estimate', render: (t) => money(t.estimatedTotalCost, t.currencyCode), className: 'w-[130px]' },
+        { key: 'status', header: 'Status', render: (t) => <StatusBadge status={String(t.status)} />, className: 'w-[140px]' },
+      ]}
+    />
+  );
+}
+
+// ── Orientation ──────────────────────────────────────────────────────────────
+
+export function OrientationRecordTab({ employeeId }: { employeeId: string }) {
+  return (
+    <RecordSummaryTab<EmployeeOrientationSummary>
+      title="Orientation"
+      description="Orientation programmes this employee was enrolled in, with progress and result. Enrolment and sessions are on the orientation screens."
+      queryKey={['hr', 'employees', employeeId, 'record', 'orientation']}
+      queryFn={() => employeeOrientationService.getByEmployee(employeeId)}
+      rowKey={(o) => o.id}
+      emptyIcon={Compass}
+      emptyTitle="No orientation"
+      emptyDescription="This employee has not been enrolled in an orientation programme."
+      openHref={`/hr/orientation/enrollments?employeeId=${employeeId}`}
+      openLabel="Open in Orientation"
+      columns={[
+        { key: 'program', header: 'Programme', render: (o) => `${o.programTitle ?? o.programCode ?? '—'}${o.sessionTitle ? ` · ${o.sessionTitle}` : ''}` },
+        { key: 'enrolled', header: 'Enrolled', render: (o) => formatDate(o.enrolledAt), className: 'w-[120px]' },
+        { key: 'progress', header: 'Progress', render: (o) => `${Math.round(o.progressPercentage)}%`, className: 'w-[100px]' },
+        { key: 'result', header: 'Result', render: (o) => (o.completedAt ? `${o.isPassed ? 'Passed' : 'Not passed'}${o.finalScore != null ? ` · ${o.finalScore}` : ''}` : '—'), className: 'w-[150px]' },
+        { key: 'status', header: 'Status', render: (o) => <StatusBadge status={String(o.completionStatus)} />, className: 'w-[140px]' },
+      ]}
+    />
+  );
+}
+
+// ── Succession ───────────────────────────────────────────────────────────────
+
+export function SuccessionRecordTab({ employeeId }: { employeeId: string }) {
+  return (
+    <RecordSummaryTab<SuccessionCandidate>
+      title="Succession"
+      description="Succession plans this employee is a candidate on, and how ready they are judged to be. Plans and readiness reviews are on the succession screens."
+      queryKey={['hr', 'employees', employeeId, 'record', 'succession']}
+      queryFn={() => successionCandidateService.getByEmployee(employeeId)}
+      rowKey={(c) => c.id}
+      rowHref={(c) => `/hr/succession/${c.successionPlanId}`}
+      emptyIcon={Users}
+      emptyTitle="Not on a succession plan"
+      emptyDescription="This employee is not a candidate on any succession plan."
+      openHref={`/hr/succession?employeeId=${employeeId}`}
+      openLabel="Open in Succession"
+      columns={[
+        { key: 'plan', header: 'Plan', render: (c) => c.planNumber },
+        { key: 'type', header: 'As', render: (c) => `${c.typeName}${c.isEmergencyOnly ? ' · emergency only' : ''}`, className: 'w-[180px]' },
+        { key: 'rank', header: 'Rank', render: (c) => c.rank, className: 'w-[70px]' },
+        { key: 'ready', header: 'Readiness', render: (c) => `${c.currentReadinessName}${c.readyByDate ? ` · by ${formatDate(c.readyByDate)}` : ''}` },
+        { key: 'pool', header: 'Talent pool', render: (c) => dash(c.talentPoolName), className: 'w-[160px]' },
       ]}
     />
   );

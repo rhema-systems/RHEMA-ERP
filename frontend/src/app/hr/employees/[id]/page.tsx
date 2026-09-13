@@ -41,14 +41,24 @@ import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
 import { EmployeeProfileProvider } from '@/components/hr/employee/EmployeeProfileContext';
 import { ProfileTabNav } from '@/components/hr/employee/ProfileTabNav';
 import {
+  AppraisalsRecordTab,
+  AssetsRecordTab,
   AttendanceRecordTab,
+  AwardsRecordTab,
   BenefitsRecordTab,
+  DisciplineRecordTab,
   LeaveRecordTab,
+  MedicalRecordTab,
   MovementsRecordTab,
+  OrientationRecordTab,
   ProbationRecordTab,
   SalaryChangesRecordTab,
   SeparationRecordTab,
+  SuccessionRecordTab,
+  TrainingRecordTab,
+  TravelRecordTab,
 } from '@/components/hr/employee/tabs/EmployeeRecordTabs';
+import { disciplineService } from '@/services/hr/discipline.service';
 import {
   DEFAULT_PROFILE_TAB,
   resolveProfileTab,
@@ -160,6 +170,14 @@ function EmployeeDetailPageInner() {
   });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['hr', 'employees'] });
+
+  // Lane T3: the one cheap count the rail shows — open disciplinary cases. A 403 (no discipline
+  // read) is simply no badge; the tab itself says so when opened.
+  const { data: openCases } = useQuery({
+    queryKey: ['hr', 'employees', id, 'record', 'discipline-open-count'],
+    queryFn: () => disciplineService.getOpenCountForEmployee(id).catch(() => 0),
+    enabled: !!id,
+  });
 
   const runAction = async () => {
     if (!action || !e) return false;
@@ -280,7 +298,7 @@ function EmployeeDetailPageInner() {
           record tab (T2/T3) is one row there and one TabsContent below. Radix mounts only the
           active content, so a tab's reads run when it is opened, not when the page is. */}
       <Tabs value={activeTab} onValueChange={changeTab} orientation="vertical" className="flex flex-col gap-4 lg:flex-row lg:gap-8">
-        <ProfileTabNav groups={groups} value={activeTab} onChange={changeTab} />
+        <ProfileTabNav groups={groups} value={activeTab} onChange={changeTab} counts={{ discipline: openCases || undefined }} />
 
         <div className="min-w-0 flex-1">
         <TabsContent value="overview" className="mt-0 space-y-4">
@@ -485,6 +503,34 @@ function EmployeeDetailPageInner() {
         </TabsContent>
         <TabsContent value="attendance" className="mt-0">
           <AttendanceRecordTab employeeId={id} />
+        </TabsContent>
+        {/* Lane T3 record tabs. */}
+        <TabsContent value="training" className="mt-0">
+          <TrainingRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="appraisals" className="mt-0">
+          <AppraisalsRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="discipline" className="mt-0">
+          <DisciplineRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="awards" className="mt-0">
+          <AwardsRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="medical" className="mt-0">
+          <MedicalRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="travel" className="mt-0">
+          <TravelRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="assets" className="mt-0">
+          <AssetsRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="orientation" className="mt-0">
+          <OrientationRecordTab employeeId={id} />
+        </TabsContent>
+        <TabsContent value="succession" className="mt-0">
+          <SuccessionRecordTab employeeId={id} />
         </TabsContent>
         </div>
       </Tabs>

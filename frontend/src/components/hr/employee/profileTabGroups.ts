@@ -71,6 +71,17 @@ export const PROFILE_TAB_GROUPS: ProfileTabGroup[] = [
       { key: 'skills', label: 'Skills' },
       { key: 'certifications', label: 'Certifications' },
       { key: 'work-history', label: 'Work history' },
+      { key: 'training', label: 'Training' },
+    ],
+  },
+  {
+    // Lane T3 record tabs.
+    key: 'performance',
+    label: 'Performance & conduct',
+    tabs: [
+      { key: 'appraisals', label: 'Appraisals & goals' },
+      { key: 'discipline', label: 'Discipline' },
+      { key: 'awards', label: 'Awards' },
     ],
   },
   {
@@ -82,12 +93,23 @@ export const PROFILE_TAB_GROUPS: ProfileTabGroup[] = [
     ],
   },
   {
+    key: 'welfare',
+    label: 'Welfare & travel',
+    tabs: [
+      { key: 'medical', label: 'Medical' },
+      { key: 'travel', label: 'Travel' },
+      { key: 'assets', label: 'Assets' },
+    ],
+  },
+  {
     key: 'records',
     label: 'Records',
     tabs: [
       { key: 'documents', label: 'Documents' },
       { key: 'referees', label: 'Referees' },
       { key: 'guarantors', label: 'Guarantors' },
+      { key: 'orientation', label: 'Orientation' },
+      { key: 'succession', label: 'Succession' },
     ],
   },
 ];

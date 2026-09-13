@@ -7,6 +7,11 @@ interface ProfileTabNavProps {
   groups: ProfileTabGroup[];
   value: string;
   onChange: (tab: string) => void;
+  /**
+   * A number beside a tab's label — only where a CHEAP count exists (discipline's open-count is
+   * the one today). A count that costs a full list read is a tab that loads before it is opened.
+   */
+  counts?: Record<string, number | undefined>;
 }
 
 /**
@@ -19,7 +24,7 @@ interface ProfileTabNavProps {
  * job: it is the one control every phone renders well, and it keeps the group names in front of the
  * user while they choose.
  */
-export function ProfileTabNav({ groups, value, onChange }: ProfileTabNavProps) {
+export function ProfileTabNav({ groups, value, onChange, counts = {} }: ProfileTabNavProps) {
   return (
     <>
       {/* Wide: the rail. */}
@@ -37,9 +42,17 @@ export function ProfileTabNav({ groups, value, onChange }: ProfileTabNavProps) {
               <TabsTrigger
                 key={tab.key}
                 value={tab.key}
-                className="w-full justify-start rounded-md px-3 py-1.5 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none"
+                className="w-full justify-between rounded-md px-3 py-1.5 text-left data-[state=active]:bg-muted data-[state=active]:shadow-none"
               >
-                {tab.label}
+                <span>{tab.label}</span>
+                {counts[tab.key] ? (
+                  <span
+                    className="ml-2 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-800 dark:bg-amber-900 dark:text-amber-100"
+                    data-testid={`profile-tab-count-${tab.key}`}
+                  >
+                    {counts[tab.key]}
+                  </span>
+                ) : null}
               </TabsTrigger>
             ))}
           </div>
@@ -63,6 +76,7 @@ export function ProfileTabNav({ groups, value, onChange }: ProfileTabNavProps) {
               {group.tabs.map((tab) => (
                 <option key={tab.key} value={tab.key}>
                   {tab.label}
+                  {counts[tab.key] ? ` (${counts[tab.key]})` : ''}
                 </option>
               ))}
             </optgroup>
