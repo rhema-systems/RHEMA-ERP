@@ -1,7 +1,6 @@
 'use client';
 
 import React from 'react';
-import Link from 'next/link';
 import {
   Building2,
   CalendarDays,
@@ -216,7 +215,6 @@ export default function ExternalPropertyListingsPage() {
     ExternalCustomerProfile[]
   >([]);
   const [selectedCustomerId, setSelectedCustomerId] = React.useState('');
-  const [areProfilesLoading, setAreProfilesLoading] = React.useState(true);
   const [listings, setListings] = React.useState<ExternalEstateListing[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
@@ -255,7 +253,6 @@ export default function ExternalPropertyListingsPage() {
         search,
         location,
         listingType,
-        businessPartnerId: selectedCustomerId || undefined,
         minPrice: parsePriceFilter(minPrice),
         maxPrice: parsePriceFilter(maxPrice),
         page: pageNumber,
@@ -277,7 +274,7 @@ export default function ExternalPropertyListingsPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [listingType, location, maxPrice, minPrice, pageSize, search, selectedCustomerId]);
+  }, [listingType, location, maxPrice, minPrice, pageSize, search]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -290,11 +287,7 @@ export default function ExternalPropertyListingsPage() {
         setCustomerProfiles(profiles);
         setSelectedCustomerId((current) => current || profiles[0]?.id || '');
       } catch {
-        if (mounted) {
-          setError('Could not load the Business Partners linked to your account.');
-        }
-      } finally {
-        if (mounted) setAreProfilesLoading(false);
+        if (mounted) setCustomerProfiles([]);
       }
     };
 
@@ -310,11 +303,6 @@ export default function ExternalPropertyListingsPage() {
 
   const submitEnquiry = async (listing: ExternalEstateListing) => {
     setSelectedId(listing.id);
-    if (!selectedCustomer) {
-      setError('Select the Business Partner placing this enquiry.');
-      return;
-    }
-
     setIsSubmitting(true);
     setSubmittingListingId(listing.id);
     setCreatedRequest(null);
@@ -322,9 +310,7 @@ export default function ExternalPropertyListingsPage() {
     try {
       const created = await externalEstateListingsService.createEnquiry(
         listing.id,
-        {
-          businessPartnerId: selectedCustomer.id,
-        }
+        selectedCustomer ? { businessPartnerId: selectedCustomer.id } : {}
       );
       setCreatedRequest(created);
       toast({
@@ -440,32 +426,6 @@ export default function ExternalPropertyListingsPage() {
             {createdRequest.referenceNumber || createdRequest.title} is now in{' '}
             {createdRequest.currentStageName}. Sales will complete their process
             before handing the transaction back to Estate.
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {areProfilesLoading ? (
-        <Alert>
-          <Loader2 className="h-4 w-4 animate-spin" />
-          <AlertTitle>Loading customer account</AlertTitle>
-          <AlertDescription>
-            We are checking the Business Partner account linked to your portal login.
-          </AlertDescription>
-        </Alert>
-      ) : customerProfiles.length === 0 ? (
-        <Alert>
-          <FileText className="h-4 w-4" />
-          <AlertTitle>Business Partner required</AlertTitle>
-          <AlertDescription className="space-y-3">
-            <p>
-              Register and obtain approval for a Customer Business Partner before
-              sending a property enquiry.
-            </p>
-            <Button asChild size="sm" variant="outline">
-              <Link href="/external-portal/business-partner">
-                Open Business Partner Registration
-              </Link>
-            </Button>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -663,11 +623,7 @@ export default function ExternalPropertyListingsPage() {
 
                 <Button
                   className="w-full"
-                  disabled={
-                    isSubmitting ||
-                    areProfilesLoading ||
-                    customerProfiles.length === 0
-                  }
+                  disabled={isSubmitting}
                   onClick={() => void submitEnquiry(selected)}
                 >
                   {submittingListingId === selected.id ? (
