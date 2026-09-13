@@ -2434,3 +2434,16 @@ reported unverified. PowerShell parsing, disposable reset safety/helper and evid
 safety/parser regression and final evidence/tamper suites passed serially. No database, process connection variable or
 preserved evidence was accessed. Reset execution remains prohibited pending Sol High review of the ledger-only
 descendant.
+
+Sol High review of exact ledger descendant `c101f693e82b229e2d8fcdc5359fc6cb65d1b7e1` found one narrow
+P2: `backupCompleted=true` required the atomic-reservation and COPY_ONLY CHECKSUM completion markers only when the
+phase-03 marker was present, so a phase-03-publication-failure package did not independently bind that completed state
+to both SQL markers. The correction completed as clean direct-child implementation commit
+`e629e57f6867745cac3fcf1dae85e63e16393885` (tree `55fc2a68f8b9ec2b11a793843e3818606e654f0e`).
+The validator now applies the two-marker requirement to every completed backup claim regardless of phase-03
+publication. Two focused tamper fixtures start from the valid marker-publication-failure package, remove one required
+marker at a time, refresh artifact bindings and request manifest publication; both are refused for the exact semantic
+invariant before a new manifest can be written. Disposable-reset safety/helper and evidence/tamper suites, FinalClone
+safety/parser and evidence/tamper suites, PowerShell parsing and diff checks passed serially. No database, connection
+variable or preserved evidence was accessed. Reset execution remains prohibited pending Sol High review of the
+ledger-only descendant.

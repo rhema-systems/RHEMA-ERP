@@ -189,6 +189,13 @@ change; phase-03 requires completed backup markers, positive length and captured
 remains prohibited until the corrected ledger-only descendant receives Sol High approval; no database mutation has
 occurred under this authorization.
 
+A narrow follow-up correction after review of exact `c101f693` completed as implementation commit
+`e629e57f6867745cac3fcf1dae85e63e16393885` (tree `55fc2a68f8b9ec2b11a793843e3818606e654f0e`).
+The disposable-reset validator now requires the atomic-reservation and COPY_ONLY CHECKSUM completion markers whenever
+terminal evidence says `backupCompleted=true`, including a truthful material-backup failure before phase-03 marker
+publication. Independent tamper fixtures remove each marker and re-manifest the otherwise valid package to prove the
+semantic refusal. Reset execution remains prohibited pending Sol High approval.
+
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
 `-ConfirmDisposableDevelopmentReset`, the exact process attestation shown below, reviewed commit/tree equality,
