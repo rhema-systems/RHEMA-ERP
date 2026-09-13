@@ -55,7 +55,7 @@ function Invoke-ExpectedFailure([string]$root, [string]$label) {
 try {
     $failed = New-PackageRoot 'FAILED'
     $null = New-Common $failed
-    Complete-Status $failed (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'OFFLINE_GATES' $false $false $false)
+    Complete-Status $failed (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'NOT_STARTED' $false $false $false)
     & pwsh -NoProfile -File $validator -EvidenceDirectory $failed -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Minimal terminal failure package did not validate.' }
     Write-Host 'PASS: terminal failure package validates and writes a manifest'
@@ -70,7 +70,7 @@ try {
             schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1]
         })
     }
-    $partialStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'BACKUP' $true $false $false
+    $partialStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'BACKUP_CREATED' $true $false $false
     $partialStatus.backupMediaId=$partialMedia; $partialStatus.backupCompleted=$false; $partialStatus.backupPreserved=$true
     Complete-Status $partialBackup $partialStatus
     & pwsh -NoProfile -File $validator -EvidenceDirectory $partialBackup -PackageKind DisposableReset -WriteManifest
@@ -86,7 +86,7 @@ try {
 
     $missingBinding = New-PackageRoot 'MISSING_BINDING'
     $null = New-Common $missingBinding
-    Complete-Status $missingBinding (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'OFFLINE_GATES' $false $false $false)
+    Complete-Status $missingBinding (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'NOT_STARTED' $false $false $false)
     $statusObject = Get-Content -Raw -LiteralPath (Join-Path $missingBinding 'reset-status.json') | ConvertFrom-Json
     $statusObject.artifactSha256.PSObject.Properties.Remove('RECOVERY.md')
     Write-Json (Join-Path $missingBinding 'reset-status.json') $statusObject
@@ -97,13 +97,13 @@ try {
     Write-Json (Join-Path $phaseMismatch 'phase-01.json') ([ordered]@{
         schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=1; phase='OFFLINE_GATES_COMPLETE'
     })
-    Complete-Status $phaseMismatch (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'RESET_STARTED' $false $false $true)
-    Invoke-ExpectedFailure $phaseMismatch 'RESET_STARTED/status phase mismatch'
+    Complete-Status $phaseMismatch (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $false $false $false)
+    Invoke-ExpectedFailure $phaseMismatch 'terminal status/final durable phase mismatch'
 
     $sanitization = New-PackageRoot 'SANITIZATION'
     $null = New-Common $sanitization
     'Server=RHEMA-AKWASI;Password=secret' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $sanitization 'leak.sql')
-    Complete-Status $sanitization (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'OFFLINE_GATES' $false $false $false)
+    Complete-Status $sanitization (New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'NOT_STARTED' $false $false $false)
     $output = & pwsh -NoProfile -File $validator -EvidenceDirectory $sanitization -PackageKind DisposableReset -WriteManifest 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) { throw 'Sanitization tamper unexpectedly passed.' }
     Write-Host 'PASS: .sql machine/secret evidence is refused'

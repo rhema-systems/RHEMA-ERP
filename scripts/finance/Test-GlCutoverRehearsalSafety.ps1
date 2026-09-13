@@ -23,8 +23,31 @@ $transportRoot = $null
 $transportEvidence = $null
 $transportRiskEvidence = $null
 $zeroOutputEvidence = $null
+$migrationParserEvidence = $null
 $priorPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
 try {
+    $scriptTextForHelpers = Get-Content -Raw -LiteralPath $script
+    $helperTokens = $null
+    $helperErrors = $null
+    $helperAst = [System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$helperTokens,[ref]$helperErrors)
+    $migrationHelper = @($helperAst.FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+        $node.Name -eq 'Get-DiscoveredMigrationIds' }, $true))
+    if ($helperErrors.Count -ne 0 -or $migrationHelper.Count -ne 1) {
+        throw 'Could not load the exact migration-discovery helper for FinalClone regression testing.'
+    }
+    . ([ScriptBlock]::Create($migrationHelper[0].Extent.Text))
+    $migrationParserEvidence = Join-Path ([System.IO.Path]::GetTempPath()) "RHEMA_MIGRATION_PARSE_$([Guid]::NewGuid().ToString('N')).log"
+    @('Build started.','20260901000000_FirstExact','20260902000000_SecondExact (Pending)',
+        '20260903000000_Invalid-Suffix','RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=dotnet') |
+        Set-Content -Encoding ascii -LiteralPath $migrationParserEvidence
+    $parsedIds = @(Get-DiscoveredMigrationIds $migrationParserEvidence)
+    $expectedParsedIds = @('20260901000000_FirstExact','20260902000000_SecondExact')
+    if (($parsedIds -join "`n") -cne ($expectedParsedIds -join "`n")) {
+        throw 'Actual migration-discovery helper did not return the exact ordered parsed IDs.'
+    }
+    Write-Host 'PASS: actual FinalClone migration parser returns exact ordered IDs only'
+
     foreach ($case in $cases) {
         [Environment]::SetEnvironmentVariable('RHEMA_GL_REHEARSAL_CONNECTION', $case.Value, 'Process')
         $output = & pwsh -NoProfile -File $script -Mode RehearseEmpty 2>&1 | Out-String
@@ -341,6 +364,9 @@ finally {
     }
     if ($transportRoot -and (Test-Path -LiteralPath $transportRoot)) {
         Remove-Item -LiteralPath $transportRoot -Recurse -Force
+    }
+    if ($migrationParserEvidence -and (Test-Path -LiteralPath $migrationParserEvidence)) {
+        Remove-Item -LiteralPath $migrationParserEvidence -Force
     }
 }
 

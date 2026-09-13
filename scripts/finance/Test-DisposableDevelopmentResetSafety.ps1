@@ -124,7 +124,9 @@ try {
     finally { if (Test-Path -LiteralPath $collisionPath) { Remove-Item -LiteralPath $collisionPath -Force } }
     Write-Host 'PASS: actual pre-dispatch backup reservation helper is available and refuses collisions'
 
-    foreach ($functionName in @('Write-AtomicTextFile','Write-DisposablePhaseMarker','Write-DisposableResetStatus')) {
+    foreach ($functionName in @('Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
+        'Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
+        'Test-DisposableSourceFingerprint')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
             $node.Name -eq $functionName }, $true))
         if ($functionAst.Count -ne 1 -or $functionAst[0].Extent.StartOffset -ge $dispatcherOffset) {
@@ -136,20 +138,54 @@ try {
     New-Item -ItemType Directory -Path $stateRoot | Out-Null
     $script:finalReviewedGitState = [pscustomobject]@{ reviewedCommit=$head; reviewedTree=$tree }
     Write-DisposablePhaseMarker $stateRoot 1 'OFFLINE_GATES_COMPLETE'
-    Write-DisposableResetStatus $stateRoot 'READY_TO_RESET' 'BACKUP_VERIFIED' $true $true $false
     foreach ($entry in @(@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'),@(4,'BACKUP_VERIFIED'),@(5,'RESET_STARTED'))) {
         Write-DisposablePhaseMarker $stateRoot $entry[0] $entry[1]
     }
-    Write-DisposableResetStatus $stateRoot 'RESET_STARTED' 'RESET_STARTED' $true $true $true
+    Write-DisposableResetStatus $stateRoot 'FAILED_NO_AUTOMATIC_RETRY' 'RESET_STARTED' $true $true $true
     $durableState = Get-Content -Raw -LiteralPath (Join-Path $stateRoot 'reset-status.json') | ConvertFrom-Json
-    if ($durableState.status -cne 'RESET_STARTED' -or $durableState.resetStarted -ne $true -or
+    if ($durableState.status -cne 'FAILED_NO_AUTOMATIC_RETRY' -or $durableState.phase -cne 'RESET_STARTED' -or
+        $durableState.resetStarted -ne $true -or
         -not (Test-Path -LiteralPath (Join-Path $stateRoot 'phase-05.json') -PathType Leaf)) {
-        throw 'Atomic RESET_STARTED replacement did not durably supersede READY_TO_RESET.'
+        throw 'Atomic terminal status did not bind the durable RESET_STARTED phase.'
     }
     $gapRefused = $false
     try { Write-DisposablePhaseMarker $stateRoot 7 'INVALID_GAP' } catch { $gapRefused = $true }
     if (-not $gapRefused) { throw 'Monotonic phase writer accepted a phase gap.' }
-    Write-Host 'PASS: durable reset status is atomically monotonic across simulated termination boundary'
+    $mismatchRefused = $false
+    try { Write-DisposableResetStatus $stateRoot 'FAILED_NO_AUTOMATIC_RETRY' 'BACKUP_VERIFIED' $true $true $true }
+    catch { $mismatchRefused = $true }
+    if (-not $mismatchRefused) { throw 'Terminal status accepted a phase other than the last durable marker.' }
+    foreach ($transition in @(
+        @('BACKUP_CREATED_VERIFY_PENDING',$false),@('BACKUP_VERIFIED',$true),@('RESET_STARTED',$true),
+        @('PASS',$true),@('FAILED_OUTER_CATCH',$false))) {
+        Write-DisposableRecoveryInstructions $stateRoot $transition[1] $transition[0]
+        $recovery = Get-Content -Raw -LiteralPath (Join-Path $stateRoot 'RECOVERY.md')
+        if ($recovery -notmatch [regex]::Escape("Status phase: $($transition[0])")) {
+            throw "Actual recovery helper did not atomically publish transition $($transition[0])."
+        }
+    }
+    Write-Host 'PASS: durable terminal phase/status and every recovery transition execute under StrictMode'
+
+    Assert-DisposableServerSideLocality 'localhost' 'LOCALHOST' '' 'LOCALHOST' '' '' 'localhost'
+    foreach ($case in @(
+        @('remote engine','localhost','REMOTEHOST','','REMOTEHOST','','','LOCALHOST'),
+        @('named-instance drift','localhost\SQLEXPRESS','LOCALHOST','','LOCALHOST','','','LOCALHOST'),
+        @('server-name alias drift','localhost','LOCALHOST','','STALE_ALIAS','','','LOCALHOST'),
+        @('port-forward drift','localhost,1433','LOCALHOST','','LOCALHOST','127.0.0.1','1555','LOCALHOST'),
+        @('non-loopback endpoint','tcp:localhost,1433','LOCALHOST','','LOCALHOST','10.10.1.20','1433','LOCALHOST'))) {
+        $refused = $false
+        try { Assert-DisposableServerSideLocality $case[1] $case[2] $case[3] $case[4] $case[5] $case[6] $case[7] }
+        catch { $refused = $true }
+        if (-not $refused) { throw "Server-side locality case unexpectedly passed: $($case[0])" }
+    }
+    if (-not (Test-DisposableSourceFingerprint '446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28')) {
+        throw 'Valid restricted source fingerprint was refused.'
+    }
+    foreach ($invalidFingerprint in @('', '446|latest|1|9|28', '446|20260902140000_Good|1|9|28|extra',
+        "446|20260902140000_Good|1|9|28`nsecret")) {
+        if (Test-DisposableSourceFingerprint $invalidFingerprint) { throw 'Invalid source fingerprint was accepted.' }
+    }
+    Write-Host 'PASS: server-side host/instance/endpoint and restricted fingerprint helpers refuse synthetic ambiguity'
 
     $start = $text.IndexOf('function Invoke-DisposableDevelopmentReset', [StringComparison]::Ordinal)
     $end = $text.IndexOf("if (`$Mode -eq 'ResetDisposableDevelopment')", $start, [StringComparison]::Ordinal)
@@ -190,7 +226,7 @@ try {
         'DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT',
         'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT',
         'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET',
-        "Write-DisposableResetStatus `$evidenceDirectory 'RESET_STARTED'",
+        "Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'",
         'Reset RhemaERP history is not exactly authoritative repository 456/C8 with zero orphans',
         'Second disposable reset seed changed canonical Finance invariants',
         "'FAILED_NO_AUTOMATIC_RETRY'",
@@ -206,10 +242,10 @@ try {
     if (-not $text.Contains("server = '<REDACTED_LOCAL_SERVER>'")) {
         throw 'Disposable reset status does not redact the local machine/server identity.'
     }
-    $resetStartedIndex = $reset.IndexOf("Write-DisposableResetStatus `$evidenceDirectory 'RESET_STARTED'", [StringComparison]::Ordinal)
+    $resetStartedIndex = $reset.IndexOf("Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'", [StringComparison]::Ordinal)
     $invokeBoundaryIndex = $reset.IndexOf("Invoke-SqlWithSanitizedEvidence `$databaseTarget.Builder 'master' '' `$destructiveSqlPath", [StringComparison]::Ordinal)
     if ($resetStartedIndex -lt 0 -or $invokeBoundaryIndex -le $resetStartedIndex) {
-        throw 'Durable RESET_STARTED status is not written before the destructive SQL call.'
+        throw 'Durable RESET_STARTED phase is not atomically written before the destructive SQL call.'
     }
     $singleUserIndex = $reset.IndexOf('ALTER DATABASE [RhemaERP] SET SINGLE_USER', [StringComparison]::Ordinal)
     $finalHistoryIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_HISTORY_DRIFT', [StringComparison]::Ordinal)

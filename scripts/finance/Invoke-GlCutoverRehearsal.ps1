@@ -314,11 +314,13 @@ SELECT MigrationId FROM dbo.__EFMigrationsHistory ORDER BY MigrationId;
 }
 
 function Get-DiscoveredMigrationIds([string]$path) {
-    $content = @(
-        Get-Content -LiteralPath $path | ForEach-Object {
-            if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
+    $ids = [System.Collections.Generic.List[string]]::new()
+    foreach ($line in Get-Content -LiteralPath $path) {
+        if ($line.Trim() -match '^(?<id>\d{14}_[A-Za-z0-9_]+)(?:\s+\(Pending\))?\s*$') {
+            $ids.Add([string]$Matches['id'])
         }
-    )
+    }
+    $ids.ToArray()
 }
 
 function Assert-FinalCutoverFlagsDisabled {
@@ -443,6 +445,46 @@ function Assert-LocalDisposableSqlServer([string]$dataSource) {
     }
 }
 
+function Assert-DisposableServerSideLocality([string]$dataSource, [string]$sqlMachineName,
+    [string]$sqlInstanceName, [string]$sqlServerName, [string]$sqlLocalAddress, [string]$sqlLocalPort,
+    [string]$executingMachineName) {
+    if ([string]::IsNullOrWhiteSpace($sqlMachineName) -or [string]::IsNullOrWhiteSpace($sqlServerName) -or
+        -not [string]::Equals($sqlMachineName, $executingMachineName, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ResetDisposableDevelopment SQL MachineName does not match the executing host; aliases, port forwards and remote engines are forbidden.'
+    }
+    $normalized = $dataSource.Trim() -replace '^(?i)tcp:', ''
+    $endpoint = $normalized -split ',', 2
+    $hostAndInstance = $endpoint[0]
+    $requestedPort = if ($endpoint.Count -eq 2) { $endpoint[1] } else { '' }
+    $requestedInstance = if ($hostAndInstance -match '\\(?<instance>[A-Za-z0-9_]+)$') { $Matches['instance'] } else { '' }
+    if ([string]::IsNullOrWhiteSpace($requestedInstance) -ne [string]::IsNullOrWhiteSpace($sqlInstanceName) -or
+        (-not [string]::IsNullOrWhiteSpace($requestedInstance) -and
+         -not [string]::Equals($requestedInstance, $sqlInstanceName, [StringComparison]::OrdinalIgnoreCase))) {
+        throw 'ResetDisposableDevelopment SQL instance identity does not exactly match the requested local endpoint.'
+    }
+    $expectedServerName = if ([string]::IsNullOrWhiteSpace($sqlInstanceName)) {
+        $sqlMachineName
+    } else {
+        "$sqlMachineName\$sqlInstanceName"
+    }
+    if (-not [string]::Equals($sqlServerName, $expectedServerName, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ResetDisposableDevelopment SQL ServerName does not match its server-side machine/instance identity.'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($requestedPort) -and
+        -not [string]::Equals($requestedPort, $sqlLocalPort, [StringComparison]::Ordinal)) {
+        throw 'ResetDisposableDevelopment SQL TCP port does not exactly match the requested local endpoint.'
+    }
+    if (-not [string]::IsNullOrWhiteSpace($sqlLocalAddress) -and
+        $sqlLocalAddress -notin @('127.0.0.1','::1')) {
+        throw 'ResetDisposableDevelopment SQL connection did not terminate on a loopback endpoint.'
+    }
+}
+
+function Test-DisposableSourceFingerprint([string]$fingerprint) {
+    return -not [string]::IsNullOrWhiteSpace($fingerprint) -and
+        $fingerprint -cmatch '^\d+\|\d{14}_[A-Za-z0-9_]+\|\d+\|\d+\|\d+$'
+}
+
 function Assert-DisposableConnectionUnambiguous([System.Data.SqlClient.SqlConnectionStringBuilder]$builder) {
     if (-not [string]::IsNullOrWhiteSpace($builder.FailoverPartner)) {
         throw 'ResetDisposableDevelopment forbids Failover Partner routing.'
@@ -525,8 +567,23 @@ function Write-DisposablePhaseMarker([string]$directory, [int]$ordinal, [string]
     Write-AtomicTextFile $path ($payload | ConvertTo-Json -Depth 8) $false
 }
 
+function Get-DisposableLastDurablePhase([string]$directory) {
+    $phaseFiles = @(Get-ChildItem -LiteralPath $directory -File -Filter 'phase-*.json' | Sort-Object Name)
+    if ($phaseFiles.Count -eq 0) { return 'NOT_STARTED' }
+    $marker = Get-Content -Raw -LiteralPath $phaseFiles[-1].FullName | ConvertFrom-Json
+    if ($marker.schema -cne 'RHEMA_DISPOSABLE_RESET_PHASE_V1' -or
+        [int]$marker.ordinal -ne $phaseFiles.Count) {
+        throw 'Disposable reset cannot publish status over a malformed durable phase sequence.'
+    }
+    return [string]$marker.phase
+}
+
 function Write-DisposableResetStatus([string]$directory, [string]$status, [string]$phase,
     [bool]$backupCreated, [bool]$backupVerified, [bool]$resetStarted, [hashtable]$extra = @{}) {
+    $durablePhase = Get-DisposableLastDurablePhase $directory
+    if ($phase -cne $durablePhase) {
+        throw "Disposable reset terminal status phase '$phase' does not equal last durable phase '$durablePhase'."
+    }
     $payload = [ordered]@{
         mode = 'ResetDisposableDevelopment'
         status = $status
@@ -552,7 +609,7 @@ function Write-DisposableResetStatus([string]$directory, [string]$status, [strin
 }
 
 function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupVerified, [string]$phase) {
-    @(
+    $content = @(
         '# Disposable RhemaERP reset recovery',
         '',
         "Status phase: $phase",
@@ -627,16 +684,33 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
             @($sourceHistory | Where-Object { $_ -notmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0) {
             throw 'Disposable reset source migration history is not a unique ordered safe identity list.'
         }
-        $sourceHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'source-migration-history.txt')
-        $sourceFingerprint = Get-SourceFingerprint $databaseTarget.Builder 'RhemaERP'
-        $sourceFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectory 'source-fingerprint-before.txt')
+        $capturedSourceFingerprint = [string](Get-SourceFingerprint $databaseTarget.Builder 'RhemaERP')
+        if (-not (Test-DisposableSourceFingerprint $capturedSourceFingerprint)) {
+            $sourceFingerprint = "INVALID_SHA256=$(Get-TextSha256 $capturedSourceFingerprint)"
+            throw "Disposable reset source fingerprint has an invalid shape; raw content was discarded and bound only as $sourceFingerprint."
+        }
+        $sourceFingerprint = $capturedSourceFingerprint
         $serverInstanceIdentity = [string](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
-SELECT CONVERT(nvarchar(128),SERVERPROPERTY('ServerName'));
+SELECT CONCAT(
+    CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')),N'|',
+    COALESCE(CONVERT(nvarchar(128),SERVERPROPERTY('InstanceName')),N''),N'|',
+    CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')),N'|',
+    COALESCE(CONVERT(nvarchar(128),CONNECTIONPROPERTY('local_net_address')),N''),N'|',
+    COALESCE(CONVERT(nvarchar(20),CONNECTIONPROPERTY('local_tcp_port')),N''));
 "@)
-        if ([string]::IsNullOrWhiteSpace($serverInstanceIdentity)) {
+        if ($serverInstanceIdentity -notmatch '^(?<machine>[^|]+)\|(?<instance>[^|]*)\|(?<server>[^|]+)\|(?<address>[^|]*)\|(?<port>\d*)$') {
             throw 'Could not bind the disposable connection to one actual local SQL Server instance.'
         }
-        Register-SensitiveEvidenceToken $serverInstanceIdentity
+        $serverMachineName = $Matches['machine']
+        $serverInstanceName = $Matches['instance']
+        $serverCanonicalName = $Matches['server']
+        $serverLocalAddress = $Matches['address']
+        $serverLocalPort = $Matches['port']
+        Assert-DisposableServerSideLocality $databaseTarget.Server $serverMachineName $serverInstanceName `
+            $serverCanonicalName $serverLocalAddress $serverLocalPort ([Environment]::MachineName)
+        foreach ($sensitiveIdentity in @($serverInstanceIdentity,$serverMachineName,$serverCanonicalName,$serverLocalAddress)) {
+            Register-SensitiveEvidenceToken $sensitiveIdentity
+        }
         $databaseIdentity = [string](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
 SELECT CONCAT(CONVERT(nvarchar(20),database_id),N'|',CONVERT(nvarchar(33),create_date,126))
 FROM sys.databases
@@ -647,6 +721,8 @@ WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_
         }
         $expectedDatabaseId = [int]$Matches.id
         $expectedCreateDate = $Matches.created
+        $sourceHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'source-migration-history.txt')
+        $sourceFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectory 'source-fingerprint-before.txt')
         "RHEMAERP_DATABASE_IDENTITY_SHA256=$(Get-TextSha256 $databaseIdentity)" | Set-Content -Encoding ascii `
             -LiteralPath (Join-Path $evidenceDirectory 'source-database-identity.sha256')
         "LOCAL_SQL_INSTANCE_IDENTITY_SHA256=$(Get-TextSha256 $serverInstanceIdentity)" | Set-Content -Encoding ascii `
@@ -694,18 +770,17 @@ SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
             if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
                 $backupFileLength = (Get-Item -LiteralPath $backupPath).Length
                 if ($backupFileLength -gt 0) {
-                    $backupCreated = $true
                     if (-not (Test-Path -LiteralPath (Join-Path $evidenceDirectory 'phase-03.json') -PathType Leaf)) {
                         Write-DisposablePhaseMarker $evidenceDirectory 3 'BACKUP_CREATED' @{
                             backupMediaId = $backupMediaId
                             backupByteLength = $backupFileLength
+                            backupCreated = $true
+                            backupVerified = $false
+                            resetStarted = $false
                         }
                     }
+                    $backupCreated = $true
                     Write-DisposableRecoveryInstructions $evidenceDirectory $false 'BACKUP_CREATED_VERIFY_PENDING'
-                    Write-DisposableResetStatus $evidenceDirectory 'BACKUP_CREATED_VERIFY_PENDING' 'BACKUP_CREATED' $true $false $false @{
-                        sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; latestMigration = $authoritativeLatestMigration
-                        backupMediaId = $backupMediaId; backupPreserved = $true; backupCompleted = $false
-                    }
                 }
             }
         }
@@ -742,16 +817,15 @@ INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
 SELECT COALESCE(MAX(FileExists),0) FROM @exists;
 "@)
         if ($backupStillExists -ne 1) { throw 'Verified reset backup disappeared before mutation; reset is forbidden.' }
-        $backupVerified = $true
         Write-DisposablePhaseMarker $evidenceDirectory 4 'BACKUP_VERIFIED' @{
             backupSha256 = $backupSha256
             backupVerifyEvidenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupVerifyEvidence).Hash
+            backupCreated = $true
+            backupVerified = $true
+            resetStarted = $false
         }
+        $backupVerified = $true
         Write-DisposableRecoveryInstructions $evidenceDirectory $true 'BACKUP_VERIFIED'
-        Write-DisposableResetStatus $evidenceDirectory 'READY_TO_RESET' 'BACKUP_VERIFIED' $true $true $false @{
-            sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; latestMigration = $authoritativeLatestMigration
-            backupSha256 = $backupSha256; backupMediaId = $backupMediaId; backupCompleted = $true
-        }
 
         $phase = 'IDENTITY_RECHECK_AND_RESET'
         $preMutationGitState = Assert-FinalReviewedGitState 'ResetDisposableDevelopment'
@@ -773,7 +847,11 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
             throw 'Disposable reset backup SHA-256 proof changed before mutation; reset is forbidden.'
         }
         $escapedCreateDate = $expectedCreateDate.Replace("'", "''")
-        $escapedServerInstanceIdentity = $serverInstanceIdentity.Replace("'", "''")
+        $escapedServerMachineName = $serverMachineName.Replace("'", "''")
+        $escapedServerInstanceName = $serverInstanceName.Replace("'", "''")
+        $escapedServerCanonicalName = $serverCanonicalName.Replace("'", "''")
+        $escapedServerLocalAddress = $serverLocalAddress.Replace("'", "''")
+        $escapedServerLocalPort = $serverLocalPort.Replace("'", "''")
         $sourceFingerprintParts = @($sourceFingerprint -split '\|')
         if ($sourceFingerprintParts.Count -ne 5 -or
             $sourceFingerprintParts[0] -notmatch '^\d+$' -or
@@ -798,8 +876,16 @@ DECLARE @backupProof table(FileExists int, FileIsDirectory int, ParentDirectoryE
 INSERT @backupProof EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
 IF NOT EXISTS (SELECT 1 FROM @backupProof WHERE FileExists=1 AND FileIsDirectory=0)
     THROW 51202, 'DISPOSABLE_RESET_VERIFIED_BACKUP_MISSING', 1;
-IF CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')) COLLATE Latin1_General_100_BIN2 <>
-   N'$escapedServerInstanceIdentity' COLLATE Latin1_General_100_BIN2
+IF CONVERT(nvarchar(128),SERVERPROPERTY('MachineName')) COLLATE Latin1_General_100_BIN2 <>
+      N'$escapedServerMachineName' COLLATE Latin1_General_100_BIN2 OR
+   COALESCE(CONVERT(nvarchar(128),SERVERPROPERTY('InstanceName')),N'') COLLATE Latin1_General_100_BIN2 <>
+      N'$escapedServerInstanceName' COLLATE Latin1_General_100_BIN2 OR
+   CONVERT(nvarchar(128),SERVERPROPERTY('ServerName')) COLLATE Latin1_General_100_BIN2 <>
+      N'$escapedServerCanonicalName' COLLATE Latin1_General_100_BIN2 OR
+   COALESCE(CONVERT(nvarchar(128),CONNECTIONPROPERTY('local_net_address')),N'') COLLATE Latin1_General_100_BIN2 <>
+      N'$escapedServerLocalAddress' COLLATE Latin1_General_100_BIN2 OR
+   COALESCE(CONVERT(nvarchar(20),CONNECTIONPROPERTY('local_tcp_port')),N'') COLLATE Latin1_General_100_BIN2 <>
+      N'$escapedServerLocalPort' COLLATE Latin1_General_100_BIN2
     THROW 51204, 'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT', 1;
 IF (SELECT COUNT_BIG(*) FROM sys.databases
     WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_100_BIN2) <> 1 OR
@@ -840,18 +926,17 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
 "@
         $destructiveSqlPath = Join-Path ([System.IO.Path]::GetTempPath()) ("rhema-disposable-reset-$([Guid]::NewGuid().ToString('N')).sql")
         Write-AtomicTextFile $destructiveSqlPath $destructiveSql $false
-        $resetStarted = $true
         $phase = 'RESET_STARTED'
         Write-DisposablePhaseMarker $evidenceDirectory 5 'RESET_STARTED' @{
             backupSha256 = $backupSha256
             repositoryHistorySha256 = $repositoryHistoryHash
             sourceFingerprint = $sourceFingerprint
+            backupCreated = $true
+            backupVerified = $true
+            resetStarted = $true
         }
+        $resetStarted = $true
         Write-DisposableRecoveryInstructions $evidenceDirectory $true 'RESET_STARTED'
-        Write-DisposableResetStatus $evidenceDirectory 'RESET_STARTED' 'RESET_STARTED' $true $true $true @{
-            sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; latestMigration = $authoritativeLatestMigration
-            backupSha256 = $backupSha256; backupMediaId = $backupMediaId; backupPreserved = $true; backupCompleted = $true
-        }
         try {
             Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' '' $destructiveSqlPath `
                 (Join-Path $evidenceDirectory 'reset-database.log')
@@ -946,8 +1031,13 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
     catch {
         $safeFailure = Get-SanitizedExceptionMessage $_.Exception
         Write-DisposableRecoveryInstructions $evidenceDirectory $backupVerified $phase
-        Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $phase $backupCreated $backupVerified $resetStarted @{
-            sourceFingerprint = $sourceFingerprint; failure = $safeFailure; backupPreserved = $backupCreated
+        $durablePhase = Get-DisposableLastDurablePhase $evidenceDirectory
+        $durableOrdinal = @(Get-ChildItem -LiteralPath $evidenceDirectory -File -Filter 'phase-*.json').Count
+        $durableBackupCreated = $durableOrdinal -ge 3
+        $durableBackupVerified = $durableOrdinal -ge 4
+        $durableResetStarted = $durableOrdinal -ge 5
+        Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $durablePhase $durableBackupCreated $durableBackupVerified $durableResetStarted @{
+            sourceFingerprint = $sourceFingerprint; failure = $safeFailure; failedOperation = $phase; backupPreserved = $durableBackupCreated
             backupMediaId = $backupMediaId; backupSha256 = $backupSha256; backupCompleted = $backupCompleted
         }
         try { Write-DisposableResetEvidenceManifest $evidenceDirectory }

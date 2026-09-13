@@ -144,6 +144,10 @@ if ($PackageKind -eq 'DisposableReset') {
             throw 'Disposable-reset phase markers contain an unknown or out-of-order phase.'
         }
     }
+    $lastDurablePhase = if ($phases.Count -eq 0) { 'NOT_STARTED' } else { $phases[-1] }
+    if ([string]$reset.phase -cne $lastDurablePhase) {
+        throw 'Disposable-reset terminal status phase does not exactly equal the final durable phase marker.'
+    }
     if (($phases -ccontains 'BACKUP_CREATED') -ne [bool]$reset.backupCreated) {
         throw 'Disposable-reset status and durable BACKUP_CREATED marker disagree.'
     }

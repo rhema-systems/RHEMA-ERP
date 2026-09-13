@@ -2366,3 +2366,14 @@ the complete disposable-reset refusal suite, actual helper/state-machine exercis
 packages, the existing rehearsal safety suite and final-clone evidence/tamper suite all passed serially. No database,
 connection variable or preserved evidence was accessed. Sol High re-review is required over the ledger-only
 descendant; execution remains prohibited.
+
+Sol High review of exact ledger descendant `1c22903769710f27960fb47d4b129631e0999c7b` remained
+`CHANGES_REQUIRED`. `Get-DiscoveredMigrationIds` assigned but never emitted its parsed list; the recovery helper
+joined lines without assigning the content it then wrote under StrictMode; client-side local-name syntax did not
+prove the connected engine's server-side machine/instance/endpoint was the executing host; source fingerprint shape
+was not restricted immediately after capture; and failure status phase was not required to equal the final durable
+phase marker. A bounded second Sol Medium correction is active. It executes both real helpers in offline regressions,
+binds `SERVERPROPERTY(MachineName/InstanceName/ServerName)` and connection endpoint to the canonical host, replaces
+invalid fingerprint raw text with a SHA-only identity, makes atomic phase files the sole intermediate state and
+requires terminal status to match the last marker exactly. No database, connection variable or retained evidence
+access is in scope; reset execution remains prohibited pending clean gates and Sol High re-review.

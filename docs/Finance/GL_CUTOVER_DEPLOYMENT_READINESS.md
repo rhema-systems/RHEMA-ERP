@@ -182,9 +182,11 @@ requires one of these explicit decisions:
    data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
    is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Phase D2 correction completed offline as exact implementation commit `abace200db87c92c0413e8f11469b5774ba8e3b5`
-after independent review of `5ced81af`. Execution remains prohibited until the corrected implementation and its
-ledger-only descendant receive Sol High approval; no database mutation has occurred under this authorization.
+Phase D2 second correction is active offline after independent review of exact `1c229037`. The first correction
+did not actually return parsed migration IDs, its recovery writer referenced undefined content under StrictMode,
+and its server-locality, fingerprint timing and terminal phase/status proof required further hardening. Execution
+remains prohibited until the corrected implementation and its ledger-only descendant receive Sol High approval;
+no database mutation has occurred under this authorization.
 
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
@@ -195,7 +197,8 @@ attach-file and user-instance ambiguity, then binds an exact binary `RhemaERP` n
 Before any `SINGLE_USER`/drop it captures source history/fingerprint, atomically reserves a no-overwrite
 target-derived backup, takes `COPY_ONLY CHECKSUM` with random media identity, records backup creation before a
 separate `RESTORE VERIFYONLY`, and records SHA-256. It then persists monotonic `RESET_STARTED=true` evidence before
-one SQL batch acquires the reset lock, rechecks server/database/backup identity, quiesces the source, proves the
+one SQL batch acquires the reset lock, rechecks server machine/instance/name/endpoint plus database/backup identity,
+quiesces the source, proves the
 exact captured source history and fingerprint, and immediately performs the sole drop/recreate. A successful reset
 recreates only `RhemaERP`, applies the exact unique ordered 456/C8 list, seeds twice with byte-identical Finance
 invariants, proves zero-orphan history, and completes DBCC. Terminal success and failure packages use the dedicated
