@@ -1,14 +1,14 @@
 'use client';
 
-import { useState } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { Suspense, useCallback, useEffect, useState } from 'react';
+import { useParams, usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Pencil, UserX, UserCheck, Ban, RotateCcw } from 'lucide-react';
 import { GatedPhoto, PhotoDialog } from '@/components/hr/common/PhotoDialog';
 import { employeeDocumentService } from '@/services/hr/employee-document.service';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsContent } from '@/components/ui/tabs';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -39,6 +39,12 @@ import { TeamsTab } from '@/components/hr/employee/tabs/TeamsTab';
 import { GuarantorsTab } from '@/components/hr/employee/tabs/GuarantorsTab';
 import { BankDetailsTab } from '@/components/hr/employee/tabs/BankDetailsTab';
 import { EmployeeProfileProvider } from '@/components/hr/employee/EmployeeProfileContext';
+import { ProfileTabNav } from '@/components/hr/employee/ProfileTabNav';
+import {
+  DEFAULT_PROFILE_TAB,
+  resolveProfileTab,
+  visibleProfileTabs,
+} from '@/components/hr/employee/profileTabGroups';
 import { offPayrollReasonLabel, PAYROLL_ISSUE_LABELS, PROBATION_SOURCE_LABEL } from '@/types/hr/employee';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
@@ -65,12 +71,57 @@ const yn = (v: boolean) => (v ? 'Yes' : 'No');
 const money = (v?: number | null) =>
   v == null ? '—' : new Intl.NumberFormat('en-GH', { style: 'currency', currency: 'GHS' }).format(v);
 
+function PageSpinner() {
+  return (
+    <div className="flex items-center justify-center py-24">
+      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
+
+/**
+ * `useSearchParams` (the `?tab=` deep link, lane T1) wants a Suspense boundary above it in Next 15,
+ * as the organogram page does — otherwise a static prerender of this route fails the build.
+ */
 export default function EmployeeDetailPage() {
+  return (
+    <Suspense fallback={<PageSpinner />}>
+      <EmployeeDetailPageInner />
+    </Suspense>
+  );
+}
+
+function EmployeeDetailPageInner() {
   const router = useRouter();
   const params = useParams();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const id = (params?.id as string) ?? '';
   const queryClient = useQueryClient();
   const { toast } = useToast();
+
+  // Round 3, lane T1: the open tab lives in the URL (`?tab=salary`), so a link from another screen
+  // — the approved salary-review proposal, a movement's "open the profile" — lands on the right
+  // section, and the browser's back button returns to the previous one. `replace` rather than
+  // `push`: switching tabs is not a navigation worth a history entry each.
+  const requestedTab = searchParams?.get('tab') ?? null;
+  const [tab, setTab] = useState<string>(requestedTab ?? DEFAULT_PROFILE_TAB);
+  useEffect(() => {
+    if (requestedTab && requestedTab !== tab) setTab(requestedTab);
+    // Only the URL drives this effect; a local change writes the URL below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requestedTab]);
+  const changeTab = useCallback(
+    (next: string) => {
+      setTab(next);
+      const qs = new URLSearchParams(searchParams?.toString() ?? '');
+      if (next === DEFAULT_PROFILE_TAB) qs.delete('tab');
+      else qs.set('tab', next);
+      const query = qs.toString();
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const [action, setAction] = useState<null | 'deactivate' | 'activate' | 'terminate' | 'reinstate'>(null);
   const [busy, setBusy] = useState(false);
@@ -127,13 +178,7 @@ export default function EmployeeDetailPage() {
     }
   };
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-24">
-        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
+  if (isLoading) return <PageSpinner />;
   if (isError || !e) {
     return (
       <div className="p-6">
@@ -143,6 +188,9 @@ export default function EmployeeDetailPage() {
   }
 
   const isTerminated = e.staffStatus === 'Terminated';
+  const groups = visibleProfileTabs(e);
+  // A `?tab=` the table does not know, or one hidden for this employee, falls back to the overview.
+  const activeTab = resolveProfileTab(tab, e);
 
   return (
     <div className="space-y-6 p-6">
@@ -208,36 +256,25 @@ export default function EmployeeDetailPage() {
         subjectLabel={e.fullName}
       />
 
-      <EmployeeProfileProvider value={{ id: e.id, fullName: e.fullName, employeeNumber: e.employeeNumber }}>
-      <Tabs defaultValue="overview">
-        {/* 15 tabs will not fit a fixed row — let the strip scroll on narrow screens. */}
-        <div className="overflow-x-auto pb-1">
-          <TabsList className="inline-flex w-max">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="contacts">Addresses</TabsTrigger>
-            <TabsTrigger value="emergency">Emergency</TabsTrigger>
-            <TabsTrigger value="dependents">Dependents</TabsTrigger>
-            <TabsTrigger value="qualifications">Qualifications</TabsTrigger>
-            <TabsTrigger value="skills">Skills</TabsTrigger>
-            <TabsTrigger value="certifications">Certifications</TabsTrigger>
-            <TabsTrigger value="identification">Identification</TabsTrigger>
-            <TabsTrigger value="work-history">Work History</TabsTrigger>
-            <TabsTrigger value="contracts">Contracts</TabsTrigger>
-            <TabsTrigger value="expatriate">Expatriate</TabsTrigger>
-            <TabsTrigger value="position-history">Position History</TabsTrigger>
-            {/* Slice 7. Who covers for this employee while they are away — read by the
-                leave request form to seed its two reliever slots by priority. */}
-            <TabsTrigger value="teams">Teams</TabsTrigger>
-            <TabsTrigger value="relievers">Relievers</TabsTrigger>
-            <TabsTrigger value="salary">Salary</TabsTrigger>
-            <TabsTrigger value="referees">Referees</TabsTrigger>
-            <TabsTrigger value="guarantors">Guarantors</TabsTrigger>
-            <TabsTrigger value="bank">Bank</TabsTrigger>
-            <TabsTrigger value="documents">Documents</TabsTrigger>
-          </TabsList>
-        </div>
+      <EmployeeProfileProvider
+        value={{
+          id: e.id,
+          fullName: e.fullName,
+          employeeNumber: e.employeeNumber,
+          staffStatus: e.staffStatus,
+          isActive: e.isActive,
+          isOnPayroll: e.isOnPayroll,
+        }}
+      >
+      {/* Round 3, lane T1 (D-4): the nineteen-tab strip became a grouped rail. Every surface —
+          the rail, the phone select, the ?tab= deep link — reads `profileTabGroups.ts`; a new
+          record tab (T2/T3) is one row there and one TabsContent below. Radix mounts only the
+          active content, so a tab's reads run when it is opened, not when the page is. */}
+      <Tabs value={activeTab} onValueChange={changeTab} orientation="vertical" className="flex flex-col gap-4 lg:flex-row lg:gap-8">
+        <ProfileTabNav groups={groups} value={activeTab} onChange={changeTab} />
 
-        <TabsContent value="overview" className="space-y-4 pt-4">
+        <div className="min-w-0 flex-1">
+        <TabsContent value="overview" className="mt-0 space-y-4">
           {/* Required vs held vs expired — the strip the demo feedback asked for (round 2, lane C2). */}
           <CertificationComplianceCard employeeId={id} compact />
           <InfoCard title="Personal">
@@ -364,60 +401,61 @@ export default function EmployeeDetailPage() {
           )}
         </TabsContent>
 
-        <TabsContent value="documents" className="pt-4">
+        <TabsContent value="documents" className="mt-0">
           <DocumentsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="contacts" className="pt-4">
+        <TabsContent value="contacts" className="mt-0">
           <ContactsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="emergency" className="pt-4">
+        <TabsContent value="emergency" className="mt-0">
           <EmergencyContactsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="dependents" className="pt-4">
+        <TabsContent value="dependents" className="mt-0">
           <DependentsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="qualifications" className="pt-4">
+        <TabsContent value="qualifications" className="mt-0">
           <QualificationsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="skills" className="pt-4">
+        <TabsContent value="skills" className="mt-0">
           <SkillsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="certifications" className="pt-4">
+        <TabsContent value="certifications" className="mt-0">
           <CertificationsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="identification" className="pt-4">
+        <TabsContent value="identification" className="mt-0">
           <IdentificationTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="work-history" className="pt-4">
+        <TabsContent value="work-history" className="mt-0">
           <WorkHistoryTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="contracts" className="pt-4">
+        <TabsContent value="contracts" className="mt-0">
           <ContractsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="expatriate" className="pt-4">
+        <TabsContent value="expatriate" className="mt-0">
           <ExpatriateTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="position-history" className="pt-4">
+        <TabsContent value="position-history" className="mt-0">
           <PositionHistoryTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="salary" className="pt-4">
+        <TabsContent value="salary" className="mt-0">
           <SalaryTab employee={e} />
         </TabsContent>
-        <TabsContent value="teams" className="pt-4">
+        <TabsContent value="teams" className="mt-0">
           <TeamsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="relievers" className="pt-4">
+        <TabsContent value="relievers" className="mt-0">
           <RelieversTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="referees" className="pt-4">
+        <TabsContent value="referees" className="mt-0">
           <RefereesTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="guarantors" className="pt-4">
+        <TabsContent value="guarantors" className="mt-0">
           <GuarantorsTab employeeId={id} />
         </TabsContent>
-        <TabsContent value="bank" className="pt-4">
+        <TabsContent value="bank" className="mt-0">
           <BankDetailsTab employeeId={id} />
         </TabsContent>
+        </div>
       </Tabs>
       </EmployeeProfileProvider>
 

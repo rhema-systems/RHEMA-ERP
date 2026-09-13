@@ -14,6 +14,11 @@ export interface EmployeeProfileSubject {
   id: string;
   fullName: string;
   employeeNumber?: string | null;
+  // Round 3, lane T1: the facts a record tab needs to decide what to show without another read —
+  // a separated employee's tabs speak in the past tense, an off-payroll one's Salary tab says why.
+  staffStatus?: string | null;
+  isActive?: boolean;
+  isOnPayroll?: boolean;
 }
 
 const EmployeeProfileContext = createContext<EmployeeProfileSubject | null>(null);

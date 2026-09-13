@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) BUILT 2026-09-13. Eight slices remain; T1 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) and T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) BUILT 2026-09-13. Seven slices remain; T2 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -164,7 +164,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 9 | **A** — application source and posting · ✅ **DONE 2026-09-13 · 44 ×2** | none | `hr-recruitment/run-a.mjs` | |
 | 10 | **G** — stage flags + pre-employment providers · ✅ **DONE 2026-09-13 · 49 ×2** | `20260913161339_AddPreEmploymentCheckProviders` | `hr-recruitment/run-g.mjs` | |
 | 11 | **U** — union contacts, documents, logo · ✅ **DONE 2026-09-13 · 137 ×2** | `20260913181139_AddUnionContactsDocumentsLogo` | `hr-unions/run-u.mjs` | |
-| 12 | **T1** — profile grouped navigation | none | screen walk + static assertions | |
+| 12 | **T1** — profile grouped navigation · ✅ **DONE 2026-09-13 · 24 static** (screen walk owed) | none | `hr-employee-docs/run-t1.mjs` + screen walk | |
 | 13 | **T2** — record tabs: Movements, Probation, Separation, Leave, Attendance, Benefits, Salary changes | none | screen walk + a static harness asserting each tab's service call | |
 | 14 | **T3** — record tabs: Training, Appraisals & goals, Discipline, Awards, Assets, Medical, Travel, Orientation, Succession | none | as T2 | |
 | 15 | **J2** — derived intrinsic value, proposed grade, the matcher | `AddJobDescriptionProposedGrade` | `hr-jobarch/run-j2.mjs` | |
@@ -468,6 +468,25 @@ the user's build failed on a lock once — stop it by command line, excluding th
 looking. Harness lessons: agreement and union DELETE answer 204 (no body) while contact and document
 DELETE answer 200 `true`; the inline stream sets NO Content-Disposition; the union list rows carry
 contacts and `primaryContact` but an empty `documents` array.
+
+**Lane T1 log (2026-09-13).** No migration; frontend only. `profileTabGroups.ts` is the one table:
+groups Personal (Overview, Addresses, Emergency contacts, Dependents, Identification, Expatriate —
+shown only for an expatriate) · Employment (Contracts, Position history, Teams, Relievers) · Pay &
+benefits (Salary, Bank) · Capability (Qualifications, Skills, Certifications, Work history) · Records
+(Documents, Referees, Guarantors); the three groups the design names but T2/T3 fill (Performance &
+conduct, Time & leave, Welfare & travel) and the T2/T3 rows inside the existing groups are ADDED in
+those lanes — a group with no tab is not rendered. `ProfileTabNav` renders the table twice: a
+vertical `TabsList` rail at `lg` (keyboard + aria intact) and a grouped native `<select>` below it.
+The page's `Tabs` are controlled: `?tab=` is read on load and written with `router.replace` on
+change (the overview clears the parameter); an unknown or hidden key falls back to the overview
+through `resolveProfileTab`; the salary-review proposal's `?tab=salary` link now lands. Radix mounts
+only the active content, so a tab's reads run when it is opened. `EmployeeProfileContext` gains
+`staffStatus`, `isActive`, `isOnPayroll` for the record tabs. The page is wrapped in a `Suspense`
+boundary (the organogram's convention; Next 15 wants one above `useSearchParams`). 24 static
+assertions (`hr-employee-docs/run-t1.mjs`: one table, every row ↔ one `TabsContent`, the deep link,
+the nav, the context). Deviation: the mobile surface is a grouped select rather than "group pills"
+— one control every phone renders well, and it keeps the group names in view. **Screen walk owed
+(§ 8 item 4)** — the rail at ≥1024px, the select below, `?tab=salary` from a proposal, back button.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.
