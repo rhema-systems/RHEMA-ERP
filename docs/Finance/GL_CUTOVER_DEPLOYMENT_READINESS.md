@@ -2,12 +2,11 @@
 
 Status: **code candidate only — deployment is not authorized**
 
-D3 status: the disposable-development reset is paused after runtime attempt 02 recreated `RhemaERP` and the
-retained migration chain failed from zero. The database now has zero applied migrations and only
-`__EFMigrationsHistory`. A verified attempt-02 recovery backup remains preserved externally (453,042,176 bytes,
-SHA-256 `2025FBD47411BD483DFB1CDC221032955668B08AFDB8CD0B322A3BB83E6DB05A`). The source archive and that
-evidence must not be changed. A new current-model baseline is prepared for independent Sol High review; no reset
-retry is authorized by this document.
+D3 status: the disposable-development reset is paused after runtime attempt 07 applied the exact one-migration
+current-model baseline and then stopped fail-closed before completing application seeding. `RhemaERP` is therefore
+baseline-migrated but not accepted as seeded or rehearsal-ready. Verified attempt-specific recovery backups and
+external evidence from attempts 01-07 remain preserved and must not be changed. The attempt-07 seed-DI correction
+is a code candidate for independent Sol High review; no reset retry is authorized by this document.
 
 Frozen integrated candidate: `cbc0d3c91142c63c4ea40f08f11d633752268367`
 
@@ -487,3 +486,35 @@ and no validated history, and phase-07 publication failure requires success/zero
 history. Behavioral fixtures cover both truthful outcomes and deletion, binding, operation-downgrade, and marker
 tampering. Reset and FinalClone offline safety/evidence suites and the full generated-SQL grammar gate pass. No
 database, connection environment, preserved runtime evidence, or backup was accessed by this correction.
+
+### Disposable reset attempt 07 and seed dependency correction
+
+The separately authorized attempt 07 ran exact reviewed commit
+`8885db288b93f7392dfd05d6671ab2d76136ba97`, tree
+`4040a6ab43ca0fd55255d98c709c0622748900ee`, once. It completed phases 01-07, applied the exact baseline
+`20260913162402_DisposableDevelopmentCurrentModelBaseline`, and then stopped fail-closed during seed pass 1 with
+last durable phase `MIGRATIONS_APPLIED` and failed operation `SEED_AND_INVARIANTS`. The source fingerprint was
+`0|EMPTY|0|0|0`; final migration count is one, latest is the exact repository baseline, and orphan count is zero.
+The harness did not claim seed, invariant, or DBCC completion.
+
+The attempt-owned COPY_ONLY backup remains preserved outside the repository as
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_317044e55b4e4b2db6b4dcb1f1ee1e61.bak`: 16,900,096 bytes, media ID
+`317044e55b4e4b2db6b4dcb1f1ee1e61`, SHA-256
+`762AD9FC047EC713D90D5F341BFF33FD93D08CBE51665CBE218E96624E155120`. Backup creation, CHECKSUM/VERIFYONLY,
+preservation, and current/verified hash equality are recorded. The DisposableReset package validator passed and
+wrote a manifest whose file SHA-256 is
+`C0590BBB53DB4F7DA953C1A8AA523527B9B6332408C92F851B4C412E489C235E`. No automatic retry, restore, drop, cleanup,
+or feature-flag enablement followed.
+
+The failure was an API command-host dependency graph defect, not a migration or Finance schema defect:
+`AddDatabaseSeeding()` registered `ProcurementSupplierOnboardingTestSeeder` but the reduced seed host did not register
+its required `IFinanceAccountProvisioningService`. Correction
+`d1237ffb6df13e93ec1e54e8f6ffc84d95821b52` (tree
+`2f9dfb22f1126e217040f2ebf36441b17d85e077`) centralizes the production
+`FinanceAccountProvisioningService` as a scoped, TryAdd-based Finance boundary and declares it in the seeding
+composition with one scoped default-tenant system context. Existing request-backed production registrations retain
+precedence. Procurement continues to submit provisioning intent through Finance; no direct Account writer, stub,
+legacy adapter, migration, schema, or feature-flag change was introduced. Offline dependency validation resolves all
+11 registered seeders under `ValidateOnBuild`/`ValidateScopes`, verifies standalone supplier-command composition,
+scope isolation, and host override behavior; Payroll provisioning and Data/API Release gates pass. A future reset is
+not authorized until this exact descendant is independently approved and a new attempt is explicitly authorized.

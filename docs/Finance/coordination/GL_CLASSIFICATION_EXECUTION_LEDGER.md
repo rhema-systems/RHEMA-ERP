@@ -2701,3 +2701,32 @@ now reports its actual error 46005 near THROW; SQL Server 102 remains only the o
 Reset and FinalClone safety/evidence suites, baseline static checks, inspector build, and the complete generated-SQL
 grammar gate pass offline. No database, connection environment, preserved evidence, or backup was accessed. Runtime
 remains prohibited pending independent Sol High re-review and fresh authorization.
+
+The separately authorized disposable-development attempt 07 executed exact approved commit
+`8885db288b93f7392dfd05d6671ab2d76136ba97`, tree
+`4040a6ab43ca0fd55255d98c709c0622748900ee`, exactly once. It completed through durable phase
+`MIGRATIONS_APPLIED`, with the exact single baseline history row
+`20260913162402_DisposableDevelopmentCurrentModelBaseline`, then stopped fail-closed at `SEED_AND_INVARIANTS`
+during seed pass 1. Source fingerprint was `0|EMPTY|0|0|0`; repository/final migration counts were one, latest was
+the exact baseline, and orphan count was zero. The package validator passed and wrote a manifest. No seed/invariant/
+DBCC success was claimed, and no automatic retry, restore, drop, cleanup, or flag transition occurred.
+
+Attempt-07 recovery media remains preserved outside the repository: media
+`317044e55b4e4b2db6b4dcb1f1ee1e61`, file
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_317044e55b4e4b2db6b4dcb1f1ee1e61.bak`, 16,900,096 bytes, verified/current
+SHA-256 `762AD9FC047EC713D90D5F341BFF33FD93D08CBE51665CBE218E96624E155120`. The manifest-file SHA-256 is
+`C0590BBB53DB4F7DA953C1A8AA523527B9B6332408C92F851B4C412E489C235E`. Attempts 01-07 and all their backups/logs
+remain external and untouched.
+
+Offline root-cause analysis found that reduced seed-command composition registered
+`ProcurementSupplierOnboardingTestSeeder` without its Finance-owned `IFinanceAccountProvisioningService`; the normal
+web graph already used scoped `FinanceAccountProvisioningService`. Bounded correction
+`d1237ffb6df13e93ec1e54e8f6ffc84d95821b52` (tree
+`2f9dfb22f1126e217040f2ebf36441b17d85e077`) makes that production scoped registration reusable and adds it to the
+database-seeding graph with a scoped, exact default-tenant command identity. TryAdd preserves request-backed host
+services. Procurement and Payroll still cross the same Finance provisioning boundary; no stub, direct Account
+writer, migration, schema, or feature-flag change exists. Focused dependency validation resolves all 11 registered
+seeders and the standalone supplier command under scope/build validation, checks scope isolation and host override
+precedence, and preserves the Procurement no-direct-writer assertion. Payroll provisioning tests and Data/API
+Release builds pass. No database, process connection variable, preserved evidence, or backup was accessed during
+the correction. Runtime retry remains prohibited pending independent Sol High review and a new explicit attempt.
