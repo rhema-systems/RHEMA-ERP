@@ -588,20 +588,26 @@ function Get-DisposableBackupRecoveryState([string]$path, [string]$evidenceDirec
         $phaseThreeDatabaseProperty = $phaseThree.PSObject.Properties['database']
         $phaseThreeMediaProperty = $phaseThree.PSObject.Properties['backupMediaId']
         $phaseThreeFileProperty = $phaseThree.PSObject.Properties['backupFileName']
+        $phaseThreePathHashProperty = $phaseThree.PSObject.Properties['backupPathSha256']
         $phaseThreeDatabase = if ($null -eq $phaseThreeDatabaseProperty) { '' } else { [string]$phaseThreeDatabaseProperty.Value }
         $phaseThreeMediaId = if ($null -eq $phaseThreeMediaProperty) { '' } else { [string]$phaseThreeMediaProperty.Value }
         $phaseThreeFileName = if ($null -eq $phaseThreeFileProperty) {
             'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
         } else { [string]$phaseThreeFileProperty.Value }
+        $phaseThreePathHash = if ($null -eq $phaseThreePathHashProperty) { '' } else { [string]$phaseThreePathHashProperty.Value }
         $expectedPhaseThreeFileName = if ($phaseThreeMediaId -cmatch '^[0-9a-f]{32}$' -and $null -ne $phaseThreeFileProperty) {
             Get-DisposableBackupFileName $phaseThreeMediaId
         } else { 'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak' }
         $durableBackupIdentityValid = $phaseThree.schema -ceq 'RHEMA_DISPOSABLE_RESET_PHASE_V1' -and
             $phaseThree.phase -ceq 'BACKUP_CREATED' -and $phaseThreeDatabase -ceq 'RhemaERP' -and
             $phaseThreeMediaId -cmatch '^[0-9a-f]{32}$' -and $phaseThreeFileName -ceq $expectedPhaseThreeFileName -and
-            (Split-Path -Leaf $path) -ceq $phaseThreeFileName
+            (Split-Path -Leaf $path) -ceq $phaseThreeFileName -and
+            $phaseThreePathHash -ceq (Get-TextSha256 $path)
+        $phaseFourPathHashProperty = $phaseFour.PSObject.Properties['backupPathSha256']
+        $phaseFourPathHash = if ($null -eq $phaseFourPathHashProperty) { '' } else { [string]$phaseFourPathHashProperty.Value }
         if ($durableBackupIdentityValid -and $phaseFour.schema -eq 'RHEMA_DISPOSABLE_RESET_PHASE_V1' -and
-            $phaseFour.phase -eq 'BACKUP_VERIFIED' -and [string]$phaseFour.backupSha256 -match '^[0-9A-F]{64}$') {
+            $phaseFour.phase -eq 'BACKUP_VERIFIED' -and $phaseFourPathHash -ceq $phaseThreePathHash -and
+            [string]$phaseFour.backupSha256 -match '^[0-9A-F]{64}$') {
             $verifiedHash = [string]$phaseFour.backupSha256
         }
         $verifiedHashPath = Join-Path $evidenceDirectory 'backup.sha256'
@@ -703,6 +709,8 @@ function Write-DisposableResetStatus([string]$directory, [string]$status, [strin
         throw "Disposable reset terminal status phase '$phase' does not equal last durable phase '$durablePhase'."
     }
     $payload = [ordered]@{
+        evidenceSchema = 'RHEMA_DISPOSABLE_RESET_EVIDENCE_V2'
+        backupIdentityVersion = 'MEDIA_BOUND_V1'
         mode = 'ResetDisposableDevelopment'
         status = $status
         phase = $phase
@@ -737,6 +745,7 @@ function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupV
         '',
         'Do not rerun this reset automatically.',
         'Keep this evidence directory and the exact backup file recorded in reset-status.json.',
+        'Resolve that strict media-bound basename only beneath the trusted SQL Server backup root; verify backupPathSha256 before recovery.',
         'A DBA must independently verify the recorded SHA-256 and RESTORE VERIFYONLY evidence.',
         'If recovery is required, restore that exact backup under explicit DBA control; this harness never restores or drops after a partial reset.',
         'Before any new attempt, use a new empty external evidence directory and obtain review of a new exact commit/tree.'
@@ -758,6 +767,8 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
     $resetStarted = $false
     $backupPath = ''
     $backupFileName = ''
+    $backupPathSha256 = ''
+    $attemptOwnedBackup = $false
     $backupMediaId = ''
     $backupSha256 = ''
     $verifiedBackupSha256 = ''
@@ -860,6 +871,7 @@ WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_
         $backupMediaId = [Guid]::NewGuid().ToString('N')
         $backupFileName = Get-DisposableBackupFileName $backupMediaId
         $backupPath = Get-DisposableBackupPath $databaseTarget $backupMediaId
+        $backupPathSha256 = Get-TextSha256 $backupPath
         $escapedBackupPath = $backupPath.Replace("'", "''")
         $backupExists = [int](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
 DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
@@ -870,6 +882,7 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
             throw 'The exact RhemaERP disposable-reset backup already exists; it will never be overwritten.'
         }
         New-AtomicBackupReservation $backupPath
+        $attemptOwnedBackup = $true
         $backupCreateEvidence = Join-Path $evidenceDirectory 'backup-create.txt'
         $materialBackupState = $null
         try {
@@ -913,6 +926,7 @@ SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
             database = 'RhemaERP'
             backupMediaId = $backupMediaId
             backupFileName = $backupFileName
+            backupPathSha256 = $backupPathSha256
             backupByteLength = $materialBackupState.byteLength
             currentMaterialSha256 = $backupSha256
             backupCreated = $true
@@ -952,6 +966,7 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
             backupSha256 = $verifiedBackupSha256
             backupFileName = $backupFileName
             backupMediaId = $backupMediaId
+            backupPathSha256 = $backupPathSha256
             backupVerifyEvidenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupVerifyEvidence).Hash
             backupCreated = $true
             backupVerified = $true
@@ -1157,6 +1172,7 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
             latestMigration = $authoritativeLatestMigration; orphanMigrationCount = 0; backupSha256 = $verifiedBackupSha256
             invariantSha256 = $firstInvariant; seedPasses = 2; dbcc = 'PASS'; backupMediaId = $backupMediaId
             backupFileName = $backupFileName
+            backupPathSha256 = $backupPathSha256; attemptOwnedBackup = $true
             backupCompleted = $true; backupPhaseMarkerPublished = $true; backupMaterialStateReconciled = $true
             backupByteLength = $materialBackupState.byteLength; verifyEvidencePresent = $true
             currentMaterialSha256 = $verifiedBackupSha256; backupHashMatchesVerified = $true; backupPreserved = $true
@@ -1169,7 +1185,12 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
         $durablePhase = Get-DisposableLastDurablePhase $evidenceDirectory
         $durableOrdinal = @(Get-ChildItem -LiteralPath $evidenceDirectory -File -Filter 'phase-*.json').Count
         $backupPhaseMarkerPublished = $durableOrdinal -ge 3
-        $reconciledBackupState = Get-DisposableBackupRecoveryState $backupPath $evidenceDirectory
+        $reconciledBackupState = if ($attemptOwnedBackup) {
+            Get-DisposableBackupRecoveryState $backupPath $evidenceDirectory
+        } else {
+            [pscustomobject]@{ materialized=$false; byteLength=[long]0; currentMaterialSha256='';
+                verifiedBackupSha256=''; verifyEvidencePresent=$false; hashMatchesVerified=$false; backupVerified=$false }
+        }
         $durableBackupCreated = [bool]$reconciledBackupState.materialized
         if ($durableBackupCreated) {
             Write-AtomicTextFile (Join-Path $evidenceDirectory 'backup-current.sha256') `
@@ -1181,6 +1202,7 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
         Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $durablePhase $durableBackupCreated $durableBackupVerified $durableResetStarted @{
             sourceFingerprint = $sourceFingerprint; failure = $safeFailure; failedOperation = $phase; backupPreserved = $durableBackupCreated
             backupMediaId = $backupMediaId; backupFileName = $backupFileName
+            backupPathSha256 = $backupPathSha256; attemptOwnedBackup = $attemptOwnedBackup
             backupSha256 = $reconciledBackupState.verifiedBackupSha256; backupCompleted = $backupCompleted
             backupPhaseMarkerPublished = $backupPhaseMarkerPublished; backupMaterialStateReconciled = $true
             backupByteLength = $reconciledBackupState.byteLength; verifyEvidencePresent = $reconciledBackupState.verifyEvidencePresent

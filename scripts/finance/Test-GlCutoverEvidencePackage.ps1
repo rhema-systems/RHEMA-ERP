@@ -281,12 +281,33 @@ if ($PackageKind -eq 'DisposableReset') {
         }
     }
 
+    $approvedLegacyCommit = '22b27ab18a19a92fa6b1222c05add817574e74fe'
+    $identityVersionProperty = $reset.PSObject.Properties['backupIdentityVersion']
+    $evidenceSchemaProperty = $reset.PSObject.Properties['evidenceSchema']
+    $isApprovedLegacy = $reset.reviewedCommit -ceq $approvedLegacyCommit -and
+        $null -eq $identityVersionProperty -and $null -eq $evidenceSchemaProperty -and
+        $null -eq $reset.PSObject.Properties['backupFileName'] -and
+        $null -eq $reset.PSObject.Properties['backupPathSha256']
+    if (-not $isApprovedLegacy -and
+        ($null -eq $identityVersionProperty -or [string]$identityVersionProperty.Value -cne 'MEDIA_BOUND_V1' -or
+         $null -eq $evidenceSchemaProperty -or [string]$evidenceSchemaProperty.Value -cne 'RHEMA_DISPOSABLE_RESET_EVIDENCE_V2')) {
+        throw 'Disposable-reset evidence schema/backup identity version is missing or unsupported.'
+    }
+    if (-not $isApprovedLegacy -and
+        ($null -eq $reset.PSObject.Properties['attemptOwnedBackup'] -or
+         [bool]$reset.attemptOwnedBackup -ne [bool]$reset.backupCreated)) {
+        throw 'Disposable-reset V2 backup ownership and creation claims disagree.'
+    }
+
     $createPath = Join-Path $root 'backup-create.txt'
     $backupFileProperty = $reset.PSObject.Properties['backupFileName']
-    $expectedBackupFileName = if ($null -eq $backupFileProperty -or
-        [string]::IsNullOrWhiteSpace([string]$backupFileProperty.Value)) {
+    if (-not $isApprovedLegacy -and $null -eq $backupFileProperty) {
+        throw 'Disposable-reset V2 status is missing backupFileName.'
+    }
+    $expectedBackupFileName = if ($isApprovedLegacy) {
         'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
     }
+    elseif ([string]::IsNullOrWhiteSpace([string]$backupFileProperty.Value) -and $reset.backupCreated -ne $true) { '' }
     else {
         $candidateBackupFileName = [string]$backupFileProperty.Value
         $derivedBackupFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_$($reset.backupMediaId).bak"
@@ -296,6 +317,13 @@ if ($PackageKind -eq 'DisposableReset') {
             throw 'Disposable-reset media-bound backup filename is malformed or path-ambiguous.'
         }
         $candidateBackupFileName
+    }
+    $pathHashProperty = $reset.PSObject.Properties['backupPathSha256']
+    $expectedBackupPathHash = if ($isApprovedLegacy) { '' } else {
+        if ($null -eq $pathHashProperty -or [string]$pathHashProperty.Value -notmatch '^[0-9A-F]{64}$') {
+            throw 'Disposable-reset media-bound backup path hash is missing or malformed.'
+        }
+        [string]$pathHashProperty.Value
     }
     $create = if (Test-Path -LiteralPath $createPath -PathType Leaf) {
         @(Get-SqlEvidenceTokens $createPath)
@@ -338,7 +366,9 @@ if ($PackageKind -eq 'DisposableReset') {
             if ($reset.backupCompleted -ne $true -or $phaseThree.backupCompleted -ne $true -or
                 [string]$phaseThree.database -cne 'RhemaERP' -or
                 [string]$phaseThree.backupMediaId -cne [string]$reset.backupMediaId -or
-                $phaseThreeFileName -cne $expectedBackupFileName -or
+            $phaseThreeFileName -cne $expectedBackupFileName -or
+                (-not $isApprovedLegacy -and
+                 ([string]$phaseThree.backupPathSha256 -cne $expectedBackupPathHash)) -or
                 [long]$phaseThree.backupByteLength -le 0 -or
                 [string]$phaseThree.currentMaterialSha256 -notmatch '^[0-9A-F]{64}$') {
                 throw 'Durable BACKUP_CREATED requires database/media identity, completed SQL markers, positive length and hash reconciliation.'
@@ -359,6 +389,7 @@ if ($PackageKind -eq 'DisposableReset') {
         $phaseFourHash = [string]$phaseMarkers[3].backupSha256
         $phaseFourFileProperty = $phaseMarkers[3].PSObject.Properties['backupFileName']
         $phaseFourMediaProperty = $phaseMarkers[3].PSObject.Properties['backupMediaId']
+        $phaseFourPathHashProperty = $phaseMarkers[3].PSObject.Properties['backupPathSha256']
         $currentMatchesVerified = [string]$reset.currentMaterialSha256 -ceq $phaseFourHash
         try {
             Assert-UniqueOrderedSqlEvidenceTokens $verifyPath @(
@@ -377,6 +408,8 @@ if ($PackageKind -eq 'DisposableReset') {
             ($null -ne $backupFileProperty -and
              ($null -eq $phaseFourFileProperty -or [string]$phaseFourFileProperty.Value -cne $expectedBackupFileName -or
               $null -eq $phaseFourMediaProperty -or [string]$phaseFourMediaProperty.Value -cne [string]$reset.backupMediaId)) -or
+            (-not $isApprovedLegacy -and
+             ($null -eq $phaseFourPathHashProperty -or [string]$phaseFourPathHashProperty.Value -cne $expectedBackupPathHash)) -or
             [string]$reset.backupSha256 -cne $phaseFourHash -or
             $reset.verifyEvidencePresent -ne $true -or [bool]$reset.backupHashMatchesVerified -ne $currentMatchesVerified -or
             [bool]$reset.backupVerified -ne $currentMatchesVerified) {

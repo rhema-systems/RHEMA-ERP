@@ -129,7 +129,7 @@ try {
         'Assert-UniqueOrderedSqlEvidenceTokens','Invoke-Native','Assert-SqlcmdOutputWidth','Invoke-Sql',
         'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
         'Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
-        'Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
+        'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
         'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
             $node.Name -eq $functionName }, $true))
@@ -164,6 +164,17 @@ try {
         if (-not $refused) { throw 'Disposable backup filename accepted malformed/path-ambiguous media identity.' }
     }
     Write-Host 'PASS: prior fixed backup coexists with two unique media-bound attempts; collision and path spoofing are refused'
+    $collisionHashBefore = (Get-FileHash -Algorithm SHA256 -LiteralPath $firstAttemptPath).Hash
+    $attemptOwnedBackup = $false
+    try { New-AtomicBackupReservation $firstAttemptPath; $attemptOwnedBackup = $true } catch [System.IO.IOException] {}
+    $collisionRecovery = if ($attemptOwnedBackup) { Get-DisposableBackupRecoveryState $firstAttemptPath $uniqueBackupRoot } else {
+        [pscustomobject]@{ materialized=$false; backupVerified=$false }
+    }
+    if ($attemptOwnedBackup -or $collisionRecovery.materialized -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $firstAttemptPath).Hash -cne $collisionHashBefore) {
+        throw 'Collision catch flow claimed or changed a backup not owned by this attempt.'
+    }
+    Write-Host 'PASS: collision catch leaves pre-existing bytes unchanged and reports no attempt-owned backup'
     $sqlcmdMaxVariableWidth = 8000
     $sqlcmdScreenWidth = 8000
     $script:sensitiveEvidenceTokens = [System.Collections.Generic.List[string]]::new()
@@ -290,14 +301,15 @@ exit 0
     $mutationBackupPath = Join-Path $mutationRoot $recoveryBackupFileName
     [System.IO.File]::WriteAllBytes($mutationBackupPath, [System.Text.Encoding]::UTF8.GetBytes('verified bytes'))
     $originalState = Get-DisposableMaterialBackupState $mutationBackupPath
+    $recoveryPathHash = Get-TextSha256 $mutationBackupPath
     Write-DisposablePhaseMarker $mutationRoot 1 'OFFLINE_GATES_COMPLETE'
     Write-DisposablePhaseMarker $mutationRoot 2 'SOURCE_CAPTURE_COMPLETE'
     Write-DisposablePhaseMarker $mutationRoot 3 'BACKUP_CREATED' @{
         database='RhemaERP'; backupMediaId=$recoveryMediaId; backupFileName=$recoveryBackupFileName; backupCompleted=$true;
-        backupByteLength=$originalState.byteLength; currentMaterialSha256=$originalState.sha256
+        backupByteLength=$originalState.byteLength; currentMaterialSha256=$originalState.sha256; backupPathSha256=$recoveryPathHash
     }
     Write-DisposablePhaseMarker $mutationRoot 4 'BACKUP_VERIFIED' @{
-        backupSha256=$originalState.sha256; backupMediaId=$recoveryMediaId; backupFileName=$recoveryBackupFileName
+        backupSha256=$originalState.sha256; backupMediaId=$recoveryMediaId; backupFileName=$recoveryBackupFileName; backupPathSha256=$recoveryPathHash
     }
     "$($originalState.sha256)  $recoveryBackupFileName" |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $mutationRoot 'backup.sha256')
