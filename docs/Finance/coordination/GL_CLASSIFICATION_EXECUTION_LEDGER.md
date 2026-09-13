@@ -2311,3 +2311,14 @@ it must preserve immutable layout publication membership and reconstruct exact F
 evidence without changing economics. The alternative is a backup-verified destructive reset/reseed only if the
 database owner explicitly declares the source disposable. Status is `DECISION_REQUIRED`; no source mutation,
 migration, backup, target creation, feature change or cutover authorization occurred.
+
+The user explicitly selected and authorized Phase D2 for the local `RhemaERP` development database, declaring
+its data disposable and permitting the schema/seed/test-data compatibility changes required by a backup-verified
+reset/reseed. This authority is development-only; it does not extend to production, remote/shared databases or
+any retained evidence. Implementation starts from exact clean base
+`299c75d46b89b8fbf83caa2394ef17de363d2b16` in the isolated rehearsal branch. The bounded deliverable is a
+guarded `ResetDisposableDevelopment` path with exact reviewed-state, local/database, attestation, disabled-flag,
+external-evidence, atomic backup/VERIFYONLY/SHA, immediate identity-recheck, 456/C8, double-seed invariant,
+history, DBCC and no-auto-retry recovery boundaries plus adversarial offline tests. No database execution is
+authorized until the resulting exact commit/tree receives Sol High approval, and implementation must not inspect
+connection variables, access a database, or touch preserved external evidence.

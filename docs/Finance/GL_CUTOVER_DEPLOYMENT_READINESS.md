@@ -178,11 +178,38 @@ requires one of these explicit decisions:
    published-layout snapshots, bind the existing posted FX batch and lines to exact book/classification/policy
    evidence, and resolve all nine links without changing their economics. Production remains read-only until the
    backfill and full clone rehearsal pass and a separate migration-application authorization is granted.
-2. **Disposable-source reset/reseed:** only if the database owner attests that `RhemaERP` contains no retained
-   accounting evidence, authorize a backup-verified destructive reset and deterministic reseed under DBA control.
-   This option discards historical layout/FX evidence and is not inferred from test-like account names.
+2. **Disposable-source reset/reseed:** the user has now explicitly declared the local `RhemaERP` development
+   data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
+   is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Status is `DECISION_REQUIRED`; neither option is authorized by the FINAL-04 run or this document.
+Phase D2 implementation is active offline. Execution remains prohibited until the exact reset implementation and
+tree receive Sol High approval; no database mutation has occurred under this authorization.
+
+`ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
+case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
+`-ConfirmDisposableDevelopmentReset`, the exact process attestation shown below, reviewed commit/tree equality,
+a wholly clean repository before connection parsing and immediately before mutation, all C6-C8 flags false, and
+a new absent external evidence directory. Before any `SINGLE_USER`/drop it captures source history/fingerprint,
+atomically reserves a no-overwrite target-derived backup, takes `COPY_ONLY CHECKSUM` with random media identity,
+runs `RESTORE VERIFYONLY`, records SHA-256, proves the source is unchanged, and rechecks the exact database
+identity in the same SQL batch immediately before reset. A successful reset recreates only `RhemaERP`, applies
+authoritative 456/C8, seeds twice with byte-identical Finance invariants, proves exact migration history with zero
+orphans, and completes DBCC. Any failure preserves backup/evidence, writes recovery instructions, and performs no
+automatic retry, restore, cleanup, or second drop.
+
+After Sol High approval only, an operator may prepare a new external evidence path and run:
+
+```powershell
+$env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION = '<explicit local connection; exact RhemaERP catalog>'
+$env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_RESET_ATTESTATION = 'I_ATTEST_RHEMAERP_DEVELOPMENT_DATA_IS_DISPOSABLE'
+$env:RHEMA_GL_REVIEWED_COMMIT = '<exact independently reviewed 40-hex commit>'
+$env:RHEMA_GL_REVIEWED_TREE = '<exact independently reviewed 40-hex tree>'
+$env:Finance__AccountingEvents__Enabled = 'false'
+$env:Finance__ProducerIntents__Enabled = 'false'
+$env:Finance__ProducerIntentGroups__Enabled = 'false'
+./scripts/finance/Invoke-GlCutoverRehearsal.ps1 -Mode ResetDisposableDevelopment `
+  -ConfirmDisposableDevelopmentReset -EvidenceDirectory '<new absent external directory>'
+```
 
 ```powershell
 $env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<secure same-server connection; exact RhemaERP catalog>'

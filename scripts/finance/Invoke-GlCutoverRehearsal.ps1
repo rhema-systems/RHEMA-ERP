@@ -1,13 +1,14 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)]
-    [ValidateSet('InspectSource', 'RehearseEmpty', 'RehearseClone', 'RehearseFinalClone', 'DropRehearsal')]
+    [ValidateSet('InspectSource', 'RehearseEmpty', 'RehearseClone', 'RehearseFinalClone', 'ResetDisposableDevelopment', 'DropRehearsal')]
     [string]$Mode,
 
     [string]$TargetConnectionEnvironmentVariable = 'RHEMA_GL_REHEARSAL_CONNECTION',
     [string]$SourceConnectionEnvironmentVariable = 'RHEMA_GL_SOURCE_READONLY_CONNECTION',
     [string]$EvidenceDirectory,
-    [switch]$ConfirmDrop
+    [switch]$ConfirmDrop,
+    [switch]$ConfirmDisposableDevelopmentReset
 )
 
 Set-StrictMode -Version Latest
@@ -37,6 +38,9 @@ $finalCutoverFlags = @(
 )
 $finalReviewedCommitVariable = 'RHEMA_GL_REVIEWED_COMMIT'
 $finalReviewedTreeVariable = 'RHEMA_GL_REVIEWED_TREE'
+$disposableConnectionVariable = 'RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION'
+$disposableAttestationVariable = 'RHEMA_GL_DISPOSABLE_DEVELOPMENT_RESET_ATTESTATION'
+$disposableAttestationValue = 'I_ATTEST_RHEMAERP_DEVELOPMENT_DATA_IS_DISPOSABLE'
 $script:sensitiveEvidenceTokens = [System.Collections.Generic.List[string]]::new()
 $script:finalReviewedGitState = $null
 
@@ -63,11 +67,11 @@ function Get-SanitizedExceptionMessage([System.Exception]$exception) {
     ConvertTo-SanitizedEvidenceLine $exception.Message
 }
 
-function Assert-FinalReviewedGitState {
+function Assert-FinalReviewedGitState([string]$operation = 'RehearseFinalClone') {
     $reviewedCommit = [Environment]::GetEnvironmentVariable($finalReviewedCommitVariable, 'Process')
     $reviewedTree = [Environment]::GetEnvironmentVariable($finalReviewedTreeVariable, 'Process')
     if ($reviewedCommit -notmatch '^[0-9a-fA-F]{40}$' -or $reviewedTree -notmatch '^[0-9a-fA-F]{40}$') {
-        throw "RehearseFinalClone requires exact 40-hex $finalReviewedCommitVariable and $finalReviewedTreeVariable process values from independent review."
+        throw "$operation requires exact 40-hex $finalReviewedCommitVariable and $finalReviewedTreeVariable process values from independent review."
     }
 
     Push-Location $repositoryRoot
@@ -83,7 +87,7 @@ function Assert-FinalReviewedGitState {
         $dirty = @(& git status --porcelain=v1 --untracked-files=all)
         if ($LASTEXITCODE -ne 0) { throw 'Unable to prove repository cleanliness.' }
         if ($dirty.Count -ne 0) {
-            throw 'RehearseFinalClone requires a completely clean tracked and untracked repository before any SQL contact.'
+            throw "$operation requires a completely clean tracked and untracked repository before any SQL contact."
         }
         $ignoredRelevant = @(& git ls-files --others --ignored --exclude-standard -- '*.cs' '*.csproj' '*.props' '*.targets' `
             '*.json' '*.config' '*.ps1' '*.psm1' '*.sql' '*.cshtml' '*.ts' '*.tsx' '*.js' '*.jsx' '*.user' '*.suo' '.env' '.env.*' | Where-Object {
@@ -93,7 +97,7 @@ function Assert-FinalReviewedGitState {
         })
         if ($LASTEXITCODE -ne 0) { throw 'Unable to inspect ignored files for relevant workspace changes.' }
         if ($ignoredRelevant.Count -ne 0) {
-            throw 'RehearseFinalClone found ignored code, migration, seeder, configuration, or script files outside the generated-output allowlist.'
+            throw "$operation found ignored code, migration, seeder, configuration, or script files outside the generated-output allowlist."
         }
     }
     finally { Pop-Location }
@@ -430,6 +434,323 @@ function Set-ApplicationConnection([string]$connectionString, [scriptblock]$acti
 
 function Get-DefaultEvidenceDirectory([string]$database) {
     Join-Path $repositoryRoot ".artifacts\finance-gl-rehearsal\$database"
+}
+
+function Assert-LocalDisposableSqlServer([string]$dataSource) {
+    $normalized = $dataSource.Trim()
+    if ($normalized -notmatch '^(?i)(?:tcp:)?(?:localhost|127\.0\.0\.1|\.|\(local\)|\[::1\])(?:\\[A-Za-z0-9_]+)?(?:,\d{1,5})?$') {
+        throw 'ResetDisposableDevelopment requires an explicitly local SQL Server data source.'
+    }
+}
+
+function Get-DisposableBackupPath($databaseTarget) {
+    $backupRoot = Get-ServerDefaultPath $databaseTarget.Builder 'InstanceDefaultBackupPath'
+    Join-Path $backupRoot 'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
+}
+
+function Get-TextSha256([string]$value) {
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($value)
+    $hash = [System.Security.Cryptography.SHA256]::HashData($bytes)
+    [Convert]::ToHexString($hash)
+}
+
+function Write-DisposableResetStatus([string]$directory, [string]$status, [string]$phase,
+    [bool]$backupCreated, [bool]$backupVerified, [bool]$resetStarted, [hashtable]$extra = @{}) {
+    $payload = [ordered]@{
+        mode = 'ResetDisposableDevelopment'
+        status = $status
+        phase = $phase
+        database = 'RhemaERP'
+        server = '<REDACTED_LOCAL_SERVER>'
+        repositoryClean = $true
+        reviewedCommit = $script:finalReviewedGitState.reviewedCommit
+        reviewedTree = $script:finalReviewedGitState.reviewedTree
+        backupCreated = $backupCreated
+        backupVerified = $backupVerified
+        resetStarted = $resetStarted
+        automaticRetry = $false
+        automaticCleanup = $false
+        completedAtUtc = [DateTime]::UtcNow.ToString('O')
+    }
+    foreach ($key in $extra.Keys) { $payload[$key] = $extra[$key] }
+    $artifactSha256 = [ordered]@{}
+    Get-ChildItem -LiteralPath $directory -File | Where-Object Name -notin @('reset-status.json','manifest.sha256') |
+        Sort-Object Name | ForEach-Object { $artifactSha256[$_.Name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash }
+    $payload['artifactSha256'] = $artifactSha256
+    $payload | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath (Join-Path $directory 'reset-status.json')
+}
+
+function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupVerified, [string]$phase) {
+    @(
+        '# Disposable RhemaERP reset recovery',
+        '',
+        "Status phase: $phase",
+        "Verified backup available: $($backupVerified.ToString().ToLowerInvariant())",
+        '',
+        'Do not rerun this reset automatically.',
+        'Keep this evidence directory and the exact RhemaERP_DISPOSABLE_RESET_COPYONLY.bak file.',
+        'A DBA must independently verify the recorded SHA-256 and RESTORE VERIFYONLY evidence.',
+        'If recovery is required, restore that exact backup under explicit DBA control; this harness never restores or drops after a partial reset.',
+        'Before any new attempt, use a new empty external evidence directory and obtain review of a new exact commit/tree.'
+    ) | Set-Content -Encoding utf8 -LiteralPath (Join-Path $directory 'RECOVERY.md')
+}
+
+function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionString, [string]$evidenceDirectory) {
+    $phase = 'OFFLINE_GATES'
+    $backupCreated = $false
+    $backupVerified = $false
+    $resetStarted = $false
+    $backupPath = ''
+    $sourceFingerprint = ''
+    $sourceHistory = @()
+    try {
+        $script:finalReviewedGitState | ConvertTo-Json | Set-Content -Encoding utf8 `
+            -LiteralPath (Join-Path $evidenceDirectory 'reviewed-git-state.json')
+        Write-FinalCutoverFlagsEvidence $evidenceDirectory
+        Push-Location $repositoryRoot
+        try {
+            $null = Invoke-NativeWithEvidence 'git' @('diff', '--check') (Join-Path $evidenceDirectory 'git-diff-check.log')
+            $null = Invoke-NativeWithEvidence 'git' @('rev-list', '--parents', 'HEAD') (Join-Path $evidenceDirectory 'commit-ancestry.txt')
+            $null = Invoke-NativeWithEvidence 'git' @('rev-parse', 'HEAD', 'HEAD^{tree}') (Join-Path $evidenceDirectory 'git-head-tree.txt')
+            $null = Invoke-NativeWithEvidence 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo') `
+                (Join-Path $evidenceDirectory 'reset-build.log')
+            $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'has-pending-model-changes',
+                '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
+                '--context', 'ApplicationDbContext', '--no-build') (Join-Path $evidenceDirectory 'ef-no-pending-model.log')
+            $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'list', '--project', $dataProject,
+                '--startup-project', $apiProject, '--configuration', 'Debug', '--context', 'ApplicationDbContext',
+                '--no-build', '--no-connect') (Join-Path $evidenceDirectory 'migration-discovery.log')
+        }
+        finally { Pop-Location }
+        $repositoryMigrations = @(Get-DiscoveredMigrationIds (Join-Path $evidenceDirectory 'migration-discovery.log'))
+        $repositoryLatest = if ($repositoryMigrations.Count) { $repositoryMigrations[-1] } else { '<none>' }
+        if ($repositoryMigrations.Count -ne $authoritativeMigrationCount -or $repositoryLatest -ne $authoritativeLatestMigration) {
+            throw "Disposable reset requires authoritative 456/C8 repository history; found $($repositoryMigrations.Count)/$repositoryLatest."
+        }
+
+        $phase = 'SOURCE_CAPTURE'
+        $sourceHistory = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
+        $sourceHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'source-migration-history.txt')
+        $sourceFingerprint = Get-SourceFingerprint $databaseTarget.Builder 'RhemaERP'
+        $sourceFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectory 'source-fingerprint-before.txt')
+        $databaseIdentity = [string](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
+SELECT CONCAT(CONVERT(nvarchar(20),database_id),N'|',CONVERT(nvarchar(33),create_date,126))
+FROM sys.databases WHERE name=N'RhemaERP';
+"@)
+        if ($databaseIdentity -notmatch '^(?<id>\d+)\|(?<created>[^|]+)$') {
+            throw 'Could not bind the exact disposable RhemaERP database identity.'
+        }
+        $expectedDatabaseId = [int]$Matches.id
+        $expectedCreateDate = $Matches.created
+        "RHEMAERP_DATABASE_IDENTITY_SHA256=$(Get-TextSha256 $databaseIdentity)" | Set-Content -Encoding ascii `
+            -LiteralPath (Join-Path $evidenceDirectory 'source-database-identity.sha256')
+
+        $phase = 'BACKUP'
+        $backupPath = Get-DisposableBackupPath $databaseTarget
+        $escapedBackupPath = $backupPath.Replace("'", "''")
+        $backupExists = [int](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
+DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
+INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
+SELECT COALESCE(MAX(FileExists),0) FROM @exists;
+"@)
+        if ($backupExists -ne 0) {
+            throw 'The exact RhemaERP disposable-reset backup already exists; it will never be overwritten.'
+        }
+        $backupMediaId = [Guid]::NewGuid().ToString('N')
+        New-AtomicBackupReservation $backupPath
+        $backupEvidence = Join-Path $evidenceDirectory 'backup-verify.txt'
+        Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
+SET NOCOUNT ON;
+SELECT N'DATABASE=RhemaERP';
+SELECT N'BACKUP_MEDIA_ID=$backupMediaId';
+SELECT N'BACKUP_PATH_ATOMICALLY_RESERVED';
+DECLARE @reserved table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
+INSERT @reserved EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
+IF NOT EXISTS (SELECT 1 FROM @reserved WHERE FileExists=1 AND FileIsDirectory=0)
+    THROW 51200, 'DISPOSABLE_RESET_BACKUP_RESERVATION_LOST', 1;
+SELECT N'BACKUP_COPY_ONLY_CHECKSUM_START';
+BACKUP DATABASE [RhemaERP] TO DISK=N'$escapedBackupPath'
+WITH COPY_ONLY, CHECKSUM, NOINIT, NOSKIP, MEDIANAME=N'$backupMediaId', NAME=N'RhemaERP disposable development reset';
+SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
+RESTORE VERIFYONLY FROM DISK=N'$escapedBackupPath' WITH CHECKSUM;
+SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
+"@ '' $backupEvidence
+        $backupEvidenceLines = @(Get-Content -LiteralPath $backupEvidence | ForEach-Object { $_.Trim() })
+        foreach ($marker in @('BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE','RESTORE_VERIFYONLY_CHECKSUM_COMPLETE')) {
+            if ($backupEvidenceLines -cnotcontains $marker) {
+                throw "Disposable reset backup evidence lacks required marker '$marker'; reset is forbidden."
+            }
+        }
+        $backupCreated = $true
+        if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+            throw 'Verified reset backup is not locally readable for SHA-256; reset is forbidden.'
+        }
+        $backupSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupPath).Hash
+        if ($backupSha256 -notmatch '^[0-9A-F]{64}$') { throw 'Verified reset backup SHA-256 is invalid; reset is forbidden.' }
+        "$backupSha256  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii `
+            -LiteralPath (Join-Path $evidenceDirectory 'backup.sha256')
+        $backupStillExists = [int](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
+DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
+INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
+SELECT COALESCE(MAX(FileExists),0) FROM @exists;
+"@)
+        if ($backupStillExists -ne 1) { throw 'Verified reset backup disappeared before mutation; reset is forbidden.' }
+        $sourceHistoryBeforeReset = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
+        $sourceFingerprintBeforeReset = Get-SourceFingerprint $databaseTarget.Builder 'RhemaERP'
+        $sourceFingerprintBeforeReset | Set-Content -Encoding utf8 `
+            -LiteralPath (Join-Path $evidenceDirectory 'source-fingerprint-pre-reset.txt')
+        if (($sourceHistoryBeforeReset -join "`n") -ne ($sourceHistory -join "`n") -or
+            $sourceFingerprintBeforeReset -ne $sourceFingerprint) {
+            throw 'Disposable RhemaERP source changed between capture and verified backup; reset is forbidden.'
+        }
+        $backupVerified = $true
+        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'BACKUP_VERIFIED'
+        Write-DisposableResetStatus $evidenceDirectory 'READY_TO_RESET' 'BACKUP_VERIFIED' $true $true $false @{
+            sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; latestMigration = $authoritativeLatestMigration
+            backupSha256 = $backupSha256; backupMediaId = $backupMediaId
+        }
+
+        $phase = 'IDENTITY_RECHECK_AND_RESET'
+        $preMutationGitState = Assert-FinalReviewedGitState 'ResetDisposableDevelopment'
+        if ($preMutationGitState.executedCommit -ne $script:finalReviewedGitState.executedCommit -or
+            $preMutationGitState.executedTree -ne $script:finalReviewedGitState.executedTree) {
+            throw 'Reviewed repository identity changed before disposable reset mutation.'
+        }
+        $preMutationGitState | ConvertTo-Json | Set-Content -Encoding utf8 `
+            -LiteralPath (Join-Path $evidenceDirectory 'pre-mutation-reviewed-git-state.json')
+        $backupHashEvidencePath = Join-Path $evidenceDirectory 'backup.sha256'
+        if (-not $backupVerified -or -not (Test-Path -LiteralPath $backupHashEvidencePath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
+            throw 'Disposable reset cannot start without verified backup markers and SHA-256 evidence.'
+        }
+        $recordedBackupHash = (Get-Content -Raw -LiteralPath $backupHashEvidencePath).Trim()
+        $currentBackupHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupPath).Hash
+        if ($recordedBackupHash -cne "$backupSha256  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" -or
+            $currentBackupHash -cne $backupSha256) {
+            throw 'Disposable reset backup SHA-256 proof changed before mutation; reset is forbidden.'
+        }
+        $escapedCreateDate = $expectedCreateDate.Replace("'", "''")
+        $resetStarted = $true
+        Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
+SET NOCOUNT ON;
+DECLARE @backupProof table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
+INSERT @backupProof EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
+IF NOT EXISTS (SELECT 1 FROM @backupProof WHERE FileExists=1 AND FileIsDirectory=0)
+    THROW 51202, 'DISPOSABLE_RESET_VERIFIED_BACKUP_MISSING', 1;
+IF DB_ID(N'RhemaERP') <> $expectedDatabaseId OR NOT EXISTS (
+    SELECT 1 FROM sys.databases WHERE database_id=$expectedDatabaseId AND name=N'RhemaERP'
+      AND CONVERT(nvarchar(33),create_date,126)=N'$escapedCreateDate')
+    THROW 51201, 'DISPOSABLE_RESET_IDENTITY_DRIFT', 1;
+SELECT N'DISPOSABLE_RESET_IDENTITY_RECHECK_COMPLETE';
+ALTER DATABASE [RhemaERP] SET SINGLE_USER WITH ROLLBACK IMMEDIATE;
+DROP DATABASE [RhemaERP];
+CREATE DATABASE [RhemaERP];
+SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
+"@ '' (Join-Path $evidenceDirectory 'reset-database.log')
+
+        $phase = 'APPLY_MIGRATIONS'
+        Push-Location $repositoryRoot
+        try {
+            Set-ApplicationConnection $connectionString {
+                $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                    '--project', $apiProject, '--', 'apply-migrations') (Join-Path $evidenceDirectory 'reset-apply-migrations.log')
+            }
+        }
+        finally { Pop-Location }
+        $finalHistory = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
+        $finalHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'target-migration-history.txt')
+        if (($finalHistory -join "`n") -ne ($repositoryMigrations -join "`n")) {
+            throw 'Reset RhemaERP history is not exactly authoritative repository 456/C8 with zero orphans.'
+        }
+
+        $phase = 'SEED_AND_INVARIANTS'
+        Push-Location $repositoryRoot
+        try {
+            Set-ApplicationConnection $connectionString {
+                $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                    '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectory 'reset-seed-pass-1.log')
+            }
+            Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'RhemaERP' '' `
+                (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') (Join-Path $evidenceDirectory 'reset-invariants-pass-1.txt')
+            Set-ApplicationConnection $connectionString {
+                $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
+                    '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectory 'reset-seed-pass-2.log')
+            }
+            Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'RhemaERP' '' `
+                (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') (Join-Path $evidenceDirectory 'reset-invariants-pass-2.txt')
+        }
+        finally { Pop-Location }
+        $firstInvariant = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'reset-invariants-pass-1.txt')).Hash
+        $secondInvariant = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'reset-invariants-pass-2.txt')).Hash
+        if ($firstInvariant -ne $secondInvariant) { throw 'Second disposable reset seed changed canonical Finance invariants.' }
+        @("$firstInvariant  reset-invariants-pass-1.txt","$secondInvariant  reset-invariants-pass-2.txt") |
+            Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'reset-invariants.sha256')
+
+        $phase = 'DBCC'
+        Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
+DBCC CHECKDB(N'RhemaERP') WITH NO_INFOMSGS;
+SELECT N'DBCC_CHECKDB_COMPLETE';
+"@ '' (Join-Path $evidenceDirectory 'reset-dbcc.txt')
+        if ((Get-Content -Raw -LiteralPath (Join-Path $evidenceDirectory 'reset-dbcc.txt')) -notmatch 'DBCC_CHECKDB_COMPLETE') {
+            throw 'Disposable reset DBCC completion marker is missing.'
+        }
+        $finalGitState = Assert-FinalReviewedGitState 'ResetDisposableDevelopment'
+        if ($finalGitState.executedCommit -ne $script:finalReviewedGitState.executedCommit -or
+            $finalGitState.executedTree -ne $script:finalReviewedGitState.executedTree) {
+            throw 'Reviewed repository identity changed during disposable reset.'
+        }
+        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'PASS'
+        Write-DisposableResetStatus $evidenceDirectory 'PASS' 'COMPLETE' $true $true $true @{
+            sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; finalMigrationCount = 456
+            latestMigration = $authoritativeLatestMigration; orphanMigrationCount = 0; backupSha256 = $backupSha256
+            invariantSha256 = $firstInvariant; seedPasses = 2; dbcc = 'PASS'
+        }
+        Write-Host "Disposable RhemaERP development reset passed. Evidence: $evidenceDirectory"
+    }
+    catch {
+        $safeFailure = Get-SanitizedExceptionMessage $_.Exception
+        Write-DisposableRecoveryInstructions $evidenceDirectory $backupVerified $phase
+        Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $phase $backupCreated $backupVerified $resetStarted @{
+            sourceFingerprint = $sourceFingerprint; failure = $safeFailure; backupPreserved = $backupCreated
+        }
+        Write-Error "Disposable RhemaERP reset stopped at $phase. Backup/evidence are preserved; no retry, restore, or cleanup was attempted. $safeFailure"
+        throw $safeFailure
+    }
+}
+
+if ($Mode -eq 'ResetDisposableDevelopment') {
+    if (-not $ConfirmDisposableDevelopmentReset) {
+        throw 'ResetDisposableDevelopment requires -ConfirmDisposableDevelopmentReset.'
+    }
+    $attestation = [Environment]::GetEnvironmentVariable($disposableAttestationVariable, 'Process')
+    if ($attestation -cne $disposableAttestationValue) {
+        throw "ResetDisposableDevelopment requires exact process attestation $disposableAttestationVariable=$disposableAttestationValue."
+    }
+    if ([string]::IsNullOrWhiteSpace($EvidenceDirectory)) {
+        throw 'ResetDisposableDevelopment requires an explicit new empty external -EvidenceDirectory.'
+    }
+    $script:finalReviewedGitState = Assert-FinalReviewedGitState 'ResetDisposableDevelopment'
+    Assert-FinalCutoverFlagsDisabled
+    $evidenceFullPath = [System.IO.Path]::GetFullPath($EvidenceDirectory)
+    $repositoryPrefix = $repositoryRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+    if ($evidenceFullPath.StartsWith($repositoryPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'ResetDisposableDevelopment evidence must be external to the repository.'
+    }
+    if (Test-Path -LiteralPath $evidenceFullPath) {
+        throw 'ResetDisposableDevelopment evidence directory must be new and absent.'
+    }
+    $connectionString = Get-ProcessConnectionString $disposableConnectionVariable
+    $databaseTarget = ConvertTo-ConnectionTarget $connectionString $false
+    if (-not [string]::Equals($databaseTarget.Database, 'RhemaERP', [StringComparison]::Ordinal)) {
+        throw 'ResetDisposableDevelopment permits only the exact case-sensitive local database RhemaERP.'
+    }
+    Assert-LocalDisposableSqlServer $databaseTarget.Server
+    Register-SensitiveEvidenceToken $databaseTarget.Server
+    New-Item -ItemType Directory -Path $evidenceFullPath | Out-Null
+    $evidenceFullPath = (Resolve-Path -LiteralPath $evidenceFullPath).Path
+    Write-TargetLog 'DISPOSABLE DEVELOPMENT RESET' $databaseTarget
+    Invoke-DisposableDevelopmentReset $databaseTarget $connectionString $evidenceFullPath
+    return
 }
 
 if ($Mode -eq 'InspectSource') {
