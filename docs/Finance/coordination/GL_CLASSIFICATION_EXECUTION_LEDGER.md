@@ -2205,3 +2205,13 @@ and the final backup used overwrite-capable `INIT` after an advisory existence c
 is active to add each row-content domain with same-count mutation refusals, make legacy links a pre-backup
 `REVIEW`, and atomically reserve the exact target-derived backup before no-overwrite SQL media creation. No
 database, migration or configured environment connection is in scope.
+
+The bounded correction completed as clean direct-child commit
+`fc4140d51642a8e80b4b646120b9e84a9381a238`. C2 balance/exposure, C4 period/initialization/line and material
+journal/transaction/posting-event row content are now canonicalized, with a same-count mutation refusal for
+each category. Active legacy currency links produce `REVIEW` and hit the final pre-backup stop. The exact
+target-derived backup is reserved atomically with OS `FileMode.CreateNew`, after which a fresh media identity
+uses `NOINIT`, `NOSKIP` and `MEDIANAME`; an existing/raced path cannot be overwritten. Exact-candidate offline
+PowerShell parsing, complete safety/refusal, atomic collision, final 456/C8 PASS/NO-GO package and tamper gates
+all passed. No database, migration or configured connection was accessed; Sol High re-review remains required
+over the ledger-only handoff descendant.
