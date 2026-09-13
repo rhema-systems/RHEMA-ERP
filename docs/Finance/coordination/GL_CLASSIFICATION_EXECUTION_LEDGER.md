@@ -2377,3 +2377,19 @@ binds `SERVERPROPERTY(MachineName/InstanceName/ServerName)` and connection endpo
 invalid fingerprint raw text with a SHA-only identity, makes atomic phase files the sole intermediate state and
 requires terminal status to match the last marker exactly. No database, connection variable or retained evidence
 access is in scope; reset execution remains prohibited pending clean gates and Sol High re-review.
+
+The second D2 correction completed as clean direct-child commit
+`05e7413aeb925901a4ce0532b9cea9bc695fcd9e` (tree
+`310ffd45d0816c32799739039117abd533a7efca`). `Get-DiscoveredMigrationIds` now emits only exact restricted parsed
+IDs, and the existing FinalClone safety suite executes that real helper against ordered, pending and malformed
+fixtures. `Write-DisposableRecoveryInstructions` now assigns and atomically publishes defined content; the reset
+safety suite executes it for backup-created, backup-verified, reset-started, pass and outer-catch transitions under
+StrictMode. SQL `MachineName`, `InstanceName`, `ServerName`, local address and port must reconcile with the canonical
+executing machine and requested literal-local endpoint, with synthetic remote, alias, instance, forwarded-port and
+non-loopback refusals. Source fingerprint raw text is accepted only in the exact restricted five-field form
+immediately after capture; invalid content is discarded in favor of its SHA-256 identity. Atomic phase files are now
+the only intermediate state, `RESET_STARTED` is durable before SQL, and terminal pass/failure phase must equal the
+last marker exactly. PowerShell parsing, disposable-reset helper/refusal and evidence/tamper suites, the existing
+FinalClone safety suite and final evidence/tamper suite all passed serially from the clean implementation commit.
+No database, process connection variable or preserved evidence was accessed. Sol High re-review is required over
+the ledger-only descendant; execution remains prohibited.

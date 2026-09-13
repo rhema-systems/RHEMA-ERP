@@ -182,10 +182,11 @@ requires one of these explicit decisions:
    data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
    is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Phase D2 second correction is active offline after independent review of exact `1c229037`. The first correction
-did not actually return parsed migration IDs, its recovery writer referenced undefined content under StrictMode,
-and its server-locality, fingerprint timing and terminal phase/status proof required further hardening. Execution
-remains prohibited until the corrected implementation and its ledger-only descendant receive Sol High approval;
+Phase D2 second correction completed offline as exact implementation commit
+`05e7413aeb925901a4ce0532b9cea9bc695fcd9e` after independent review of `1c229037`. The real migration parser and
+recovery writer now execute in regression tests, server-side machine/instance/name/endpoint identity is bound to the
+executing host, fingerprint shape is restricted immediately after capture, and terminal status must equal the last
+atomic durable phase. Execution remains prohibited until the ledger-only descendant receives Sol High approval;
 no database mutation has occurred under this authorization.
 
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
