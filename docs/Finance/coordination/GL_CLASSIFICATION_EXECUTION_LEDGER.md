@@ -2252,3 +2252,14 @@ created no file. FINAL-01, FINAL-02 and FINAL-03 evidence directories are preser
 is active to atomically publish explicit sanitized command status/exit evidence for silent success, validate all
 required command artifacts, and add missing/empty/tamper refusals. The operational NO-GO findings remain open;
 no database, connection-variable inspection or evidence cleanup is authorized in this correction.
+
+The silent-command evidence correction completed as clean direct-child commit
+`d95ea72e`. `Invoke-NativeWithEvidence` now writes sanitized output and an explicit command/status/exit marker
+to a same-directory `CreateNew` temporary file, flushes it, and publishes it with a no-overwrite atomic move;
+successful zero-output commands therefore produce durable evidence as part of command execution. Final-package
+validation requires a unique `SUCCESS`/zero marker with the expected command identity for every required native
+artifact, including PASS-only apply and seed logs, and refuses missing, empty, marker-tampered and content-
+tampered evidence. An offline exercise of the actual `RehearseFinalClone` path proves silent successful
+`git diff --check` creates exactly the expected artifact before the synthetic migration-count stop. PowerShell
+parsing, complete rehearsal safety/refusal and final 456/C8 evidence/tamper suites passed. FINAL-01/02/03 remain
+preserved and the recorded operational NO-GO remains unchanged. No database or connection variable was accessed.
