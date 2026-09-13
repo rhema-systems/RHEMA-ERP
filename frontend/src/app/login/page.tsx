@@ -1,14 +1,14 @@
  
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { Building2, Eye, EyeOff, Loader2, Shield, Users, UserPlus, Check } from 'lucide-react';
+import { Building2, Eye, EyeOff, Loader2, Shield, Check } from 'lucide-react';
 import ReCAPTCHA from 'react-google-recaptcha';
 
 import { Button } from '../../components/ui/button';
@@ -62,6 +62,8 @@ function LoginFormWithSearchParams() {
   const [otpErrorMessage, setOtpErrorMessage] = useState('');
   const [otpRequiresTwoFactor, setOtpRequiresTwoFactor] = useState(false);
   const [otpTwoFactorCode, setOtpTwoFactorCode] = useState('');
+  const [isRedirecting, setIsRedirecting] = useState(false);
+  const redirectStartedRef = useRef(false);
   const lastAutoSubmittedTwoFactorCodeRef = useRef<string | null>(null);
   const lastAutoSubmittedOtpTwoFactorKeyRef = useRef<string | null>(null);
   const router = useRouter();
@@ -85,7 +87,7 @@ function LoginFormWithSearchParams() {
   });
 
   // Fetch tenants to check if any allow self-registration
-  const { data: tenants, isLoading: tenantsLoading, error: tenantsError } = useQuery({
+  const { data: tenants } = useQuery({
     queryKey: ['tenants'],
     queryFn: () => apiService.getTenants(),
     retry: 3,
@@ -96,37 +98,8 @@ function LoginFormWithSearchParams() {
     refetchOnReconnect: false,
   });
 
-  // Debug: Log tenant data
-  console.log('🏢 Tenants query state:', {
-    tenants,
-    tenantsLoading,
-    tenantsError: tenantsError?.message,
-    hasData: !!tenants,
-    tenantCount: tenants?.length || 0
-  });
-
-  if (tenants) {
-    console.log('🔍 Tenant self-registration status:',
-      tenants.map(t => ({
-        name: t.name,
-        code: t.code,
-        allowSelfRegistration: t.allowSelfRegistration,
-        isActive: t.isActive
-      }))
-    );
-  }
-
   // Check if any tenant allows self-registration
   const allowSelfRegistration = tenants?.some(tenant => tenant.allowSelfRegistration && tenant.isActive) ?? false;
-
-  console.log('✨ Create Account button will be shown:', allowSelfRegistration);
-  console.log('📋 Button visibility logic:', {
-    hasTenants: !!tenants,
-    tenantCount: tenants?.length || 0,
-    tenantsWithSelfReg: tenants?.filter(t => t.allowSelfRegistration).length || 0,
-    activeTenants: tenants?.filter(t => t.isActive).length || 0,
-    finalDecision: allowSelfRegistration
-  });
 
   // Determine if reCAPTCHA should be shown based on settings and failed attempts
   const shouldShowRecaptcha = () => {
@@ -176,9 +149,13 @@ function LoginFormWithSearchParams() {
   });
 
   const redirectAfterLogin = useCallback(async (response: LoginResponse) => {
-    if (response.token) {
+    if (response.token && !response.requiresTwoFactor && !redirectStartedRef.current) {
+      // The stored-session effect and either login mutation share one redirect.
+      // Keep the guard after success while App Router finishes navigation.
+      redirectStartedRef.current = true;
+      setIsRedirecting(true);
       if (response.user?.mustChangePassword) {
-        router.push('/change-temporary-password');
+        router.replace('/change-temporary-password');
         return;
       }
 
@@ -214,7 +191,7 @@ function LoginFormWithSearchParams() {
           if (preferredTenantCode) {
             await tenantService.selectTenant(preferredTenantCode, false);
 
-            router.push(
+            router.replace(
               resolveRedirectTarget(
                 redirectTarget,
                 isCandidate
@@ -231,10 +208,10 @@ function LoginFormWithSearchParams() {
         }
 
         // Fallback: tenant selection page auto-selects when possible.
-        router.push(buildTenantSelectRedirectUrl(redirectTarget));
+        router.replace(buildTenantSelectRedirectUrl(redirectTarget));
       } else {
         // Internal users go to tenant selection
-        router.push(buildTenantSelectRedirectUrl(redirectTarget));
+        router.replace(buildTenantSelectRedirectUrl(redirectTarget));
       }
     }
   }, [redirectTarget, router]);
@@ -360,7 +337,6 @@ function LoginFormWithSearchParams() {
 
     // During 2FA step, only proceed if we have exactly 6 digits
     if (showTwoFactor && cleaned2fa?.length !== 6) {
-      console.warn('🚫 2FA submission blocked: code not 6 digits', cleaned2fa);
       return; // Don't submit if 2FA code is not exactly 6 digits
     }
 
@@ -372,17 +348,6 @@ function LoginFormWithSearchParams() {
       twoFactorCode: cleaned2fa,
       recaptchaToken: (data as any).recaptchaToken || undefined,
     };
-
-    console.log('🚀 Submitting login request:', {
-      hasUsername: !!loginData.username,
-      hasPassword: !!loginData.password,
-      showTwoFactor,
-      twoFactorCodeLength: cleaned2fa?.length ?? 0,
-      twoFactorCodeValue: cleaned2fa,
-      rawTwoFactorCode: twoFactorCode,
-      twoFactorCode: showTwoFactor ? loginData.twoFactorCode : 'not required',
-      fullPayload: loginData
-    });
 
     loginMutation.mutate(loginData);
   };
@@ -462,37 +427,41 @@ function LoginFormWithSearchParams() {
     verifyOtpMutation,
   ]);
 
+  if (isRedirecting) {
+    return <LoginPageLoading message="Signing you in..." />;
+  }
+
   return (
-    <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
+    <div className="min-h-screen flex items-start justify-center px-4 py-6 sm:py-8 relative overflow-hidden">
       {/* Background Image */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: 'url(/login.svg)' }}
       ></div>
 
-      <div className="relative w-full max-w-md space-y-8">
+      <div className="relative w-full max-w-md space-y-4">
         {/* Logo and Header */}
         <div className="text-center">
-          <div className="flex justify-center mb-6">
+          <div className="flex justify-center mb-3">
             <div className="relative">
-              <div className="flex h-20 w-20 items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg ring-1 ring-white/10">
-                <Building2 className="h-10 w-10 text-white" />
+              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 shadow-lg ring-1 ring-white/10">
+                <Building2 className="h-6 w-6 text-white" />
               </div>
               <div className="absolute -inset-1 bg-gradient-to-r from-blue-600 to-indigo-600 rounded-2xl blur opacity-25"></div>
             </div>
           </div>
-          <h1 className="text-4xl font-bold tracking-tight text-white drop-shadow-lg">
+          <h1 className="text-2xl font-bold tracking-tight text-white drop-shadow-lg">
             ERP System
           </h1>
-          <p className="mt-2 text-white/90 drop-shadow">
+          <p className="mt-1 text-sm text-white/90 drop-shadow">
             Enterprise Resource Planning Platform
           </p>
         </div>
 
         {/* Login Card */}
         <Card className="backdrop-blur-xl bg-white/95 dark:bg-slate-900/95 shadow-2xl border border-white/30 dark:border-slate-700/50 rounded-2xl">
-          <CardHeader className="space-y-1 pb-6">
-            <CardTitle className="text-2xl font-bold text-center">
+          <CardHeader className="space-y-1 p-5 pb-4">
+            <CardTitle className="text-xl font-bold text-center">
               {showTwoFactor ? '2FA Verification' : authMode === 'otp' ? (otpRequiresTwoFactor ? '2FA Verification' : 'Sign In with Code') : 'Sign In'}
             </CardTitle>
             <CardDescription className="text-center">
@@ -523,10 +492,10 @@ function LoginFormWithSearchParams() {
               </div>
             )}
           </CardHeader>
-          <CardContent>
+          <CardContent className="px-5 pb-5">
             {/* Auth mode switch (not shown during password 2FA step) */}
             {!showTwoFactor && (
-              <div className="grid grid-cols-2 gap-2 mb-6">
+              <div className="grid grid-cols-2 gap-2 mb-4">
                 <Button
                   type="button"
                   variant={authMode === 'password' ? 'default' : 'outline'}
@@ -560,7 +529,7 @@ function LoginFormWithSearchParams() {
             )}
 
             {authMode === 'password' ? (
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
 
               {/* Username Field - Hidden during 2FA step */}
               {!showTwoFactor && (
@@ -605,6 +574,7 @@ function LoginFormWithSearchParams() {
                       variant="ghost"
                       size="sm"
                       className="absolute right-2 top-1/2 -translate-y-1/2 h-8 w-8 p-0 hover:bg-transparent"
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                       onClick={() => setShowPassword(!showPassword)}
                     >
                       {showPassword ? (
@@ -683,7 +653,7 @@ function LoginFormWithSearchParams() {
 
               {/* Remember Me & Forgot Password - Hidden during 2FA step */}
               {!showTwoFactor && (
-                <div className="flex items-center justify-between">
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
                   <div className="flex items-center space-x-2">
                     <input
                       id="rememberMe"
@@ -752,7 +722,7 @@ function LoginFormWithSearchParams() {
               {/* Submit Button */}
               <Button
                 type="submit"
-                className="w-full h-12 text-base font-semibold"
+                className="w-full h-10 text-sm font-semibold"
                 disabled={loginMutation.isPending || (showTwoFactor && twoFactorCode.replace(/\D/g, '').length !== 6)}
               >
                 {loginMutation.isPending ? (
@@ -766,7 +736,7 @@ function LoginFormWithSearchParams() {
               </Button>
             </form>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-4">
                 {/* Info message */}
                 {otpInfoMessage && (
                   <div className="rounded-lg bg-blue-50 dark:bg-blue-900/20 p-4 border border-blue-200 dark:border-blue-800">
@@ -918,7 +888,7 @@ function LoginFormWithSearchParams() {
                 {otpStage === 'request' ? (
                   <Button
                     type="button"
-                    className="w-full h-12 text-base font-semibold"
+                    className="w-full h-10 text-sm font-semibold"
                     disabled={requestOtpMutation.isPending || !otpIdentifier.trim()}
                     onClick={() => {
                       setOtpErrorMessage('');
@@ -942,7 +912,7 @@ function LoginFormWithSearchParams() {
                 ) : (
                   <Button
                     type="button"
-                    className="w-full h-12 text-base font-semibold"
+                    className="w-full h-10 text-sm font-semibold"
                     disabled={verifyOtpMutation.isPending || otpCode.replace(/\D/g, '').length !== 6 || (otpRequiresTwoFactor && otpTwoFactorCode.replace(/\D/g, '').length !== 6)}
                     onClick={() => {
                       setOtpErrorMessage('');
@@ -968,42 +938,15 @@ function LoginFormWithSearchParams() {
               </div>
             )}
 
-            {/* Create Account Link - Only shown if any tenant allows self-registration */}
+            {/* Preserve the supplier application entry point and its existing availability policy. */}
             {allowSelfRegistration && (
-              <div className="mt-6 text-center">
-                <div className="relative">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-slate-200 dark:border-slate-700" />
-                  </div>
-                  <div className="relative flex justify-center text-sm">
-                    <span className="bg-white dark:bg-slate-900 px-2 text-slate-500 dark:text-slate-400">or</span>
-                  </div>
-                </div>
-                <div className="mt-6">
+              <div className="mt-4 border-t border-slate-200 pt-4 text-center dark:border-slate-700">
+                <Button asChild variant="outline" className="h-10 w-full text-sm font-semibold">
                   <Link href="/supplier-application">
-                    <Button
-                      type="button"
-                      className="mb-3 h-12 w-full text-base font-semibold"
-                    >
-                      <Shield className="mr-2 h-4 w-4" />
-                      Apply as a supplier
-                    </Button>
+                    <Shield className="mr-2 h-4 w-4" />
+                    Apply as a supplier
                   </Link>
-                  <Link href="/register">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full h-12 text-base font-semibold border-slate-300 dark:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-800"
-                    >
-                      <UserPlus className="mr-2 h-4 w-4" />
-                      Create Account
-                    </Button>
-                  </Link>
-                  <p className="mt-2 text-xs text-slate-500 dark:text-slate-400">
-                    Supplier applicants verify a contact and use an
-                    application token; other services may create an account.
-                  </p>
-                </div>
+                </Button>
               </div>
             )}
 
@@ -1011,7 +954,7 @@ function LoginFormWithSearchParams() {
         </Card>
 
         {/* Footer */}
-        <div className="text-center text-sm text-white/70 drop-shadow">
+        <div className="text-center text-xs text-white/70 drop-shadow">
           <p>© 2025 ERP System. All rights reserved.</p>
           <p className="mt-1">Secure enterprise management platform</p>
         </div>
@@ -1021,18 +964,18 @@ function LoginFormWithSearchParams() {
 }
 
 // Loading component for Suspense fallback
-function LoginPageLoading() {
+function LoginPageLoading({ message = 'Loading login page...' }: { message?: string }) {
   return (
-    <div className="min-h-screen flex items-start justify-center p-4 pt-16 relative overflow-hidden">
+    <div className="min-h-screen flex items-start justify-center px-4 py-6 sm:py-8 relative overflow-hidden">
       {/* Background Image */}
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{ backgroundImage: 'url(/login.svg)' }}
       ></div>
 
-      <div className="relative flex items-center space-x-3 backdrop-blur-sm bg-white/95 dark:bg-slate-900/95 p-8 rounded-2xl shadow-2xl border border-white/30">
+      <div role="status" className="relative flex items-center space-x-3 backdrop-blur-sm bg-white/95 dark:bg-slate-900/95 p-6 rounded-2xl shadow-2xl border border-white/30">
         <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-        <span className="text-slate-900 dark:text-slate-100 font-medium text-lg">Loading login page...</span>
+        <span className="text-slate-900 dark:text-slate-100 font-medium">{message}</span>
       </div>
     </div>
   );

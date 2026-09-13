@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { SessionTimeoutProvider } from '../../contexts/session-timeout-context';
@@ -12,6 +12,7 @@ interface DebugLayoutProps {
 }
 
 export function DebugLayout({ children }: DebugLayoutProps) {
+  const [accountSidebarContainer, setAccountSidebarContainer] = useState<HTMLDivElement | null>(null);
   const { user, isAuthenticated } = useAuth();
   const isAuthenticatedClient = typeof window !== 'undefined' ? authService.isAuthenticated() : false;
   
@@ -30,29 +31,32 @@ export function DebugLayout({ children }: DebugLayoutProps) {
         </div>
 
         {/* Main Content */}
-        <div className="flex flex-1 flex-col overflow-hidden bg-blue-200">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-blue-200">
           {/* Header with debug styling */}
           <div className="bg-green-200 border-4 border-green-500">
             <SessionTimeoutProvider enabled={isAuthenticatedClient}>
-              <Header />
+              <Header accountSidebarContainer={accountSidebarContainer} />
             </SessionTimeoutProvider>
           </div>
 
           {/* Page Content */}
-          <main className="flex-1 overflow-y-auto bg-yellow-200">
-            <div className="container mx-auto p-6 space-y-6 border-4 border-yellow-500">
-              <div className="bg-white p-4 border-2 border-purple-500">
-                <h1 className="text-lg font-bold">Debug Info:</h1>
-                <ul className="text-sm">
-                  <li>User: {user?.username || 'Not loaded'}</li>
-                  <li>Authenticated: {isAuthenticated.toString()}</li>
-                  <li>Client Auth: {isAuthenticatedClient.toString()}</li>
-                  <li>Has Window: {(typeof window !== 'undefined').toString()}</li>
-                </ul>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <main className="min-h-0 min-w-0 flex-1 overflow-auto bg-yellow-200">
+              <div className="container mx-auto p-6 space-y-6 border-4 border-yellow-500">
+                <div className="bg-white p-4 border-2 border-purple-500">
+                  <h1 className="text-lg font-bold">Debug Info:</h1>
+                  <ul className="text-sm">
+                    <li>User: {user?.username || 'Not loaded'}</li>
+                    <li>Authenticated: {isAuthenticated.toString()}</li>
+                    <li>Client Auth: {isAuthenticatedClient.toString()}</li>
+                    <li>Has Window: {(typeof window !== 'undefined').toString()}</li>
+                  </ul>
+                </div>
+                {children}
               </div>
-              {children}
-            </div>
-          </main>
+            </main>
+            <div ref={setAccountSidebarContainer} className="contents" />
+          </div>
         </div>
       </div>
     </div>

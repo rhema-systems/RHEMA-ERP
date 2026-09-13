@@ -1,6 +1,6 @@
 'use client';
 
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { Sidebar } from './sidebar';
 import { Header } from './header';
 import { SessionTimeoutProvider } from '../../contexts/session-timeout-context';
@@ -12,6 +12,7 @@ interface DashboardLayoutProps {
 }
 
 export function DashboardLayout({ children, defaultSidebarCollapsed = false }: DashboardLayoutProps) {
+  const [accountSidebarContainer, setAccountSidebarContainer] = useState<HTMLDivElement | null>(null);
   const isAuthenticated = typeof window !== 'undefined' ? authService.isAuthenticated() : false;
   
   return (
@@ -21,18 +22,21 @@ export function DashboardLayout({ children, defaultSidebarCollapsed = false }: D
         <Sidebar defaultCollapsed={defaultSidebarCollapsed} />
 
         {/* Main Content */}
-        <div className="flex flex-1 flex-col overflow-hidden">
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Header */}
           <SessionTimeoutProvider enabled={isAuthenticated}>
-            <Header />
+            <Header accountSidebarContainer={accountSidebarContainer} />
           </SessionTimeoutProvider>
 
           {/* Page Content */}
-          <main className="flex-1 overflow-y-auto">
-            <div className="w-full max-w-none p-6 space-y-6">
-              {children}
-            </div>
-          </main>
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
+            <main className="min-h-0 min-w-0 flex-1 overflow-auto">
+              <div className="w-full max-w-none p-6 space-y-6">
+                {children}
+              </div>
+            </main>
+            <div ref={setAccountSidebarContainer} className="contents" />
+          </div>
         </div>
       </div>
     </div>

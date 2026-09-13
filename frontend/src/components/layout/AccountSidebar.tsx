@@ -23,6 +23,7 @@ import { Button } from '../ui/button';
 
 interface AccountSidebarProps {
   open: boolean;
+  container?: HTMLElement | null;
   user?: User;
   currentTenant?: Tenant | null;
   isLoggingOut?: boolean;
@@ -39,6 +40,7 @@ const modes = [
 
 export function AccountSidebar({
   open,
+  container,
   user,
   currentTenant,
   isLoggingOut = false,
@@ -55,39 +57,28 @@ export function AccountSidebar({
   useEffect(() => {
     if (!open) return;
 
-    const previousOverflow = document.body.style.overflow;
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
+      if (event.key === 'Escape' && !event.defaultPrevented) onClose();
     };
 
-    document.body.style.overflow = 'hidden';
     document.addEventListener('keydown', handleKeyDown);
     closeButtonRef.current?.focus();
 
     return () => {
-      document.body.style.overflow = previousOverflow;
       document.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose, open]);
 
   if (!open || typeof document === 'undefined') return null;
 
-  return createPortal(
-    <div className="fixed inset-0 z-[80]" data-testid="account-sidebar">
-      <button
-        type="button"
-        aria-label="Dismiss account sidebar"
-        className="absolute inset-0 cursor-default bg-slate-950/45 backdrop-blur-[1px]"
-        onClick={onClose}
-      />
-
+  const panel = (
       <aside
-        role="dialog"
-        aria-modal="true"
+        id="account-sidebar"
+        data-testid="account-sidebar"
         aria-labelledby="account-sidebar-title"
-        className="absolute inset-y-0 right-0 flex w-[min(420px,calc(100vw-16px))] flex-col overflow-hidden border-l border-slate-200 bg-slate-50 shadow-2xl dark:border-neutral-700 dark:bg-[#151515]"
+        className="order-first flex h-[min(36rem,60dvh)] min-h-0 w-full shrink-0 flex-col overflow-x-hidden overflow-y-auto border-b border-slate-200 bg-slate-50 dark:border-neutral-700 dark:bg-[#151515] lg:order-last lg:h-full lg:w-80 lg:border-b-0 lg:border-l"
       >
-        <div className="relative bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 px-6 pb-7 pt-6 text-white">
+        <div className="relative shrink-0 bg-gradient-to-br from-blue-600 via-indigo-600 to-violet-600 p-4 text-white">
           <Button
             ref={closeButtonRef}
             type="button"
@@ -95,35 +86,35 @@ export function AccountSidebar({
             size="sm"
             aria-label="Close account sidebar"
             onClick={onClose}
-            className="absolute right-4 top-4 h-9 w-9 rounded-full p-0 text-white hover:bg-white/15 hover:text-white"
+            className="absolute right-2 top-2 h-8 w-8 rounded-full p-0 text-white hover:bg-white/15 hover:text-white"
           >
             <X className="h-5 w-5" />
           </Button>
 
-          <div className="flex items-center gap-4 pr-10">
-            <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full border-4 border-white/25 bg-white/15 text-xl font-semibold shadow-lg">
+          <div className="flex items-center gap-3 pr-7">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border-2 border-white/25 bg-white/15 text-base font-semibold">
               {getInitials(displayName) || user?.username?.[0]?.toUpperCase() || 'U'}
             </div>
             <div className="min-w-0">
-              <h2 id="account-sidebar-title" className="truncate text-lg font-semibold">
+              <h2 id="account-sidebar-title" className="truncate text-sm font-semibold" title={displayName}>
                 {displayName}
               </h2>
-              <p className="truncate text-sm text-white/85">{user?.email || user?.username}</p>
-              {user?.id && <p className="mt-1 truncate text-xs text-white/65">User ID: {user.id}</p>}
+              <p className="truncate text-xs text-white/85" title={user?.email || user?.username}>{user?.email || user?.username}</p>
+              {user?.id && <p className="mt-1 truncate text-[11px] text-white/65" title={user.id}>User ID: {user.id}</p>}
             </div>
           </div>
 
           {currentTenant && (
-            <div className="mt-5 flex items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-3 py-2 text-sm backdrop-blur-sm">
+            <div className="mt-3 flex items-center gap-2 rounded-lg border border-white/25 bg-white/10 px-2.5 py-2 text-xs">
               <Building2 className="h-4 w-4 shrink-0" />
-              <span className="min-w-0 flex-1 truncate">{currentTenant.name}</span>
-              <span className="rounded-md bg-white/15 px-2 py-0.5 text-xs">{currentTenant.code}</span>
+              <span className="min-w-0 flex-1 truncate" title={currentTenant.name}>{currentTenant.name}</span>
+              <span className="max-w-20 truncate rounded-md bg-white/15 px-2 py-0.5 text-xs" title={currentTenant.code}>{currentTenant.code}</span>
             </div>
           )}
         </div>
 
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-          <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-[#202020]">
+        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain p-3">
+          <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-neutral-700 dark:bg-[#202020]">
             <div className="mb-3 flex items-center justify-between gap-3">
               <div>
                 <h3 className="text-sm font-semibold text-slate-950 dark:text-neutral-100">Appearance</h3>
@@ -152,7 +143,7 @@ export function AccountSidebar({
                     aria-checked={selected}
                     onClick={() => setTheme(mode.value)}
                     className={cn(
-                      'flex h-10 items-center justify-center gap-2 rounded-lg text-sm font-medium transition-colors',
+                      'flex h-9 items-center justify-center gap-1 rounded-lg text-xs font-medium transition-colors',
                       selected
                         ? 'bg-blue-600 text-white shadow-sm'
                         : 'text-slate-600 hover:bg-white hover:text-slate-950 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-white',
@@ -167,15 +158,15 @@ export function AccountSidebar({
             </div>
           </section>
 
-          <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-[#202020]">
-            <div className="border-b border-slate-100 px-4 py-3 dark:border-neutral-700">
+          <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-neutral-700 dark:bg-[#202020]">
+            <div className="border-b border-slate-100 px-3 py-2.5 dark:border-neutral-700">
               <h3 className="text-sm font-semibold text-slate-950 dark:text-neutral-100">Account</h3>
             </div>
             <nav aria-label="Account shortcuts" className="p-2">
               <Link
                 href="/profile"
                 onClick={onClose}
-                className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
+                className="flex items-center gap-2 rounded-lg px-2 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
               >
                 <UserIcon className="h-4 w-4 text-slate-500 dark:text-neutral-400" />
                 Profile Settings
@@ -183,7 +174,7 @@ export function AccountSidebar({
               <Link
                 href="/account"
                 onClick={onClose}
-                className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
+                className="flex items-center gap-2 rounded-lg px-2 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
               >
                 <Settings className="h-4 w-4 text-slate-500 dark:text-neutral-400" />
                 Account Settings
@@ -192,7 +183,7 @@ export function AccountSidebar({
                 <Link
                   href="/settings"
                   onClick={onClose}
-                  className="flex items-center gap-3 rounded-xl px-3 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
+                  className="flex items-center gap-2 rounded-lg px-2 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700 dark:text-neutral-200 dark:hover:bg-neutral-800 dark:hover:text-white"
                 >
                   <Settings className="h-4 w-4 text-slate-500 dark:text-neutral-400" />
                   All Settings
@@ -202,7 +193,7 @@ export function AccountSidebar({
           </section>
 
           {!!user?.roles?.length && (
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm dark:border-neutral-700 dark:bg-[#202020]">
+            <section className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm dark:border-neutral-700 dark:bg-[#202020]">
               <div className="mb-3 flex items-center gap-2">
                 <ShieldCheck className="h-4 w-4 text-blue-600 dark:text-blue-400" />
                 <h3 className="text-sm font-semibold text-slate-950 dark:text-neutral-100">Access roles</h3>
@@ -211,7 +202,7 @@ export function AccountSidebar({
                 {user.roles.map(role => (
                   <span
                     key={role}
-                    className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300"
+                    className="max-w-full break-words rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 dark:bg-blue-950/50 dark:text-blue-300"
                   >
                     {role}
                   </span>
@@ -221,20 +212,20 @@ export function AccountSidebar({
           )}
         </div>
 
-        <div className="border-t border-slate-200 bg-white p-4 dark:border-neutral-700 dark:bg-[#1b1b1b]">
+        <div className="shrink-0 border-t border-slate-200 bg-white p-3 dark:border-neutral-700 dark:bg-[#1b1b1b]">
           <Button
             type="button"
             variant="ghost"
             onClick={onLogout}
             disabled={isLoggingOut}
-            className="h-11 w-full justify-center gap-2 rounded-xl text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/30 dark:hover:text-red-300"
+            className="h-10 w-full justify-center gap-2 rounded-lg text-red-600 hover:bg-red-50 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950/30 dark:hover:text-red-300"
           >
             <LogOut className="h-4 w-4" />
             {isLoggingOut ? 'Signing Out...' : 'Sign Out'}
           </Button>
         </div>
       </aside>
-    </div>,
-    document.body,
   );
+
+  return container ? createPortal(panel, container) : panel;
 }

@@ -242,6 +242,13 @@ class ApiService {
     }
   }
 
+  private isCurrentRequestSession(requestToken: string | null): boolean {
+    // Other tabs share storage, but an outstanding request still belongs to
+    // the token it was sent with. Never terminate a replacement session.
+    this.syncTokenFromStorage();
+    return !!requestToken && requestToken === this.token;
+  }
+
   private appendQueryParams(endpoint: string, query?: Record<string, unknown>): string {
     if (!query) {
       return endpoint;
@@ -418,6 +425,7 @@ class ApiService {
   }
 
   public async refreshToken(): Promise<LoginResponse> {
+    this.syncTokenFromStorage();
     const token = this.token;
     const refreshToken = typeof window !== 'undefined' ? localStorage.getItem('refreshToken') : null;
 
@@ -429,6 +437,11 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ token, refreshToken }),
     });
+
+    if (!this.isCurrentRequestSession(token) ||
+        (typeof window !== 'undefined' && localStorage.getItem('refreshToken') !== refreshToken)) {
+      throw new Error('The session changed while refreshing authentication. Please retry.');
+    }
 
     if (response.token) {
       this.setToken(response.token);
@@ -531,6 +544,7 @@ class ApiService {
       ...options,
       signal: timeout.signal,
     };
+    const requestToken = new Headers(config.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
 
     const method = options.method || 'GET';
     const timestamp = new Date().toISOString();
@@ -579,7 +593,7 @@ class ApiService {
       const error = this.normalizeFetchError(caught, method, endpoint);
 
       // Handle 401 errors with token refresh attempt (only once)
-      if (error.status === 401 && includeAuth && retryCount === 0 && this.token) {
+      if (error.status === 401 && includeAuth && retryCount === 0 && this.isCurrentRequestSession(requestToken)) {
         // Don't retry for auth endpoints to avoid infinite loops
         const isAuthEndpoint = endpoint.includes('/auth/login') ||
           endpoint.includes('/auth/refresh') ||
@@ -601,6 +615,9 @@ class ApiService {
             // Retry the original request with the new token
             return this.privateRequest<T>(endpoint, options, includeAuth, silent, retryCount + 1);
           } catch (refreshError) {
+            if (!this.isCurrentRequestSession(requestToken)) {
+              throw error;
+            }
             if (!silent) {
               console.error('❌ Token refresh failed:', refreshError);
             }
@@ -642,6 +659,7 @@ class ApiService {
       ...options,
       signal: timeout.signal,
     };
+    const requestToken = new Headers(config.headers).get('Authorization')?.replace(/^Bearer\s+/i, '') ?? null;
     const method = options.method || 'GET';
 
     try {
@@ -658,11 +676,14 @@ class ApiService {
         error = e;
       }
 
-      if (error?.status === 401 && retryCount === 0 && this.token) {
+      if (error?.status === 401 && retryCount === 0 && this.isCurrentRequestSession(requestToken)) {
         try {
           await this.refreshToken();
           return this.privateBlobRequest(endpoint, options, retryCount + 1);
         } catch {
+          if (!this.isCurrentRequestSession(requestToken)) {
+            throw error;
+          }
           this.clearToken();
           if (typeof window !== 'undefined') {
             window.dispatchEvent(new CustomEvent('session-blacklisted', {
