@@ -62,6 +62,28 @@ function Test-NativeFailureEvidenceMarker([string]$line, [string]$command) {
     return $exitCode -ne 0
 }
 
+function Test-NativeSuccessEvidenceMarker([string]$line, [string]$command) {
+    return $line -ceq "RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=$command"
+}
+
+function Assert-DisposableRequiredArtifactBinding($reset, [string]$root, [string]$name,
+    [string]$context) {
+    $path = Join-Path $root $name
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "$context requires retained artifact: $name"
+    }
+    $artifactMap = $reset.PSObject.Properties['artifactSha256']
+    $binding = if ($null -eq $artifactMap -or $null -eq $artifactMap.Value) {
+        $null
+    } else {
+        $artifactMap.Value.PSObject.Properties[$name]
+    }
+    if ($null -eq $binding -or $null -eq $binding.Value -or
+        [string]$binding.Value -cne (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash) {
+        throw "$context requires the exact artifact hash binding: $name"
+    }
+}
+
 function Read-MigrationHistoryEvidence([string]$path, [string]$context, [bool]$allowReviewedLegacy = $false) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "$context evidence is missing." }
     $raw = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false))
@@ -305,6 +327,42 @@ if ($PackageKind -eq 'DisposableReset') {
         throw 'Disposable-reset PASS does not contain the complete monotonic phase sequence.'
     }
 
+    $durableOrdinal = $phases.Count
+    $failedOperation = if ($reset.status -ceq 'FAILED_NO_AUTOMATIC_RETRY') {
+        [string]$reset.failedOperation
+    } else { 'NOT_APPLICABLE' }
+    $offlineCommandEvidence = @('git-diff-check.log','commit-ancestry.txt','git-head-tree.txt',
+        'reset-build.log','ef-no-pending-model.log','migration-discovery.log')
+    if ($durableOrdinal -ge 1 -and -not $allowReviewedLegacyMigrationHistory) {
+        foreach ($name in $offlineCommandEvidence) {
+            Assert-DisposableRequiredArtifactBinding $reset $root $name `
+                'Disposable-reset OFFLINE_GATES_COMPLETE phase'
+        }
+        Assert-DisposableRequiredArtifactBinding $reset $root 'repository-migration-history.txt' `
+            'Disposable-reset OFFLINE_GATES_COMPLETE phase'
+    }
+    $migrationOperationClaimed = $durableOrdinal -ge 7 -or $failedOperation -in @(
+        'APPLY_MIGRATIONS','CAPTURE_TARGET_MIGRATION_HISTORY','PHASE_07_PUBLICATION')
+    if ($migrationOperationClaimed) {
+        Assert-DisposableRequiredArtifactBinding $reset $root 'reset-apply-migrations.log' `
+            'Disposable-reset migration operation'
+    }
+    if ($durableOrdinal -ge 7 -or $failedOperation -ceq 'PHASE_07_PUBLICATION') {
+        Assert-DisposableRequiredArtifactBinding $reset $root 'target-migration-history.txt' `
+            'Disposable-reset validated target migration state'
+    }
+    if ($durableOrdinal -ge 8) {
+        foreach ($name in @('reset-seed-pass-1.log','reset-seed-pass-2.log',
+            'reset-invariants-pass-1.txt','reset-invariants-pass-2.txt','reset-invariants.sha256')) {
+            Assert-DisposableRequiredArtifactBinding $reset $root $name `
+                'Disposable-reset SEED_INVARIANTS_VERIFIED phase'
+        }
+    }
+    if ($durableOrdinal -ge 9) {
+        Assert-DisposableRequiredArtifactBinding $reset $root 'reset-dbcc.txt' `
+            'Disposable-reset DBCC_COMPLETE phase'
+    }
+
     $commandEvidence = [ordered]@{
         'git-diff-check.log'='git'; 'commit-ancestry.txt'='git'; 'git-head-tree.txt'='git';
         'reset-build.log'='dotnet'; 'ef-no-pending-model.log'='dotnet'; 'migration-discovery.log'='dotnet';
@@ -314,16 +372,30 @@ if ($PackageKind -eq 'DisposableReset') {
         $path = Join-Path $root $entry.Key
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
         $lines = @(Get-Content -LiteralPath $path)
-        $expectedMarker = "RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=$($entry.Value)"
-        $validTerminalMarker = $lines[-1] -ceq $expectedMarker -or
-            ($reset.status -eq 'FAILED_NO_AUTOMATIC_RETRY' -and
-             (Test-NativeFailureEvidenceMarker ([string]$lines[-1]) ([string]$entry.Value)))
-        if ([string]$reset.failedOperation -ceq 'APPLY_MIGRATIONS' -and
-            $entry.Key -ceq 'reset-apply-migrations.log' -and
-            -not (Test-NativeFailureEvidenceMarker ([string]$lines[-1]) ([string]$entry.Value))) {
-            throw 'Disposable-reset APPLY_MIGRATIONS failure must bind its exact failed native-command evidence.'
+        if ($lines.Count -eq 0) {
+            throw "Disposable-reset native evidence is empty: $($entry.Key)"
         }
-        if ($lines.Count -eq 0 -or -not $validTerminalMarker -or
+        $successMarker = Test-NativeSuccessEvidenceMarker ([string]$lines[-1]) ([string]$entry.Value)
+        $failureMarker = Test-NativeFailureEvidenceMarker ([string]$lines[-1]) ([string]$entry.Value)
+        $validTerminalMarker = $successMarker -or
+            ($reset.status -eq 'FAILED_NO_AUTOMATIC_RETRY' -and
+             $failureMarker)
+        if ($entry.Key -ceq 'reset-apply-migrations.log' -and $migrationOperationClaimed) {
+            if ($failedOperation -ceq 'APPLY_MIGRATIONS' -and -not $failureMarker) {
+                throw 'Disposable-reset native APPLY_MIGRATIONS failure must bind its exact failed command evidence.'
+            }
+            if ($failedOperation -cne 'APPLY_MIGRATIONS' -and -not $successMarker) {
+                throw 'Disposable-reset post-migration state requires exact successful apply-migrations command evidence.'
+            }
+        }
+        if ($durableOrdinal -ge 1 -and $entry.Key -in $offlineCommandEvidence -and -not $successMarker) {
+            throw "Disposable-reset completed offline gate requires exact successful command evidence: $($entry.Key)"
+        }
+        if ($durableOrdinal -ge 8 -and $entry.Key -in @('reset-seed-pass-1.log','reset-seed-pass-2.log') -and
+            -not $successMarker) {
+            throw "Disposable-reset completed seed phase requires exact successful command evidence: $($entry.Key)"
+        }
+        if (-not $validTerminalMarker -or
             @($lines | Where-Object { $_ -like 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' }).Count -ne 1) {
             throw "Disposable-reset native evidence is empty or marker-invalid: $($entry.Key)"
         }
@@ -358,6 +430,19 @@ if ($PackageKind -eq 'DisposableReset') {
             $validatedTargetHistoryPresent = $true
             $validatedTargetHistoryCount = [long]$targetIds.Count
         }
+    }
+    if ($failedOperation -ceq 'APPLY_MIGRATIONS' -and
+        ($durableOrdinal -ne 6 -or $validatedTargetHistoryPresent -or [long]$reset.finalMigrationCount -ne 0)) {
+        throw 'Native APPLY_MIGRATIONS failure must stop at DATABASE_RECREATED without validated target history.'
+    }
+    if ($failedOperation -ceq 'CAPTURE_TARGET_MIGRATION_HISTORY' -and
+        ($durableOrdinal -ne 6 -or $validatedTargetHistoryPresent -or [long]$reset.finalMigrationCount -ne 0)) {
+        throw 'Post-success migration-history capture failure must retain DATABASE_RECREATED and no validated target history.'
+    }
+    if ($failedOperation -ceq 'PHASE_07_PUBLICATION' -and
+        ($durableOrdinal -ne 6 -or -not $validatedTargetHistoryPresent -or
+         $validatedTargetHistoryCount -ne 1 -or [long]$reset.finalMigrationCount -ne 1)) {
+        throw 'Phase-07 publication failure must bind the exact validated target migration history.'
     }
     $sourceIds = @()
     if (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf) {

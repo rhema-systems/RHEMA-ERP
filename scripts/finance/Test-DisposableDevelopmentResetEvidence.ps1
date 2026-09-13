@@ -46,6 +46,24 @@ function New-Common([string]$root) {
     $reviewed
 }
 
+function Add-OfflineGateEvidence([string]$root) {
+    $reviewed = Get-Content -Raw -LiteralPath (Join-Path $root 'reviewed-git-state.json') | ConvertFrom-Json
+    $nativeGit = 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=git'
+    $nativeDotnet = 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=dotnet'
+    @($reviewed.executedCommit,$reviewed.executedTree,$nativeGit) |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'git-head-tree.txt')
+    @("$($reviewed.executedCommit) $('c' * 40)",$nativeGit) |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'commit-ancestry.txt')
+    $nativeGit | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'git-diff-check.log')
+    foreach ($name in @('reset-build.log','ef-no-pending-model.log')) {
+        $nativeDotnet | Set-Content -Encoding ascii -LiteralPath (Join-Path $root $name)
+    }
+    $repositoryIds = @('20260913162402_DisposableDevelopmentCurrentModelBaseline')
+    @($repositoryIds + $nativeDotnet) |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'migration-discovery.log')
+    Write-HistoryFixture $root 'repository-migration-history.txt' $repositoryIds
+}
+
 function Add-EmptySourceCaptureEvidence([string]$root) {
     Write-HistoryFixture $root 'source-migration-history.txt' @()
     '0|EMPTY|0|0|0' | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
@@ -126,7 +144,10 @@ try {
     )) {
         $early = New-PackageRoot $earlyCase.label
         $null = New-Common $early
-        if ($earlyCase.count -ge 1) { Write-Json (Join-Path $early 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE';repositoryMigrationCount=1;latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'}) }
+        if ($earlyCase.count -ge 1) {
+            Add-OfflineGateEvidence $early
+            Write-Json (Join-Path $early 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE';repositoryMigrationCount=1;latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'})
+        }
         if ($earlyCase.count -ge 2) { Write-Json (Join-Path $early 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'}) }
         if ($earlyCase.count -ge 2) { Add-EmptySourceCaptureEvidence $early }
         $earlyStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' $earlyCase.phase $false $false $false
@@ -142,6 +163,16 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Valid early V2 state failed: $($earlyCase.label)" }
     }
     Write-Host 'PASS: V2 NOT_STARTED, OFFLINE, SOURCE_CAPTURE and resolved-path failure states validate truthfully'
+    foreach($offlineArtifact in @('git-diff-check.log','commit-ancestry.txt','git-head-tree.txt',
+        'reset-build.log','ef-no-pending-model.log','migration-discovery.log','repository-migration-history.txt')){
+        $tamperRoot=New-PackageRoot ('OFFLINE_REQUIRED_'+($offlineArtifact -replace '[^A-Za-z0-9]','_'))
+        Copy-Item -Path (Join-Path $sourceCapturedEarly '*') -Destination $tamperRoot
+        Remove-Item -LiteralPath (Join-Path $tamperRoot $offlineArtifact) -Force
+        $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json')|ConvertFrom-Json -AsHashtable
+        Complete-Status $tamperRoot $tamperStatus
+        Invoke-ExpectedRemanifestFailure $tamperRoot "completed offline phase missing $offlineArtifact"
+    }
+    Write-Host 'PASS: every completed offline-gate command/history artifact is mandatory and hash-bound'
     foreach ($schemaTamper in @(
         @{label='singleton-array'; value=[object[]]@('RHEMA_MIGRATION_HISTORY_V1')},
         @{label='multi-array'; value=[object[]]@('RHEMA_MIGRATION_HISTORY_V1','EXTRA')},
@@ -186,6 +217,7 @@ try {
     }
     $ownedEmpty = New-PackageRoot 'OWNED_EMPTY'
     $null = New-Common $ownedEmpty
+    Add-OfflineGateEvidence $ownedEmpty
     Write-Json (Join-Path $ownedEmpty 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE';repositoryMigrationCount=1;latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'})
     Write-Json (Join-Path $ownedEmpty 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'})
     Add-EmptySourceCaptureEvidence $ownedEmpty
@@ -293,6 +325,7 @@ try {
 
     $partialBackup = New-PackageRoot 'VERIFY_FAILURE'
     $null = New-Common $partialBackup
+    Add-OfflineGateEvidence $partialBackup
     Add-EmptySourceCaptureEvidence $partialBackup
     $partialMedia = 'e' * 32
     $partialFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_${partialMedia}.bak"
@@ -324,6 +357,7 @@ try {
 
     $markerFailure = New-PackageRoot 'MARKER_FAILURE'
     $null = New-Common $markerFailure
+    Add-OfflineGateEvidence $markerFailure
     Add-EmptySourceCaptureEvidence $markerFailure
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'))) {
         $marker=[ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=$entry[0];phase=$entry[1]}
@@ -379,6 +413,7 @@ try {
 
     $postVerifyMutation = New-PackageRoot 'POST_VERIFY_MUTATION'
     $null = New-Common $postVerifyMutation
+    Add-OfflineGateEvidence $postVerifyMutation
     Add-EmptySourceCaptureEvidence $postVerifyMutation
     $mutatedMedia = '1' * 32
     $mutatedFileName = "RhemaERP_DISPOSABLE_RESET_COPYONLY_${mutatedMedia}.bak"
@@ -557,6 +592,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Complete disposable-reset PASS package did not validate.' }
     Write-Host 'PASS: complete disposable-development baseline reset package validates and writes a manifest'
 
+    foreach($completedPhaseArtifact in @('reset-seed-pass-1.log','reset-seed-pass-2.log',
+        'reset-invariants-pass-1.txt','reset-invariants-pass-2.txt','reset-invariants.sha256','reset-dbcc.txt')){
+        $tamperRoot=New-PackageRoot ('COMPLETED_PHASE_'+($completedPhaseArtifact -replace '[^A-Za-z0-9]','_'))
+        Copy-Item -Path (Join-Path $pass '*') -Destination $tamperRoot
+        Remove-Item -LiteralPath (Join-Path $tamperRoot $completedPhaseArtifact) -Force
+        $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json')|ConvertFrom-Json -AsHashtable
+        Complete-Status $tamperRoot $tamperStatus
+        Invoke-ExpectedRemanifestFailure $tamperRoot "completed phase missing $completedPhaseArtifact"
+    }
+    Write-Host 'PASS: completed seed/invariant/DBCC evidence is mandatory and hash-bound'
+
     foreach ($migrationTamper in @(
         @{label='repository count';property='repositoryMigrationCount';value=2},
         @{label='latest migration';property='latestMigration';value='20260913162403_Unreviewed'},
@@ -712,6 +758,45 @@ try {
         Invoke-ExpectedRemanifestFailure $tamperRoot "native failure exit $($nativeExitTamper.label)"
     }
     Write-Host 'PASS: zero, nonnumeric, overflow, success-downgrade and duplicate failure markers are refused'
+
+    $postSuccessHistoryFailure=New-PackageRoot 'POST_SUCCESS_HISTORY_CAPTURE_FAILURE'
+    Copy-Item -Path (Join-Path $applyMigrationFailure '*') -Destination $postSuccessHistoryFailure
+    'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=dotnet' |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $postSuccessHistoryFailure 'reset-apply-migrations.log')
+    $postSuccessStatus=Get-Content -Raw -LiteralPath (Join-Path $postSuccessHistoryFailure 'reset-status.json')|ConvertFrom-Json -AsHashtable
+    $postSuccessStatus.failedOperation='CAPTURE_TARGET_MIGRATION_HISTORY';$postSuccessStatus.finalMigrationCount=0
+    Complete-Status $postSuccessHistoryFailure $postSuccessStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $postSuccessHistoryFailure -PackageKind DisposableReset -WriteManifest
+    if($LASTEXITCODE -ne 0){throw 'Truthful post-success target-history capture failure was rejected.'}
+    Write-Host 'PASS: successful migration command followed by target-history capture failure remains distinguishable'
+
+    foreach($applyBindingTamper in @('missing-log','missing-hash')){
+        $tamperRoot=New-PackageRoot ('POST_SUCCESS_'+($applyBindingTamper -replace '-','_'))
+        Copy-Item -Path (Join-Path $postSuccessHistoryFailure '*') -Destination $tamperRoot
+        if($applyBindingTamper -eq 'missing-log'){
+            Remove-Item -LiteralPath (Join-Path $tamperRoot 'reset-apply-migrations.log') -Force
+            $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json')|ConvertFrom-Json -AsHashtable
+            Complete-Status $tamperRoot $tamperStatus
+        }else{
+            $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json')|ConvertFrom-Json
+            $tamperStatus.artifactSha256.PSObject.Properties.Remove('reset-apply-migrations.log')
+            Write-Json (Join-Path $tamperRoot 'reset-status.json') $tamperStatus
+        }
+        Invoke-ExpectedRemanifestFailure $tamperRoot "post-success migration evidence $applyBindingTamper"
+    }
+
+    foreach($operationDowngrade in @(
+        @{label='success-log-as-native-failure';source=$postSuccessHistoryFailure;operation='APPLY_MIGRATIONS'},
+        @{label='failure-log-as-post-success';source=$applyMigrationFailure;operation='CAPTURE_TARGET_MIGRATION_HISTORY'}
+    )){
+        $tamperRoot=New-PackageRoot ('MIGRATION_OPERATION_'+($operationDowngrade.label -replace '-','_'))
+        Copy-Item -Path (Join-Path $operationDowngrade.source '*') -Destination $tamperRoot
+        $tamperStatus=Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json')|ConvertFrom-Json -AsHashtable
+        $tamperStatus.failedOperation=$operationDowngrade.operation
+        Complete-Status $tamperRoot $tamperStatus
+        Invoke-ExpectedRemanifestFailure $tamperRoot "migration operation downgrade $($operationDowngrade.label)"
+    }
+    Write-Host 'PASS: migration log deletion, hash deletion, and command/history failure downgrades are refused'
 
     $fingerprintFileMismatch=New-PackageRoot 'FAILED_FINGERPRINT_FILE_STATUS'
     Copy-Item -Path (Join-Path $phaseSevenFailure '*') -Destination $fingerprintFileMismatch

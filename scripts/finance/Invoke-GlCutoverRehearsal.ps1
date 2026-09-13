@@ -1223,6 +1223,9 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
             }
         }
         finally { Pop-Location }
+        # The native command has succeeded. Failures below are evidence capture/publication failures,
+        # not migration-command failures, and terminal evidence must preserve that distinction.
+        $phase = 'CAPTURE_TARGET_MIGRATION_HISTORY'
         $finalHistory = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
         $finalHistoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectory 'target-migration-history.txt') $finalHistory
         $finalHistory = @($finalHistoryEvidence.ids)

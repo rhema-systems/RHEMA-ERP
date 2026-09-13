@@ -229,7 +229,7 @@ if ($GeneratedSqlPath) {
     $grammarOutput = @(& dotnet run --project $inspectorProject -- --verify-generated-sql $resolvedGeneratedSql 2>&1)
     if ($LASTEXITCODE -ne 0 -or
         @($grammarOutput | Where-Object { $_ -ceq 'PASS: generated SQL parses with TSql160Parser; THROW_STATEMENTS=1280' }).Count -ne 1 -or
-        @($grammarOutput | Where-Object { $_ -ceq 'PASS: archived C8 missing-parenthesis boundary reproduces SQL error 102 near THROW' }).Count -ne 1) {
+        @($grammarOutput | Where-Object { $_ -ceq 'PASS: archived C8 missing-parenthesis boundary reproduces TSql160Parser grammar error 46005 near THROW' }).Count -ne 1) {
         throw "Generated zero-to-current SQL failed the deterministic T-SQL grammar gate:`n$($grammarOutput -join "`n")"
     }
     Write-Host 'PASS: generated zero-to-current SQL has exact isolated 459-trigger and audited object authority'

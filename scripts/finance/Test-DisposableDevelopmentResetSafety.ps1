@@ -107,6 +107,14 @@ try {
     $parseErrors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($script,[ref]$tokens,[ref]$parseErrors)
     if ($parseErrors.Count -ne 0) { throw 'Could not parse rehearsal harness for function-availability exercise.' }
+    $applyCommandIndex = $text.IndexOf("(Join-Path `$evidenceDirectory 'reset-apply-migrations.log')", [StringComparison]::Ordinal)
+    $capturePhaseIndex = $text.IndexOf("`$phase = 'CAPTURE_TARGET_MIGRATION_HISTORY'", [StringComparison]::Ordinal)
+    $targetHistoryIndex = $text.IndexOf("`$finalHistory = @(Get-MigrationHistory", [StringComparison]::Ordinal)
+    if ($applyCommandIndex -lt 0 -or $capturePhaseIndex -le $applyCommandIndex -or
+        $targetHistoryIndex -le $capturePhaseIndex) {
+        throw 'Disposable reset does not distinguish successful migration command completion from target-history capture.'
+    }
+    Write-Host 'PASS: post-success target-history capture has a distinct terminal failed-operation boundary'
     $dispatcherOffset = $text.IndexOf("if (`$Mode -eq 'ResetDisposableDevelopment')", [StringComparison]::Ordinal)
     $reservationAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
         $node.Name -eq 'New-AtomicBackupReservation' }, $true))

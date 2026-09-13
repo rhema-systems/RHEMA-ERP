@@ -467,8 +467,9 @@ Offline parsing identified one exact historical grammar defect in
 `20260908120000_AddProducerIntentGroupsC8`: the outer `IF EXISTS (` was missing its closing parenthesis immediately
 before the C8 attempt-authority THROW. Correction `0915baf8` adds only that delimiter to the compiled baseline
 helper, without changing the predicate or economics. The complete regenerated zero-to-current script now parses
-under TSql160Parser with all 1,280 THROW statements; a deliberate removal of the same delimiter reproduces error 102
-near THROW. The terminal evidence validator also accepts canonical signed nonzero Int32 process exits such as
+under TSql160Parser with all 1,280 THROW statements; a deliberate removal of the same delimiter reproduces
+TSql160Parser grammar error 46005 near THROW. SQL Server error 102 remains the separately observed attempt-06 runtime
+fact. The terminal evidence validator also accepts canonical signed nonzero Int32 process exits such as
 `-532462766`, rejects malformed/zero/overflow/duplicate markers, and binds an `APPLY_MIGRATIONS` failure to the
 matching failed dotnet evidence. A separate copy of attempt-06 evidence validates and manifests with this correction;
 the preserved external package and backup were not modified. Offline reset/FinalClone safety and tamper suites,

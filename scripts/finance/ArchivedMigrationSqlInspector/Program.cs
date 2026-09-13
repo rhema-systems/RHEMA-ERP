@@ -238,12 +238,12 @@ static void VerifyGeneratedSqlGrammar(string path)
     var brokenBoundary = correctedBoundary.Replace("N'Posted')))))", "N'Posted'))))", StringComparison.Ordinal);
     var brokenSql = sql.Replace(correctedBoundary, brokenBoundary, StringComparison.Ordinal);
     _ = ParseSql(brokenSql, out var brokenErrors);
-    if (brokenErrors.Count == 0 || !brokenErrors.Any(error =>
-            error.Line > 0 && error.Message.Contains("THROW", StringComparison.OrdinalIgnoreCase)))
+    if (brokenErrors.Count != 1 || brokenErrors[0].Number != 46005 || brokenErrors[0].Line <= 0 ||
+        !brokenErrors[0].Message.Contains("THROW", StringComparison.OrdinalIgnoreCase))
         throw new InvalidOperationException("The parser regression did not detect the archived missing-parenthesis failure at THROW.");
 
     Console.WriteLine($"PASS: generated SQL parses with TSql160Parser; THROW_STATEMENTS={visitor.Count}");
-    Console.WriteLine("PASS: archived C8 missing-parenthesis boundary reproduces SQL error 102 near THROW");
+    Console.WriteLine("PASS: archived C8 missing-parenthesis boundary reproduces TSql160Parser grammar error 46005 near THROW");
 }
 
 static TSqlFragment ParseSql(string sql, out IList<ParseError> errors)
