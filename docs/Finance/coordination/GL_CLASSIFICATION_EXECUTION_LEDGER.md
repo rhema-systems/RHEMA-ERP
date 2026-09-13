@@ -2511,3 +2511,16 @@ coalesced recovery and post-VERIFY current/verified hash semantics remain passin
 evidence/tamper, FinalClone safety/parser, FinalClone evidence/tamper, parsing and diff gates passed serially. No
 database, connection variable, preserved runtime evidence or backup was accessed. A new attempt requires a new absent
 evidence directory and independent Sol High approval of the ledger-only descendant.
+
+Sol High review of exact `703eac84d4f8d9f75fdbc0f64f9f655ccf42c60a` found two P1s and one P2:
+pre-reservation collision catch could reconcile another file as this attempt's backup; legacy fallback lacked a strict
+version/discriminator; and the exact full backup path was not bound without disclosure. The correction completed as
+clean direct-child commit `1532d77c18bdcad245ad509a6dede606dcce9507` (tree
+`8b3caab03f549a44ab6cea5b3a00077f409fa0c0`). `attemptOwnedBackup` remains false until successful atomic `CreateNew`,
+and catch reconciles only an owned path. V2 packages require `RHEMA_DISPOSABLE_RESET_EVIDENCE_V2`, `MEDIA_BOUND_V1`,
+the strict media-derived basename and deterministic full-path SHA-256; phase-03/04, terminal status, recovery and
+validator bind them consistently without exposing the machine path. Legacy fallback is restricted to exact approved
+historical commit `22b27ab18a19a92fa6b1222c05add817574e74fe` with absent V2 fields and the exact fixed basename.
+Re-manifest tamper tests refuse deleted schema/version/name/path-hash, wrong media/name/phase/hash identity; collision
+flow proves pre-existing bytes/hash unchanged and no backup ownership. All reset and FinalClone offline suites passed.
+No database, connection variable, preserved evidence or backup was accessed. Runtime remains prohibited pending review.

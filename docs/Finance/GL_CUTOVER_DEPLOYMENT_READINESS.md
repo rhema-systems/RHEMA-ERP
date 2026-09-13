@@ -231,6 +231,14 @@ fixed-name package remains validator-compatible and untouched. Tests prove the p
 attempts, while collisions, malformed/path-like media IDs, wrong filenames/media and hash-record tampering fail closed.
 Another runtime attempt remains prohibited until the ledger-only descendant receives Sol High approval.
 
+Sol High review of `703eac84` required final ownership and evidence-version hardening. The correction completed as
+`1532d77c18bdcad245ad509a6dede606dcce9507` (tree `8b3caab03f549a44ab6cea5b3a00077f409fa0c0`).
+An attempt owns no backup until its atomic `CreateNew` succeeds; a derived-path collision therefore cannot be hashed or
+reported as created/preserved. New packages use explicit V2/media-bound identity and bind the secret full server path
+only by SHA-256 through phase-03/04, status, recovery and validation. Only exact approved historical commit `22b27ab`
+may use the fixed-name legacy shape; deleting version/name/path-hash fields from a new package is refused. Full offline
+gates passed; runtime remains prohibited pending Sol High approval.
+
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
 `-ConfirmDisposableDevelopmentReset`, the exact process attestation shown below, reviewed commit/tree equality,
