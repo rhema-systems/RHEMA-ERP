@@ -156,6 +156,16 @@ try {
     & pwsh -NoProfile -File $validator -EvidenceDirectory $legacy -PackageKind DisposableReset -WriteManifest
     if($LASTEXITCODE -ne 0){throw 'Exact approved historical 22b package did not validate.'}
     Write-Host 'PASS: exact documented 22b legacy failure package validates under its strict discriminator'
+    foreach($legacyMutation in @('backupCompleted','backupVerified','backupMediaId','backupByteLength','currentMaterialSha256')){
+        $tamper=New-PackageRoot ("LEGACY_"+$legacyMutation);Copy-Item -Path (Join-Path $legacy '*') -Destination $tamper
+        $status=Get-Content -Raw (Join-Path $tamper 'reset-status.json')|ConvertFrom-Json
+        if($legacyMutation -in @('backupCompleted','backupVerified')){$status.$legacyMutation=$true}
+        elseif($legacyMutation -eq 'backupMediaId'){$status.$legacyMutation='0'*32}
+        elseif($legacyMutation -eq 'backupByteLength'){$status.$legacyMutation=1}
+        else{$status.$legacyMutation='0'*64}
+        Write-Json (Join-Path $tamper 'reset-status.json') $status
+        Invoke-ExpectedRemanifestFailure $tamper "exact legacy mutation $legacyMutation"
+    }
     foreach ($property in @('backupMediaId','backupFileName','backupPathSha256')) {
         $mixed = New-PackageRoot ("MIXED_" + $property)
         Copy-Item -Path (Join-Path $failed '*') -Destination $mixed
@@ -166,13 +176,35 @@ try {
         Write-Json (Join-Path $mixed 'reset-status.json') $mixedStatus
         Invoke-ExpectedRemanifestFailure $mixed "mixed unresolved V2 $property"
     }
-    foreach ($property in @('backupMediaId','backupFileName','backupPathSha256','attemptOwnedBackup')) {
+    $allV2StateFields=@('backupMediaId','backupFileName','backupPathSha256','attemptOwnedBackup','backupCreated',
+        'backupCompleted','backupPreserved','backupVerified','resetStarted','backupPhaseMarkerPublished',
+        'backupHashMatchesVerified','verifyEvidencePresent','backupByteLength','currentMaterialSha256','backupSha256')
+    foreach ($property in $allV2StateFields) {
         $nullState = New-PackageRoot ("NULL_" + $property)
         Copy-Item -Path (Join-Path $failed '*') -Destination $nullState
         $status = Get-Content -Raw -LiteralPath (Join-Path $nullState 'reset-status.json') | ConvertFrom-Json
         $status.$property=$null
         Write-Json (Join-Path $nullState 'reset-status.json') $status
         Invoke-ExpectedRemanifestFailure $nullState "unresolved V2 null $property"
+    }
+    foreach ($property in $allV2StateFields) {
+        $missingState=New-PackageRoot ("MISSING_"+$property);Copy-Item -Path (Join-Path $failed '*') -Destination $missingState
+        $status=Get-Content -Raw (Join-Path $missingState 'reset-status.json')|ConvertFrom-Json
+        $status.PSObject.Properties.Remove($property);Write-Json (Join-Path $missingState 'reset-status.json') $status
+        Invoke-ExpectedRemanifestFailure $missingState "unresolved V2 missing $property"
+    }
+    foreach($property in @('backupCreated','backupCompleted','backupPreserved','backupVerified','resetStarted',
+        'backupPhaseMarkerPublished','backupHashMatchesVerified','verifyEvidencePresent','attemptOwnedBackup')){
+        $trueState=New-PackageRoot ("TRUE_"+$property);Copy-Item -Path (Join-Path $failed '*') -Destination $trueState
+        $status=Get-Content -Raw (Join-Path $trueState 'reset-status.json')|ConvertFrom-Json;$status.$property=$true
+        Write-Json (Join-Path $trueState 'reset-status.json') $status
+        Invoke-ExpectedRemanifestFailure $trueState "unresolved V2 true $property"
+    }
+    foreach($case in @(@('backupCreated','false'),@('backupByteLength','0'),@('currentMaterialSha256',$false))){
+        $typed=New-PackageRoot ("TYPE_"+$case[0]);Copy-Item -Path (Join-Path $failed '*') -Destination $typed
+        $status=Get-Content -Raw (Join-Path $typed 'reset-status.json')|ConvertFrom-Json;$status.($case[0])=$case[1]
+        Write-Json (Join-Path $typed 'reset-status.json') $status
+        Invoke-ExpectedRemanifestFailure $typed "V2 wrong JSON type $($case[0])"
     }
 
     $partialBackup = New-PackageRoot 'VERIFY_FAILURE'

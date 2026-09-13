@@ -10,6 +10,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-RequiredNonNullJsonProperty($value, [string]$name, [string]$context) {
+    $property = $value.PSObject.Properties[$name]
+    if ($null -eq $property -or $null -eq $property.Value) {
+        throw "$context requires non-null property '$name'."
+    }
+    return $property.Value
+}
+
 function Get-SqlEvidenceTokens([string]$evidenceFile) {
     if (-not (Test-Path -LiteralPath $evidenceFile -PathType Leaf)) { return @() }
     $raw = Get-Content -Raw -LiteralPath $evidenceFile
@@ -283,11 +291,24 @@ if ($PackageKind -eq 'DisposableReset') {
 
     $approvedLegacyCommit = '22b27ab18a19a92fa6b1222c05add817574e74fe'
     $approvedLegacyTree = '13f1eb03a24af14ff23998de72e3ddac9992981d'
+    $approvedLegacyMedia = 'cc918da6ac23465497e00ca210a4c2c6'
+    $approvedLegacyHash = '7F07CD03EED8F178ED45208936C3CC8F6E9F8D1336FFB3BF371C076D8F343743'
+    $approvedLegacyFingerprint = '446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28'
     $identityVersionProperty = $reset.PSObject.Properties['backupIdentityVersion']
     $evidenceSchemaProperty = $reset.PSObject.Properties['evidenceSchema']
-    $isApprovedLegacy = $reset.reviewedCommit -ceq $approvedLegacyCommit -and $reset.reviewedTree -ceq $approvedLegacyTree -and
+    $legacyTypesExact = $reset.backupCreated -is [bool] -and $reset.backupPreserved -is [bool] -and
+        $reset.backupCompleted -is [bool] -and $reset.backupVerified -is [bool] -and $reset.resetStarted -is [bool] -and
+        $reset.backupPhaseMarkerPublished -is [bool] -and $reset.backupHashMatchesVerified -is [bool] -and
+        $reset.verifyEvidencePresent -is [bool] -and $reset.backupByteLength -is [long]
+    $isApprovedLegacy = $legacyTypesExact -and $reset.reviewedCommit -ceq $approvedLegacyCommit -and $reset.reviewedTree -ceq $approvedLegacyTree -and
         $reset.status -ceq 'FAILED_NO_AUTOMATIC_RETRY' -and $reset.phase -ceq 'SOURCE_CAPTURE_COMPLETE' -and
-        -not $backupPhaseMarkerPublished -and $reset.resetStarted -ne $true -and
+        [string]$reset.backupMediaId -ceq $approvedLegacyMedia -and [long]$reset.backupByteLength -eq 453042176 -and
+        [string]$reset.currentMaterialSha256 -ceq $approvedLegacyHash -and [string]$reset.backupSha256 -ceq '' -and
+        $reset.backupCreated -eq $true -and $reset.backupPreserved -eq $true -and $reset.backupCompleted -eq $false -and
+        $reset.backupVerified -eq $false -and $reset.resetStarted -eq $false -and
+        $reset.backupPhaseMarkerPublished -eq $false -and $reset.backupHashMatchesVerified -eq $false -and
+        $reset.verifyEvidencePresent -eq $false -and
+        ($null -eq $reset.PSObject.Properties['sourceFingerprint'] -or [string]$reset.sourceFingerprint -ceq $approvedLegacyFingerprint) -and
         $null -eq $identityVersionProperty -and $null -eq $evidenceSchemaProperty -and
         $null -eq $reset.PSObject.Properties['backupFileName'] -and
         $null -eq $reset.PSObject.Properties['backupPathSha256'] -and
@@ -296,6 +317,23 @@ if ($PackageKind -eq 'DisposableReset') {
         ($null -eq $identityVersionProperty -or [string]$identityVersionProperty.Value -cne 'MEDIA_BOUND_V1' -or
          $null -eq $evidenceSchemaProperty -or [string]$evidenceSchemaProperty.Value -cne 'RHEMA_DISPOSABLE_RESET_EVIDENCE_V2')) {
         throw 'Disposable-reset evidence schema/backup identity version is missing or unsupported.'
+    }
+    if (-not $isApprovedLegacy) {
+        $v2BooleanFields = @('backupCreated','backupCompleted','backupPreserved','backupVerified','resetStarted',
+            'backupPhaseMarkerPublished','backupHashMatchesVerified','verifyEvidencePresent','attemptOwnedBackup')
+        foreach ($field in $v2BooleanFields) {
+            $fieldValue = Get-RequiredNonNullJsonProperty $reset $field 'Disposable-reset V2 status'
+            if ($fieldValue -isnot [bool]) { throw "Disposable-reset V2 property '$field' must be Boolean." }
+        }
+        $byteLengthValue = Get-RequiredNonNullJsonProperty $reset 'backupByteLength' 'Disposable-reset V2 status'
+        if ($byteLengthValue -isnot [long] -or $byteLengthValue -lt 0) {
+            throw 'Disposable-reset V2 backupByteLength must be a nonnegative Int64.'
+        }
+        foreach ($field in @('backupMediaId','backupFileName','backupPathSha256','currentMaterialSha256','backupSha256')) {
+            if ((Get-RequiredNonNullJsonProperty $reset $field 'Disposable-reset V2 status') -isnot [string]) {
+                throw "Disposable-reset V2 property '$field' must be String."
+            }
+        }
     }
     $ownedProperty = $reset.PSObject.Properties['attemptOwnedBackup']
     if (-not $isApprovedLegacy -and ($null -eq $ownedProperty -or $null -eq $ownedProperty.Value)) {
