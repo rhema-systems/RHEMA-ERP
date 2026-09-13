@@ -2420,8 +2420,17 @@ over the ledger-only descendant; reset execution remains prohibited.
 Sol High review of exact `7811cfe4af45900be400f4b96486ee110ad23871` found one P1 and one P2 in backup
 evidence semantics. Catch could overwrite the phase-04 verified hash with current material bytes and still derive a
 verified claim after post-VERIFY mutation. Phase-03 also did not independently require completed backup markers,
-positive material length and captured hash, and the obsolete partial phase-03 fixture encoded that weak state. A
-bounded offline correction is active to retain immutable verified hash separately from current material SHA, require
-hash equality plus VERIFY proof for `backupVerified=true`, strengthen phase-03 completion/preservation invariants,
-replace the obsolete fixture, and add an actual post-VERIFY mutation recovery test. No database, connection variable
-or preserved evidence is in scope; reset execution remains prohibited pending clean gates and Sol High re-review.
+positive material length and captured hash, and the obsolete partial phase-03 fixture encoded that weak state.
+
+The bounded offline correction completed as clean direct-child implementation commit
+`7492452fadffb9b5affffa66b829b3b5a969af7d` (tree `d3cb8cb51f957ec33a996fb7178ac41392b5c760`).
+It retains the immutable phase-04 verified SHA separately from the current material SHA and permits
+`backupVerified=true` only when current bytes still match the recorded verified hash and the original VERIFY proof is
+present. Phase-03 now requires completed backup state, both SQL completion markers, positive byte length and captured
+hash reconciliation; terminal failure with material backup proves preservation even when phase-03 publication itself
+failed. The obsolete partial phase-03 fixture was replaced, and actual recovery-helper plus package tests mutate backup
+bytes after phase-04 to prove the original verified hash remains immutable while the current bytes are truthfully
+reported unverified. PowerShell parsing, disposable reset safety/helper and evidence/tamper suites, existing FinalClone
+safety/parser regression and final evidence/tamper suites passed serially. No database, process connection variable or
+preserved evidence was accessed. Reset execution remains prohibited pending Sol High review of the ledger-only
+descendant.

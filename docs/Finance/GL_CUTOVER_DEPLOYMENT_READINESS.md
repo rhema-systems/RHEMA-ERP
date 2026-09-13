@@ -182,10 +182,12 @@ requires one of these explicit decisions:
    data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
    is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Phase D2 verified-hash correction is active offline after review of exact `7811cfe4`. Phase-04 must preserve the
-original verified backup hash even if current bytes later change; phase-03 must prove completed backup markers,
-positive length and captured hash. Execution remains prohibited until the corrected ledger-only descendant receives
-Sol High approval; no database mutation has occurred under this authorization.
+Phase D2 verified-hash correction completed offline as exact implementation commit
+`7492452fadffb9b5affffa66b829b3b5a969af7d` (tree `d3cb8cb51f957ec33a996fb7178ac41392b5c760`)
+after review of exact `7811cfe4`. Phase-04 now preserves the original verified backup hash even if current bytes later
+change; phase-03 requires completed backup markers, positive length and captured-hash reconciliation. Execution
+remains prohibited until the corrected ledger-only descendant receives Sol High approval; no database mutation has
+occurred under this authorization.
 
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
