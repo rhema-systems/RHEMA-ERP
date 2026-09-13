@@ -2542,3 +2542,20 @@ zero/false material state. Mixed, missing, null and contradictory cases refuse. 
 22b/13f1eb03, media `cc918da6ac23465497e00ca210a4c2c6`, 453042176 bytes and SHA
 `7F07CD03EED8F178ED45208936C3CC8F6E9F8D1336FFB3BF371C076D8F343743`. Full offline suites passed; no DB/evidence
 access occurred. Runtime remains prohibited pending review.
+
+Sol High review of exact `531c6cb8dabcdaf4efdca5b367dafcd49fe640c1` found that PowerShell property access and coercive
+comparisons could still allow missing, null, or wrong-typed V2 reset state fields to reach state validation. The
+bounded direct-child correction completed as `1798895595500bcc3b0d76157e4bb0255457e608` (tree
+`a89147ac9eec17b5b5a956cd16ca09b098a5dfcc`). A shared validator helper now requires every V2 Boolean, Int64,
+identity, ownership, current-hash and verified-hash property to exist and be non-null before exact type and value
+checks. Unresolved and owned-empty fixtures require the complete false/zero/empty state, including
+`backupHashMatchesVerified=false`; deletion, null, true-contradiction and wrong-type tamper loops are refused before
+manifest publication. The legacy predicate itself now embeds the exact approved 22b commit, 13f1eb03 tree,
+SOURCE_CAPTURE failure, `cc918da6ac23465497e00ca210a4c2c6` media, 453042176-byte length,
+`7F07CD03EED8F178ED45208936C3CC8F6E9F8D1336FFB3BF371C076D8F343743` current SHA, false completion/verification/
+reset/phase-03/hash-match/VERIFY claims, empty verified hash, optional exact recorded fingerprint, and absent V2-only
+fields. Mutation tests include a false historical `backupCompleted=true` claim. Disposable reset safety/helper and
+evidence/tamper suites, FinalClone safety/parser and final evidence/tamper suites, PowerShell parsing and diff checks
+passed serially from the clean implementation commit. No database, process connection variable, preserved external
+evidence or backup was accessed. Runtime remains prohibited pending independent Sol High re-review of the docs-only
+descendant.

@@ -366,3 +366,13 @@ Owned-empty/unresolved-state correction `6f308860c1ff4cdfb4281c7f960b365e527d75a
 `d4d9e0ded646bd1a83fb315fef66162dd8437270`) distinguishes a successful zero-byte owned reservation from material
 backup and requires present-exact-empty unresolved V2 fields with no backup/reset claims. The strict 22b historical
 fixture binds its known tree, media, 453042176-byte length and SHA. Offline gates pass; runtime remains prohibited.
+
+The exact-state validation correction completed as `1798895595500bcc3b0d76157e4bb0255457e608` (tree
+`a89147ac9eec17b5b5a956cd16ca09b098a5dfcc`). Every V2 reset state property and identity field must now be present,
+non-null, and of its exact JSON type before state-specific values are evaluated. Unresolved and owned-empty packages
+therefore cannot use omitted, null, string-coerced, or contradictory values to obtain a manifest. The approved
+historical exception is encoded entirely by its exact reviewed commit/tree, failed SOURCE_CAPTURE outcome, media ID,
+453042176-byte current backup and SHA-256, false completion/verification/reset claims, optional exact source
+fingerprint, and absent V2-only identity fields. The complete reset safety/evidence and FinalClone safety/evidence
+suites passed serially from the clean implementation commit. No database, connection variable, preserved evidence or
+backup was accessed; runtime remains prohibited pending independent Sol High review.
