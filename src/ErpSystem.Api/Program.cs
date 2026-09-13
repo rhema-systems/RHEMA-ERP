@@ -250,12 +250,7 @@ if (args.Length > 0 && args[0] == "seed-supplier-onboarding-e2e")
 
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ICurrentUserService>(_ =>
-        new MaintenanceCurrentUserContext(Guid.Parse("00000000-0000-0000-0000-000000000001")));
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider>(_ =>
-        new MaintenanceCurrentUserContext(Guid.Parse("00000000-0000-0000-0000-000000000001")));
-    tempBuilder.Services.AddScoped<ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService,
-        ErpSystem.Api.Services.Finance.GL.FinanceAccountProvisioningService>();
+    tempBuilder.Services.AddDatabaseSeedingFinanceBoundary();
     tempBuilder.Services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
 
     var tempApp = tempBuilder.Build();
@@ -1532,41 +1527,6 @@ static string SummarizeConnectionTarget(string? connectionString)
     return safeParts.Length == 0
         ? "Configured connection string target unavailable"
         : string.Join("; ", safeParts);
-}
-
-sealed class MaintenanceCurrentUserContext : ErpSystem.Core.Interfaces.ICurrentUserService, ErpSystem.Core.Interfaces.ICurrentUserProvider
-{
-    private static readonly Guid SystemUserId = Guid.Empty;
-    private static readonly string[] SystemRoles = ["SuperAdmin"];
-    private readonly Guid _tenantId;
-
-    public MaintenanceCurrentUserContext(Guid tenantId)
-    {
-        _tenantId = tenantId;
-    }
-
-    public string? UserId => SystemUserId.ToString();
-    public string? UserName => "system";
-    public string? Email => "system@local";
-    public Guid? TenantId => _tenantId;
-    public Guid? EmployeeId => null;
-    public bool IsAuthenticated => true;
-    public IEnumerable<string> Roles => SystemRoles;
-    public string? IpAddress => null;
-    public string? UserAgent => "MaintenanceCommand";
-    public bool IsInRole(string role) => HasRole(role);
-
-    Guid ErpSystem.Core.Interfaces.ICurrentUserProvider.UserId => SystemUserId;
-    Guid ErpSystem.Core.Interfaces.ICurrentUserProvider.TenantId => _tenantId;
-    public string Username => UserName!;
-    public string FullName => "System";
-    public bool HasRole(string role) => SystemRoles.Contains(role, StringComparer.OrdinalIgnoreCase);
-    public IDictionary<string, string> Claims => new Dictionary<string, string>
-    {
-        ["tenant_id"] = _tenantId.ToString()
-    };
-    public bool IsExternalUser => false;
-    public string AuthenticationProvider => "MaintenanceCommand";
 }
 
 class NoopServiceProxy : System.Reflection.DispatchProxy
