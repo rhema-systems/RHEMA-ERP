@@ -14,6 +14,12 @@ function Write-Json([string]$path, $value) {
     $value | ConvertTo-Json -Depth 10 | Set-Content -Encoding utf8 -LiteralPath $path
 }
 
+function Write-HistoryFixture([string]$root, [string]$name, [string[]]$ids) {
+    $state = if ($ids.Count -eq 0) { 'EMPTY' } else { 'POPULATED' }
+    @("RHEMA_MIGRATION_HISTORY_V1|COUNT=$($ids.Count)|STATE=$state") + @($ids) |
+        Set-Content -Encoding utf8 -LiteralPath (Join-Path $root $name)
+}
+
 function Complete-Status([string]$root, [hashtable]$status) {
     $failedOperation = if ($status.status -eq 'PASS') { 'NOT_APPLICABLE' } else { [string]$status.failedOperation }
     @('# Disposable RhemaERP reset recovery','',"Last durable phase: $($status.phase)",
@@ -41,14 +47,22 @@ function New-Common([string]$root) {
 }
 
 function Add-EmptySourceCaptureEvidence([string]$root) {
-    '' | Set-Content -NoNewline -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    Write-HistoryFixture $root 'source-migration-history.txt' @()
     '0|EMPTY|0|0|0' | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+    $phaseTwoPath = Join-Path $root 'phase-02.json'
+    if (Test-Path -LiteralPath $phaseTwoPath -PathType Leaf) {
+        $phaseTwo = Get-Content -Raw -LiteralPath $phaseTwoPath | ConvertFrom-Json
+        $phaseTwo | Add-Member -NotePropertyName sourceHistorySha256 -NotePropertyValue `
+            (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'source-migration-history.txt')).Hash -Force
+        Write-Json $phaseTwoPath $phaseTwo
+    }
 }
 
 function New-Status([string]$terminalStatus, [string]$phase, [bool]$backupCreated,
     [bool]$backupVerified, [bool]$resetStarted) {
     $result = @{
         evidenceSchema='RHEMA_DISPOSABLE_RESET_EVIDENCE_V2'; backupIdentityVersion='MEDIA_BOUND_V1';
+        migrationHistoryEvidenceSchema='RHEMA_MIGRATION_HISTORY_V1';
         mode='ResetDisposableDevelopment'; status=$terminalStatus; phase=$phase; database='RhemaERP';
         server='<REDACTED_LOCAL_SERVER>'; repositoryClean=$true; reviewedCommit=('a' * 40);
         reviewedTree=('b' * 40); backupCreated=$backupCreated; backupVerified=$backupVerified;
@@ -104,6 +118,7 @@ try {
     Write-Host 'PASS: terminal failure package validates and writes a manifest'
 
     $resolvedUnowned = $null
+    $sourceCapturedEarly = $null
     foreach ($earlyCase in @(
         @{ label='OFFLINE'; phase='OFFLINE_GATES_COMPLETE'; count=1; resolved=$false },
         @{ label='SOURCE'; phase='SOURCE_CAPTURE_COMPLETE'; count=2; resolved=$false },
@@ -121,11 +136,28 @@ try {
             $earlyStatus.backupPathSha256='4' * 64
             $resolvedUnowned = $early
         }
+        elseif ($earlyCase.phase -eq 'SOURCE_CAPTURE_COMPLETE') { $sourceCapturedEarly = $early }
         Complete-Status $early $earlyStatus
         & pwsh -NoProfile -File $validator -EvidenceDirectory $early -PackageKind DisposableReset -WriteManifest
         if ($LASTEXITCODE -ne 0) { throw "Valid early V2 state failed: $($earlyCase.label)" }
     }
     Write-Host 'PASS: V2 NOT_STARTED, OFFLINE, SOURCE_CAPTURE and resolved-path failure states validate truthfully'
+    foreach ($historyTamper in @('missing','empty','missing-marker','wrong-count','wrong-state')) {
+        $tamperRoot = New-PackageRoot ("SOURCE_HISTORY_" + $historyTamper)
+        Copy-Item -Path (Join-Path $sourceCapturedEarly '*') -Destination $tamperRoot
+        $historyPath = Join-Path $tamperRoot 'source-migration-history.txt'
+        if ($historyTamper -eq 'missing') { Remove-Item -LiteralPath $historyPath -Force }
+        elseif ($historyTamper -eq 'empty') { Clear-Content -LiteralPath $historyPath }
+        elseif ($historyTamper -eq 'missing-marker') { '0|EMPTY|0|0|0' | Set-Content -Encoding utf8 -LiteralPath $historyPath }
+        elseif ($historyTamper -eq 'wrong-count') { 'RHEMA_MIGRATION_HISTORY_V1|COUNT=1|STATE=POPULATED' | Set-Content -Encoding utf8 -LiteralPath $historyPath }
+        else { 'RHEMA_MIGRATION_HISTORY_V1|COUNT=0|STATE=POPULATED' | Set-Content -Encoding utf8 -LiteralPath $historyPath }
+        $tamperStatus = Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json') | ConvertFrom-Json
+        if ($historyTamper -eq 'missing') { $tamperStatus.artifactSha256.PSObject.Properties.Remove('source-migration-history.txt') }
+        else { $tamperStatus.artifactSha256.PSObject.Properties['source-migration-history.txt'].Value = (Get-FileHash -Algorithm SHA256 -LiteralPath $historyPath).Hash }
+        Write-Json (Join-Path $tamperRoot 'reset-status.json') $tamperStatus
+        Invoke-ExpectedRemanifestFailure $tamperRoot "zero-row source history $historyTamper"
+    }
+    Write-Host 'PASS: zero-row source history missing, empty and marker tampering is refused after re-manifesting'
     foreach ($property in @('backupHashMatchesVerified','backupMaterialStateReconciled')) {
         $contradiction = New-PackageRoot ("RESOLVED_UNOWNED_" + $property)
         Copy-Item -Path (Join-Path $resolvedUnowned '*') -Destination $contradiction
@@ -168,7 +200,7 @@ try {
     @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$legacyMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') | Set-Content -Encoding ascii -LiteralPath (Join-Path $legacy 'backup-create.txt')
     "$legacyHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $legacy 'backup-current.sha256')
     $legacyStatus=New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $true $false $false
-    foreach($name in @('evidenceSchema','backupIdentityVersion','backupFileName','backupPathSha256','attemptOwnedBackup')){$legacyStatus.Remove($name)}
+    foreach($name in @('evidenceSchema','backupIdentityVersion','migrationHistoryEvidenceSchema','backupFileName','backupPathSha256','attemptOwnedBackup')){$legacyStatus.Remove($name)}
     $legacyStatus.reviewedCommit=$legacyCommit;$legacyStatus.reviewedTree=$legacyTree;$legacyStatus.backupMediaId=$legacyMedia
     $legacyStatus.backupCompleted=$false;$legacyStatus.backupPreserved=$true;$legacyStatus.backupByteLength=453042176
     $legacyStatus.backupPhaseMarkerPublished=$false;$legacyStatus.backupMaterialStateReconciled=$true
@@ -253,6 +285,7 @@ try {
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'))) {
         $marker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1] }
         if ($entry[0] -eq 1) { $marker.repositoryMigrationCount=1; $marker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline' }
+        if ($entry[0] -eq 2) { $marker.sourceHistorySha256=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $partialBackup 'source-migration-history.txt')).Hash }
         if ($entry[0] -eq 3) {
             $marker.database='RhemaERP'; $marker.backupMediaId=$partialMedia; $marker.backupFileName=$partialFileName; $marker.backupPathSha256=('E' * 64)
             $marker.backupCompleted=$true; $marker.backupByteLength=1024; $marker.currentMaterialSha256=('E' * 64)
@@ -277,6 +310,7 @@ try {
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'))) {
         $marker=[ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=$entry[0];phase=$entry[1]}
         if($entry[0] -eq 1){$marker.repositoryMigrationCount=1;$marker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'}
+        if($entry[0] -eq 2){$marker.sourceHistorySha256=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $markerFailure 'source-migration-history.txt')).Hash}
         Write-Json (Join-Path $markerFailure ("phase-{0:D2}.json" -f $entry[0])) $marker
     }
     $markerMedia = 'f' * 32
@@ -342,6 +376,7 @@ try {
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'),@(4,'BACKUP_VERIFIED'))) {
         $marker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1] }
         if ($entry[0] -eq 1) { $marker.repositoryMigrationCount=1; $marker.latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline' }
+        if ($entry[0] -eq 2) { $marker.sourceHistorySha256=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $postVerifyMutation 'source-migration-history.txt')).Hash }
         if ($entry[0] -eq 3) {
             $marker.database='RhemaERP'; $marker.backupMediaId=$mutatedMedia; $marker.backupFileName=$mutatedFileName; $marker.backupPathSha256=('1' * 64)
             $marker.backupCompleted=$true; $marker.backupByteLength=2048; $marker.currentMaterialSha256=$verifiedHash
@@ -442,8 +477,8 @@ try {
     }
     $repositoryIds = @('20260913162402_DisposableDevelopmentCurrentModelBaseline')
     @($repositoryIds + "${native}dotnet") | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'migration-discovery.log')
-    $repositoryIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'repository-migration-history.txt')
-    '' | Set-Content -NoNewline -Encoding ascii -LiteralPath (Join-Path $pass 'source-migration-history.txt')
+    Write-HistoryFixture $pass 'repository-migration-history.txt' $repositoryIds
+    Write-HistoryFixture $pass 'source-migration-history.txt' @()
     $fingerprint = '0|EMPTY|0|0|0'
     $fingerprint | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'source-fingerprint-before.txt')
     "RHEMAERP_DATABASE_IDENTITY_SHA256=$('A' * 64)" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'source-database-identity.sha256')
@@ -465,7 +500,7 @@ try {
     foreach ($name in @('reset-apply-migrations.log','reset-seed-pass-1.log','reset-seed-pass-2.log')) {
         "${native}dotnet" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass $name)
     }
-    $repositoryIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'target-migration-history.txt')
+    Write-HistoryFixture $pass 'target-migration-history.txt' $repositoryIds
     'CANONICAL_FIXED_HASH_ROWS' | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'reset-invariants-pass-1.txt')
     Copy-Item -LiteralPath (Join-Path $pass 'reset-invariants-pass-1.txt') -Destination (Join-Path $pass 'reset-invariants-pass-2.txt')
     $invariantHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $pass 'reset-invariants-pass-1.txt')).Hash
@@ -484,6 +519,9 @@ try {
             $phaseMarker.database='RhemaERP'; $phaseMarker.backupMediaId=$mediaId; $phaseMarker.backupFileName=$passBackupFileName; $phaseMarker.backupPathSha256=('C' * 64)
             $phaseMarker.backupCompleted=$true; $phaseMarker.backupByteLength=1024
             $phaseMarker.currentMaterialSha256=('D' * 64)
+        }
+        if (($index + 1) -eq 2) {
+            $phaseMarker.sourceHistorySha256=(Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $pass 'source-migration-history.txt')).Hash
         }
         if (($index + 1) -eq 4) {
             $phaseMarker.backupSha256=('D' * 64); $phaseMarker.backupMediaId=$mediaId; $phaseMarker.backupFileName=$passBackupFileName; $phaseMarker.backupPathSha256=('C' * 64)
@@ -603,7 +641,7 @@ try {
             $tamperStatus[$phaseSevenTamper.property]=$phaseSevenTamper.value
             Complete-Status $tamperRoot $tamperStatus
         }elseif($phaseSevenTamper.kind -eq 'target'){
-            $phaseSevenTamper.value|Set-Content -Encoding ascii -LiteralPath (Join-Path $tamperRoot 'target-migration-history.txt')
+            Write-HistoryFixture $tamperRoot 'target-migration-history.txt' @($phaseSevenTamper.value)
             Update-ArtifactBinding $tamperRoot 'target-migration-history.txt'
         }else{
             Remove-Item -LiteralPath (Join-Path $tamperRoot 'target-migration-history.txt') -Force

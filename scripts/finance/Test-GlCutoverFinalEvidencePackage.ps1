@@ -6,6 +6,12 @@ $head = 'a' * 40
 $tree = 'b' * 40
 $fixtureFingerprint = '1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28'
 
+function Write-HistoryFixture([string]$name, [string[]]$ids) {
+    $state = if ($ids.Count -eq 0) { 'EMPTY' } else { 'POPULATED' }
+    @("RHEMA_MIGRATION_HISTORY_V1|COUNT=$($ids.Count)|STATE=$state") + @($ids) |
+        Set-Content -Encoding utf8 -LiteralPath (Join-Path $root $name)
+}
+
 function Write-Manifest([string]$directory) {
     $manifest = Join-Path $directory 'manifest.sha256'
     Get-ChildItem -LiteralPath $directory -File -Recurse | Where-Object FullName -ne $manifest |
@@ -26,6 +32,7 @@ function Write-Summary([string]$status, [string[]]$pending) {
         sourceDatabase='RhemaERP'; targetDatabase='RHEMAERP_GL_REHEARSAL_FINAL_TEST'
         sourceServer='<REDACTED_SAME_SERVER>'; targetServer='<REDACTED_SAME_SERVER>'; sameServer=$true
         repositoryMigrationCount=1; latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'
+        migrationHistoryEvidenceSchema='RHEMA_MIGRATION_HISTORY_V1'
         pendingMigrationCount=$pending.Count; pendingMigrations=@($pending)
         sourceFingerprint=$script:fixtureFingerprint
         cutoverFlagsExplicitlyFalse=$true; targetCreated=($status -eq 'PASS'); backupCreated=($status -eq 'PASS')
@@ -61,9 +68,9 @@ try {
     $sourceIds = @($orphanId)
     $pending = @($migrationIds | Where-Object { $_ -notin $sourceIds })
     Write-CommandEvidenceFixture 'migration-discovery.log' 'dotnet' $migrationIds
-    $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
-    $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
-    $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
+    Write-HistoryFixture 'source-migration-history.txt' $sourceIds
+    Write-HistoryFixture 'pending-migrations.txt' $pending
+    Write-HistoryFixture 'orphan-history.txt' @($orphanId)
     Write-CommandEvidenceFixture 'commit-ancestry.txt' 'git' @($head)
     Write-CommandEvidenceFixture 'git-head-tree.txt' 'git' @($head,$tree)
     [ordered]@{ reviewedCommit=$head; reviewedTree=$tree; executedCommit=$head; executedTree=$tree; repositoryClean=$true } |
@@ -112,12 +119,12 @@ try {
     $idempotentScriptPath = Join-Path $root 'pending-migrations-idempotent.sql'
     $idempotentHashPath = Join-Path $root 'pending-migrations-idempotent.sha256'
     $zeroPending = @()
-    $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    Write-HistoryFixture 'source-migration-history.txt' $migrationIds
     $script:fixtureFingerprint = "1|$($migrationIds[0])|1|9|28"
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
-    Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
-    Clear-Content -LiteralPath (Join-Path $root 'orphan-history.txt')
+    Write-HistoryFixture 'pending-migrations.txt' @()
+    Write-HistoryFixture 'orphan-history.txt' @()
     '-- NO PENDING MIGRATIONS AT FRESH DISCOVERY' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
     $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
@@ -126,6 +133,20 @@ try {
     Write-Summary 'NO_GO_PREFLIGHT' $zeroPending
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Valid zero-pending final preflight NO-GO package was rejected.' }
+    foreach ($historyName in @('pending-migrations.txt','orphan-history.txt')) {
+        $historyPath = Join-Path $root $historyName
+        Remove-Item -LiteralPath $historyPath -Force
+        Write-Summary 'NO_GO_PREFLIGHT' $zeroPending
+        Assert-Refused "Required rehearsal evidence is missing: $historyName"
+        '' | Set-Content -NoNewline -Encoding utf8 -LiteralPath $historyPath
+        Write-Summary 'NO_GO_PREFLIGHT' $zeroPending
+        Assert-Refused 'evidence is empty or lacks its deterministic terminal newline'
+        'RHEMA_MIGRATION_HISTORY_V1|COUNT=1|STATE=EMPTY' | Set-Content -Encoding utf8 -LiteralPath $historyPath
+        Write-Summary 'NO_GO_PREFLIGHT' $zeroPending
+        Assert-Refused 'evidence count, state, or exact ordered IDs are inconsistent'
+        Write-HistoryFixture $historyName @()
+    }
+    Write-Host 'PASS: FinalClone explicit empty migration sets refuse missing, empty and tampered markers'
     Remove-Item -LiteralPath $generationPath
     Write-Summary 'NO_GO_PREFLIGHT' $zeroPending; Assert-Refused 'Required rehearsal evidence is missing: idempotent-script-generation.log'
     'RHEMA_IDEMPOTENT_SCRIPT_GENERATION_V1|STATUS=NOT_REQUIRED|REASON=ZERO_PENDING_MIGRATIONS|PENDING_COUNT=1' |
@@ -134,12 +155,12 @@ try {
     Write-CommandEvidenceFixture 'idempotent-script-generation.log' 'dotnet' @('fabricated generation')
     Write-Summary 'NO_GO_PREFLIGHT' $zeroPending; Assert-Refused 'Zero-pending idempotent-script evidence is missing or invalid'
 
-    $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    Write-HistoryFixture 'source-migration-history.txt' $sourceIds
     $script:fixtureFingerprint = "1|$orphanId|1|9|28"
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
-    $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
-    $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
+    Write-HistoryFixture 'pending-migrations.txt' $pending
+    Write-HistoryFixture 'orphan-history.txt' @($orphanId)
     '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
     $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
@@ -150,13 +171,13 @@ try {
     Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'does not prove C6, C7 and C8 explicitly false'; $validFlags | Set-Content -Encoding utf8 $flagsPath
 
     $badPending = @()
-    Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
+    Write-HistoryFixture 'pending-migrations.txt' @()
     Write-Summary 'NO_GO_PREFLIGHT' $badPending; Assert-Refused 'repository history minus source history'
-    $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
+    Write-HistoryFixture 'pending-migrations.txt' $pending
 
-    Clear-Content -LiteralPath (Join-Path $root 'orphan-history.txt')
+    Write-HistoryFixture 'orphan-history.txt' @()
     Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'source history minus repository history'
-    $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
+    Write-HistoryFixture 'orphan-history.txt' @($orphanId)
 
     $reviewed = Get-Content -Raw (Join-Path $root 'reviewed-git-state.json') | ConvertFrom-Json
     $reviewed.executedTree = 'd' * 40; $reviewed | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $root 'reviewed-git-state.json')
@@ -169,7 +190,7 @@ try {
     (('C' * 64) + '  RHEMAERP_GL_REHEARSAL_FINAL_TEST_COPYONLY.bak') | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'backup.sha256')
     foreach ($file in @('clone-apply-migrations.log','seed-pass-1.log','seed-pass-2.log')) { Write-CommandEvidenceFixture $file 'dotnet' @('PASS') }
     $targetIds = @(@($sourceIds) + @($pending) | Sort-Object -Unique)
-    $targetIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
+    Write-HistoryFixture 'target-migration-history.txt' $targetIds
     $canonicalInvariantRows = @(
         'ACCOUNT|1|1000|Cash',
         'ACCOUNT_SEGMENT_VALUE|1|1000|00',
@@ -191,13 +212,13 @@ try {
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Valid final baseline PASS package was rejected.' }
 
-    $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    Write-HistoryFixture 'source-migration-history.txt' $migrationIds
     $script:fixtureFingerprint = "1|$($migrationIds[0])|1|9|28"
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
-    Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
-    Clear-Content -LiteralPath (Join-Path $root 'orphan-history.txt')
-    $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
+    Write-HistoryFixture 'pending-migrations.txt' @()
+    Write-HistoryFixture 'orphan-history.txt' @()
+    Write-HistoryFixture 'target-migration-history.txt' $migrationIds
     '-- NO PENDING MIGRATIONS AT FRESH DISCOVERY' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
     $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
@@ -206,21 +227,21 @@ try {
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Valid zero-pending final PASS package was rejected.' }
 
-    $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    Write-HistoryFixture 'source-migration-history.txt' $sourceIds
     $script:fixtureFingerprint = "1|$orphanId|1|9|28"
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
     $script:fixtureFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
-    $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
-    $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
-    $targetIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
+    Write-HistoryFixture 'pending-migrations.txt' $pending
+    Write-HistoryFixture 'orphan-history.txt' @($orphanId)
+    Write-HistoryFixture 'target-migration-history.txt' $targetIds
     '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
     $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
     Write-CommandEvidenceFixture 'idempotent-script-generation.log' 'dotnet' @('offline generation passed')
 
-    $badTarget=@($targetIds); $badTarget[0]='00000000000000_SameCountMutation'; $badTarget | Sort-Object | Set-Content -Encoding ascii (Join-Path $root 'target-migration-history.txt')
+    $badTarget=@($targetIds); $badTarget[0]='00000000000000_SameCountMutation'; Write-HistoryFixture 'target-migration-history.txt' @($badTarget | Sort-Object)
     Write-Summary 'PASS' $pending; Assert-Refused 'exactly source history union the ordered pending delta'
-    $targetIds | Set-Content -Encoding ascii (Join-Path $root 'target-migration-history.txt')
+    Write-HistoryFixture 'target-migration-history.txt' $targetIds
 
     $markers=Get-Content (Join-Path $root 'backup-restore-checkdb.txt'); $verifyIndex=[Array]::IndexOf($markers,'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'); $markers[$verifyIndex]='RESTORE_TARGET_COMPLETE'; $markers | Set-Content -Encoding utf8 (Join-Path $root 'backup-restore-checkdb.txt')
     Write-Summary 'PASS' $pending; Assert-Refused 'identity-inconsistent'

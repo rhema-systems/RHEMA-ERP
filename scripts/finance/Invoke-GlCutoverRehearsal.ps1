@@ -37,6 +37,7 @@ $supersededMigrations = @(
 $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
 $authoritativeMigrationCount = 1
 $authoritativeLatestMigration = '20260913162402_DisposableDevelopmentCurrentModelBaseline'
+$migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
 $sqlcmdMaxVariableWidth = 8000
 $sqlcmdScreenWidth = 8000
 $finalCutoverFlags = @(
@@ -373,8 +374,8 @@ function Get-DisposableTargetMigrationState([string]$directory, [string[]]$repos
     if (-not (Test-Path -LiteralPath $historyPath -PathType Leaf)) {
         return [pscustomobject]@{ applied=$false; count=[long]0; historySha256='' }
     }
-    $targetMigrations = @(Get-Content -LiteralPath $historyPath |
-        ForEach-Object { $_.Trim() } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $targetEvidence = Read-MigrationHistoryEvidence $historyPath 'Reset target history'
+    $targetMigrations = @($targetEvidence.ids)
     if ($targetMigrations.Count -ne $repositoryMigrations.Count -or
         @($targetMigrations | Where-Object { $_ -notmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0 -or
         @($targetMigrations | Sort-Object -Unique).Count -ne $targetMigrations.Count -or
@@ -422,6 +423,7 @@ function Write-FinalSummary([string]$directory, [string]$status, $source, $targe
         targetDatabase = $target.Database
         repositoryMigrationCount = $authoritativeMigrationCount
         latestMigration = $authoritativeLatestMigration
+        migrationHistoryEvidenceSchema = $migrationHistoryEvidenceSchema
         pendingMigrationCount = $pendingMigrations.Count
         pendingMigrations = @($pendingMigrations)
         sourceFingerprint = $sourceFingerprint
@@ -721,6 +723,57 @@ function Write-AtomicTextFile([string]$path, [string]$content, [bool]$replaceExi
     }
 }
 
+function Write-MigrationHistoryEvidence([string]$path, [string[]]$migrationIds,
+    [bool]$replaceExisting = $false) {
+    $ids = @($migrationIds)
+    if (@($ids | Where-Object { $_ -cnotmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0 -or
+        @($ids | Sort-Object -Unique).Count -ne $ids.Count -or
+        (@($ids | Sort-Object) -join "`n") -cne ($ids -join "`n")) {
+        throw 'Migration-history evidence requires an exact unique ordered safe migration ID list.'
+    }
+    $state = if ($ids.Count -eq 0) { 'EMPTY' } else { 'POPULATED' }
+    $lines = @("$migrationHistoryEvidenceSchema|COUNT=$($ids.Count)|STATE=$state") + $ids
+    Write-AtomicTextFile $path ($lines -join "`n") $replaceExisting
+    return Read-MigrationHistoryEvidence $path 'Published migration history'
+}
+
+function Read-MigrationHistoryEvidence([string]$path, [string]$context) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        throw "$context evidence is missing."
+    }
+    $raw = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false))
+    if ([string]::IsNullOrEmpty($raw) -or -not $raw.EndsWith("`n", [StringComparison]::Ordinal)) {
+        throw "$context evidence is empty or lacks its deterministic terminal newline."
+    }
+    $normalized = $raw.Replace("`r`n", "`n")
+    if ($normalized.Contains("`r", [StringComparison]::Ordinal)) {
+        throw "$context evidence contains a noncanonical line ending."
+    }
+    $lines = @($normalized.Substring(0, $normalized.Length - 1).Split("`n"))
+    if ($lines.Count -lt 1 -or
+        $lines[0] -cnotmatch '^RHEMA_MIGRATION_HISTORY_V1\|COUNT=(?<count>0|[1-9]\d*)\|STATE=(?<state>EMPTY|POPULATED)$') {
+        throw "$context evidence has a missing or malformed migration-history marker."
+    }
+    $declaredCount = [long]$Matches.count
+    $declaredState = [string]$Matches.state
+    $ids = @($lines | Select-Object -Skip 1)
+    if ($ids.Count -ne $declaredCount -or
+        ($declaredCount -eq 0 -and $declaredState -cne 'EMPTY') -or
+        ($declaredCount -gt 0 -and $declaredState -cne 'POPULATED') -or
+        @($ids | Where-Object { $_ -cnotmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0 -or
+        @($ids | Sort-Object -Unique).Count -ne $ids.Count -or
+        (@($ids | Sort-Object) -join "`n") -cne ($ids -join "`n")) {
+        throw "$context evidence count, state, or exact ordered IDs are inconsistent."
+    }
+    [pscustomobject]@{
+        schema = $migrationHistoryEvidenceSchema
+        count = $declaredCount
+        state = $declaredState
+        ids = [string[]]$ids
+        sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash
+    }
+}
+
 function Write-DisposablePhaseMarker([string]$directory, [int]$ordinal, [string]$phase,
     [hashtable]$details = @{}) {
     $expectedOrdinal = @(Get-ChildItem -LiteralPath $directory -File -Filter 'phase-*.json').Count + 1
@@ -752,6 +805,7 @@ function Write-DisposableResetStatus([string]$directory, [string]$status, [strin
     }
     $payload = [ordered]@{
         evidenceSchema = 'RHEMA_DISPOSABLE_RESET_EVIDENCE_V2'
+        migrationHistoryEvidenceSchema = $migrationHistoryEvidenceSchema
         backupIdentityVersion = 'MEDIA_BOUND_V1'
         mode = 'ResetDisposableDevelopment'
         status = $status
@@ -845,8 +899,9 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
             (@($repositoryMigrations | Sort-Object) -join "`n") -cne ($repositoryMigrations -join "`n")) {
             throw 'Disposable reset requires the exact authoritative disposable-development baseline identity before DROP.'
         }
-        $repositoryMigrations | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'repository-migration-history.txt')
-        $repositoryHistoryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'repository-migration-history.txt')).Hash
+        $repositoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectory 'repository-migration-history.txt') $repositoryMigrations
+        $repositoryMigrations = @($repositoryEvidence.ids)
+        $repositoryHistoryHash = $repositoryEvidence.sha256
         Write-DisposablePhaseMarker $evidenceDirectory 1 'OFFLINE_GATES_COMPLETE' @{
             repositoryMigrationCount = $authoritativeMigrationCount
             latestMigration = $authoritativeLatestMigration
@@ -897,7 +952,8 @@ WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_
         }
         $expectedDatabaseId = [int]$Matches.id
         $expectedCreateDate = $Matches.created
-        $sourceHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'source-migration-history.txt')
+        $sourceHistoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectory 'source-migration-history.txt') $sourceHistory
+        $sourceHistory = @($sourceHistoryEvidence.ids)
         $sourceFingerprint | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectory 'source-fingerprint-before.txt')
         "RHEMAERP_DATABASE_IDENTITY_SHA256=$(Get-TextSha256 $databaseIdentity)" | Set-Content -Encoding ascii `
             -LiteralPath (Join-Path $evidenceDirectory 'source-database-identity.sha256')
@@ -905,7 +961,7 @@ WHERE name COLLATE Latin1_General_100_BIN2 = N'RhemaERP' COLLATE Latin1_General_
             -LiteralPath (Join-Path $evidenceDirectory 'source-server-identity.sha256')
         Write-DisposablePhaseMarker $evidenceDirectory 2 'SOURCE_CAPTURE_COMPLETE' @{
             sourceFingerprint = $sourceFingerprint
-            sourceHistorySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'source-migration-history.txt')).Hash
+            sourceHistorySha256 = $sourceHistoryEvidence.sha256
             databaseIdentitySha256 = (Get-TextSha256 $databaseIdentity)
             serverIdentitySha256 = (Get-TextSha256 $serverInstanceIdentity)
         }
@@ -1168,7 +1224,8 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
         }
         finally { Pop-Location }
         $finalHistory = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
-        $finalHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'target-migration-history.txt')
+        $finalHistoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectory 'target-migration-history.txt') $finalHistory
+        $finalHistory = @($finalHistoryEvidence.ids)
         $targetMigrationState = Get-DisposableTargetMigrationState $evidenceDirectory $repositoryMigrations
         $phase = 'PHASE_07_PUBLICATION'
         Write-DisposablePhaseMarker $evidenceDirectory 7 'MIGRATIONS_APPLIED' @{
@@ -1467,11 +1524,14 @@ if ($Mode -eq 'RehearseFinalClone') {
         # Only after every repository-only gate passes may the harness contact SQL Server.
         Assert-TargetAbsent $target
         $sourceHistory = @(Get-MigrationHistory $source.Builder $source.Database)
-        $sourceHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-migration-history.txt')
+        $sourceHistoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectoryResolved 'source-migration-history.txt') $sourceHistory
+        $sourceHistory = @($sourceHistoryEvidence.ids)
         $pendingMigrations = @($repositoryMigrations | Where-Object { $_ -notin $sourceHistory })
         $orphanHistory = @($sourceHistory | Where-Object { $_ -notin $repositoryMigrations })
-        $pendingMigrations | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectoryResolved 'pending-migrations.txt')
-        $orphanHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectoryResolved 'orphan-history.txt')
+        $pendingEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectoryResolved 'pending-migrations.txt') $pendingMigrations
+        $orphanEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectoryResolved 'orphan-history.txt') $orphanHistory
+        $pendingMigrations = @($pendingEvidence.ids)
+        $orphanHistory = @($orphanEvidence.ids)
         $sourceFingerprintBefore = Get-SourceFingerprint $source.Builder $source.Database
         $sourceFingerprintBefore | Set-Content -Encoding utf8 -LiteralPath (Join-Path $evidenceDirectoryResolved 'source-fingerprint-before.txt')
         $idempotentScript = Join-Path $evidenceDirectoryResolved 'pending-migrations-idempotent.sql'
@@ -1598,7 +1658,8 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
         finally { Pop-Location }
 
         $finalHistory = @(Get-MigrationHistory $target.Builder $target.Database)
-        $finalHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectoryResolved 'target-migration-history.txt')
+        $finalHistoryEvidence = Write-MigrationHistoryEvidence (Join-Path $evidenceDirectoryResolved 'target-migration-history.txt') $finalHistory
+        $finalHistory = @($finalHistoryEvidence.ids)
         $missingAfterApply = @($repositoryMigrations | Where-Object { $_ -notin $finalHistory })
         $missingOriginalHistory = @($sourceHistory | Where-Object { $_ -notin $finalHistory })
         $unexpectedAfterApply = @($finalHistory | Where-Object { $_ -notin $sourceHistory -and $_ -notin $pendingMigrations })

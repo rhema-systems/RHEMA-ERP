@@ -9,6 +9,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+$migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
 
 function Get-RequiredNonNullJsonProperty($value, [string]$name, [string]$context) {
     $property = $value.PSObject.Properties[$name]
@@ -50,6 +51,40 @@ function Assert-UniqueOrderedSqlEvidenceTokens([string]$evidenceFile, [string[]]
         }
         $priorIndex = $matchingIndexes[0]
     }
+}
+
+function Read-MigrationHistoryEvidence([string]$path, [string]$context, [bool]$allowReviewedLegacy = $false) {
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "$context evidence is missing." }
+    $raw = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false))
+    if ($allowReviewedLegacy) {
+        $legacyIds = @($raw -split '\r?\n' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        if (@($legacyIds | Where-Object { $_ -cnotmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0 -or
+            @($legacyIds | Sort-Object -Unique).Count -ne $legacyIds.Count -or
+            (@($legacyIds | Sort-Object) -join "`n") -cne ($legacyIds -join "`n")) {
+            throw "$context reviewed legacy evidence is malformed."
+        }
+        return [pscustomobject]@{ schema='REVIEWED_LEGACY_RAW'; count=[long]$legacyIds.Count; ids=[string[]]$legacyIds }
+    }
+    if ([string]::IsNullOrEmpty($raw) -or -not $raw.EndsWith("`n", [StringComparison]::Ordinal)) {
+        throw "$context evidence is empty or lacks its deterministic terminal newline."
+    }
+    $normalized = $raw.Replace("`r`n", "`n")
+    if ($normalized.Contains("`r", [StringComparison]::Ordinal)) { throw "$context evidence has a noncanonical line ending." }
+    $lines = @($normalized.Substring(0, $normalized.Length - 1).Split("`n"))
+    if ($lines[0] -cnotmatch '^RHEMA_MIGRATION_HISTORY_V1\|COUNT=(?<count>0|[1-9]\d*)\|STATE=(?<state>EMPTY|POPULATED)$') {
+        throw "$context evidence has a missing or malformed migration-history marker."
+    }
+    $count = [long]$Matches.count
+    $state = [string]$Matches.state
+    $ids = @($lines | Select-Object -Skip 1)
+    if ($ids.Count -ne $count -or ($count -eq 0 -and $state -cne 'EMPTY') -or
+        ($count -gt 0 -and $state -cne 'POPULATED') -or
+        @($ids | Where-Object { $_ -cnotmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0 -or
+        @($ids | Sort-Object -Unique).Count -ne $ids.Count -or
+        (@($ids | Sort-Object) -join "`n") -cne ($ids -join "`n")) {
+        throw "$context evidence count, state, or exact ordered IDs are inconsistent."
+    }
+    [pscustomobject]@{ schema=$migrationHistoryEvidenceSchema; count=$count; ids=[string[]]$ids }
 }
 
 $root = (Resolve-Path -LiteralPath $EvidenceDirectory).Path
@@ -144,6 +179,22 @@ if ($PackageKind -eq 'DisposableReset') {
         [string]$reset.reviewedCommit -cne [string]$reviewedState.reviewedCommit -or
         [string]$reset.reviewedTree -cne [string]$reviewedState.reviewedTree) {
         throw 'Disposable-reset evidence does not bind one exact reviewed clean HEAD/tree.'
+    }
+    $historySchemaProperty = $reset.PSObject.Properties['migrationHistoryEvidenceSchema']
+    $isReviewedAttempt03Or04EarlyPackage =
+        [string]$reset.reviewedCommit -ceq '2de5f800c47e58fe62ca1715db0ac4aef5001327' -and
+        [string]$reset.reviewedTree -ceq '8a2f30bead3500138657c85a8447765330500515' -and
+        [string]$reset.status -ceq 'FAILED_NO_AUTOMATIC_RETRY' -and
+        [string]$reset.phase -ceq 'OFFLINE_GATES_COMPLETE' -and
+        -not (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf)
+    $isPotentialReviewed22Legacy =
+        [string]$reset.reviewedCommit -ceq '22b27ab18a19a92fa6b1222c05add817574e74fe' -and
+        [string]$reset.reviewedTree -ceq '13f1eb03a24af14ff23998de72e3ddac9992981d'
+    $allowReviewedLegacyMigrationHistory = $null -eq $historySchemaProperty -and
+        ($isReviewedAttempt03Or04EarlyPackage -or $isPotentialReviewed22Legacy)
+    if (-not $allowReviewedLegacyMigrationHistory -and
+        ($null -eq $historySchemaProperty -or [string]$historySchemaProperty.Value -cne $migrationHistoryEvidenceSchema)) {
+        throw 'Disposable-reset migration-history evidence schema is missing or unsupported.'
     }
     if (Test-Path -LiteralPath (Join-Path $root 'git-head-tree.txt') -PathType Leaf) {
         $headTree = @(Get-Content -LiteralPath (Join-Path $root 'git-head-tree.txt') |
@@ -272,12 +323,15 @@ if ($PackageKind -eq 'DisposableReset') {
             throw 'Disposable-reset repository history is not the exact authoritative disposable-development baseline.'
         }
         $repositoryHistoryPath = Join-Path $root 'repository-migration-history.txt'
-        if (-not (Test-Path -LiteralPath $repositoryHistoryPath -PathType Leaf) -or
-            ((Get-Content -LiteralPath $repositoryHistoryPath) -join "`n") -cne ($repositoryIds -join "`n")) {
+        $repositoryHistory = Read-MigrationHistoryEvidence $repositoryHistoryPath `
+            'Disposable-reset repository history' $allowReviewedLegacyMigrationHistory
+        if ((@($repositoryHistory.ids) -join "`n") -cne ($repositoryIds -join "`n")) {
             throw 'Disposable-reset repository migration identity evidence is missing or inconsistent.'
         }
         if (Test-Path -LiteralPath (Join-Path $root 'target-migration-history.txt') -PathType Leaf) {
-            $targetIds = @(Get-Content -LiteralPath (Join-Path $root 'target-migration-history.txt'))
+            $targetHistoryEvidence = Read-MigrationHistoryEvidence (Join-Path $root 'target-migration-history.txt') `
+                'Disposable-reset target history' $allowReviewedLegacyMigrationHistory
+            $targetIds = @($targetHistoryEvidence.ids)
             if (($targetIds -join "`n") -cne ($repositoryIds -join "`n") -or
                 [long]$reset.finalMigrationCount -ne $targetIds.Count -or [long]$reset.orphanMigrationCount -ne 0) {
                 throw 'Disposable-reset target history is not exactly the repository baseline with zero orphans.'
@@ -288,12 +342,17 @@ if ($PackageKind -eq 'DisposableReset') {
     }
     $sourceIds = @()
     if (Test-Path -LiteralPath (Join-Path $root 'source-migration-history.txt') -PathType Leaf) {
-        $sourceIds = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-        if (@($sourceIds | Sort-Object -Unique).Count -ne $sourceIds.Count -or
-            (@($sourceIds | Sort-Object) -join "`n") -cne ($sourceIds -join "`n") -or
-            @($sourceIds | Where-Object { $_ -notmatch '^\d{14}_[A-Za-z0-9_]+$' }).Count -ne 0) {
-            throw 'Disposable-reset source history is duplicate, out of order, or malformed.'
+        $sourceHistoryEvidence = Read-MigrationHistoryEvidence (Join-Path $root 'source-migration-history.txt') `
+            'Disposable-reset source history' $allowReviewedLegacyMigrationHistory
+        $sourceIds = @($sourceHistoryEvidence.ids)
+        if (-not $allowReviewedLegacyMigrationHistory -and $phases -ccontains 'SOURCE_CAPTURE_COMPLETE') {
+            $sourcePhaseIndex = [Array]::IndexOf($phases, 'SOURCE_CAPTURE_COMPLETE')
+            $sourceHistoryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath `
+                (Join-Path $root 'source-migration-history.txt')).Hash
+            if ($null -eq $phaseMarkers[$sourcePhaseIndex].PSObject.Properties['sourceHistorySha256'] -or
+                [string]$phaseMarkers[$sourcePhaseIndex].sourceHistorySha256 -cne $sourceHistoryHash) {
+                throw 'Disposable-reset SOURCE_CAPTURE phase does not bind the exact migration-history artifact hash.'
+            }
         }
     }
     foreach ($identityFile in @('source-database-identity.sha256','source-server-identity.sha256')) {
@@ -664,8 +723,9 @@ if ($PackageKind -eq 'DisposableReset') {
         }
         $sourceFingerprint = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')).Trim()
         $resetTokens = @(Get-SqlEvidenceTokens (Join-Path $root 'reset-database.log'))
-        $sourceHistory = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $sourceHistory = @((Read-MigrationHistoryEvidence `
+            (Join-Path $root 'source-migration-history.txt') 'Disposable-reset PASS source history' `
+            $allowReviewedLegacyMigrationHistory).ids)
         $fingerprintParts = @($sourceFingerprint -split '\|')
         $expectedLatest = if ($sourceHistory.Count -eq 0) { 'EMPTY' } else { $sourceHistory[-1] }
         if (-not (Test-DisposableSourceFingerprintShape $sourceFingerprint) -or
@@ -726,6 +786,12 @@ if ($PackageKind -eq 'FinalClone') {
         throw 'Final-clone summary does not bind exact RhemaERP source and prefix-safe target identities.'
     }
     $reviewedState = Get-Content -Raw -LiteralPath (Join-Path $root 'reviewed-git-state.json') | ConvertFrom-Json
+    $finalHistorySchemaProperty = $summary.PSObject.Properties['migrationHistoryEvidenceSchema']
+    if ($null -eq $finalHistorySchemaProperty -or
+        [string]$finalHistorySchemaProperty.Value -cne $migrationHistoryEvidenceSchema) {
+        throw 'Final-clone migration-history evidence schema is missing or unsupported.'
+    }
+    $allowReviewedLegacyFinalHistory = $false
     $gitHeadTree = @(Get-Content -LiteralPath (Join-Path $root 'git-head-tree.txt') |
         ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notlike 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' })
     if ($gitHeadTree.Count -ne 2 -or $gitHeadTree[0] -notmatch '^[0-9a-fA-F]{40}$' -or
@@ -764,16 +830,12 @@ if ($PackageKind -eq 'FinalClone') {
         $summary.latestMigration -isnot [string] -or [string]$summary.latestMigration -cne $migrationIds[-1]) {
         throw 'Final-clone summary repository migration count/latest disagrees with independently derived discovery evidence.'
     }
-    $sourceHistory = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    if (@($sourceHistory | Sort-Object -Unique).Count -ne $sourceHistory.Count -or
-        (@($sourceHistory | Sort-Object) -join "`n") -ne ($sourceHistory -join "`n")) {
-        throw 'Final-clone source history contains duplicate or out-of-order migration IDs.'
-    }
-    $pending = @(Get-Content -LiteralPath (Join-Path $root 'pending-migrations.txt') |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
-    $orphan = @(Get-Content -LiteralPath (Join-Path $root 'orphan-history.txt') |
-        Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $sourceHistory = @((Read-MigrationHistoryEvidence (Join-Path $root 'source-migration-history.txt') `
+        'Final-clone source history' $allowReviewedLegacyFinalHistory).ids)
+    $pending = @((Read-MigrationHistoryEvidence (Join-Path $root 'pending-migrations.txt') `
+        'Final-clone pending migrations' $allowReviewedLegacyFinalHistory).ids)
+    $orphan = @((Read-MigrationHistoryEvidence (Join-Path $root 'orphan-history.txt') `
+        'Final-clone orphan history' $allowReviewedLegacyFinalHistory).ids)
     $derivedPending = @($migrationIds | Where-Object { $_ -notin $sourceHistory })
     $derivedOrphan = @($sourceHistory | Where-Object { $_ -notin $migrationIds })
     if (($pending -join "`n") -ne ($derivedPending -join "`n")) {
@@ -845,8 +907,8 @@ if ($PackageKind -eq 'FinalClone') {
         if ([string]$summary.pendingMigrationScriptSha256 -ne $idempotentScriptHash) {
             throw 'Final-clone idempotent SQL checksum disagrees with summary.json.'
         }
-        $targetHistory = @(Get-Content -LiteralPath (Join-Path $root 'target-migration-history.txt') |
-            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $targetHistory = @((Read-MigrationHistoryEvidence (Join-Path $root 'target-migration-history.txt') `
+            'Final-clone target history' $allowReviewedLegacyFinalHistory).ids)
         $expectedTargetHistory = @(@($sourceHistory) + @($derivedPending) | Sort-Object -Unique)
         if (@($targetHistory | Sort-Object -Unique).Count -ne $targetHistory.Count -or
             ($targetHistory -join "`n") -ne ($expectedTargetHistory -join "`n")) {

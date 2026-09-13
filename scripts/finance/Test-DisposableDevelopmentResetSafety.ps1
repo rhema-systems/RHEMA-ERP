@@ -125,10 +125,12 @@ try {
     finally { if (Test-Path -LiteralPath $collisionPath) { Remove-Item -LiteralPath $collisionPath -Force } }
     Write-Host 'PASS: actual pre-dispatch backup reservation helper is available and refuses collisions'
 
+    $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
     foreach ($functionName in @('ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
         'Assert-UniqueOrderedSqlEvidenceTokens','Invoke-Native','Assert-SqlcmdOutputWidth','Invoke-Sql',
         'Invoke-SqlWithSanitizedEvidence','Get-DisposableBackupFileName','Join-DisposableBackupPath',
-        'Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
+        'Write-AtomicTextFile','Write-MigrationHistoryEvidence','Read-MigrationHistoryEvidence',
+        'Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
         'Get-TextSha256','Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
         'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState',
         'Get-DisposableTargetMigrationState')) {
@@ -139,6 +141,40 @@ try {
         }
         . ([ScriptBlock]::Create($functionAst[0].Extent.Text))
     }
+    $historyRoot = New-ExternalEvidencePath 'MIGRATION_HISTORY'
+    New-Item -ItemType Directory -Path $historyRoot | Out-Null
+    $emptyHistoryPath = Join-Path $historyRoot 'source-migration-history.txt'
+    $emptyHistory = Write-MigrationHistoryEvidence $emptyHistoryPath @()
+    if (-not (Test-Path -LiteralPath $emptyHistoryPath -PathType Leaf) -or
+        (Get-Item -LiteralPath $emptyHistoryPath).Length -le 0 -or $emptyHistory.count -ne 0 -or
+        $emptyHistory.state -cne 'EMPTY') {
+        throw 'Actual migration-history writer did not atomically publish explicit zero-row evidence.'
+    }
+    Write-DisposablePhaseMarker $historyRoot 1 'OFFLINE_GATES_COMPLETE'
+    Write-DisposablePhaseMarker $historyRoot 2 'SOURCE_CAPTURE_COMPLETE' @{
+        sourceHistorySha256 = $emptyHistory.sha256; sourceFingerprint = '0|EMPTY|0|0|0'
+    }
+    $nonemptyHistoryPath = Join-Path $historyRoot 'target-migration-history.txt'
+    $nonemptyHistory = Write-MigrationHistoryEvidence $nonemptyHistoryPath `
+        @('20260913162402_DisposableDevelopmentCurrentModelBaseline')
+    if ($nonemptyHistory.count -ne 1 -or
+        $nonemptyHistory.ids[0] -cne '20260913162402_DisposableDevelopmentCurrentModelBaseline') {
+        throw 'Actual migration-history writer/parser lost a nonempty migration ID.'
+    }
+    foreach ($badContent in @(
+        '',
+        "RHEMA_MIGRATION_HISTORY_V1|COUNT=0|STATE=POPULATED`n",
+        "RHEMA_MIGRATION_HISTORY_V1|COUNT=1|STATE=EMPTY`n",
+        "RHEMA_MIGRATION_HISTORY_V1|COUNT=0|STATE=EMPTY`n20260913162402_DisposableDevelopmentCurrentModelBaseline`n",
+        "RHEMA_MIGRATION_HISTORY_V1|COUNT=2|STATE=POPULATED`n20260913162402_DisposableDevelopmentCurrentModelBaseline`n20260913162402_DisposableDevelopmentCurrentModelBaseline`n"
+    )) {
+        [System.IO.File]::WriteAllText($emptyHistoryPath, $badContent, [System.Text.UTF8Encoding]::new($false))
+        $refused = $false
+        try { $null = Read-MigrationHistoryEvidence $emptyHistoryPath 'Synthetic source history' }
+        catch { $refused = $true }
+        if (-not $refused) { throw 'Migration-history parser accepted missing/empty/tampered marker evidence.' }
+    }
+    Write-Host 'PASS: actual zero/nonzero migration-history publication, phase-02 binding and tamper refusals'
     $uniqueBackupRoot = New-ExternalEvidencePath 'UNIQUE_BACKUPS'
     New-Item -ItemType Directory -Path $uniqueBackupRoot | Out-Null
     $legacyBackupPath = Join-Path $uniqueBackupRoot 'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
@@ -276,7 +312,7 @@ exit 0
         Write-DisposablePhaseMarker $phaseSevenFailureRoot ($index+1) $phaseSevenNames[$index]
     }
     $baselineMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'
-    $baselineMigration | Set-Content -Encoding ascii -LiteralPath (Join-Path $phaseSevenFailureRoot 'target-migration-history.txt')
+    $null = Write-MigrationHistoryEvidence (Join-Path $phaseSevenFailureRoot 'target-migration-history.txt') @($baselineMigration)
     New-Item -ItemType Directory -Path (Join-Path $phaseSevenFailureRoot 'phase-07.json') | Out-Null
     $phaseSevenPublicationRefused=$false
     try { Write-DisposablePhaseMarker $phaseSevenFailureRoot 7 'MIGRATIONS_APPLIED' }
