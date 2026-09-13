@@ -2638,3 +2638,22 @@ audit restores `TR_PurchaseOrders_ApprovedCommercialCapacity` and
 model-declared, explicitly dropped, nor superseded. Behavioral and re-manifest tamper fixtures cover phase-07 marker
 failure, target-history downgrade/rebinding, fingerprint file/status drift, and non-history drift from the final
 destructive-boundary evidence. No runtime or preserved evidence access is authorized by this correction.
+
+The separately authorized disposable-development attempt 04 executed exact approved commit
+`2de5f800c47e58fe62ca1715db0ac4aef5001327`, tree
+`8a2f30bead3500138657c85a8447765330500515`, and reached the corrected exact local SQL endpoint. It captured the
+unchanged schema-empty source fingerprint `0|EMPTY|0|0|0` and zero source migration rows, then stopped fail-closed at
+`SOURCE_CAPTURE` with last durable phase `OFFLINE_GATES_COMPLETE`. No backup was created and no reset mutation ran.
+The terminal evidence package validator passed; external attempts 01-04 and their backups/evidence remain untouched.
+
+Root cause was the zero-row PowerShell pipeline writer: an empty `$sourceHistory | Set-Content` invocation created no
+artifact, so phase-02 SHA-256 publication failed. The bounded correction completed as
+`9554038d207b7ac7ef541f18ba493d277363c53e` (tree
+`3f3918222e15e6064110bd1918a0ce2fe2d726b1`). A shared atomic `RHEMA_MIGRATION_HISTORY_V1` writer/parser now covers
+reset repository/source/target history and FinalClone source/pending/orphan/target sets. Zero rows produce an explicit
+nonempty `COUNT=0|STATE=EMPTY` artifact; populated records bind exact count and unique ordinal IDs. Producer logic
+parses the published artifact before downstream fingerprint/delta work, reset phase-02 binds its SHA-256, and status,
+summary, artifact maps and manifests bind the schema and content. Behavioral tests execute real zero/nonzero writes
+and phase-02 publication; independent validation refuses missing, empty, marker/count/state, duplicate and ordering
+tampering after re-manifesting. No database, environment connection, backup, or preserved evidence directory was
+accessed during correction. Sol High review is required before any separately authorized attempt 05.

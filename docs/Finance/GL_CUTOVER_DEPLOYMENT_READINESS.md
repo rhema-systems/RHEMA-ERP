@@ -397,6 +397,27 @@ named deployment, Finance, DBA, independent-review, and rollback owners.
 
 No item in this document authorizes migration application or feature enablement by itself.
 
+### Disposable reset attempt 04 and zero-history correction
+
+The separately authorized attempt 04 ran exact reviewed commit
+`2de5f800c47e58fe62ca1715db0ac4aef5001327`, tree
+`8a2f30bead3500138657c85a8447765330500515`, against the corrected exact local endpoint and stopped fail-closed at
+`SOURCE_CAPTURE`. The source was the already recreated schema-empty development database: fingerprint
+`0|EMPTY|0|0|0`, zero migration-history rows, no backup, and no reset mutation in this attempt. Its last durable phase
+was `OFFLINE_GATES_COMPLETE`; the terminal package validator passed and external attempt-01/02/03/04 evidence remains
+preserved.
+
+The defect was evidence publication, not database state: piping an empty PowerShell array to `Set-Content` did not
+create `source-migration-history.txt`, so phase-02 could not hash the zero-row history. Correction
+`9554038d207b7ac7ef541f18ba493d277363c53e` (tree
+`3f3918222e15e6064110bd1918a0ce2fe2d726b1`) replaces every reset and FinalClone migration-set writer with one atomic
+`RHEMA_MIGRATION_HISTORY_V1` record. It publishes an explicit `COUNT=0|STATE=EMPTY` marker for zero rows and a
+count-bound ordered list for populated history, then parses the written artifact back before fingerprint/delta use.
+Reset phase-02 binds the exact source-history SHA-256; terminal status/summary and manifests bind the format and
+artifact hashes. Independent validation refuses missing, empty, count/state-tampered, duplicate, malformed, or
+out-of-order records. No database, process connection variable, or preserved external evidence was accessed during
+the correction. A new reset attempt requires independent Sol High review and separate authorization.
+
 The V2 early-state/legacy discriminator correction completed as `5cf447bac84d14a67a77bd955de28176b4a21774`
 (tree `0c43d41ee271a2eab70c33777feb1df4d01541ab`). Empty media/name/path-hash is valid only for unowned,
 uncreated, incomplete pre-phase-03 failures at NOT_STARTED, OFFLINE or SOURCE_CAPTURE. Once path identity is resolved,
