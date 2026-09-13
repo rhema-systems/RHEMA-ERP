@@ -2350,3 +2350,19 @@ one quiescent final history/fingerprint/reset batch, pre-dispatch helper availab
 immediate partial-backup recovery state, exact 456/C8 list proof, a dedicated `DisposableReset` hash/sanitization/
 tamper validator and behavioral failure/termination fixtures. No database, connection variable or preserved
 evidence directory is accessed; execution remains prohibited pending clean gates and Sol High re-review.
+
+The bounded D2 correction completed as clean direct-child implementation commit
+`abace200db87c92c0413e8f11469b5774ba8e3b5` (tree
+`52c5586163ad44c88df4034f28d3cf14bccc52e7`). The reset now rejects failover/multisubnet/application-intent/
+network-library ambiguity, proves the exact binary `RhemaERP` name and actual local instance, defines and
+behaviorally exercises atomic backup reservation before dispatch, records a nonempty backup immediately before
+separate VERIFYONLY, and uses atomic contiguous phase markers so `RESET_STARTED=true` durably precedes the one
+destructive SQL call. That batch acquires the reset lock, rechecks backup/server/database identity, makes the source
+single-user, reconciles exact captured history and fingerprint while quiescent, then immediately performs its sole
+drop/recreate. Repository evidence is the exact unique ordered 456/C8 identity list. Terminal packages use the new
+`DisposableReset` validator and atomic manifest, bind every retained artifact hash, validate success and partial-
+failure semantics, and scan JSON/text/log/hash/SQL/Markdown for secrets and machine identity. PowerShell parsing,
+the complete disposable-reset refusal suite, actual helper/state-machine exercises, complete/partial/tampered reset
+packages, the existing rehearsal safety suite and final-clone evidence/tamper suite all passed serially. No database,
+connection variable or preserved evidence was accessed. Sol High re-review is required over the ledger-only
+descendant; execution remains prohibited.

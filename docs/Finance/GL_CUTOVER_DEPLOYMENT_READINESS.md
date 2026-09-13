@@ -182,9 +182,9 @@ requires one of these explicit decisions:
    data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
    is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Phase D2 correction is active offline after independent review of exact `5ced81af`. Execution remains prohibited
-until the corrected reset implementation and tree receive Sol High approval; no database mutation has occurred
-under this authorization.
+Phase D2 correction completed offline as exact implementation commit `abace200db87c92c0413e8f11469b5774ba8e3b5`
+after independent review of `5ced81af`. Execution remains prohibited until the corrected implementation and its
+ledger-only descendant receive Sol High approval; no database mutation has occurred under this authorization.
 
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
