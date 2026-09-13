@@ -1282,6 +1282,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesOrderService, ErpSystem.Core.Services.Sales.SalesOrderService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSetupService, ErpSystem.Core.Services.Sales.SalesSetupService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesAllocationService, ErpSystem.Core.Services.Sales.SalesAllocationService>();
+        services.AddScoped<ErpSystem.Core.Interfaces.Sales.IOpportunityService, ErpSystem.Core.Services.Sales.OpportunityService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ICompetitorService, ErpSystem.Core.Services.Sales.CompetitorService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesReportingService, ErpSystem.Core.Services.Sales.SalesReportingService>();
         services.AddScoped<ErpSystem.Core.Interfaces.Sales.ISalesSaleableSourceAdapter, ErpSystem.Core.Services.Sales.ProjectUnitSaleableSourceAdapter>();

@@ -334,7 +334,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         var method = Slice(
             source,
             "private async Task EnsureStampDutyPayableAsync",
-            "private async Task EnsureAcquisitionPayableApprovedAndPostedAsync");
+            "private async Task EnsureOtherAcquisitionCostsPayableAsync");
 
         method.Should().Contain("payment.AccountsPayableSupplierId = invoice.SupplierId;");
         method.Should().Contain("[\"accountsPayableSupplierId\"] = invoice.SupplierId");
@@ -343,7 +343,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
-    public void AcquisitionPayableApproval_RepairsLegacySubmissionMetadataBeforePostingGate()
+    public void AcquisitionPayableSubmission_UsesFinanceApprovalWorkflow()
     {
         var source = ReadSource(
             "src",
@@ -353,14 +353,13 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "LandAcquisitionsController.cs");
         var method = Slice(
             source,
-            "private async Task EnsureAcquisitionPayableApprovedAndPostedAsync",
+            "private async Task EnsureAcquisitionPayableSubmittedForApprovalAsync",
             "private async Task<Guid> ResolveLandAcquisitionDebitAccountIdAsync");
 
-        method.Should().Contain("!invoice.SubmittedById.HasValue || invoice.SubmittedById.Value == Guid.Empty || !invoice.SubmittedDate.HasValue");
-        method.Should().Contain("invoice.SubmittedById = userId == Guid.Empty ? invoice.ApprovedById : userId;");
-        method.Should().Contain("invoice.SubmittedDate ??= invoice.ApprovedDate ?? now;");
-        method.IndexOf("if (!invoice.SubmittedById.HasValue", StringComparison.Ordinal)
-            .Should().BeLessThan(method.IndexOf("if (!invoice.JournalEntryId.HasValue)", StringComparison.Ordinal));
+        method.Should().Contain("if (invoice.Status == VendorInvoiceStatus.Draft)");
+        method.Should().Contain("await _vendorInvoiceService.SubmitForApprovalAsync(invoice.Id, cancellationToken);");
+        method.Should().Contain("if (invoice.Status == VendorInvoiceStatus.Rejected)");
+        method.Should().Contain("was rejected");
     }
 
     [Fact]
@@ -765,6 +764,60 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
+    public void OutboundDemarcationCosting_ReconcilesLeafTotalsAndParentPools()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Core",
+            "Services",
+            "Estate",
+            "EstateManagedAssetService.cs");
+        var costingGuard = Slice(
+            source,
+            "private static void EnsureDemarcationCostingReconcilesForOutbound(",
+            "private async Task<HashSet<string>> GetAssignedProjectLandReferencesAsync");
+
+        costingGuard.Should().Contain("GetLeafDemarcations(demarcations)");
+        costingGuard.Should().Contain("GetLeafDescendants(demarcations, parent.Id)");
+        costingGuard.Should().Contain("leafDemarcations.Sum(item => item.AllocatedCost!.Value)");
+        costingGuard.Should().Contain("Demarcation costs must equal the parent land value.");
+        costingGuard.Should().Contain("must equal its parent pool");
+    }
+
+    [Fact]
+    public void LandCreationFixedAsset_IsCreatedOnlyAfterSuccessfulWorkflowCompletion()
+    {
+        var source = ReadSource(
+            "src",
+            "ErpSystem.Api",
+            "Controllers",
+            "Estate",
+            "LandAcquisitionsController.cs");
+        var saveWorkspace = Slice(
+            source,
+            "public async Task<ActionResult<LandAcquisitionWorkspaceResponse>> SaveWorkspace(",
+            "[HttpGet(\"{id:guid}/workspace/{procedureId:int}\")]");
+        var workflowAction = Slice(
+            source,
+            "[HttpPost(\"workflow-action\")]",
+            "[HttpPost(\"{id:guid}/workflow-task-completion\")]");
+        var completionHelper = Slice(
+            source,
+            "private async Task EnsureFinanceFixedAssetForCompletedLandCreationAsync(",
+            "private async Task EnsureFinanceFixedAssetForLandAssetAsync(");
+
+        saveWorkspace.Should().NotContain("EnsureFinanceFixedAssetForLandAssetAsync");
+        workflowAction.Should().Contain("EnsureFinanceFixedAssetForCompletedLandCreationAsync");
+        workflowAction.IndexOf("var missingInputs", StringComparison.Ordinal)
+            .Should().BeLessThan(
+                workflowAction.IndexOf(
+                    "EnsureFinanceFixedAssetForCompletedLandCreationAsync",
+                    StringComparison.Ordinal));
+        completionHelper.Should().Contain("workflowOutcome != WorkflowOutcome.Approved");
+        completionHelper.Should().Contain("SnapshotToObjectDictionary(assetCreationSnapshot)");
+    }
+
+    [Fact]
     public void DemarcationEditors_ConfirmBeforeReplacingUnsavedDrafts()
     {
         var dialog = ReadSource(
@@ -984,7 +1037,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "public async Task<ActionResult<EstateSaleCompletionResult>> CompleteSaleOwnership",
             "[HttpPost(\"invoices\")]");
 
-        completion.Should().Contain("invoice.BalanceAmount > 0m");
+        completion.Should().Contain("invoice.BalanceAmount <= 0m");
         completion.Should().Contain("invoice.Status, \"Paid\"");
         completion.Should().Contain("legalConveyanceStatus");
         completion.Should().Contain("\"Completed by Legal\"");

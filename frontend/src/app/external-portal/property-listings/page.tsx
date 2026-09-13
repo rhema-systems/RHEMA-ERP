@@ -6,6 +6,8 @@ import {
   Building2,
   CalendarDays,
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   FileText,
   Filter,
   Home,
@@ -121,6 +123,13 @@ function listingFallbackImage(listing: ExternalEstateListing) {
   return '/images/estate/listing-apartment-fallback.png';
 }
 
+function parsePriceFilter(value: string) {
+  const parsed = Number(value.trim());
+  return value.trim() && Number.isFinite(parsed) && parsed >= 0
+    ? parsed
+    : undefined;
+}
+
 function isLandListing(listing?: ExternalEstateListing | null) {
   if (!listing) return false;
   const assetType = String(listing.assetType).toLowerCase();
@@ -201,6 +210,7 @@ function ListingStat({
 }
 
 export default function ExternalPropertyListingsPage() {
+  const pageSize = 10;
   const { toast } = useToast();
   const [customerProfiles, setCustomerProfiles] = React.useState<
     ExternalCustomerProfile[]
@@ -212,6 +222,13 @@ export default function ExternalPropertyListingsPage() {
   const [search, setSearch] = React.useState('');
   const [location, setLocation] = React.useState('');
   const [listingType, setListingType] = React.useState('all');
+  const [minPrice, setMinPrice] = React.useState('');
+  const [maxPrice, setMaxPrice] = React.useState('');
+  const [page, setPage] = React.useState(1);
+  const [totalCount, setTotalCount] = React.useState(0);
+  const [totalPages, setTotalPages] = React.useState(1);
+  const [hasPreviousPage, setHasPreviousPage] = React.useState(false);
+  const [hasNextPage, setHasNextPage] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
   const [submittingListingId, setSubmittingListingId] = React.useState<string | null>(null);
@@ -230,29 +247,37 @@ export default function ExternalPropertyListingsPage() {
     [listings, selectedId]
   );
 
-  const loadListings = React.useCallback(async () => {
+  const loadListings = React.useCallback(async (pageNumber = 1) => {
     setIsLoading(true);
     setError(null);
     try {
-      const data = await externalEstateListingsService.getListings({
+      const result = await externalEstateListingsService.getListingsPage({
         search,
         location,
         listingType,
         businessPartnerId: selectedCustomerId || undefined,
-        take: 120,
+        minPrice: parsePriceFilter(minPrice),
+        maxPrice: parsePriceFilter(maxPrice),
+        page: pageNumber,
+        pageSize,
       });
-      setListings(data);
+      setListings(result.items);
+      setPage(result.page);
+      setTotalCount(result.totalCount);
+      setTotalPages(result.totalPages);
+      setHasPreviousPage(result.hasPreviousPage);
+      setHasNextPage(result.hasNextPage);
       setSelectedId((current) =>
-        current && data.some((listing) => listing.id === current)
+        current && result.items.some((listing) => listing.id === current)
           ? current
-          : (data[0]?.id ?? null)
+          : (result.items[0]?.id ?? null)
       );
     } catch {
       setError('Could not load property listings.');
     } finally {
       setIsLoading(false);
     }
-  }, [listingType, location, search, selectedCustomerId]);
+  }, [listingType, location, maxPrice, minPrice, pageSize, search, selectedCustomerId]);
 
   React.useEffect(() => {
     let mounted = true;
@@ -339,13 +364,13 @@ export default function ExternalPropertyListingsPage() {
               Loading
             </>
           ) : (
-            `${listings.length} available`
+            `${totalCount} available`
           )}
         </Badge>
       </div>
 
       <Card>
-        <CardContent className="grid gap-3 p-4 md:grid-cols-[1fr_1fr_180px_auto]">
+        <CardContent className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_180px_160px_160px_auto]">
           <div className="relative">
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input
@@ -374,8 +399,26 @@ export default function ExternalPropertyListingsPage() {
               <SelectItem value="Sale">For sale</SelectItem>
               <SelectItem value="Rent">For rent</SelectItem>
             </SelectContent>
-          </Select>
-          <Button onClick={() => void loadListings()}>
+            </Select>
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            value={minPrice}
+            onChange={(event) => setMinPrice(event.target.value)}
+            placeholder="Minimum price"
+            aria-label="Minimum price"
+          />
+          <Input
+            type="number"
+            min="0"
+            step="0.01"
+            value={maxPrice}
+            onChange={(event) => setMaxPrice(event.target.value)}
+            placeholder="Maximum price"
+            aria-label="Maximum price"
+          />
+          <Button onClick={() => void loadListings(1)}>
             <Search className="mr-2 h-4 w-4" />
             Search
           </Button>
@@ -428,64 +471,94 @@ export default function ExternalPropertyListingsPage() {
       ) : null}
 
       <div className="grid items-start gap-4 xl:grid-cols-[minmax(0,1fr)_420px]">
-        <div className="grid auto-rows-max content-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
-          {isLoading ? (
-            <div className="col-span-full flex items-center justify-center gap-2 rounded-md border py-16 text-sm text-slate-500">
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Loading listings
-            </div>
-          ) : null}
+        <div className="space-y-4">
+          <div className="grid auto-rows-max content-start gap-4 md:grid-cols-2 2xl:grid-cols-3">
+            {isLoading ? (
+              <div className="col-span-full flex items-center justify-center gap-2 rounded-md border py-16 text-sm text-slate-500">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Loading listings
+              </div>
+            ) : null}
 
-          {!isLoading && listings.length === 0 ? (
-            <div className="col-span-full rounded-md border border-dashed py-16 text-center text-sm text-slate-500">
-              No listings found.
-            </div>
-          ) : null}
+            {!isLoading && listings.length === 0 ? (
+              <div className="col-span-full rounded-md border border-dashed py-16 text-center text-sm text-slate-500">
+                No listings found.
+              </div>
+            ) : null}
 
-          {listings.map((listing) => {
-            const active = selectedId === listing.id;
-            return (
-              <div
-                key={listing.id}
-                className={`overflow-hidden rounded-md border bg-white text-left shadow-sm transition ${
-                  active ? 'border-blue-600 ring-2 ring-blue-100' : ''
-                }`}
-              >
-                <button
-                  type="button"
-                  onClick={() => setSelectedId(listing.id)}
-                  className="block w-full text-left"
+            {listings.map((listing) => {
+              const active = selectedId === listing.id;
+              return (
+                <div
+                  key={listing.id}
+                  className={`overflow-hidden rounded-md border bg-white text-left shadow-sm transition ${
+                    active ? 'border-blue-600 ring-2 ring-blue-100' : ''
+                  }`}
                 >
-                <ListingImage listing={listing} />
-                <div className="space-y-3 p-4">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-slate-900">
-                        {listing.name}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedId(listing.id)}
+                    className="block w-full text-left"
+                  >
+                    <ListingImage listing={listing} />
+                    <div className="space-y-3 p-4">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="truncate font-semibold text-slate-900">
+                            {listing.name}
+                          </div>
+                          <div className="mt-1 truncate text-xs text-slate-500">
+                            {listing.assetCode}
+                          </div>
+                        </div>
+                        <Badge variant="secondary">
+                          {listingTypeLabel(listing.externalListingType)}
+                        </Badge>
                       </div>
-                      <div className="mt-1 truncate text-xs text-slate-500">
-                        {listing.assetCode}
+                      <div className="flex items-center gap-2 text-sm text-slate-600">
+                        <MapPin className="h-4 w-4 shrink-0" />
+                        <span className="truncate">{locationLabel(listing)}</span>
+                      </div>
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="font-semibold text-slate-900">
+                          {listingPriceSummary(listing)}
+                        </span>
+                        <span className="text-slate-500">{areaLabel(listing)}</span>
                       </div>
                     </div>
-                    <Badge variant="secondary">
-                      {listingTypeLabel(listing.externalListingType)}
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-2 text-sm text-slate-600">
-                    <MapPin className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{locationLabel(listing)}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-3 text-sm">
-                    <span className="font-semibold text-slate-900">
-                      {listingPriceSummary(listing)}
-                    </span>
-                    <span className="text-slate-500">{areaLabel(listing)}</span>
-                  </div>
+                  </button>
                 </div>
-                </button>
+              );
+            })}
+          </div>
+
+          {!isLoading && totalCount > 0 ? (
+            <div className="flex items-center justify-between rounded-md border bg-white px-3 py-2 text-sm text-slate-600">
+              <span>
+                Page {page} of {totalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasPreviousPage}
+                  onClick={() => void loadListings(page - 1)}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Previous
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasNextPage}
+                  onClick={() => void loadListings(page + 1)}
+                >
+                  Next
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
               </div>
-            );
-          })}
+            </div>
+          ) : null}
         </div>
 
         <Card className="h-fit">

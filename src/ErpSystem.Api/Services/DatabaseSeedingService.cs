@@ -8,6 +8,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
@@ -353,6 +354,9 @@ namespace ErpSystem.Web.Services
                     var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
                     if (defaultTenant != null)
                     {
+                        _logger.LogInformation("Ensuring public estate portal demo sale listings are seeded...");
+                        await EnsurePublicEstatePortalDemoSaleListingsSeededAsync(defaultTenant.Id);
+
                         var ehcDemoSeeder = new EhcHelpdeskDemoSeeder(_context, _logger);
                         await ehcDemoSeeder.SeedAsync(defaultTenant.Id);
                     }
@@ -7646,6 +7650,391 @@ namespace ErpSystem.Web.Services
                 }
             }
         }
+
+        private async Task EnsurePublicEstatePortalDemoSaleListingsSeededAsync(Guid tenantId)
+        {
+            var now = DateTime.UtcNow;
+            var seeds = new[]
+            {
+                new PublicEstatePortalSaleListingSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-001",
+                    AssetCode: "TDC-PORTAL-LAND-001",
+                    AssetName: "Community 25 Serviced Parcel 01",
+                    ListingNotes: "Serviced residential land available for purchase. Boundary verified and ready for buyer enquiry.",
+                    Location: "Community 25 Extension, Tema",
+                    Town: "Tema Community 25",
+                    District: "Tema West",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 5445m,
+                    SalePrice: 850000m,
+                    OwnerName: "Nii Tema Family Stool",
+                    ContactNumber: "0302001101",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-001",
+                    MapSheetNumber: "MS-TDC-C25-001",
+                    DemarcationNumber: 1),
+                new PublicEstatePortalSaleListingSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-002",
+                    AssetCode: "TDC-PORTAL-LAND-002",
+                    AssetName: "East Legon Hills Residential Parcel 02",
+                    ListingNotes: "Residential land parcel published to the public portal for sales enquiry.",
+                    Location: "East Legon Hills, Accra",
+                    Town: "East Legon Hills",
+                    District: "Adentan",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 7200m,
+                    SalePrice: 1250000m,
+                    OwnerName: "Mensah-Aryee Family",
+                    ContactNumber: "0302001102",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-002",
+                    MapSheetNumber: "MS-TDC-ELH-002",
+                    DemarcationNumber: 1)
+            };
+
+            foreach (var seed in seeds)
+            {
+                var acquisition = await _context.LandAcquisitions
+                    .Include(item => item.CadastralSurveys)
+                    .Include(item => item.OwnershipHistories)
+                    .Include(item => item.NegotiationOffers)
+                    .Include(item => item.LandAssets)
+                    .FirstOrDefaultAsync(item =>
+                        item.TenantId == tenantId
+                        && item.ProjectReference == seed.ProjectReference
+                        && !item.IsDeleted);
+
+                if (acquisition is null)
+                {
+                    acquisition = new LandAcquisition
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        ProjectReference = seed.ProjectReference,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    _context.LandAcquisitions.Add(acquisition);
+                }
+
+                acquisition.IntendedUse = "Residential sale listing";
+                acquisition.EstimatedSize = seed.AreaSquareFeet;
+                acquisition.Location = seed.Location;
+                acquisition.CurrentStage = AcquisitionProcedure.LandAssetCreation;
+                acquisition.Status = LandAcquisitionStatus.AssetCreated;
+                acquisition.OwnershipType = LandOwnershipType.Family;
+                acquisition.Coordinates = BuildSeedBoundary(seed);
+                acquisition.StageOrder = (int)AcquisitionProcedure.LandAssetCreation;
+                acquisition.PlanningUploaded = true;
+                acquisition.InternalApproved = true;
+                acquisition.SuitableForDueDiligence = true;
+                acquisition.ApprovedAt ??= now.AddDays(-7);
+                acquisition.UpdatedAt = now;
+                acquisition.UpdatedBy = "System";
+
+                EnsureSeedCadastralSurvey(acquisition, seed, tenantId, now);
+                EnsureSeedOwnershipHistory(acquisition, seed, tenantId, now);
+                EnsureSeedNegotiationOffer(acquisition, seed, tenantId, now);
+                EnsureSeedLandAsset(acquisition, seed, tenantId, now);
+
+                var asset = await _context.EstateManagedAssets
+                    .Include(item => item.Demarcations)
+                    .FirstOrDefaultAsync(item =>
+                        item.TenantId == tenantId
+                        && item.AssetCode == seed.AssetCode
+                        && !item.IsDeleted);
+
+                if (asset is null)
+                {
+                    asset = new EstateManagedAsset
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        AssetCode = seed.AssetCode,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    _context.EstateManagedAssets.Add(asset);
+                }
+
+                asset.LandAcquisitionId = acquisition.Id;
+                asset.Name = seed.AssetName;
+                asset.Description = seed.ListingNotes;
+                asset.Location = seed.Location;
+                asset.Purpose = "Residential development";
+                asset.ZoningClassification = "Residential";
+                asset.PlanningComplianceStatus = "Compliant";
+                asset.BoundaryVerified = true;
+                asset.BoundaryCoordinates = BuildSeedBoundary(seed);
+                asset.SurveyPlanNumber = seed.SurveyPlanNumber;
+                asset.MapSheetNumber = seed.MapSheetNumber;
+                asset.CadastreDescription = $"{seed.AssetName} cadastral survey";
+                asset.Region = seed.Region;
+                asset.District = seed.District;
+                asset.Town = seed.Town;
+                asset.AreaValue = seed.AreaSquareFeet;
+                asset.AreaUnit = "square feet";
+                asset.SurveyorName = "TDC Survey Unit";
+                asset.SurveyDate = now.Date.AddDays(-21);
+                asset.BeaconCount = 4;
+                asset.AssetType = EstateManagedAssetType.Land;
+                asset.Status = EstateManagedAssetStatus.LandBank;
+                asset.SourceType = EstateManagedAssetSourceType.LandAcquisition;
+                asset.ProjectId = null;
+                asset.ProjectCode = null;
+                asset.ProjectTitle = null;
+                asset.CustomerBusinessPartnerId = null;
+                asset.LesseeName = null;
+                asset.AreaSquareMeters = seed.AreaSquareFeet * 0.09290304m;
+                asset.ValuationAmount = seed.SalePrice;
+                asset.OwnerConsiderationCost = seed.SalePrice * 0.70m;
+                asset.ExternalSurveyorCost = 25000m;
+                asset.StampDutyCost = seed.SalePrice * 0.01m;
+                asset.OtherAcquisitionCost = 15000m;
+                asset.TotalCapitalizedCost =
+                    asset.OwnerConsiderationCost + asset.ExternalSurveyorCost + asset.StampDutyCost + asset.OtherAcquisitionCost;
+                asset.Currency = "GHS";
+                asset.IsAvailableForLease = false;
+                asset.IsAvailableForSale = true;
+                asset.IsPublishedFromProject = false;
+                asset.IsPublishedToExternalPortal = false;
+                asset.ExternalListingType = "Sale";
+                asset.ExternalListingStatus = "Draft";
+                asset.ExternalListingPrice = seed.SalePrice;
+                asset.ExternalSalePrice = seed.SalePrice;
+                asset.ExternalMonthlyRent = null;
+                asset.ExternalLeaseTermMonths = null;
+                asset.ExternalListingCurrency = "GHS";
+                asset.ExternalListingNotes = seed.ListingNotes;
+                asset.ExternalPublishedAt = now.AddDays(-2);
+                asset.Notes = "Seeded public portal land sale listing for sales enquiry testing.";
+                asset.IsReadyForProjectManagement = false;
+                asset.UpdatedAt = now;
+                asset.UpdatedBy = "System";
+
+                var demarcation = asset.Demarcations.FirstOrDefault(item =>
+                    item.DemarcationNumber == seed.DemarcationNumber
+                    && !item.IsDeleted);
+                if (demarcation is null)
+                {
+                    demarcation = new EstateLandDemarcation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        EstateManagedAssetId = asset.Id,
+                        EstateManagedAsset = asset,
+                        DemarcationNumber = seed.DemarcationNumber,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    asset.Demarcations.Add(demarcation);
+                }
+
+                demarcation.Description = seed.ListingNotes;
+                demarcation.BeaconCount = 4;
+                demarcation.BoundaryCoordinates = BuildSeedBoundary(seed);
+                demarcation.AreaSquareFeet = seed.AreaSquareFeet;
+                demarcation.BoundaryVerified = true;
+                demarcation.CostAllocationMethod = "Manual";
+                demarcation.AllocatedCost = asset.TotalCapitalizedCost;
+                demarcation.CostPerAcre = asset.TotalCapitalizedCost / (seed.AreaSquareFeet / 43560m);
+                demarcation.TargetSalePrice = seed.SalePrice;
+                demarcation.ParentLandAssetReference = seed.AssetCode;
+                demarcation.FixedAssetPostingStatus = "NotRequired";
+                demarcation.IsReadyForProjectManagement = false;
+                demarcation.IsPublishedToExternalPortal = true;
+                demarcation.ExternalListingType = "Sale";
+                demarcation.ExternalListingStatus = "Published";
+                demarcation.ExternalListingPrice = seed.SalePrice;
+                demarcation.ExternalSalePrice = seed.SalePrice;
+                demarcation.ExternalMonthlyRent = null;
+                demarcation.ExternalLeaseTermMonths = null;
+                demarcation.ExternalListingCurrency = "GHS";
+                demarcation.ExternalListingNotes = seed.ListingNotes;
+                demarcation.ExternalPublishedAt = now.AddDays(-2);
+                demarcation.UpdatedAt = now;
+                demarcation.UpdatedBy = "System";
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static void EnsureSeedCadastralSurvey(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.CadastralSurveys.Any(item => item.PlanNumber == seed.SurveyPlanNumber && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.CadastralSurveys.Add(new CadastralSurvey
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                SurveyorName = "TDC Survey Unit",
+                SurveyDate = now.Date.AddDays(-21),
+                SurveyorSignedDate = now.Date.AddDays(-19),
+                PlanNumber = seed.SurveyPlanNumber,
+                MapSheetNumber = seed.MapSheetNumber,
+                BeaconCount = "4",
+                Description = $"{seed.AssetName} cadastral survey",
+                AreaSize = seed.AreaSquareFeet,
+                AreaUnit = "square feet",
+                BoundaryCoordinates = BuildSeedBoundary(seed),
+                RegionalSurveyorName = "Regional Survey Office",
+                RegionalSurveyorSignedDate = now.Date.AddDays(-18),
+                MainPortion = true,
+                CadastralMatch = true,
+                OverlapCleared = true,
+                BoundaryConfirmed = true,
+                VerificationReference = $"VR-{seed.ProjectReference}",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static void EnsureSeedOwnershipHistory(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.OwnershipHistories.Any(item => item.OwnerName == seed.OwnerName && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.OwnershipHistories.Add(new OwnershipHistory
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                OwnerName = seed.OwnerName,
+                ContactNumber = seed.ContactNumber,
+                Address = seed.Location,
+                OwnershipType = LandOwnershipType.Family,
+                AcquisitionMethod = LandAcquisitionMethod.Purchase,
+                TenureType = "Freehold",
+                OwnershipStartDate = now.Date.AddYears(-10),
+                OwnershipPercentage = 100m,
+                IsCurrentOwner = true,
+                InterestHeld = "Beneficial ownership",
+                RiskLevel = "Low",
+                TitleSearchCompleted = true,
+                OwnerIdentityVerified = true,
+                AuthorityToSellVerified = true,
+                SearchReference = $"SR-{seed.ProjectReference}",
+                IdentificationType = "Family / stool authority",
+                IdentificationNumber = seed.ProjectReference,
+                Notes = "Seeded owner profile for portal listing demo.",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static void EnsureSeedNegotiationOffer(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.NegotiationOffers.Any(item => item.IsAccepted && item.NegotiatedValue == seed.SalePrice && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.NegotiationOffers.Add(new NegotiationOffer
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                OpeningOffer = seed.SalePrice * 0.85m,
+                CounterOffer = seed.SalePrice,
+                NegotiatedValue = seed.SalePrice,
+                SellerQuote = seed.SalePrice,
+                PaymentTerms = "Full payment on sales agreement execution",
+                PaymentType = "Bank transfer",
+                AgreementDay = now.Day.ToString("00"),
+                AgreementMonth = now.Month.ToString("00"),
+                AgreementYear = now.Year.ToString(),
+                AgreementGenerated = true,
+                Notes = "Accepted demo acquisition value used as public portal sale price.",
+                IsAccepted = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static void EnsureSeedLandAsset(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.LandAssets.Any(item => item.AssetCode == seed.AssetCode && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.LandAssets.Add(new LandAsset
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                AssetCode = seed.AssetCode,
+                AssetNumber = seed.AssetCode,
+                ParcelIdentifier = $"{seed.AssetCode}-P{seed.DemarcationNumber:000}",
+                RegistrationNumber = $"REG-{seed.ProjectReference}",
+                OwnerName = seed.OwnerName,
+                Location = seed.Location,
+                AssetCategory = "Land bank",
+                Size = seed.AreaSquareFeet,
+                SizeUnit = "square feet",
+                Status = "LandBank",
+                Purpose = "Residential development",
+                ZoningClassification = "Residential",
+                OwnershipVerification = "Verified",
+                CapitalizationValue = seed.SalePrice,
+                GlAccount = "Land Bank",
+                Custodian = "Estate Management",
+                Notes = "Seeded land asset backing a public portal listing.",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static string BuildSeedBoundary(PublicEstatePortalSaleListingSeed seed)
+        {
+            var longitude = seed.AssetCode.EndsWith("002", StringComparison.Ordinal) ? -0.1837m : -0.0086m;
+            var latitude = seed.AssetCode.EndsWith("002", StringComparison.Ordinal) ? 5.7138m : 5.6813m;
+            return JsonSerializer.Serialize(new[]
+            {
+                new { lat = latitude, lng = longitude },
+                new { lat = latitude + 0.0010m, lng = longitude },
+                new { lat = latitude + 0.0010m, lng = longitude + 0.0010m },
+                new { lat = latitude, lng = longitude + 0.0010m },
+                new { lat = latitude, lng = longitude }
+            });
+        }
+
+        private sealed record PublicEstatePortalSaleListingSeed(
+            string ProjectReference,
+            string AssetCode,
+            string AssetName,
+            string ListingNotes,
+            string Location,
+            string Town,
+            string District,
+            string Region,
+            decimal AreaSquareFeet,
+            decimal SalePrice,
+            string OwnerName,
+            string ContactNumber,
+            string SurveyPlanNumber,
+            string MapSheetNumber,
+            int DemarcationNumber);
 
         private async Task EnsureEstateSopExampleCasesSeededAsync()
         {
