@@ -107,6 +107,19 @@ interface ApiResponse<T> {
   };
 }
 
+function appendQueryParams(endpoint: string, query?: Record<string, unknown>) {
+  if (!query) return endpoint;
+
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null || value === '') continue;
+    params.append(key, String(value));
+  }
+
+  const queryString = params.toString();
+  return queryString ? `${endpoint}?${queryString}` : endpoint;
+}
+
 export interface PublicEstateListingsPage {
   items: ExternalEstateListing[];
   page: number;
@@ -170,9 +183,9 @@ class ExternalEstateListingsService {
     search?: string;
     take?: number;
   }): Promise<ExternalEstateListing[]> {
-    const response = await apiService.get<ApiResponse<ExternalEstateListing[]>>(
-      '/estate/public/listings',
-      query
+    const response = await rawApiService.publicRequest<ApiResponse<ExternalEstateListing[]>>(
+      appendQueryParams('/estate/public/listings', query),
+      { method: 'GET' }
     );
     return response.data || [];
   }
@@ -186,9 +199,9 @@ class ExternalEstateListingsService {
     page?: number;
     pageSize?: number;
   }): Promise<PublicEstateListingsPage> {
-    const response = await apiService.get<ApiResponse<ExternalEstateListing[]>>(
-      '/estate/public/listings',
-      query
+    const response = await rawApiService.publicRequest<ApiResponse<ExternalEstateListing[]>>(
+      appendQueryParams('/estate/public/listings', query),
+      { method: 'GET' }
     );
     return {
       items: response.data || [],
