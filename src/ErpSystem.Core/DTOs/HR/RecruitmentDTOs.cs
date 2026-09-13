@@ -3468,6 +3468,8 @@ public class PreEmploymentCheckItemDto : BaseDto
     public string? Name { get; set; }
     public string DisplayName => !string.IsNullOrEmpty(Name) ? Name : CheckTypeName;
     public string? ServiceProviderName { get; set; }
+    /// <summary>The supplier behind the provider name, when it is one (round 3, lane G; D-14).</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
     public CheckItemStatus Status { get; set; }
     public string StatusName => Status.ToString();
     public DateTime? RequestedDate { get; set; }
@@ -3502,8 +3504,12 @@ public class CreatePreEmploymentCheckItemDto : CreateDtoBase
     [MaxLength(200)]
     public string? Name { get; set; }
 
+    /// <summary>Typed when the provider is not a supplier on file; mirrored from the supplier when one is named.</summary>
     [MaxLength(200)]
     public string? ServiceProviderName { get; set; }
+
+    /// <summary>A Procurement supplier (round 3, lane G; D-14) — must be the tenant's, live; refused otherwise.</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
 
     [MaxLength(2000)]
     public string? Instructions { get; set; }
@@ -3528,6 +3534,9 @@ public class UpdatePreEmploymentCheckItemDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? ServiceProviderName { get; set; }
+
+    /// <summary>A Procurement supplier (round 3, lane G; D-14); null keeps the typed name only.</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
 
     public CheckItemStatus Status { get; set; }
     public DateTime? RequestedDate { get; set; }
@@ -3688,6 +3697,36 @@ public class PreEmploymentCheckTemplateDetailDto : PreEmploymentCheckTemplateDto
     public List<PreEmploymentCheckTemplateItemDto> Items { get; set; } = new();
 }
 
+/// <summary>
+/// A supplier that provides one kind of pre-employment check (round 3, lane G; register row R-7;
+/// decision D-14). The check-type → provider cascade on the check and template screens reads these.
+/// </summary>
+public class PreEmploymentCheckProviderServiceDto : BaseDto
+{
+    public Guid TenantId { get; set; }
+    public Guid SupplierId { get; set; }
+    public string SupplierCode { get; set; } = string.Empty;
+    public string SupplierName { get; set; } = string.Empty;
+    public bool SupplierIsActive { get; set; }
+    public PreEmploymentCheckType CheckType { get; set; }
+    public string CheckTypeName => CheckType.ToString();
+    public string? Notes { get; set; }
+    public bool IsActive { get; set; }
+}
+
+/// <summary>One supplier, the check types it provides — one row is written per type; an existing pairing is kept.</summary>
+public class CreatePreEmploymentCheckProviderServicesDto
+{
+    [Required]
+    public Guid SupplierId { get; set; }
+
+    [Required, MinLength(1)]
+    public List<PreEmploymentCheckType> CheckTypes { get; set; } = new();
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+}
+
 public class PreEmploymentCheckTemplateItemDto : BaseDto
 {
     public Guid TenantId { get; set; }
@@ -3695,6 +3734,8 @@ public class PreEmploymentCheckTemplateItemDto : BaseDto
     public PreEmploymentCheckType CheckType { get; set; }
     public string CheckTypeName => CheckType.ToString();
     public string? DefaultServiceProvider { get; set; }
+    /// <summary>The supplier behind the default provider, when it is one (round 3, lane G; D-14).</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
     public string? Instructions { get; set; }
     public bool IsMandatory { get; set; }
     public bool IsBlockingOnFail { get; set; }
@@ -3734,6 +3775,9 @@ public class CreatePreEmploymentCheckTemplateItemDto : CreateDtoBase
     [MaxLength(200)]
     public string? DefaultServiceProvider { get; set; }
 
+    /// <summary>A Procurement supplier (round 3, lane G; D-14) — the tenant's, live; refused otherwise.</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
+
     [MaxLength(2000)]
     public string? Instructions { get; set; }
 
@@ -3752,6 +3796,9 @@ public class UpdatePreEmploymentCheckTemplateItemDto : UpdateDtoBase
 
     [MaxLength(200)]
     public string? DefaultServiceProvider { get; set; }
+
+    /// <summary>A Procurement supplier (round 3, lane G; D-14) — the tenant's, live; refused otherwise.</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
 
     [MaxLength(2000)]
     public string? Instructions { get; set; }

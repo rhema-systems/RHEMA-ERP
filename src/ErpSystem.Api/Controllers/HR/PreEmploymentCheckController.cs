@@ -160,7 +160,15 @@ public class PreEmploymentCheckController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        return Ok(await _service.AddItemAsync(dto, tenantId.Value, employeeId.Value));
+        try
+        {
+            return Ok(await _service.AddItemAsync(dto, tenantId.Value, employeeId.Value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            // The rule in its own words (the middleware would keep the 422 and discard the message).
+            return UnprocessableEntity(new { message = ex.Message });
+        }
     }
 
     [HttpPut("items/{itemId:guid}")]
@@ -175,7 +183,53 @@ public class PreEmploymentCheckController : ControllerBase
         if (employeeId == null)
             return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
 
-        return Ok(await _service.UpdateItemAsync(dto, employeeId.Value));
+        try
+        {
+            return Ok(await _service.UpdateItemAsync(dto, employeeId.Value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { message = ex.Message });
+        }
+    }
+
+    // =========================================================================
+    // PROVIDERS (round 3, lane G; register row R-7; decision D-14)
+    // =========================================================================
+    // Which Procurement suppliers provide which checks. The check-type → provider cascade on the
+    // check and template screens reads this; Procurement's own record is untouched.
+
+    [HttpGet("providers")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<IEnumerable<PreEmploymentCheckProviderServiceDto>>> GetProviderServices(
+        [FromQuery] PreEmploymentCheckType? checkType = null, [FromQuery] bool includeInactive = false)
+        => Ok(await _service.GetProviderServicesAsync(checkType, includeInactive));
+
+    [HttpPost("providers")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<IEnumerable<PreEmploymentCheckProviderServiceDto>>> AddProviderServices(
+        [FromBody] CreatePreEmploymentCheckProviderServicesDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+        try
+        {
+            return Ok(await _service.AddProviderServicesAsync(dto, employeeId.Value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return UnprocessableEntity(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("providers/{id:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<IActionResult> RemoveProviderService(Guid id)
+    {
+        await _service.RemoveProviderServiceAsync(id);
+        return NoContent();
     }
 
     [HttpDelete("items/{itemId:guid}")]

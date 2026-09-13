@@ -310,6 +310,7 @@ public partial class ApplicationDbContext
     public DbSet<PreEmploymentCheckItem> PreEmploymentCheckItems { get; set; } = null!;
     public DbSet<PreEmploymentCheckTemplate> PreEmploymentCheckTemplates { get; set; } = null!;
     public DbSet<PreEmploymentCheckTemplateItem> PreEmploymentCheckTemplateItems { get; set; } = null!;
+    public DbSet<PreEmploymentCheckProviderService> PreEmploymentCheckProviderServices { get; set; } = null!;
     public DbSet<ReferenceCheckResponse> ReferenceCheckResponses { get; set; } = null!;
     public DbSet<OnboardingPlanTemplate> OnboardingPlanTemplates { get; set; } = null!;
     public DbSet<OnboardingTaskTemplate> OnboardingTaskTemplates { get; set; } = null!;
@@ -8791,6 +8792,13 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.ReviewedById)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Round 3, lane G (D-14): the supplier behind the provider name.
+            entity.HasIndex(x => x.ServiceProviderSupplierId).HasDatabaseName("IX_PreEmpCheckItem_SupplierId");
+            entity.HasOne(x => x.ServiceProviderSupplier)
+                .WithMany()
+                .HasForeignKey(x => x.ServiceProviderSupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             // One check item → one reference response (FK lives on ReferenceCheckResponse)
             entity.HasOne(x => x.ReferenceResponse)
                 .WithOne(x => x.CheckItem)
@@ -8835,6 +8843,29 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.Items)
                 .HasForeignKey(x => x.TemplateId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            // Round 3, lane G (D-14): the supplier behind the default provider name.
+            entity.HasIndex(x => x.DefaultServiceProviderSupplierId).HasDatabaseName("IX_PreEmpCheckTemplateItem_SupplierId");
+            entity.HasOne(x => x.DefaultServiceProviderSupplier)
+                .WithMany()
+                .HasForeignKey(x => x.DefaultServiceProviderSupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- PreEmploymentCheckProviderService (round 3, lane G; D-14) ----
+        builder.Entity<PreEmploymentCheckProviderService>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.CheckType }).HasDatabaseName("IX_PreEmpCheckProvider_Tenant_Type");
+            // One row per supplier × check type, among live rows: a retired pairing may be re-added.
+            entity.HasIndex(x => new { x.TenantId, x.SupplierId, x.CheckType })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0")
+                .HasDatabaseName("IX_PreEmpCheckProvider_Tenant_Supplier_Type");
+            entity.Property(x => x.CheckType).HasConversion<int>();
+            entity.HasOne(x => x.Supplier)
+                .WithMany()
+                .HasForeignKey(x => x.SupplierId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ---- Onboarding ----

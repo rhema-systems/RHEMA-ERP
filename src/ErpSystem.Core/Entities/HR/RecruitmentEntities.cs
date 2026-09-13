@@ -500,6 +500,12 @@ public class RecruitmentPipelineStage : TenantEntity
 
     public bool IsActive { get; set; } = true;
 	
+	/// <summary>
+    /// Round 3, lane G (decision D-13): DERIVED — always <c>!CanSkip</c>. The form offers one switch
+    /// ("Can be skipped"); both columns stay so old readers keep working, and the service writes
+    /// them together. Enforced by the pipeline move: a non-skippable stage cannot be jumped over,
+    /// and the final stage refuses an application that never entered a required stage.
+    /// </summary>
 	public bool IsRequired { get; set; } = true;
         
     public int? DefaultTimeToCompleteDays { get; set; }
@@ -2606,8 +2612,19 @@ public class PreEmploymentCheckItem : TenantEntity
     [MaxLength(200)]
     public string? Name { get; set; }
 
+    /// <summary>
+    /// The provider's name — a SNAPSHOT (round 3, lane G; decision D-14). Mirrored from the
+    /// supplier when <see cref="ServiceProviderSupplierId"/> is set; typed when the provider is not
+    /// a supplier on file.
+    /// </summary>
     [MaxLength(200)]
     public string? ServiceProviderName { get; set; }
+
+    /// <summary>The Procurement supplier providing this check, when it is one (round 3, lane G; D-14).</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
+
+    [ForeignKey(nameof(ServiceProviderSupplierId))]
+    public virtual ErpSystem.Core.Entities.Procurement.Supplier? ServiceProviderSupplier { get; set; }
  
     public CheckItemStatus Status { get; set; } = CheckItemStatus.Pending;
  
@@ -2706,8 +2723,15 @@ public class PreEmploymentCheckTemplateItem : TenantEntity
 
     public PreEmploymentCheckType CheckType { get; set; }
 
+    /// <summary>The default provider's name — a snapshot, mirrored from the supplier when one is linked (round 3, lane G).</summary>
     [MaxLength(200)]
     public string? DefaultServiceProvider { get; set; }
+
+    /// <summary>The Procurement supplier this template names by default (round 3, lane G; D-14).</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
+
+    [ForeignKey(nameof(DefaultServiceProviderSupplierId))]
+    public virtual ErpSystem.Core.Entities.Procurement.Supplier? DefaultServiceProviderSupplier { get; set; }
 
     [MaxLength(2000)]
     public string? Instructions { get; set; }
@@ -2719,6 +2743,26 @@ public class PreEmploymentCheckTemplateItem : TenantEntity
 
     /// <summary>Expected number of calendar days to complete this check.</summary>
     public int? ExpectedDays { get; set; }
+}
+
+/// <summary>
+/// Which Procurement suppliers provide which pre-employment checks (round 3, lane G; register row
+/// R-7; decision D-14). The check-type → provider cascade on the check and template screens reads
+/// this; Procurement's supplier record is untouched. One row per (supplier, check type).
+/// </summary>
+public class PreEmploymentCheckProviderService : TenantEntity
+{
+    public Guid SupplierId { get; set; }
+
+    [ForeignKey(nameof(SupplierId))]
+    public virtual ErpSystem.Core.Entities.Procurement.Supplier Supplier { get; set; } = null!;
+
+    public PreEmploymentCheckType CheckType { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
+    public bool IsActive { get; set; } = true;
 }
 
 // =============================================================================

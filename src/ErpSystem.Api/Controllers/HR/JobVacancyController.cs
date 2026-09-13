@@ -505,7 +505,15 @@ public class JobVacancyController : ControllerBase
         var employeeId = _currentUser.EmployeeId;
         if (employeeId == null) return BadRequest("Your user account is not linked to an employee record.");
 
-        return Ok(await _service.SkipStageAssignmentAsync(dto, employeeId.Value));
+        try
+        {
+            return Ok(await _service.SkipStageAssignmentAsync(dto, employeeId.Value));
+        }
+        catch (InvalidOperationException ex)
+        {
+            // Round 3, lane G (D-13): the stage's rule in its own words.
+            return UnprocessableEntity(new { message = ex.Message });
+        }
     }
 
     [HttpDelete("stage-assignments/{id:guid}")]

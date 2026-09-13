@@ -431,6 +431,8 @@ export interface PreEmploymentCheckItem {
   /** `name` when set, otherwise the check type — the server computes it. */
   displayName: string;
   serviceProviderName?: string | null;
+  /** The supplier behind the provider name, when it is one (round 3, lane G; D-14). */
+  serviceProviderSupplierId?: string | null;
   status: CheckItemStatus;
   statusName: string;
   requestedDate?: string | null;
@@ -480,6 +482,8 @@ export interface CreatePreEmploymentCheckItem {
   checkType: PreEmploymentCheckType;
   name?: string | null;
   serviceProviderName?: string | null;
+  /** A Procurement supplier (round 3, lane G); the server mirrors its name into `serviceProviderName`. */
+  serviceProviderSupplierId?: string | null;
   instructions?: string | null;
   isMandatory: boolean;
   isBlockingOnFail: boolean;
@@ -497,6 +501,7 @@ export interface CreatePreEmploymentCheck {
 export interface UpdatePreEmploymentCheckItem {
   name?: string | null;
   serviceProviderName?: string | null;
+  serviceProviderSupplierId?: string | null;
   status: CheckItemStatus;
   requestedDate?: string | null;
   receivedDate?: string | null;
@@ -576,10 +581,31 @@ export interface PreEmploymentCheckTemplateItem {
   checkType: PreEmploymentCheckType;
   checkTypeName: string;
   defaultServiceProvider?: string | null;
+  /** The supplier behind the default provider, when it is one (round 3, lane G; D-14). */
+  defaultServiceProviderSupplierId?: string | null;
   instructions?: string | null;
   isMandatory: boolean;
   isBlockingOnFail: boolean;
   expectedDays?: number | null;
+}
+
+/** A supplier that provides one kind of check (round 3, lane G; D-14) — the check-type → provider cascade reads these. */
+export interface PreEmploymentCheckProviderService {
+  id: string;
+  supplierId: string;
+  supplierCode: string;
+  supplierName: string;
+  supplierIsActive: boolean;
+  checkType: PreEmploymentCheckType;
+  checkTypeName: string;
+  notes?: string | null;
+  isActive: boolean;
+}
+
+export interface CreatePreEmploymentCheckProviderServices {
+  supplierId: string;
+  checkTypes: PreEmploymentCheckType[];
+  notes?: string | null;
 }
 
 export interface PreEmploymentCheckTemplate {
@@ -599,6 +625,8 @@ export interface PreEmploymentCheckTemplateDetail extends PreEmploymentCheckTemp
 export interface CreatePreEmploymentCheckTemplateItem {
   checkType: PreEmploymentCheckType;
   defaultServiceProvider?: string | null;
+  /** A Procurement supplier (round 3, lane G); the server mirrors its name into `defaultServiceProvider`. */
+  defaultServiceProviderSupplierId?: string | null;
   instructions?: string | null;
   isMandatory: boolean;
   isBlockingOnFail: boolean;

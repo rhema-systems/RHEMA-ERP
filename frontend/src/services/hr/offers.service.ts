@@ -39,6 +39,9 @@ import type {
   UpdatePreEmploymentCheckTemplate,
   UpdatePreEmploymentCheckTemplateItem,
   UpdateReferenceCheckResponse,
+  PreEmploymentCheckProviderService,
+  CreatePreEmploymentCheckProviderServices,
+  PreEmploymentCheckType,
 } from '@/types/hr/offers';
 
 /**
@@ -329,6 +332,23 @@ class JobHireService {
  */
 class PreEmploymentCheckService {
   private readonly baseUrl = '/pre-employment-checks';
+
+  // ── providers (round 3, lane G; D-14): which suppliers provide which checks ──
+
+  getProviders(checkType?: PreEmploymentCheckType, includeInactive = false): Promise<PreEmploymentCheckProviderService[]> {
+    return apiService.get<PreEmploymentCheckProviderService[]>(`${this.baseUrl}/providers`, {
+      ...(checkType ? { checkType } : {}),
+      ...(includeInactive ? { includeInactive: true } : {}),
+    });
+  }
+
+  addProviders(payload: CreatePreEmploymentCheckProviderServices): Promise<PreEmploymentCheckProviderService[]> {
+    return apiService.post<PreEmploymentCheckProviderService[]>(`${this.baseUrl}/providers`, payload);
+  }
+
+  removeProvider(id: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/providers/${id}`);
+  }
 
   getById(id: string): Promise<PreEmploymentCheck> {
     return apiService.get<PreEmploymentCheck>(`${this.baseUrl}/${id}`);

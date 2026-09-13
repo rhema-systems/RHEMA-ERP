@@ -1285,6 +1285,12 @@ public class JobVacancyService : IJobVacancyService
         var entity = await GetOwnedStageAssignmentAsync(dto.Id);
         RequireStageOwnership(entity, userId, "skip");
 
+        // Round 3, lane G (D-13): the stage's own flag decides, and it never used to be read here.
+        var stage = await _unitOfWork.Repository<RecruitmentPipelineStage>().GetByIdAsync(entity.PipelineStageId);
+        if (stage is not null && !stage.CanSkip)
+            throw new InvalidOperationException(
+                $"Stage '{stage.Name}' cannot be skipped: complete it, or mark the stage as skippable on the pipeline.");
+
         entity.Status          = VacancyStageAssignmentStatus.Skipped;
         entity.CompletionNotes = dto.Reason;
         entity.UpdatedAt       = DateTime.UtcNow;

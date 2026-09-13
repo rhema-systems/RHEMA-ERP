@@ -139,6 +139,42 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
                     $"Stage '{targetStage.Name}' does not permit repeat entries (CanRepeat = false).");
         }
 
+        // ── Round 3, lane G (D-13): CanSkip and IsRequired, enforced at last ─────
+        // `IJobApplicationServices` had promised "a stage may only be skipped when CanSkip" since the
+        // module shipped, and nothing read the flag. Moving FORWARD past an active stage that cannot
+        // be skipped, which this application never entered, is refused; and the final stage refuses
+        // an application that never entered a required stage (however it got past it).
+        var forward = currentStage is null || targetStage.Order > currentStage.Order;
+        if (forward)
+        {
+            var pipelineStages = (await _pipelineStageRepository.GetByPipelineIdAsync(vacancy.RecruitmentPipelineId.Value))
+                .Where(st => st.IsActive && !st.IsDeleted && st.TenantId == application.TenantId)
+                .ToList();
+            var visited = (await _stageHistoryRepository.GetByApplicationIdAsync(applicationId))
+                .Select(h => h.PipelineStageId)
+                .ToHashSet();
+            var fromOrder = currentStage?.Order ?? int.MinValue;
+
+            var jumped = pipelineStages
+                .Where(st => st.Order > fromOrder && st.Order < targetStage.Order && !st.CanSkip && !visited.Contains(st.Id))
+                .OrderBy(st => st.Order)
+                .FirstOrDefault();
+            if (jumped is not null)
+                throw new InvalidOperationException(
+                    $"Stage '{jumped.Name}' cannot be skipped: move the application through it first, or mark the stage as skippable on the pipeline.");
+
+            if (targetStage.IsFinalStage)
+            {
+                var missed = pipelineStages
+                    .Where(st => st.Order < targetStage.Order && st.IsRequired && !visited.Contains(st.Id))
+                    .OrderBy(st => st.Order)
+                    .FirstOrDefault();
+                if (missed is not null)
+                    throw new InvalidOperationException(
+                        $"The final stage refuses an application that never entered the required stage '{missed.Name}'.");
+            }
+        }
+
         // MaxAttempts check: count all (including closed) visits to the target stage
         if (targetStage.MaxAttempts.HasValue)
         {

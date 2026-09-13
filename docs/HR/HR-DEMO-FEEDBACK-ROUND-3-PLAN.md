@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-13. Ten slices remain; G next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13. Nine slices remain; U next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -162,7 +162,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 7 | **C2** — careers + HR candidate screens, photo, currency picker, languages tab, document restructure · ✅ **DONE 2026-09-12 · 89 ×2** | none | `hr-recruitment/run-c2.mjs` + screen walk | |
 | 8 | **K** — catalogue-driven criteria values + the nine scoring fixes + D-7 · ✅ **DONE 2026-09-12 · 81 ×2** | `20260912211938_AddCriteriaCatalogueValues` | `hr-recruitment/run-k.mjs` (extends `run-lane5b.mjs`) | |
 | 9 | **A** — application source and posting · ✅ **DONE 2026-09-13 · 44 ×2** | none | `hr-recruitment/run-a.mjs` | |
-| 10 | **G** — stage flags + pre-employment providers | `AddPreEmploymentCheckProviders` | `hr-recruitment/run-g.mjs` | |
+| 10 | **G** — stage flags + pre-employment providers · ✅ **DONE 2026-09-13 · 49 ×2** | `20260913161339_AddPreEmploymentCheckProviders` | `hr-recruitment/run-g.mjs` | |
 | 11 | **U** — union contacts, documents, logo | `AddUnionContactsDocumentsLogo` | new `hr-unions/run-u.mjs` | |
 | 12 | **T1** — profile grouped navigation | none | screen walk + static assertions | |
 | 13 | **T2** — record tabs: Movements, Probation, Separation, Leave, Attendance, Benefits, Salary changes | none | screen walk + a static harness asserting each tab's service call | |
@@ -395,6 +395,36 @@ derivation is the careers surface's rule); the draft advert stays valid on the H
 REMOVED advert is refused — a draft is still this vacancy's). Harness lesson: `POST job-postings`
 requires `description`. The "stranger's advert" fence is proven against any other live advert in
 the tenant; when none exists the assertion says so rather than failing.
+
+**Lane G log (2026-09-13).** Migration `20260913161339_AddPreEmploymentCheckProviders` (guarded
+SQL; proven twice on the dev database and Up/Down/Up on a scratch one with stub parents so every
+branch ran). *D-13, the stage flags:* `IsRequired` is derived as `!CanSkip` in both stage mappers
+(the payload's `isRequired` is ignored); `ApplicationPipelineService.MoveApplicationToStageAsync`
+refuses a forward move over an active non-skippable stage the application never entered, and the
+final stage refuses an application that never entered a required stage — both name the stage;
+`JobVacancyService.SkipStageAssignmentAsync` reads the stage's `CanSkip` at last (the controller
+now surfaces the wording as 422). The stage form has ONE switch ("Can be skipped", with its meaning
+spelled out) and shows "Max entries" only when re-entry is allowed; the list says "Required —
+cannot be skipped" or "Can be skipped". *D-14, the providers:* `PreEmploymentCheckProviderServices`
+(supplier × check type, notes, active; unique among live rows) with `GET/POST/DELETE
+api/pre-employment-checks/providers` (read/write/write; one POST writes one row per distinct type,
+keeps an existing pairing, refuses a supplier not on the register); `ServiceProviderSupplierId` on
+the check item and `DefaultServiceProviderSupplierId` on the template item, the NAME columns kept
+as snapshots and mirrored from the supplier on every save, a stranger supplier refused in words;
+applying a template carries the supplier onto the item. `CheckProviderPicker` (check type →
+providers set up for it → "another supplier from the register" through `SupplierPicker` → "not a
+supplier on file" typed) on both item forms; `CheckProvidersPanel` on the check templates page.
+Manifest row `PreEmploymentCheckProviderServices` as `optional` (set up by hand, not seeded).
+Type-check: baseline 33 only. Screen walk owed: the one-switch stage form, both pickers, the
+providers panel.
+
+⚠ **Found while building:** slice E's stage-owner test skipped an assignment on a non-skippable
+stage and expected success — the behaviour D-13 removes; it now asserts the refusal, marks the stage
+skippable through the stage PUT, then expects the skip (102 → 105). Deviations: the "final stage"
+rule reads `IsRequired`, which is now the same bit as `!CanSkip`, so it is a second door onto one
+rule (kept because legacy rows may hold the two apart until their next save); the assignment skip
+refusal is 422 in words rather than the middleware's fixed text. Harness lesson: the assignment
+create field is `assignedToId` and the skip is a PATCH.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

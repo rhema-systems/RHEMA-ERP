@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR;
@@ -15,6 +16,8 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
     private readonly IReferenceCheckResponseRepository _referenceResponseRepository;
     private readonly IJobOfferRepository _offerRepository;
     private readonly IPreEmploymentCheckTemplateRepository _templateRepository;
+    private readonly IGenericRepository<PreEmploymentCheckProviderService> _providerRepository;
+    private readonly ErpSystem.Core.Interfaces.Procurement.ISupplierRepository _suppliers;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PreEmploymentCheckService> _logger;
@@ -25,6 +28,8 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         IReferenceCheckResponseRepository referenceResponseRepository,
         IJobOfferRepository offerRepository,
         IPreEmploymentCheckTemplateRepository templateRepository,
+        IGenericRepository<PreEmploymentCheckProviderService> providerRepository,
+        ErpSystem.Core.Interfaces.Procurement.ISupplierRepository suppliers,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PreEmploymentCheckService> logger)
@@ -34,6 +39,8 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         _referenceResponseRepository = referenceResponseRepository;
         _offerRepository = offerRepository;
         _templateRepository = templateRepository;
+        _providerRepository = providerRepository;
+        _suppliers = suppliers;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -154,6 +161,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedCheckAsync(createDto.PreEmploymentCheckId);
+        createDto.ServiceProviderName = await ResolveProviderNameAsync(createDto.ServiceProviderSupplierId, createDto.ServiceProviderName, current);
 
         var entity = createDto.ToEntity(current, createdByUserId);
         await _itemRepository.AddAsync(entity);
@@ -164,6 +172,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
     public async Task<PreEmploymentCheckItemDto> UpdateItemAsync(UpdatePreEmploymentCheckItemDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedItemAsync(updateDto.Id);
+        updateDto.ServiceProviderName = await ResolveProviderNameAsync(updateDto.ServiceProviderSupplierId, updateDto.ServiceProviderName, GetTenantId());
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _itemRepository.UpdateAsync(entity);
@@ -187,6 +196,93 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
         var entities = await _itemRepository.GetBlockingFailuresAsync(checkId);
         return entities.Where(e => e.TenantId == tenantId).Select(e => e.ToDto());
     }
+
+    // ── Providers (round 3, lane G; D-14) ─────────────────────────────────────
+
+    /// <summary>
+    /// A named supplier must be the tenant's live Procurement supplier; its name is mirrored into
+    /// the snapshot column so a renamed or retired supplier never rewrites a completed check.
+    /// Without a supplier the typed name stands.
+    /// </summary>
+    private async Task<string?> ResolveProviderNameAsync(Guid? supplierId, string? typedName, Guid tenantId)
+    {
+        if (supplierId is not { } id) return string.IsNullOrWhiteSpace(typedName) ? null : typedName.Trim();
+        var supplier = await _suppliers.GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted);
+        if (supplier is null)
+            throw new InvalidOperationException("That service provider is not a supplier of this organisation. Pick one from the supplier register.");
+        return supplier.Name;
+    }
+
+    public async Task<IEnumerable<PreEmploymentCheckProviderServiceDto>> GetProviderServicesAsync(PreEmploymentCheckType? checkType = null, bool includeInactive = false, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var query = _providerRepository.GetQueryable().AsNoTracking()
+            .Include(x => x.Supplier)
+            .Where(x => x.TenantId == tenantId && !x.IsDeleted);
+        if (checkType is { } type) query = query.Where(x => x.CheckType == type);
+        if (!includeInactive) query = query.Where(x => x.IsActive && x.Supplier.IsActive);
+        var rows = await query.OrderBy(x => x.Supplier.Name).ThenBy(x => x.CheckType).ToListAsync(cancellationToken);
+        return rows.Select(ToProviderDto);
+    }
+
+    public async Task<IEnumerable<PreEmploymentCheckProviderServiceDto>> AddProviderServicesAsync(CreatePreEmploymentCheckProviderServicesDto dto, Guid createdByUserId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var supplier = await _suppliers.GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == dto.SupplierId && x.TenantId == tenantId && !x.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("That supplier is not on this organisation's register.");
+        var types = dto.CheckTypes.Where(t => Enum.IsDefined(typeof(PreEmploymentCheckType), t)).Distinct().ToList();
+        if (types.Count == 0)
+            throw new InvalidOperationException("Say which checks the supplier provides.");
+
+        var existing = (await _providerRepository.FindAsync(x => x.TenantId == tenantId && x.SupplierId == supplier.Id && !x.IsDeleted))
+            .ToDictionary(x => x.CheckType);
+        foreach (var type in types)
+        {
+            if (existing.TryGetValue(type, out var row))
+            {
+                if (!row.IsActive || row.Notes != dto.Notes)
+                {
+                    row.IsActive = true;
+                    row.Notes = dto.Notes;
+                    row.UpdatedAt = DateTime.UtcNow;
+                    row.UpdatedBy = createdByUserId.ToString();
+                    await _providerRepository.UpdateAsync(row);
+                }
+                continue;
+            }
+            await _providerRepository.AddAsync(new PreEmploymentCheckProviderService
+            {
+                TenantId = tenantId, SupplierId = supplier.Id, CheckType = type, Notes = dto.Notes, IsActive = true,
+                CreatedBy = createdByUserId.ToString(),
+            });
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        var rows = await _providerRepository.GetQueryable().AsNoTracking().Include(x => x.Supplier)
+            .Where(x => x.TenantId == tenantId && x.SupplierId == supplier.Id && !x.IsDeleted && types.Contains(x.CheckType))
+            .OrderBy(x => x.CheckType).ToListAsync(cancellationToken);
+        return rows.Select(ToProviderDto);
+    }
+
+    public async Task<bool> RemoveProviderServiceAsync(Guid id, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var row = await _providerRepository.GetByIdAsync(id);
+        if (row is null || row.TenantId != tenantId || row.IsDeleted)
+            throw new ArgumentException($"Provider service '{id}' not found.");
+        await _providerRepository.DeleteAsync(row);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return true;
+    }
+
+    private static PreEmploymentCheckProviderServiceDto ToProviderDto(PreEmploymentCheckProviderService x) => new()
+    {
+        Id = x.Id, TenantId = x.TenantId, CreatedAt = x.CreatedAt, CreatedBy = x.CreatedBy ?? string.Empty,
+        UpdatedAt = x.UpdatedAt, UpdatedBy = x.UpdatedBy,
+        SupplierId = x.SupplierId, SupplierCode = x.Supplier?.SupplierCode ?? string.Empty, SupplierName = x.Supplier?.Name ?? string.Empty,
+        SupplierIsActive = x.Supplier?.IsActive ?? false, CheckType = x.CheckType, Notes = x.Notes, IsActive = x.IsActive,
+    };
 
     // ── Reference responses ───────────────────────────────────────────────────
 
@@ -460,6 +556,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
                 foreach (var stale in existingItems!.Where(i => i.Status == CheckItemStatus.Pending))
                 {
                     stale.ServiceProviderName = templateItem.DefaultServiceProvider;
+                    stale.ServiceProviderSupplierId = templateItem.DefaultServiceProviderSupplierId;
                     stale.Instructions        = templateItem.Instructions;
                     stale.IsMandatory         = templateItem.IsMandatory;
                     stale.IsBlockingOnFail    = templateItem.IsBlockingOnFail;
@@ -477,6 +574,7 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
                 PreEmploymentCheckId = check.Id,
                 CheckType = templateItem.CheckType,
                 ServiceProviderName = templateItem.DefaultServiceProvider,
+                ServiceProviderSupplierId = templateItem.DefaultServiceProviderSupplierId,
                 Instructions = templateItem.Instructions,
                 IsMandatory = templateItem.IsMandatory,
                 IsBlockingOnFail = templateItem.IsBlockingOnFail,
@@ -515,17 +613,20 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 public class PreEmploymentCheckTemplateService : IPreEmploymentCheckTemplateService
 {
     private readonly IPreEmploymentCheckTemplateRepository _templateRepository;
+    private readonly ErpSystem.Core.Interfaces.Procurement.ISupplierRepository _suppliers;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<PreEmploymentCheckTemplateService> _logger;
 
     public PreEmploymentCheckTemplateService(
         IPreEmploymentCheckTemplateRepository templateRepository,
+        ErpSystem.Core.Interfaces.Procurement.ISupplierRepository suppliers,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<PreEmploymentCheckTemplateService> logger)
     {
         _templateRepository = templateRepository;
+        _suppliers = suppliers;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -611,6 +712,7 @@ public class PreEmploymentCheckTemplateService : IPreEmploymentCheckTemplateServ
         // built from it.
         if (template.Items.Any(i => i.CheckType == dto.CheckType))
             throw new InvalidOperationException("That check type is already on this template.");
+        dto.DefaultServiceProvider = await ResolveDefaultProviderNameAsync(dto.DefaultServiceProviderSupplierId, dto.DefaultServiceProvider, current);
 
         var item = dto.ToEntity(current, createdByUserId);
         await _templateRepository.AddTemplateItemAsync(item);
@@ -628,10 +730,22 @@ public class PreEmploymentCheckTemplateService : IPreEmploymentCheckTemplateServ
         // No duplicate-check-type guard here, unlike AddItemAsync: UpdatePreEmploymentCheckTemplateItemDto
         // deliberately omits CheckType ("delete + re-add to change it"), so an update cannot
         // introduce a clash.
+        dto.DefaultServiceProvider = await ResolveDefaultProviderNameAsync(dto.DefaultServiceProviderSupplierId, dto.DefaultServiceProvider, GetTenantId());
         item.UpdateEntity(dto, updatedByUserId);
         await _templateRepository.UpdateAsync(template);
         await _unitOfWork.SaveChangesAsync(ct);
         return item.ToDto();
+    }
+
+    /// <summary>Round 3, lane G (D-14): a named supplier must be the tenant's; its name is mirrored into the snapshot.</summary>
+    private async Task<string?> ResolveDefaultProviderNameAsync(Guid? supplierId, string? typedName, Guid tenantId)
+    {
+        if (supplierId is not { } id) return string.IsNullOrWhiteSpace(typedName) ? null : typedName.Trim();
+        var supplier = await _suppliers.GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(x => x.Id == id && x.TenantId == tenantId && !x.IsDeleted);
+        if (supplier is null)
+            throw new InvalidOperationException("That service provider is not a supplier of this organisation. Pick one from the supplier register.");
+        return supplier.Name;
     }
 
     /// <summary>

@@ -668,7 +668,8 @@ public static class RecruitmentMappingExtensions
             StageType = dto.StageType,
             IsFinalStage = dto.IsFinalStage,
             IsActive = dto.IsActive,
-            IsRequired = dto.IsRequired,
+            // Round 3, lane G (D-13): one switch — a stage is required exactly when it cannot be skipped.
+            IsRequired = !dto.CanSkip,
             DefaultTimeToCompleteDays = dto.DefaultTimeToCompleteDays,
             CanSkip = dto.CanSkip,
             CanRepeat = dto.CanRepeat,
@@ -686,7 +687,7 @@ public static class RecruitmentMappingExtensions
         entity.StageType = dto.StageType;
         entity.IsActive = dto.IsActive;
         entity.IsFinalStage = dto.IsFinalStage;
-        entity.IsRequired = dto.IsRequired;
+        entity.IsRequired = !dto.CanSkip; // D-13: derived, never typed
         entity.DefaultTimeToCompleteDays = dto.DefaultTimeToCompleteDays;
         entity.CanSkip = dto.CanSkip;
         entity.CanRepeat = dto.CanRepeat;
@@ -3043,6 +3044,7 @@ public static class RecruitmentMappingExtensions
             CheckType = entity.CheckType,
             Name = entity.Name,
             ServiceProviderName = entity.ServiceProviderName,
+            ServiceProviderSupplierId = entity.ServiceProviderSupplierId,
             Status = entity.Status,
             RequestedDate = entity.RequestedDate,
             ReceivedDate = entity.ReceivedDate,
@@ -3072,6 +3074,7 @@ public static class RecruitmentMappingExtensions
             CheckType = dto.CheckType,
             Name = dto.Name,
             ServiceProviderName = dto.ServiceProviderName,
+            ServiceProviderSupplierId = dto.ServiceProviderSupplierId,
             Instructions = dto.Instructions,
             Status = CheckItemStatus.Pending,
             IsMandatory = dto.IsMandatory,
@@ -3085,6 +3088,7 @@ public static class RecruitmentMappingExtensions
     {
         entity.Name = dto.Name;
         entity.ServiceProviderName = dto.ServiceProviderName;
+        entity.ServiceProviderSupplierId = dto.ServiceProviderSupplierId;
         entity.Status = dto.Status;
         entity.RequestedDate = dto.RequestedDate;
         entity.ReceivedDate = dto.ReceivedDate;
@@ -3237,6 +3241,7 @@ public static class RecruitmentMappingExtensions
             TemplateId = entity.TemplateId,
             CheckType = entity.CheckType,
             DefaultServiceProvider = entity.DefaultServiceProvider,
+            DefaultServiceProviderSupplierId = entity.DefaultServiceProviderSupplierId,
             Instructions = entity.Instructions,
             IsMandatory = entity.IsMandatory,
             IsBlockingOnFail = entity.IsBlockingOnFail,
@@ -3264,6 +3269,7 @@ public static class RecruitmentMappingExtensions
             TemplateId = dto.TemplateId,
             CheckType = dto.CheckType,
             DefaultServiceProvider = dto.DefaultServiceProvider,
+            DefaultServiceProviderSupplierId = dto.DefaultServiceProviderSupplierId,
             Instructions = dto.Instructions,
             IsMandatory = dto.IsMandatory,
             IsBlockingOnFail = dto.IsBlockingOnFail,
@@ -3284,6 +3290,7 @@ public static class RecruitmentMappingExtensions
     public static void UpdateEntity(this PreEmploymentCheckTemplateItem entity, UpdatePreEmploymentCheckTemplateItemDto dto, Guid userId)
     {
         entity.DefaultServiceProvider = dto.DefaultServiceProvider;
+        entity.DefaultServiceProviderSupplierId = dto.DefaultServiceProviderSupplierId;
         entity.Instructions = dto.Instructions;
         entity.IsMandatory = dto.IsMandatory;
         entity.IsBlockingOnFail = dto.IsBlockingOnFail;

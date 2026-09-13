@@ -31,6 +31,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
+import { CheckProviderPicker } from '@/components/hr/recruitment/CheckProviderPicker';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
@@ -52,6 +53,7 @@ const blankItem = (): CreatePreEmploymentCheckItem => ({
   checkType: 'BackgroundCheck',
   name: '',
   serviceProviderName: '',
+  serviceProviderSupplierId: null,
   instructions: '',
   isMandatory: true,
   isBlockingOnFail: true,
@@ -319,14 +321,16 @@ export function PreEmploymentChecksPanel({
                 placeholder="Defaults to the check type"
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="serviceProvider">Service provider</Label>
-              <Input
-                id="serviceProvider"
-                value={itemForm.serviceProviderName ?? ''}
-                onChange={(e) => setItemForm({ ...itemForm, serviceProviderName: e.target.value })}
-              />
-            </div>
+            {/* Round 3, lane G (D-14): the provider from the suppliers set up for this check type;
+                another supplier from the register, or a typed name when it is not a supplier. */}
+            <CheckProviderPicker
+              checkType={itemForm.checkType}
+              supplierId={itemForm.serviceProviderSupplierId ?? null}
+              name={itemForm.serviceProviderName ?? ''}
+              onChange={({ supplierId, name }) =>
+                setItemForm({ ...itemForm, serviceProviderSupplierId: supplierId || null, serviceProviderName: name })
+              }
+            />
             <div className="space-y-1.5">
               <Label htmlFor="itemInstructions">Instructions</Label>
               <Textarea
