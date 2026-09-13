@@ -2488,3 +2488,26 @@ safety/helper and evidence/tamper suites, FinalClone safety/parser and evidence/
 diff checks passed serially. No database, connection variable, preserved runtime evidence or backup was accessed.
 The historical failed run remains unchanged; a new absent evidence directory and Sol High approval of the ledger-only
 descendant are required before another reset attempt.
+
+Operational review of exact approved `2b9e4fe0588bab03029365b0e2b856a22970482a` identified a new-attempt
+blocker: `Get-DisposableBackupPath` always selected the preserved fixed
+`RhemaERP_DISPOSABLE_RESET_COPYONLY.bak`, so a safe retry would complete offline gates and then correctly refuse the
+existing recovery file. The bounded correction completed as clean direct-child implementation commit
+`d76df29d2e382116e59299aa561de0310a2ba7fb` (tree `9349b7dc1c067f2968452229cb3e9e2678a03e3a`).
+
+The harness now generates the random 32-lowerhex `backupMediaId` before backup path resolution and derives the exact
+filename `RhemaERP_DISPOSABLE_RESET_COPYONLY_<mediaId>.bak` from that value alone beneath the server-provided backup
+root. No operator path or filename input exists. Atomic `CreateNew`, SQL existence proof, `NOINIT`/`NOSKIP`, media
+identity and no-overwrite behavior remain intact. The exact `backupFileName` and media ID are bound through phase-03,
+phase-04, terminal status, recovery, verified/current SHA records, validator artifact checks and manifest. Legacy
+fixed-name evidence remains compatible only through the absent-new-field path and continues to require the exact old
+basename. Recovery before phase-03 uses the already generated exact attempt path; after phase-03 it additionally binds
+the durable media/filename/database identity.
+
+Offline tests preserve a synthetic prior fixed backup while atomically reserving two distinct attempt paths, refuse
+same-attempt collision and malformed, uppercase, length-invalid or path-like media IDs, and reject wrong status media,
+path-spoofed filename, phase-03 filename drift and hash-record filename tampering before manifest publication. Existing
+coalesced recovery and post-VERIFY current/verified hash semantics remain passing. All disposable reset safety/helper,
+evidence/tamper, FinalClone safety/parser, FinalClone evidence/tamper, parsing and diff gates passed serially. No
+database, connection variable, preserved runtime evidence or backup was accessed. A new attempt requires a new absent
+evidence directory and independent Sol High approval of the ledger-only descendant.

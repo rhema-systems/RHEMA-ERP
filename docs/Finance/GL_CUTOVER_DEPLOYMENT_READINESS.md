@@ -221,6 +221,16 @@ positive verified state; missing, duplicate, reordered, embedded, wrong-database
 post-verification material mutation with truthful verification downgrade. The preserved failed runtime evidence and
 backup were not accessed or changed. A new attempt remains prohibited pending Sol High approval.
 
+The fixed backup filename would itself prevent a fresh attempt while correctly preserving the first verified backup.
+The operational correction completed as exact implementation commit
+`d76df29d2e382116e59299aa561de0310a2ba7fb` (tree `9349b7dc1c067f2968452229cb3e9e2678a03e3a`).
+Each attempt now generates its 32-lowerhex media ID before path resolution and derives the sole allowed filename
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_<mediaId>.bak` beneath the server backup root. Phase-03/04, terminal status,
+recovery, current/verified hash records and the package validator bind that exact media/filename pair. The historical
+fixed-name package remains validator-compatible and untouched. Tests prove the prior file can coexist with two unique
+attempts, while collisions, malformed/path-like media IDs, wrong filenames/media and hash-record tampering fail closed.
+Another runtime attempt remains prohibited until the ledger-only descendant receives Sol High approval.
+
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
 `-ConfirmDisposableDevelopmentReset`, the exact process attestation shown below, reviewed commit/tree equality,
