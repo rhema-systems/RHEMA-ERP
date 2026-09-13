@@ -2298,8 +2298,8 @@ The coordinator completed a follow-up read-only FINAL-04 remediation assessment.
 published `BS_LEGACY_IFRS`, `IFRS_BS`, and `IFRS_IS` version-1 layouts with respectively 9/37, 22/27, and 21/19
 row/mapping counts. The one live FX batch is posted, contains two lines, has journal and posting-event references,
 and has not been reversed. The nine active legacy currency links are three zero-history links each for test-account
-codes `000-8884-0000` and `000-9994-0000`, one history-bearing USD link for `000-9995-0000`, and one history-bearing
-USD link each for receivables `1100` and payables `2000`; each has three enabled active posting-book mappings and
+codes `000-8884-0000` and `000-9994-0000`, one history-bearing USD link for `000-9995-0000`, and one USD link
+each for receivables `1100` and payables `2000`; each has three enabled active posting-book mappings and
 one default mapping. The manifest deterministically resolves `1100`/`2000` to the compatible include-by-default
 receivable/payable classifications, but the three test-account identities are outside the reviewed manifest.
 
