@@ -115,6 +115,47 @@ try {
         if ($LASTEXITCODE -ne 0) { throw "Valid early V2 state failed: $($earlyCase.label)" }
     }
     Write-Host 'PASS: V2 NOT_STARTED, OFFLINE, SOURCE_CAPTURE and resolved-path failure states validate truthfully'
+    $ownedEmpty = New-PackageRoot 'OWNED_EMPTY'
+    $null = New-Common $ownedEmpty
+    Write-Json (Join-Path $ownedEmpty 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE'})
+    Write-Json (Join-Path $ownedEmpty 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'})
+    $ownedEmptyStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $false $false $false
+    $ownedEmptyStatus.backupMediaId='6' * 32
+    $ownedEmptyStatus.backupFileName="RhemaERP_DISPOSABLE_RESET_COPYONLY_$('6' * 32).bak"
+    $ownedEmptyStatus.backupPathSha256='6' * 64
+    $ownedEmptyStatus.attemptOwnedBackup=$true
+    Complete-Status $ownedEmpty $ownedEmptyStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $ownedEmpty -PackageKind DisposableReset -WriteManifest
+    if ($LASTEXITCODE -ne 0) { throw 'Owned empty reservation failure did not validate.' }
+    Write-Host 'PASS: owned zero-byte reservation is distinct from material backup creation and preservation'
+    foreach ($property in @('backupCompleted','backupPreserved','backupVerified','verifyEvidencePresent')) {
+        $contradiction = New-PackageRoot ("OWNED_EMPTY_" + $property)
+        Copy-Item -Path (Join-Path $ownedEmpty '*') -Destination $contradiction
+        $status = Get-Content -Raw -LiteralPath (Join-Path $contradiction 'reset-status.json') | ConvertFrom-Json
+        $status.$property=$true
+        Write-Json (Join-Path $contradiction 'reset-status.json') $status
+        Invoke-ExpectedRemanifestFailure $contradiction "owned-empty contradiction $property"
+    }
+
+    $legacy = New-PackageRoot 'APPROVED_LEGACY_22B'
+    $null = New-Common $legacy
+    $legacyCommit='22b27ab18a19a92fa6b1222c05add817574e74fe'; $legacyTree='13f1eb03a24af14ff23998de72e3ddac9992981d'
+    Write-Json (Join-Path $legacy 'reviewed-git-state.json') ([ordered]@{reviewedCommit=$legacyCommit;reviewedTree=$legacyTree;executedCommit=$legacyCommit;executedTree=$legacyTree;repositoryClean=$true})
+    Write-Json (Join-Path $legacy 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE'})
+    Write-Json (Join-Path $legacy 'phase-02.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=2;phase='SOURCE_CAPTURE_COMPLETE'})
+    $legacyMedia='cc918da6ac23465497e00ca210a4c2c6'; $legacyHash='7F07CD03EED8F178ED45208936C3CC8F6E9F8D1336FFB3BF371C076D8F343743'
+    @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$legacyMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') | Set-Content -Encoding ascii -LiteralPath (Join-Path $legacy 'backup-create.txt')
+    "$legacyHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $legacy 'backup-current.sha256')
+    $legacyStatus=New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $true $false $false
+    foreach($name in @('evidenceSchema','backupIdentityVersion','backupFileName','backupPathSha256','attemptOwnedBackup')){$legacyStatus.Remove($name)}
+    $legacyStatus.reviewedCommit=$legacyCommit;$legacyStatus.reviewedTree=$legacyTree;$legacyStatus.backupMediaId=$legacyMedia
+    $legacyStatus.backupCompleted=$false;$legacyStatus.backupPreserved=$true;$legacyStatus.backupByteLength=453042176
+    $legacyStatus.backupPhaseMarkerPublished=$false;$legacyStatus.backupMaterialStateReconciled=$true
+    $legacyStatus.currentMaterialSha256=$legacyHash;$legacyStatus.backupSha256='';$legacyStatus.backupHashMatchesVerified=$false;$legacyStatus.verifyEvidencePresent=$false
+    Complete-Status $legacy $legacyStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $legacy -PackageKind DisposableReset -WriteManifest
+    if($LASTEXITCODE -ne 0){throw 'Exact approved historical 22b package did not validate.'}
+    Write-Host 'PASS: exact documented 22b legacy failure package validates under its strict discriminator'
     foreach ($property in @('backupMediaId','backupFileName','backupPathSha256')) {
         $mixed = New-PackageRoot ("MIXED_" + $property)
         Copy-Item -Path (Join-Path $failed '*') -Destination $mixed
@@ -124,6 +165,14 @@ try {
         else { $mixedStatus.$property = '5' * 64 }
         Write-Json (Join-Path $mixed 'reset-status.json') $mixedStatus
         Invoke-ExpectedRemanifestFailure $mixed "mixed unresolved V2 $property"
+    }
+    foreach ($property in @('backupMediaId','backupFileName','backupPathSha256','attemptOwnedBackup')) {
+        $nullState = New-PackageRoot ("NULL_" + $property)
+        Copy-Item -Path (Join-Path $failed '*') -Destination $nullState
+        $status = Get-Content -Raw -LiteralPath (Join-Path $nullState 'reset-status.json') | ConvertFrom-Json
+        $status.$property=$null
+        Write-Json (Join-Path $nullState 'reset-status.json') $status
+        Invoke-ExpectedRemanifestFailure $nullState "unresolved V2 null $property"
     }
 
     $partialBackup = New-PackageRoot 'VERIFY_FAILURE'

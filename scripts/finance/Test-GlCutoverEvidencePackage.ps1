@@ -297,10 +297,9 @@ if ($PackageKind -eq 'DisposableReset') {
          $null -eq $evidenceSchemaProperty -or [string]$evidenceSchemaProperty.Value -cne 'RHEMA_DISPOSABLE_RESET_EVIDENCE_V2')) {
         throw 'Disposable-reset evidence schema/backup identity version is missing or unsupported.'
     }
-    if (-not $isApprovedLegacy -and
-        ($null -eq $reset.PSObject.Properties['attemptOwnedBackup'] -or
-         [bool]$reset.attemptOwnedBackup -ne [bool]$reset.backupCreated)) {
-        throw 'Disposable-reset V2 backup ownership and creation claims disagree.'
+    $ownedProperty = $reset.PSObject.Properties['attemptOwnedBackup']
+    if (-not $isApprovedLegacy -and ($null -eq $ownedProperty -or $null -eq $ownedProperty.Value)) {
+        throw 'Disposable-reset V2 attemptOwnedBackup is missing.'
     }
 
     $createPath = Join-Path $root 'backup-create.txt'
@@ -308,7 +307,14 @@ if ($PackageKind -eq 'DisposableReset') {
     if (-not $isApprovedLegacy -and $null -eq $backupFileProperty) {
         throw 'Disposable-reset V2 status is missing backupFileName.'
     }
-    $mediaText = [string]$reset.backupMediaId
+    $mediaProperty = $reset.PSObject.Properties['backupMediaId']
+    if (-not $isApprovedLegacy -and ($null -eq $mediaProperty -or $null -eq $mediaProperty.Value -or
+        $null -eq $backupFileProperty -or $null -eq $backupFileProperty.Value -or
+        $null -eq $reset.PSObject.Properties['backupPathSha256'] -or
+        $null -eq $reset.PSObject.Properties['backupPathSha256'].Value)) {
+        throw 'Disposable-reset V2 path identity fields must be present.'
+    }
+    $mediaText = if ($null -eq $mediaProperty) { '' } else { [string]$mediaProperty.Value }
     $fileText = if ($null -eq $backupFileProperty) { '' } else { [string]$backupFileProperty.Value }
     $pathHashProperty = $reset.PSObject.Properties['backupPathSha256']
     $pathHashText = if ($null -eq $pathHashProperty) { '' } else { [string]$pathHashProperty.Value }
@@ -318,6 +324,12 @@ if ($PackageKind -eq 'DisposableReset') {
         $reset.attemptOwnedBackup -eq $true -or $backupPhaseMarkerPublished -or $reset.backupVerified -eq $true -or
         $reset.resetStarted -eq $true -or $reset.phase -notin @('NOT_STARTED','OFFLINE_GATES_COMPLETE','SOURCE_CAPTURE_COMPLETE'))) {
         throw 'Disposable-reset unresolved V2 backup path is inconsistent with terminal state.'
+    }
+    if ($v2PathUnresolved -and ($reset.backupPreserved -eq $true -or [long]$reset.backupByteLength -ne 0 -or
+        -not [string]::IsNullOrEmpty([string]$reset.currentMaterialSha256) -or
+        -not [string]::IsNullOrEmpty([string]$reset.backupSha256) -or $reset.backupHashMatchesVerified -eq $true -or
+        $reset.verifyEvidencePresent -eq $true)) {
+        throw 'Disposable-reset unresolved V2 state contains material or verification claims.'
     }
     $expectedBackupFileName = if ($isApprovedLegacy) {
         'RhemaERP_DISPOSABLE_RESET_COPYONLY.bak'
@@ -338,6 +350,29 @@ if ($PackageKind -eq 'DisposableReset') {
             throw 'Disposable-reset media-bound backup path hash is missing or malformed.'
         }
         [string]$pathHashProperty.Value
+    }
+    $ownedEmptyReservation = -not $isApprovedLegacy -and -not $v2PathUnresolved -and
+        $reset.attemptOwnedBackup -eq $true -and $reset.backupCreated -ne $true
+    $resolvedUnowned = -not $isApprovedLegacy -and -not $v2PathUnresolved -and
+        $reset.attemptOwnedBackup -ne $true -and $reset.backupCreated -ne $true
+    if ($ownedEmptyReservation -and ($reset.backupCompleted -eq $true -or $reset.backupPreserved -eq $true -or
+        [long]$reset.backupByteLength -ne 0 -or -not [string]::IsNullOrEmpty([string]$reset.currentMaterialSha256) -or
+        -not [string]::IsNullOrEmpty([string]$reset.backupSha256) -or $reset.backupVerified -eq $true -or
+        $reset.verifyEvidencePresent -eq $true -or $backupPhaseMarkerPublished -or $reset.resetStarted -eq $true)) {
+        throw 'Disposable-reset owned empty reservation contains material, completion, verification, or reset claims.'
+    }
+    if ($resolvedUnowned -and ($reset.backupCompleted -eq $true -or $reset.backupPreserved -eq $true -or
+        [long]$reset.backupByteLength -ne 0 -or -not [string]::IsNullOrEmpty([string]$reset.currentMaterialSha256) -or
+        -not [string]::IsNullOrEmpty([string]$reset.backupSha256) -or $reset.backupVerified -eq $true -or
+        $reset.verifyEvidencePresent -eq $true -or $backupPhaseMarkerPublished -or $reset.resetStarted -eq $true)) {
+        throw 'Disposable-reset resolved unowned path contains backup or reset claims.'
+    }
+    if (-not $isApprovedLegacy -and $reset.backupCreated -eq $true -and $reset.attemptOwnedBackup -ne $true) {
+        throw 'Disposable-reset material backup is not owned by this attempt.'
+    }
+    if (-not $isApprovedLegacy -and -not $v2PathUnresolved -and -not $ownedEmptyReservation -and -not $resolvedUnowned -and
+        $reset.backupCreated -ne $true) {
+        throw 'Disposable-reset resolved V2 path is neither an owned empty reservation nor material backup.'
     }
     $create = if (Test-Path -LiteralPath $createPath -PathType Leaf) {
         @(Get-SqlEvidenceTokens $createPath)

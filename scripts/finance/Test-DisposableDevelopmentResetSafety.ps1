@@ -153,6 +153,11 @@ try {
     }
     New-AtomicBackupReservation $firstAttemptPath
     New-AtomicBackupReservation $secondAttemptPath
+    $ownedEmptyMaterial = Get-DisposableMaterialBackupState $secondAttemptPath
+    if ($ownedEmptyMaterial.materialized -or $ownedEmptyMaterial.byteLength -ne 0) {
+        throw 'Actual CreateNew reservation helper incorrectly classified its owned zero-byte file as backup material.'
+    }
+    Write-Host 'PASS: actual CreateNew helper yields owned reservation with no material backup claim before SQL writes'
     $collisionRefused = $false
     try { New-AtomicBackupReservation $firstAttemptPath } catch [System.IO.IOException] { $collisionRefused = $true }
     if (-not $collisionRefused -or (Get-Content -Raw -LiteralPath $legacyBackupPath).Trim() -cne 'preserved legacy backup') {
