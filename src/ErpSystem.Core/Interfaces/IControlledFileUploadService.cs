@@ -210,6 +210,14 @@ public static class ControlledFileUploadCategories
     public const string HrEmployeeDocuments = "hr-employee-documents";
 
     /// <summary>
+    /// A union's files (round 3, lane U): the signed collective agreement, the constitution,
+    /// correspondence, and the union's logo. Its own category because a collective agreement binds
+    /// every member and is read by people who did not write it — the case for a scan — and because
+    /// "delete a union's papers" must never be able to reach an employee's documents.
+    /// </summary>
+    public const string HrUnionDocuments = "hr-union-documents";
+
+    /// <summary>
     /// The workbook behind an employee bulk import — the file HR uploaded, kept as the record of
     /// what was loaded and by whom.
     /// </summary>
@@ -337,7 +345,10 @@ public static class ControlledFileUploadCategories
                 HrAnnouncementDocuments,
                 // A policy document is pushed at everyone AND signed for. A signature against an
                 // unscanned file is the last thing anybody wants to have to explain.
-                HrPolicyDocuments
+                HrPolicyDocuments,
+                // A collective agreement binds every member of a bargaining unit and is read by all
+                // of them; a union's constitution and correspondence sit beside it.
+                HrUnionDocuments
             ],
             StringComparer.OrdinalIgnoreCase);
 }

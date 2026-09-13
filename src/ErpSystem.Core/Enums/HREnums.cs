@@ -10170,3 +10170,25 @@ public enum SalaryChangeAuthority
     Direct = 0,
     Approved = 1
 }
+
+/// <summary>
+/// What a file on a union's record is (round 3, lane U; register row U-2; decision D-17's cousin).
+/// A <see cref="CollectiveAgreement"/> row carries the agreement it is the signed copy of.
+/// </summary>
+public enum UnionDocumentKind
+{
+    [Description("Collective agreement")]
+    CollectiveAgreement = 1,
+
+    [Description("Constitution")]
+    Constitution = 2,
+
+    [Description("Correspondence")]
+    Correspondence = 3,
+
+    [Description("Membership list")]
+    MembershipList = 4,
+
+    [Description("Other")]
+    Other = 9
+}

@@ -191,6 +191,10 @@ export function AgreementDialog({
               onChange={(e) => setDocumentReference(e.target.value)}
               maxLength={500}
             />
+            <p className="text-xs text-muted-foreground">
+              In words. The signed copy itself is uploaded on the union&apos;s Documents tab and
+              linked to this agreement.
+            </p>
           </div>
 
           <div className="flex items-center justify-between rounded-md border p-4">

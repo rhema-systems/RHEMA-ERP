@@ -209,6 +209,8 @@ public partial class ApplicationDbContext
     public DbSet<JobResponsibilityKpi> JobResponsibilityKpis { get; set; } = null!;
     public DbSet<Union> Unions { get; set; } = null!;
     public DbSet<CollectiveBargainingAgreement> CollectiveBargainingAgreements { get; set; } = null!;
+    public DbSet<UnionContact> UnionContacts { get; set; } = null!;
+    public DbSet<UnionDocument> UnionDocuments { get; set; } = null!;
     public DbSet<JobFamily> JobFamilies { get; set; } = null!;
     public DbSet<JobSubFamily> JobSubFamilies { get; set; } = null!;
     public DbSet<CareerLevel> JobLevels { get; set; } = null!;
@@ -6127,6 +6129,43 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .WithMany(x => x.Agreements)
                 .HasForeignKey(x => x.UnionId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ---- UnionContact (round 3, lane U; D-8) ----
+        builder.Entity<UnionContact>(entity =>
+        {
+            entity.HasIndex(x => x.UnionId).HasDatabaseName("IX_UnionContact_UnionId");
+            entity.HasIndex(x => x.EmployeeId).HasDatabaseName("IX_UnionContact_EmployeeId");
+
+            entity.HasOne(x => x.Union)
+                .WithMany(x => x.Contacts)
+                .HasForeignKey(x => x.UnionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Employee)
+                .WithMany()
+                .HasForeignKey(x => x.EmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- UnionDocument (round 3, lane U; the requisition-attachment shape) ----
+        builder.Entity<UnionDocument>(entity =>
+        {
+            entity.HasIndex(x => x.UnionId).HasDatabaseName("IX_UnionDocument_UnionId");
+            entity.HasIndex(x => x.AgreementId).HasDatabaseName("IX_UnionDocument_AgreementId");
+            entity.Property(x => x.Kind).HasConversion<int>();
+
+            entity.HasOne(x => x.Union)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.UnionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Agreement)
+                .WithMany(x => x.Documents)
+                .HasForeignKey(x => x.AgreementId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.UploadedBy)
+                .WithMany()
+                .HasForeignKey(x => x.UploadedById)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<JobFamily>(entity =>

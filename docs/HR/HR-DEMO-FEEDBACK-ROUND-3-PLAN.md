@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13. Nine slices remain; U next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) BUILT 2026-09-13. Eight slices remain; T1 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -163,7 +163,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 8 | **K** — catalogue-driven criteria values + the nine scoring fixes + D-7 · ✅ **DONE 2026-09-12 · 81 ×2** | `20260912211938_AddCriteriaCatalogueValues` | `hr-recruitment/run-k.mjs` (extends `run-lane5b.mjs`) | |
 | 9 | **A** — application source and posting · ✅ **DONE 2026-09-13 · 44 ×2** | none | `hr-recruitment/run-a.mjs` | |
 | 10 | **G** — stage flags + pre-employment providers · ✅ **DONE 2026-09-13 · 49 ×2** | `20260913161339_AddPreEmploymentCheckProviders` | `hr-recruitment/run-g.mjs` | |
-| 11 | **U** — union contacts, documents, logo | `AddUnionContactsDocumentsLogo` | new `hr-unions/run-u.mjs` | |
+| 11 | **U** — union contacts, documents, logo · ✅ **DONE 2026-09-13 · 137 ×2** | `20260913181139_AddUnionContactsDocumentsLogo` | `hr-unions/run-u.mjs` | |
 | 12 | **T1** — profile grouped navigation | none | screen walk + static assertions | |
 | 13 | **T2** — record tabs: Movements, Probation, Separation, Leave, Attendance, Benefits, Salary changes | none | screen walk + a static harness asserting each tab's service call | |
 | 14 | **T3** — record tabs: Training, Appraisals & goals, Discipline, Awards, Assets, Medical, Travel, Orientation, Succession | none | as T2 | |
@@ -425,6 +425,49 @@ rule reads `IsRequired`, which is now the same bit as `!CanSkip`, so it is a sec
 rule (kept because legacy rows may hold the two apart until their next save); the assignment skip
 refusal is 422 in words rather than the middleware's fixed text. Harness lesson: the assignment
 create field is `assignedToId` and the skip is a PATCH.
+
+**Lane U log (2026-09-13).** Migration `20260913181139_AddUnionContactsDocumentsLogo` (guarded SQL;
+proven Up/Up/Down/Down/Up on a scratch database with stub parents; purely additive — two tables, six
+nullable logo columns, seven indexes, seven Restrict FKs). *D-8, the contacts:* `UnionContact` rows
+(an employee by id OR an external name, a role, email/phone, notes, `IsPrimary`) at
+`api/hr/unions/{id}/contacts` + `contacts/{id}`; reads open to any employee, writes `HR.Employee.Write`.
+Rules: the first contact is primary whatever the box said; a new primary demotes the old one; the only
+primary cannot be demoted (400 in words); deleting the primary promotes the oldest remaining. The
+union's legacy `ContactPerson/ContactEmail/ContactPhone` trio is re-mirrored from the primary on every
+contact save AND on a union update — a stale form cannot overwrite it; with no contact rows the typed
+trio stands (and the last mirror is left as it was). *U-2, the files:* `UnionDocument` (kind enum
+`UnionDocumentKind`, optional `AgreementId`) through `HrAttachmentUpload` under the new scan-mandatory
+category `hr-union-documents`, served only by `HrDocumentDownload` at `{id}/documents/{docId}/download`;
+a file naming an agreement is forced to kind CollectiveAgreement and must be the union's; kind
+CollectiveAgreement without an agreement is refused (422 from the gate); document DELETE is
+`HR.Employee.Admin`. The logo is a `Logo*` triple on `Union`, `POST/GET {id}/logo` (inline, no
+disposition — the photo convention), `HasLogo` on every read. Delete rules: a union with documents is
+refused as one with agreements is; **an agreement with a document filed against it is refused too**
+(soft delete, the FK never fires — a rule beyond the design). Frontend: `UnionContactsPanel`
+(`EmployeePicker` or a name), `UnionDocumentsPanel` (its own dialog — `AttachmentsPanel` has no room
+for kind + agreement; the agreement picker appears only for the signed copy), detail page = header
+card with `GatedPhoto` + `PhotoDialog`, tabs Agreements · Contacts · Documents · Details, `UnionForm`
+trio read-only with a pointer to the Contacts tab once contacts exist; list page shows the logo and
+the primary contact; `AgreementDialog` points the "document reference" at the Documents tab.
+Harness 137 ×2 (`hr-unions/run-u.mjs`, spawns the clamd stub, mints an HR actor + a plain-Employee
+outsider). Regression: tier-B tail slice 11 (the union audit) 67/67, slice 6 78/78, employee-relations
+slice 4 86/86, recruitment lane5b 34/34. Tier-B slice 0 13/17 (four D-1/D-2 misses are a payroll FK —
+`PayrollEmployeeProfiles → PayrollPaymentMethods` — on the org-unit head change; the slice is
+diagnostic and the failure is not HR's) and employee-relations slice 1 121/123 (two count assertions
+from an older database: "≥ 87 pre-migration Grievance rows", "page size 5") are pre-existing.
+
+⚠ **Found while building:** (1) the agreement DELETE endpoint mapped only `ArgumentException`, so the
+new rule surfaced as a 500 until the `InvalidOperationException → 400` catch the union DELETE already
+had was added — the RunAsync/hand-written split in that controller is a trap for the next rule. (2) The
+tier-B tail and employee-relations minters still sent an `employeeNumber` (refused since round 2b) —
+every one of those suites has been dying in its fixture since then; repaired in their `setup.mjs`.
+(3) Tier-B slice 6 had an HR officer DELETE a union — `HR.Employee.Admin` since the W3 sweep; the
+assertion now expects the 403 and lets admin remove the litter (76 → 78). (4) `Get-Process
+ErpSystem.Api` does not find an API started as `dotnet ErpSystem.Api.dll` (its name is `dotnet`);
+the user's build failed on a lock once — stop it by command line, excluding the shell doing the
+looking. Harness lessons: agreement and union DELETE answer 204 (no body) while contact and document
+DELETE answer 200 `true`; the inline stream sets NO Content-Disposition; the union list rows carry
+contacts and `primaryContact` but an empty `documents` array.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

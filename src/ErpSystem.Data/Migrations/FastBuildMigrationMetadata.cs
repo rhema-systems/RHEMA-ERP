@@ -321,3 +321,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260911111931_AddCandidateIdentityLanguagesAndCertification")] partial class AddCandidateIdentityLanguagesAndCertification { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260912211938_AddCriteriaCatalogueValues")] partial class AddCriteriaCatalogueValues { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260913161339_AddPreEmploymentCheckProviders")] partial class AddPreEmploymentCheckProviders { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260913181139_AddUnionContactsDocumentsLogo")] partial class AddUnionContactsDocumentsLogo { }
