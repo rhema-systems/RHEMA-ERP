@@ -2447,3 +2447,26 @@ invariant before a new manifest can be written. Disposable-reset safety/helper a
 safety/parser and evidence/tamper suites, PowerShell parsing and diff checks passed serially. No database, connection
 variable or preserved evidence was accessed. Reset execution remains prohibited pending Sol High review of the
 ledger-only descendant.
+
+The authorized D2 runtime attempt executed exact approved commit
+`22b27ab18a19a92fa6b1222c05add817574e74fe` and stopped fail-closed before phase-03 and before any reset. External
+evidence directory `GL-Disposable-Reset-Evidence-20260913-01` remains preserved and is not copied into the repository.
+The source database was unchanged. The atomic no-overwrite COPY_ONLY backup exists at 453,042,176 bytes with SHA-256
+`7F07CD03EED8F178ED45208936C3CC8F6E9F8D1336FFB3BF371C076D8F343743`; an independent `RESTORE VERIFYONLY WITH
+CHECKSUM` completed successfully. That independent recovery check does not rewrite the historical harness terminal
+state or authorize reuse of its evidence directory.
+
+The exact runtime defect was evidence transport/record parsing: `backup-create.txt` contained all SQL result markers
+and informational messages on one 399-character physical line, but the post-backup gate used standalone-line
+`-cnotcontains` matching and falsely reported `BACKUP_PATH_ATOMICALLY_RESERVED` absent. A bounded offline correction
+completed as clean direct-child implementation commit `9a8b0e3ffe9df35c832efa099ab6b67b786d7ac8` (tree
+`9f302c880af66f96f15dbab7981acdab5761c19c`). Producer and DisposableReset validator now tokenize evidence only on
+whitespace, require exact case-sensitive tokens once and in order, and bind database/media identity plus reservation,
+start, completion and VERIFY markers. Embedded strings, missing, reordered and duplicate tokens fail closed. Sanitized
+SQL evidence assembly now preserves physical input records without nesting arrays into one string. An actual fake-
+sqlcmd transport test reproduces the long single-line runtime shape and proves the valid sequence passes while marker
+absence, reordering, embedded forgery and duplication are refused; the collapsed marker-publication-failure package
+also validates and retains its focused marker-removal refusals. All offline suites passed. No database, connection
+variable or external evidence directory was accessed during correction. The historical attempt remains preserved; a
+new absent evidence directory and independent Sol High approval of the ledger-only descendant are required before any
+new reset attempt.

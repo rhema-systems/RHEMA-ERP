@@ -196,6 +196,22 @@ terminal evidence says `backupCompleted=true`, including a truthful material-bac
 publication. Independent tamper fixtures remove each marker and re-manifest the otherwise valid package to prove the
 semantic refusal. Reset execution remains prohibited pending Sol High approval.
 
+The approved runtime attempt at exact `22b27ab18a19a92fa6b1222c05add817574e74fe` stopped fail-closed before
+phase-03 and before any reset in preserved external evidence directory `GL-Disposable-Reset-Evidence-20260913-01`.
+The source remained unchanged. Its no-overwrite COPY_ONLY backup is preserved at 453,042,176 bytes with SHA-256
+`7F07CD03EED8F178ED45208936C3CC8F6E9F8D1336FFB3BF371C076D8F343743`; a separate independent `RESTORE VERIFYONLY
+WITH CHECKSUM` passed. The historical run must remain preserved and must not be resumed or reused. The harness had
+collapsed the SQL result records and progress messages into one 399-character physical line, while its post-backup
+gate expected standalone lines and falsely reported `BACKUP_PATH_ATOMICALLY_RESERVED` absent.
+
+The bounded offline correction completed as implementation commit
+`9a8b0e3ffe9df35c832efa099ab6b67b786d7ac8` (tree `9f302c880af66f96f15dbab7981acdab5761c19c`).
+Producer and validator now parse exact whitespace-delimited evidence tokens, require each expected database/media and
+backup/VERIFY marker exactly once and in order, and reject absence, reordering, embedded-marker forgery and
+duplication even when sqlcmd emits one physical line. Sanitized evidence publication also preserves genuine input
+line records rather than string-collapsing nested arrays. Any new reset attempt requires a new absent external evidence
+directory plus independent review and approval of the ledger-only descendant.
+
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
 `-ConfirmDisposableDevelopmentReset`, the exact process attestation shown below, reviewed commit/tree equality,
