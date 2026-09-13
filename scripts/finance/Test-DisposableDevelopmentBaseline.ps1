@@ -15,11 +15,12 @@ $snapshotPath = Join-Path $migrationDirectory 'ApplicationDbContextModelSnapshot
 $authorityPath = Join-Path $migrationDirectory 'FinanceC1C8BaselineAuthoritySql.cs'
 $governancePath = Join-Path $migrationDirectory 'ArchivedGovernanceBaselineSql.cs'
 $governanceManifestPath = Join-Path $migrationDirectory 'ArchivedGovernanceBaselineManifest.json'
+$archivedC8Path = Join-Path $archiveDirectory '20260908120000_AddProducerIntentGroupsC8.cs'
 $inspectorProject = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\ArchivedMigrationSqlInspector.csproj'
 $inspectorSource = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\Program.cs'
 
 foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPath,$authorityPath,$governancePath,
-    $governanceManifestPath,$inspectorProject,$inspectorSource,
+    $governanceManifestPath,$inspectorProject,$inspectorSource,$archivedC8Path,
     (Join-Path $archiveDirectory 'README.md'))) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Disposable-development baseline artifact is missing: $requiredPath"
@@ -160,6 +161,14 @@ foreach ($entry in $representativeHashes.GetEnumerator()) {
 }
 
 $authorityText = Get-Content -Raw -LiteralPath $authorityPath
+$archivedC8Text = Get-Content -Raw -LiteralPath $archivedC8Path
+$badC8Boundary = "WHERE m.[TenantId]=g.[TenantId] AND m.[ProducerIntentGroupId]=g.[Id] AND e.[Status]<>N'Posted'))))`n  THROW 51000, 'C8_ATTEMPT_AUTHORITY: one exact terminal attempt must atomically drive an authorized group transition.', 1;"
+$correctedC8Boundary = $badC8Boundary.Replace("N'Posted'))))", "N'Posted')))))")
+if (([regex]::Matches($archivedC8Text.Replace("`r`n","`n"), [regex]::Escape($badC8Boundary))).Count -ne 1 -or
+    ([regex]::Matches($authorityText.Replace("`r`n","`n"), [regex]::Escape($correctedC8Boundary))).Count -ne 1 -or
+    $authorityText -cnotmatch 'Baseline-only grammar correction for archived 20260908120000_AddProducerIntentGroupsC8') {
+    throw 'The disposable baseline does not bind the exact archived C8 grammar defect to its semantics-preserving correction.'
+}
 $authorityBatches = @([regex]::Matches($authorityText,
     'migrationBuilder\.Sql\(@"(?<sql>.*?)"\);',[Text.RegularExpressions.RegexOptions]::Singleline))
 if ($authorityBatches.Count -ne 17 -or @($authorityBatches | Where-Object {
@@ -217,7 +226,14 @@ if ($GeneratedSqlPath) {
         [regex]::Matches($generatedSql,[regex]::Escape($baselineId)).Count -ne 1) {
         throw 'Generated zero-to-current SQL omits or duplicates audited governance objects, patches, or baseline history.'
     }
+    $grammarOutput = @(& dotnet run --project $inspectorProject -- --verify-generated-sql $resolvedGeneratedSql 2>&1)
+    if ($LASTEXITCODE -ne 0 -or
+        @($grammarOutput | Where-Object { $_ -ceq 'PASS: generated SQL parses with TSql160Parser; THROW_STATEMENTS=1280' }).Count -ne 1 -or
+        @($grammarOutput | Where-Object { $_ -ceq 'PASS: archived C8 missing-parenthesis boundary reproduces SQL error 102 near THROW' }).Count -ne 1) {
+        throw "Generated zero-to-current SQL failed the deterministic T-SQL grammar gate:`n$($grammarOutput -join "`n")"
+    }
     Write-Host 'PASS: generated zero-to-current SQL has exact isolated 459-trigger and audited object authority'
+    $grammarOutput | Where-Object { $_ -cmatch '^PASS:' } | ForEach-Object { Write-Host $_ }
 }
 
 Write-Host "PASS: exactly one compiled EF migration ($baselineId)"

@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
+using Microsoft.SqlServer.TransactSql.ScriptDom;
 
 const string SnapshotRelativePath = "src/ErpSystem.Data/Migrations/ApplicationDbContextModelSnapshot.cs";
 const string BaselineRelativePath = "src/ErpSystem.Data/Migrations/20260913162402_DisposableDevelopmentCurrentModelBaseline.cs";
@@ -12,6 +13,13 @@ const string ImmutableLotTrigger = "TR_ProcurementSourcingCaseLots_Immutable";
 const string ImmutableLotItemTrigger = "TR_ProcurementSourcingCaseLotItems_Immutable";
 const string ModelLotTrigger = "TR_ProcurementSourcingCaseLots_NoMutation";
 const string ModelLotItemTrigger = "TR_ProcurementSourcingCaseLotItems_NoMutation";
+
+if (args.Length == 2 && args[0] == "--verify-generated-sql")
+{
+    VerifyGeneratedSqlGrammar(Path.GetFullPath(args[1]));
+    return;
+}
+
 var separateFinanceAuthorityTriggers = new HashSet<string>(new[]
 {
     "TR_AccountingBookApplicabilityPolicies_C5Authority", "TR_AccountingBookApplicabilityRules_C5Immutable",
@@ -184,7 +192,7 @@ if (args.Length == 0 || args[0] == "--summary")
 
 if (args.Length != 3 || args[0] is not ("--generate" or "--verify"))
 {
-    throw new InvalidOperationException("Usage: --summary, --generate <helper.cs> <manifest.json>, or --verify <helper.cs> <manifest.json>.");
+    throw new InvalidOperationException("Usage: --summary, --generate <helper.cs> <manifest.json>, --verify <helper.cs> <manifest.json>, or --verify-generated-sql <script.sql>.");
 }
 
 var helperContent = RenderHelper(programmableDefinitions, selectedTriggers.Values, patches);
@@ -204,6 +212,54 @@ WriteAtomic(manifestPath, manifestContent);
 Console.WriteLine($"GENERATED_TRIGGERS={selectedTriggers.Count}");
 Console.WriteLine($"GENERATED_PATCHES={patches.Length}");
 Console.WriteLine($"GENERATED_PROGRAMMABLE_OBJECTS={programmableDefinitions.Length}");
+
+static void VerifyGeneratedSqlGrammar(string path)
+{
+    if (!File.Exists(path)) throw new InvalidOperationException($"Generated SQL is missing: {path}.");
+    var sql = NormalizeNewlines(File.ReadAllText(path));
+    var fragment = ParseSql(sql, out var errors);
+    if (errors.Count != 0)
+    {
+        var first = errors[0];
+        throw new InvalidOperationException(
+            $"Generated zero-to-current SQL has {errors.Count} T-SQL grammar error(s); first at {first.Line}:{first.Column}: {first.Message}");
+    }
+
+    var visitor = new ThrowCountingVisitor();
+    fragment.Accept(visitor);
+    if (visitor.Count == 0) throw new InvalidOperationException("Generated SQL grammar audit found no THROW statements.");
+
+    const string correctedBoundary =
+        "WHERE m.[TenantId]=g.[TenantId] AND m.[ProducerIntentGroupId]=g.[Id] AND e.[Status]<>N'Posted')))))\n" +
+        "  THROW 51000, 'C8_ATTEMPT_AUTHORITY: one exact terminal attempt must atomically drive an authorized group transition.', 1;";
+    if (CountOrdinal(sql, correctedBoundary) != 1)
+        throw new InvalidOperationException("The exact corrected C8 attempt-authority grammar boundary is missing or duplicated.");
+
+    var brokenBoundary = correctedBoundary.Replace("N'Posted')))))", "N'Posted'))))", StringComparison.Ordinal);
+    var brokenSql = sql.Replace(correctedBoundary, brokenBoundary, StringComparison.Ordinal);
+    _ = ParseSql(brokenSql, out var brokenErrors);
+    if (brokenErrors.Count == 0 || !brokenErrors.Any(error =>
+            error.Line > 0 && error.Message.Contains("THROW", StringComparison.OrdinalIgnoreCase)))
+        throw new InvalidOperationException("The parser regression did not detect the archived missing-parenthesis failure at THROW.");
+
+    Console.WriteLine($"PASS: generated SQL parses with TSql160Parser; THROW_STATEMENTS={visitor.Count}");
+    Console.WriteLine("PASS: archived C8 missing-parenthesis boundary reproduces SQL error 102 near THROW");
+}
+
+static TSqlFragment ParseSql(string sql, out IList<ParseError> errors)
+{
+    var parser = new TSql160Parser(initialQuotedIdentifiers: true);
+    using var reader = new StringReader(sql);
+    return parser.Parse(reader, out errors);
+}
+
+static int CountOrdinal(string value, string needle)
+{
+    var count = 0;
+    for (var index = 0; (index = value.IndexOf(needle, index, StringComparison.Ordinal)) >= 0; index += needle.Length)
+        count++;
+    return count;
+}
 
 static string FindRepositoryRoot()
 {
@@ -499,3 +555,9 @@ internal sealed record SqlDefinition(string Name, string MigrationId, int Operat
     public string Kind => Derivation;
 }
 internal sealed record GovernanceAudit(string Kind, int DefinitionCount, int UniqueNameCount);
+
+internal sealed class ThrowCountingVisitor : TSqlFragmentVisitor
+{
+    public int Count { get; private set; }
+    public override void ExplicitVisit(ThrowStatement node) => Count++;
+}

@@ -567,6 +567,8 @@ BEGIN
   THROW 51000, 'C8_RECEIPT_REUSED: owner-effect evidence already belongs to a single event.', 1;
 END;");
 
+        // Baseline-only grammar correction for archived 20260908120000_AddProducerIntentGroupsC8:
+        // close the outer IF EXISTS before THROW; the governed predicate and trigger behavior are unchanged.
         migrationBuilder.Sql(@"CREATE TRIGGER [TR_ProducerIntentGroupAttempts_C8Immutable] ON [ProducerIntentGroupAttempts] INSTEAD OF INSERT AS
 BEGIN
  SET NOCOUNT ON;
@@ -588,7 +590,7 @@ BEGIN
       OR NOT EXISTS(SELECT 1 FROM [ProducerIntentGroupReceipts] r WHERE r.[TenantId]=g.[TenantId] AND r.[ProducerIntentGroupId]=g.[Id])
       OR EXISTS(SELECT 1 FROM [ProducerIntentGroupMembers] m JOIN [AccountingEvents] e
          ON e.[TenantId]=m.[TenantId] AND e.[Id]=m.[AccountingEventId]
-         WHERE m.[TenantId]=g.[TenantId] AND m.[ProducerIntentGroupId]=g.[Id] AND e.[Status]<>N'Posted'))))
+         WHERE m.[TenantId]=g.[TenantId] AND m.[ProducerIntentGroupId]=g.[Id] AND e.[Status]<>N'Posted')))))
   THROW 51000, 'C8_ATTEMPT_AUTHORITY: one exact terminal attempt must atomically drive an authorized group transition.', 1;
  INSERT [ProducerIntentGroupAttempts]([Id],[ProducerIntentGroupId],[AttemptNumber],[GroupFingerprint],[Status],[StartedAtUtc],
   [CompletedAtUtc],[FailedMemberOrder],[FailedAccountingEventId],[FailureMessage],[CreatedAt],[UpdatedAt],[CreatedBy],[UpdatedBy],

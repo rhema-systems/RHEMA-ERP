@@ -670,6 +670,49 @@ try {
         Invoke-ExpectedRemanifestFailure $tamperRoot "phase-07 publication $($phaseSevenTamper.label)"
     }
 
+    $applyMigrationFailure=New-PackageRoot 'APPLY_MIGRATIONS_NEGATIVE_EXIT'
+    Copy-Item -Path (Join-Path $pass '*') -Destination $applyMigrationFailure
+    foreach($ordinal in 7..10){
+        $phasePath=Join-Path $applyMigrationFailure ("phase-{0:D2}.json" -f $ordinal)
+        if(Test-Path -LiteralPath $phasePath){Remove-Item -LiteralPath $phasePath -Force}
+    }
+    foreach($lateArtifact in @('target-migration-history.txt','reset-seed-pass-1.log','reset-seed-pass-2.log',
+        'reset-invariants-pass-1.txt','reset-invariants-pass-2.txt','reset-invariants.sha256','reset-dbcc.txt')){
+        $latePath=Join-Path $applyMigrationFailure $lateArtifact
+        if(Test-Path -LiteralPath $latePath){Remove-Item -LiteralPath $latePath -Force}
+    }
+    @('Sanitized .NET migration failure: SQL error 102 near THROW.',
+        'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=-532462766|COMMAND=dotnet') |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $applyMigrationFailure 'reset-apply-migrations.log')
+    $applyFailureStatus=Get-Content -Raw -LiteralPath (Join-Path $applyMigrationFailure 'reset-status.json')|ConvertFrom-Json -AsHashtable
+    $applyFailureStatus.status='FAILED_NO_AUTOMATIC_RETRY';$applyFailureStatus.phase='DATABASE_RECREATED'
+    $applyFailureStatus.failedOperation='APPLY_MIGRATIONS';$applyFailureStatus.finalMigrationCount=0
+    Complete-Status $applyMigrationFailure $applyFailureStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $applyMigrationFailure -PackageKind DisposableReset -WriteManifest
+    if($LASTEXITCODE -ne 0){throw 'Truthful APPLY_MIGRATIONS failure with signed negative Int32 exit was rejected.'}
+    if(Test-Path -LiteralPath (Join-Path $applyMigrationFailure 'target-migration-history.txt')){
+        throw 'APPLY_MIGRATIONS failure fixture unexpectedly retained target history.'
+    }
+    Write-Host 'PASS: phase-06 APPLY_MIGRATIONS failure accepts exact signed negative Int32 native exit and no target history'
+
+    foreach($nativeExitTamper in @(
+        @{label='zero-as-failure';marker='RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=0|COMMAND=dotnet'},
+        @{label='negative-zero';marker='RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=-0|COMMAND=dotnet'},
+        @{label='nonnumeric';marker='RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=FAILED|COMMAND=dotnet'},
+        @{label='positive-overflow';marker='RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=2147483648|COMMAND=dotnet'},
+        @{label='negative-overflow';marker='RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=-2147483649|COMMAND=dotnet'},
+        @{label='success-downgrade';marker='RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=dotnet'},
+        @{label='duplicate';marker="RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=-532462766|COMMAND=dotnet`nRHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=FAILURE|EXIT_CODE=-532462766|COMMAND=dotnet"}
+    )){
+        $tamperRoot=New-PackageRoot ('NATIVE_EXIT_'+($nativeExitTamper.label -replace '-','_'))
+        Copy-Item -Path (Join-Path $applyMigrationFailure '*') -Destination $tamperRoot
+        @('Sanitized migration failure.',[string]$nativeExitTamper.marker) |
+            Set-Content -Encoding ascii -LiteralPath (Join-Path $tamperRoot 'reset-apply-migrations.log')
+        Update-ArtifactBinding $tamperRoot 'reset-apply-migrations.log'
+        Invoke-ExpectedRemanifestFailure $tamperRoot "native failure exit $($nativeExitTamper.label)"
+    }
+    Write-Host 'PASS: zero, nonnumeric, overflow, success-downgrade and duplicate failure markers are refused'
+
     $fingerprintFileMismatch=New-PackageRoot 'FAILED_FINGERPRINT_FILE_STATUS'
     Copy-Item -Path (Join-Path $phaseSevenFailure '*') -Destination $fingerprintFileMismatch
     '0|EMPTY|1|0|0'|Set-Content -Encoding ascii -LiteralPath (Join-Path $fingerprintFileMismatch 'source-fingerprint-before.txt')

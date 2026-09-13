@@ -53,6 +53,15 @@ function Assert-UniqueOrderedSqlEvidenceTokens([string]$evidenceFile, [string[]]
     }
 }
 
+function Test-NativeFailureEvidenceMarker([string]$line, [string]$command) {
+    $pattern = '^RHEMA_NATIVE_COMMAND_EVIDENCE_V1\|STATUS=FAILURE\|EXIT_CODE=(?<exit>-?(?:0|[1-9]\d*))\|COMMAND=' +
+        [regex]::Escape($command) + '$'
+    if ($line -cnotmatch $pattern) { return $false }
+    $exitCode = 0
+    if (-not [int]::TryParse([string]$Matches.exit, [ref]$exitCode)) { return $false }
+    return $exitCode -ne 0
+}
+
 function Read-MigrationHistoryEvidence([string]$path, [string]$context, [bool]$allowReviewedLegacy = $false) {
     if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "$context evidence is missing." }
     $raw = [System.IO.File]::ReadAllText($path, [System.Text.UTF8Encoding]::new($false))
@@ -306,9 +315,14 @@ if ($PackageKind -eq 'DisposableReset') {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
         $lines = @(Get-Content -LiteralPath $path)
         $expectedMarker = "RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=$($entry.Value)"
-        $failurePattern = '^RHEMA_NATIVE_COMMAND_EVIDENCE_V1\|STATUS=FAILURE\|EXIT_CODE=[1-9]\d*\|COMMAND=' + [regex]::Escape($entry.Value) + '$'
         $validTerminalMarker = $lines[-1] -ceq $expectedMarker -or
-            ($reset.status -eq 'FAILED_NO_AUTOMATIC_RETRY' -and $lines[-1] -cmatch $failurePattern)
+            ($reset.status -eq 'FAILED_NO_AUTOMATIC_RETRY' -and
+             (Test-NativeFailureEvidenceMarker ([string]$lines[-1]) ([string]$entry.Value)))
+        if ([string]$reset.failedOperation -ceq 'APPLY_MIGRATIONS' -and
+            $entry.Key -ceq 'reset-apply-migrations.log' -and
+            -not (Test-NativeFailureEvidenceMarker ([string]$lines[-1]) ([string]$entry.Value))) {
+            throw 'Disposable-reset APPLY_MIGRATIONS failure must bind its exact failed native-command evidence.'
+        }
         if ($lines.Count -eq 0 -or -not $validTerminalMarker -or
             @($lines | Where-Object { $_ -like 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' }).Count -ne 1) {
             throw "Disposable-reset native evidence is empty or marker-invalid: $($entry.Key)"
