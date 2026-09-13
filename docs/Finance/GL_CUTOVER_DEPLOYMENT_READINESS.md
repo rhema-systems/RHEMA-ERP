@@ -146,6 +146,44 @@ count `0`). Final-package validation passed and wrote the manifest. The external
 remains preserved and is not copied into this repository. This is durable proof of a safe stop, not cutover
 approval; every blocker and review finding remains open.
 
+### FINAL-04 remediation decision packet
+
+A follow-up read-only assessment on 2026-09-13 identified the exact shape of the four findings without changing
+the source. The three historical versions are published layouts: `BS_LEGACY_IFRS` version 1 (9 rows/37 mappings),
+`IFRS_BS` version 1 (22 rows/27 mappings), and `IFRS_IS` version 1 (21 rows/19 mappings). Their immutable
+publication membership and book identity need an explicit preservation decision; the migration must not infer
+those snapshots silently from mutable current mappings.
+
+The single live FX batch is posted, has two lines and durable journal/posting references, and has not been
+reversed. It therefore must not be deleted, soft-deleted, reclassified, or reset merely to pass Phase 4. The
+safe history-preserving option is a separately reviewed backfill that reconstructs and verifies the exact
+book, classification, rate, policy and reversal evidence from durable source records. Reset/reseed is a distinct
+destructive option suitable only if the database owner explicitly declares this source disposable.
+
+The nine active currency links comprise three zero-history links for `000-8884-0000`, three zero-history links
+for `000-9994-0000`, one three-transaction USD link for `000-9995-0000`, and one USD link each for `1100` and
+`2000`. Every link has three enabled active posting-book mappings and exactly one default posting-book mapping.
+The reviewed manifest resolves `1100` to `RECEIVABLE_CONTROL` and `2000` to `PAYABLE_CONTROL`, whose revaluation
+default agrees with the legacy enabled flag. The three test-account codes are not reviewed manifest identities:
+their classifications or controlled inactivation require an explicit Finance decision, and the history-bearing
+`000-9995-0000` link cannot be removed.
+
+The classification table is absent because its foundation is the first of the 13 pending migrations. The
+current all-at-once migration entry point cannot seed or review classifications between Phase 1 and the Phase 4
+preflight, while the final harness refuses the absent schema before creating a clone. Proceeding therefore
+requires one of these explicit decisions:
+
+1. **Recommended — preserve history:** authorize design and isolated-clone rehearsal of a staged, independently
+   reviewed compatibility backfill. It must create/seed Phase 1 authority before Phase 4, preserve the three
+   published-layout snapshots, bind the existing posted FX batch and lines to exact book/classification/policy
+   evidence, and resolve all nine links without changing their economics. Production remains read-only until the
+   backfill and full clone rehearsal pass and a separate migration-application authorization is granted.
+2. **Disposable-source reset/reseed:** only if the database owner attests that `RhemaERP` contains no retained
+   accounting evidence, authorize a backup-verified destructive reset and deterministic reseed under DBA control.
+   This option discards historical layout/FX evidence and is not inferred from test-like account names.
+
+Status is `DECISION_REQUIRED`; neither option is authorized by the FINAL-04 run or this document.
+
 ```powershell
 $env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<secure same-server connection; exact RhemaERP catalog>'
 $env:RHEMA_GL_REHEARSAL_CONNECTION = '<same server; absent RHEMAERP_GL_REHEARSAL_* catalog>'

@@ -2293,3 +2293,21 @@ The run returned `NO_GO_PREFLIGHT` on `CLASSIFICATION_SCHEMA_ABSENT=1` and
 was zero. Final-package validation passed and wrote its manifest. The external FINAL-04 evidence package remains
 preserved outside the repository. This records a successfully evidenced fail-closed stop only; it does not clear
 the two blockers, resolve the two review sets, or authorize cutover.
+
+The coordinator completed a follow-up read-only FINAL-04 remediation assessment. The three historical records are
+published `BS_LEGACY_IFRS`, `IFRS_BS`, and `IFRS_IS` version-1 layouts with respectively 9/37, 22/27, and 21/19
+row/mapping counts. The one live FX batch is posted, contains two lines, has journal and posting-event references,
+and has not been reversed. The nine active legacy currency links are three zero-history links each for test-account
+codes `000-8884-0000` and `000-9994-0000`, one history-bearing USD link for `000-9995-0000`, and one history-bearing
+USD link each for receivables `1100` and payables `2000`; each has three enabled active posting-book mappings and
+one default mapping. The manifest deterministically resolves `1100`/`2000` to the compatible include-by-default
+receivable/payable classifications, but the three test-account identities are outside the reviewed manifest.
+
+This also exposed an operational sequencing gap: the classification foundation is the first pending migration,
+the all-at-once migration entry point does not interleave classification seeding/review before Phase 4, and the
+final harness refuses an absent classification schema before backup. The recommended resolution is a
+history-preserving, independently reviewed staged compatibility backfill rehearsed only on an isolated clone;
+it must preserve immutable layout publication membership and reconstruct exact FX book/classification/rate/policy
+evidence without changing economics. The alternative is a backup-verified destructive reset/reseed only if the
+database owner explicitly declares the source disposable. Status is `DECISION_REQUIRED`; no source mutation,
+migration, backup, target creation, feature change or cutover authorization occurred.
