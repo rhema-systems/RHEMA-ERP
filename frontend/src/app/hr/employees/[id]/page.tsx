@@ -313,6 +313,15 @@ function EmployeeDetailPageInner() {
             <InfoRow label="Religion" value={e.religion} />
             <InfoRow label="Blood Type" value={e.bloodType} />
             <InfoRow label="Expatriate" value={yn(e.isExpatriate)} />
+            {/* Round 3, lane P2: the catalogue row, with the notes beside it. */}
+            <InfoRow
+              label="Disability"
+              value={
+                e.hasDisability
+                  ? [e.disabilityTypeName, e.disabilityDescription].filter(Boolean).join(' — ') || 'Yes'
+                  : 'None recorded'
+              }
+            />
           </InfoCard>
 
           <InfoCard title="Contact">

@@ -515,6 +515,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     /// <summary>How one person is tied to another — the catalogue four free-text columns
     /// used to spell out separately (round 2, lane D2).</summary>
     public DbSet<RelationshipType> RelationshipTypes { get; set; }
+    /// <summary>Round 3, lane P2: the disability catalogue the employee and dependant forms pick from.</summary>
+    public DbSet<DisabilityType> DisabilityTypes { get; set; }
 
     // ── Teams and committees: the activity sub-module (round 2, lane F1) ────────────────────
     //

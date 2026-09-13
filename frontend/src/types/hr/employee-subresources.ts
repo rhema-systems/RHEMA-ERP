@@ -230,6 +230,9 @@ export interface EmployeeDependent {
   gender?: Gender | null;
   hasDisability: boolean;
   disabilityDescription?: string | null;
+  /** Round 3, lane P2. */
+  disabilityTypeId?: string | null;
+  disabilityTypeName?: string | null;
   ghanaCardNumber?: string | null;
   phone?: string | null;
   digitalAddress?: string | null;
@@ -257,6 +260,7 @@ export interface CreateEmployeeDependentRequest {
   gender?: Gender | null;
   hasDisability: boolean;
   disabilityDescription?: string | null;
+  disabilityTypeId?: string | null;
   ghanaCardNumber?: string | null;
   phone?: string | null;
   digitalAddress?: string | null;

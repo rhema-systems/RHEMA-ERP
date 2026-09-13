@@ -26,6 +26,7 @@ public class EmployeeService : IEmployeeService
     private readonly IPositionNamedSetService _namedSets;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<EmployeeService> _logger;
+    private readonly IDisabilityTypeService _disabilityTypes; // round 3, lane P2
 
     public EmployeeService(
         IEmployeeRepository employeeRepository,
@@ -41,7 +42,8 @@ public class EmployeeService : IEmployeeService
         INumberSequenceService numberSequence,
         ICompanyHrPolicySettingsService policySettings,
         IPositionNamedSetService namedSets,
-        ILogger<EmployeeService> logger)
+        ILogger<EmployeeService> logger,
+        IDisabilityTypeService disabilityTypes)
     {
         _currencies = currencies;
         _staffNumbers = staffNumbers;
@@ -57,6 +59,7 @@ public class EmployeeService : IEmployeeService
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _disabilityTypes = disabilityTypes;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant
@@ -519,6 +522,7 @@ public class EmployeeService : IEmployeeService
                 + "the probation record is what passes it. To record an employee who was confirmed before "
                 + "this system, use the import door — tick that they already have a staff number.");
 
+        await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability, cancellationToken); // round 3, lane P2
         var employeeEntity = dto.ToEntity(employeeNumber, orgUnit.OrganizationLevelId, location.LocationLevelId);
         employeeEntity.EmailAddress = email;
         employeeEntity.TenantId = GetTenantId();
@@ -823,6 +827,7 @@ public class EmployeeService : IEmployeeService
         var previousEmploymentType = employee.EmploymentType;
         var previousProbationDays = employee.ProbationPeriodDays;
 
+        await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability, cancellationToken); // round 3, lane P2
         dto.Apply(employee, newOrgLevelId, newLocationLevelId);
 
         // ⚠ AFTER Apply, which has just written whatever probation length the caller sent. The
@@ -1488,7 +1493,9 @@ public class EmployeeService : IEmployeeService
     public async Task<IEnumerable<EmployeeDependentReadDto>> GetDependentsAsync(Guid employeeId, CancellationToken cancellationToken = default)
     {
         var repo = _unitOfWork.Repository<EmployeeDependent>();
-        var items = await repo.FindAsync(d => d.EmployeeId == employeeId);
+        // Round 3, lane P2: the type's name travels on the read.
+        var items = await repo.GetQueryable().AsNoTracking().Include(d => d.DisabilityType)
+            .Where(d => d.EmployeeId == employeeId && !d.IsDeleted).ToListAsync(cancellationToken);
         return items.OrderBy(d => d.LastName).ThenBy(d => d.FirstName).Select(d => d.ToReadDto());
     }
 
@@ -1498,6 +1505,7 @@ public class EmployeeService : IEmployeeService
         await EnsureEmployeeExistsAsync(dto.EmployeeId);
 
         var repo = _unitOfWork.Repository<EmployeeDependent>();
+        await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability, cancellationToken); // round 3, lane P2
         var entity = dto.ToEntity();
         // ToEntity() does not stamp the tenant, and the DbContext auto-stamp is inert, so an
         // unstamped row inserts TenantId = Guid.Empty and trips the Tenants FK.
@@ -1506,7 +1514,7 @@ public class EmployeeService : IEmployeeService
         await repo.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToReadDto();
+        return (await LoadDependentAsync(repo, entity.Id, cancellationToken)).ToReadDto();
     }
 
     public async Task<EmployeeDependentReadDto> UpdateDependentAsync(EmployeeDependentUpdateDto dto, CancellationToken cancellationToken = default)
@@ -1517,12 +1525,17 @@ public class EmployeeService : IEmployeeService
         var entity = await repo.GetByIdAsync(dto.Id);
         if (entity == null) throw new ArgumentException($"Dependent '{dto.Id}' not found.");
 
+        await _disabilityTypes.EnsureUsableAsync(dto.DisabilityTypeId, dto.HasDisability ?? entity.HasDisability, cancellationToken); // round 3, lane P2
         dto.Apply(entity);
         await repo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        return entity.ToReadDto();
+        return (await LoadDependentAsync(repo, entity.Id, cancellationToken)).ToReadDto();
     }
+
+    /// <summary>The dependant with its disability type loaded — the write paths answer through this (round 3, lane P2).</summary>
+    private static async Task<EmployeeDependent> LoadDependentAsync(IGenericRepository<EmployeeDependent> repo, Guid id, CancellationToken cancellationToken)
+        => await repo.GetQueryable().AsNoTracking().Include(d => d.DisabilityType).FirstAsync(d => d.Id == id, cancellationToken);
 
     public async Task<bool> RemoveDependentAsync(Guid employeeId, Guid dependentId, CancellationToken cancellationToken = default)
     {

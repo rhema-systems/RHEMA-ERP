@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) and J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) BUILT 2026-09-13. Four slices remain; P2 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) and P2 (72 ×2, `hr-employee-docs/run-p2.mjs`; lane 3a 47, D2 121, round-2 lane A 88, P1 17 after) BUILT 2026-09-13. Three slices remain; P3 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -168,7 +168,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 13 | **T2** — record tabs: Movements, Probation, Separation, Leave, Attendance, Benefits, Salary changes · ✅ **DONE 2026-09-13 · 54** (screen walk owed) | none | `hr-employee-docs/run-t2.mjs` (static + live reads) + screen walk | |
 | 14 | **T3** — record tabs: Training, Appraisals & goals, Discipline, Awards, Assets, Medical, Travel, Orientation, Succession · ✅ **DONE 2026-09-13 · 70** (screen walk owed) | none | `hr-employee-docs/run-t3.mjs` (static + live reads) + screen walk | |
 | 15 | **J2** — derived intrinsic value, proposed grade, the matcher · ✅ **DONE 2026-09-13 · 67 ×2** | `20260913214947_AddJobDescriptionProposedGrade` | `hr-jobarch/run-j2.mjs` | |
-| 16 | **P2** — the disability catalogue | `AddDisabilityTypes` | `hr-employee-docs/run-p2.mjs` | |
+| 16 | **P2** — the disability catalogue · ✅ **DONE 2026-09-13 · 72 ×2** | `20260913224857_AddDisabilityTypes` | `hr-employee-docs/run-p2.mjs` | |
 | 17 | **P3** — drop the contract leave columns | `DropContractLeaveColumns` | `hr-probation/run-p3.mjs` | |
 | 18 | **X** — allowances and deductions (probe → editor or read-only) | none | `hr-payroll-membership/run-x.mjs` | the probe decides; can move earlier |
 | 19 | **V** — talent segment ownership | `AddTalentSegmentOwnership` | `hr-recruitment/run-v.mjs` | |
@@ -565,6 +565,38 @@ is read from the entity nav because no position DTO carries `SalaryGradeId`. Har
 update routes are `qualifications/{id}` and `competencies/{id}`, not nested under the description;
 `var entity = createDto.ToEntity();` appears fifteen times in the service — scope an anchor to its
 method; `SalaryEntities.cs` declares no namespace.
+
+**Lane P2 log (2026-09-13).** Migration `20260913224857_AddDisabilityTypes` (guarded SQL; scratch
+Up/Up/Down/Down/Up; one table, two nullable columns, five indexes — Tenant+Name unique, Tenant+Code
+unique filtered — three Restrict FKs). Built on the relationship-type pattern (round 2, lane D2):
+`DisabilityType` (name, code, `DisabilityCategory` enum, description, sort, active) with
+`IDisabilityTypeConsumer` on `Employee` AND `EmployeeDependent`; `DisabilityTypeId` on both records,
+the existing `DisabilityDescription` kept as the NOTES beside it; `api/hr/disability-types`
+(Read/Write/Admin; delete 422 with a count while any employee or dependant names the row; retire
+otherwise); `DisabilityTypeSeeder` (16 rows — the census / Act 715 groupings, probe code `VISUAL`)
+as a `seed-hr-all` step after Languages. Every writer of the id goes through
+`IDisabilityTypeService.EnsureUsableAsync`: a type without the tick, a retired type and a stranger
+type are each refused in words, on employee create/update and dependant add/update alike. Employee
+update writes the type only when supplied (partial, like the notes — the import's partial update
+leaves it alone); unticking clears type and notes; the dependant update is a replace, like its
+notes. Reads carry `DisabilityTypeName` (the detail read and the dependant list/write responses
+include the nav). *Frontend:* catalogue page under HR setup ("Disability Types"), the employee form
+and the dependant form open a picker over the live catalogue beside the notes once the box is
+ticked, the profile overview shows "type — notes", the edit path and mapper carry the id. Harness 72
+×2 (`hr-employee-docs/run-p2.mjs`); regression lane 3a 47, D2 121, round-2 lane A 88, P1 17.
+Deviations: none of the plan's. Manifest rows added (DisabilityTypes required; and the two lane U
+owed — UnionContacts, UnionDocuments — optional).
+
+⚠ **Found while building:** (1) the entity had no DbSet, so the first scaffold named the table
+`DisabilityType` singular; adding the DbSet and running `migrations remove` + `add` under the focused
+tooling build produced a migration body that CREATED THE WHOLE SCHEMA (1,645 CreateTable calls) —
+the remove had rolled the snapshot back to the previous Designer's reduced model. The Designer and
+the regenerated snapshot were correct (same entity count as HEAD plus the additions), so the body was
+overwritten with the guarded SQL and nothing else touched; recorded in memory — never remove+add,
+delete the two files by hand and `git checkout` the snapshot instead. (2) Harness lesson: a body
+spread from the detail read carries the OLD type id, so an "untick" that keeps it is (correctly)
+refused — send the type as null when unticking, as the form mapper does. (3) `EmployeeForm.tsx`
+already had a component-scoped `NONE`; the picker uses its own `NO_DISABILITY_TYPE` sentinel.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

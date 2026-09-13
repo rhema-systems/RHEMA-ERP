@@ -160,6 +160,15 @@ public class HrSeedOrchestrator
                                       && x.Code == LanguageSeeder.ProbeCode, ct),
             ct => new LanguageSeeder(_context, Log<LanguageSeeder>()).SeedAsync(tenantId, ct)),
 
+        // Round 3, lane P2: the disability catalogue the employee and dependant forms pick from.
+        // Probes on the code "VISUAL", like the two catalogues above.
+        new SeedStep(
+            "Disability types (census / Act 715 groupings)",
+            ct => _context.Set<DisabilityType>()
+                          .AnyAsync(x => x.TenantId == tenantId
+                                      && x.Code == DisabilityTypeSeeder.ProbeCode, ct),
+            ct => new DisabilityTypeSeeder(_context, Log<DisabilityTypeSeeder>()).SeedAsync(tenantId, ct)),
+
         new SeedStep(
             "Skills",
             ct => _context.Set<Skill>().AnyAsync(x => x.TenantId == tenantId, ct),

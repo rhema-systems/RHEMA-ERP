@@ -44,6 +44,8 @@ export function employeeFormToRequest(
     genderDescription: values.gender === 'Other' ? s(values.genderDescription) : null,
     hometown: s(values.hometown),
     hasDisability: values.hasDisability,
+    // Round 3, lane P2: the catalogue row travels only with the tick; the server refuses one without it.
+    disabilityTypeId: values.hasDisability ? s(values.disabilityTypeId) : null,
     disabilityDescription: values.hasDisability ? s(values.disabilityDescription) : null,
     dateOfBirth: s(values.dateOfBirth),
     maritalStatus: (values.maritalStatus || null) as MaritalStatus | null,

@@ -17,7 +17,7 @@ namespace ErpSystem.Core.Entities.HR;
 /// The authoritative HR record for a person employed by the organisation.
 /// Created (or linked) when a JobHireRecord is confirmed and onboarding completes.
 /// </summary>
-public class Employee : TenantEntity
+public class Employee : TenantEntity, IDisabilityTypeConsumer
 {
     [Required]
     [MaxLength(50)]
@@ -87,6 +87,12 @@ public class Employee : TenantEntity
     /// is not asked to learn a second vocabulary for one idea.</para>
     /// </remarks>
     public bool HasDisability { get; set; }
+
+    /// <summary>Which kind, from the tenant's catalogue (round 3, lane P2). Notes stay in the description.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+
+    [ForeignKey(nameof(DisabilityTypeId))]
+    public virtual DisabilityType? DisabilityType { get; set; }
 
     [MaxLength(500)]
     public string? DisabilityDescription { get; set; }
@@ -1272,7 +1278,7 @@ public class EmployeeEmergencyContact : TenantEntity, IRelationshipTypeConsumer
 /// <summary>
 /// Represents employee dependents
 /// </summary>
-public class EmployeeDependent : TenantEntity
+public class EmployeeDependent : TenantEntity, IDisabilityTypeConsumer
 {
     [Required]
     public Guid EmployeeId { get; set; }
@@ -1301,6 +1307,12 @@ public class EmployeeDependent : TenantEntity
     public string? GenderDescription { get; set; }
 
     public bool HasDisability { get; set; }
+
+    /// <summary>Which kind, from the tenant's catalogue (round 3, lane P2). Notes stay in the description.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+
+    [ForeignKey(nameof(DisabilityTypeId))]
+    public virtual DisabilityType? DisabilityType { get; set; }
 
     [MaxLength(500)]
     public string? DisabilityDescription { get; set; }

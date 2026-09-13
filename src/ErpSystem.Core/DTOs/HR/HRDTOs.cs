@@ -88,6 +88,9 @@ public class EmployeeDetailDto : EmployeeDto
     /// </summary>
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: the catalogue row, and its name for display.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+    public string? DisabilityTypeName { get; set; }
     public string? Address { get; set; }
 
     /// <summary>⚠ A display snapshot resolved from <c>GeoAreaId</c> when one is set — see the entity.</summary>
@@ -237,6 +240,8 @@ public class CreateEmployeeDto
     /// </summary>
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
     public bool IsFullTime { get; set; } = true;
     public DateOnly? DateEmployed { get; set; }
 
@@ -387,6 +392,8 @@ public class UpdateEmployeeDto
     /// </summary>
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
     public bool IsFullTime { get; set; }
     public DateOnly? DateEmployed { get; set; }
 
@@ -822,6 +829,9 @@ public class EmployeeDependentReadDto
     public string? GenderDescription { get; set; }
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: the catalogue row, and its name for display.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+    public string? DisabilityTypeName { get; set; }
 
     public string? GhanaCardNumber { get; set; }
     public string? Phone { get; set; }
@@ -878,6 +888,8 @@ public class EmployeeDependentCreateDto
 
     [MaxLength(500)]
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
 
     [MaxLength(50)]
     public string? GhanaCardNumber { get; set; }
@@ -921,6 +933,8 @@ public class EmployeeDependentUpdateDto
     public string? GenderDescription { get; set; }
     public bool? HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
     public string? GhanaCardNumber { get; set; }
     public string? Phone { get; set; }
     public string? DigitalAddress { get; set; }

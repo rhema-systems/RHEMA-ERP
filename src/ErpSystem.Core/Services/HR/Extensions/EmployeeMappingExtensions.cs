@@ -114,6 +114,8 @@ public static class EmployeeMappingExtensions
             PhotoMimeType = e.PhotoMimeType,
             PhotoFileSizeBytes = e.PhotoFileSizeBytes,
             DisabilityDescription = e.DisabilityDescription,
+            DisabilityTypeId = e.DisabilityTypeId,
+            DisabilityTypeName = e.DisabilityType?.Name,
             Address = e.Address,
             City = e.City,
             State = e.State,
@@ -244,6 +246,8 @@ public static class EmployeeMappingExtensions
         to.PhotoMimeType = from.PhotoMimeType;
         to.PhotoFileSizeBytes = from.PhotoFileSizeBytes;
         to.DisabilityDescription = from.DisabilityDescription;
+        to.DisabilityTypeId = from.DisabilityTypeId;
+        to.DisabilityTypeName = from.DisabilityTypeName;
         to.Address = from.Address;
         to.City = from.City;
         to.State = from.State;
@@ -332,7 +336,10 @@ public static class EmployeeMappingExtensions
             GenderDescription = dto.GenderDescription,
             Hometown = dto.Hometown,
             HasDisability = dto.HasDisability,
-            DisabilityDescription = dto.DisabilityDescription,
+            // Round 3, lane P2: a type without the tick is contradictory — the service refuses it
+            // before this runs, and a false tick clears both the type and the notes.
+            DisabilityTypeId = dto.HasDisability ? dto.DisabilityTypeId : null,
+            DisabilityDescription = dto.HasDisability ? dto.DisabilityDescription : null,
             IsFullTime = dto.IsFullTime,
             DateEmployed = dto.DateEmployed,
 
@@ -418,6 +425,10 @@ public static class EmployeeMappingExtensions
         // treating false as absent would make the tick impossible to UNtick.
         e.HasDisability = dto.HasDisability;
         if (dto.DisabilityDescription != null) e.DisabilityDescription = dto.DisabilityDescription;
+        // Round 3, lane P2. Like the description: written when supplied, so a partial update (the
+        // import's) leaves it alone; untick and both go.
+        if (dto.DisabilityTypeId.HasValue) e.DisabilityTypeId = dto.DisabilityTypeId;
+        if (!dto.HasDisability) { e.DisabilityTypeId = null; e.DisabilityDescription = null; }
         if (dto.DateEmployed.HasValue) e.DateEmployed = dto.DateEmployed;
 
         e.IsFullTime = dto.IsFullTime;
@@ -678,6 +689,8 @@ public static class EmployeeMappingExtensions
             PhotoFileSizeBytes = d.PhotoFileSizeBytes,
             HasDisability = d.HasDisability,
             DisabilityDescription = d.DisabilityDescription,
+            DisabilityTypeId = d.DisabilityTypeId,
+            DisabilityTypeName = d.DisabilityType?.Name,
             GhanaCardNumber = d.GhanaCardNumber,
             Phone = d.Phone,
             DigitalAddress = d.DigitalAddress,
@@ -701,7 +714,10 @@ public static class EmployeeMappingExtensions
             Gender = dto.Gender,
             GenderDescription = dto.GenderDescription,
             HasDisability = dto.HasDisability,
-            DisabilityDescription = dto.DisabilityDescription,
+            // Round 3, lane P2: a type without the tick is contradictory — the service refuses it
+            // before this runs, and a false tick clears both the type and the notes.
+            DisabilityTypeId = dto.HasDisability ? dto.DisabilityTypeId : null,
+            DisabilityDescription = dto.HasDisability ? dto.DisabilityDescription : null,
             GhanaCardNumber = dto.GhanaCardNumber,
             Phone = dto.Phone,
             DigitalAddress = dto.DigitalAddress,
@@ -724,6 +740,9 @@ public static class EmployeeMappingExtensions
         d.GenderDescription = dto.GenderDescription;
         if (dto.HasDisability.HasValue) d.HasDisability = dto.HasDisability.Value;
         d.DisabilityDescription = dto.DisabilityDescription;
+        // Round 3, lane P2: the dependant update is a replace, like its description.
+        d.DisabilityTypeId = dto.DisabilityTypeId;
+        if (!d.HasDisability) { d.DisabilityTypeId = null; d.DisabilityDescription = null; }
         d.GhanaCardNumber = dto.GhanaCardNumber;
         d.Phone = dto.Phone;
         d.DigitalAddress = dto.DigitalAddress;

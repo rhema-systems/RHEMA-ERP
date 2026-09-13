@@ -2,12 +2,14 @@
 
 import { useState } from 'react';
 import { z } from 'zod';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Camera } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { PhotoDialog } from '@/components/hr/common/PhotoDialog';
 import { employeeService } from '@/services/hr/employee.service';
 import { employeeDocumentService } from '@/services/hr/employee-document.service';
+import { disabilityTypeService } from '@/services/hr/disability-type.service';
+import { disabilityTypeOptions } from '@/types/hr/disability-type';
 import { GENDER_OPTIONS } from '@/types/hr/employee';
 import {
   DEPENDENT_RELATIONSHIP_OPTIONS,
@@ -33,6 +35,7 @@ const schema = z.object({
   dateOfBirth: z.string().optional().or(z.literal('')),
   gender: z.string().optional().or(z.literal('')),
   hasDisability: z.boolean(),
+  disabilityTypeId: z.string().optional().or(z.literal('')),
   disabilityDescription: z.string().max(500).optional().or(z.literal('')),
   ghanaCardNumber: z.string().max(50).optional().or(z.literal('')),
   phone: z.string().max(30).optional().or(z.literal('')),
@@ -54,6 +57,7 @@ const empty: FormValues = {
   dateOfBirth: '',
   gender: '',
   hasDisability: false,
+  disabilityTypeId: '',
   disabilityDescription: '',
   ghanaCardNumber: '',
   phone: '',
@@ -74,6 +78,8 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   dateOfBirth: v.dateOfBirth || null,
   gender: (v.gender || null) as Gender | null,
   hasDisability: v.hasDisability,
+  // Round 3, lane P2: the catalogue row travels only with the tick.
+  disabilityTypeId: v.hasDisability ? v.disabilityTypeId || null : null,
   disabilityDescription: v.disabilityDescription || null,
   ghanaCardNumber: v.ghanaCardNumber || null,
   phone: v.phone || null,
@@ -94,6 +100,12 @@ const age = (dob?: string | null) => {
 
 export function DependentsTab({ employeeId }: { employeeId: string }) {
   const qc = useQueryClient();
+  // Round 3, lane P2: the same catalogue the employee's own disability picks from.
+  const { data: disabilityTypes } = useQuery({
+    queryKey: ['hr', 'disability-types', 'active'],
+    queryFn: () => disabilityTypeService.getActive(),
+  });
+  const disabilityOptions = disabilityTypeOptions(disabilityTypes ?? []);
   const [benefitsFor, setBenefitsFor] = useState<EmployeeDependent | null>(null);
   const [photoFor, setPhotoFor] = useState<EmployeeDependent | null>(null);
 
@@ -142,7 +154,7 @@ export function DependentsTab({ employeeId }: { employeeId: string }) {
             cell: (d) => (
               <div className="flex gap-1">
                 {d.isEligibleForBenefits && <Badge variant="secondary">Benefits</Badge>}
-                {d.hasDisability && <Badge variant="outline">Disability</Badge>}
+                {d.hasDisability && <Badge variant="outline">{d.disabilityTypeName ?? 'Disability'}</Badge>}
                 {d.isDeceased && <Badge variant="outline">Deceased</Badge>}
               </div>
             ),
@@ -160,6 +172,7 @@ export function DependentsTab({ employeeId }: { employeeId: string }) {
           dateOfBirth: d.dateOfBirth?.slice(0, 10) ?? '',
           gender: d.gender ?? '',
           hasDisability: d.hasDisability,
+          disabilityTypeId: d.disabilityTypeId ?? '',
           disabilityDescription: d.disabilityDescription ?? '',
           ghanaCardNumber: d.ghanaCardNumber ?? '',
           phone: d.phone ?? '',
@@ -215,11 +228,25 @@ export function DependentsTab({ employeeId }: { employeeId: string }) {
               label="Has a disability"
               description="Recorded for benefit eligibility."
             />
-            <TextareaField
-              form={form}
-              name="disabilityDescription"
-              label="Disability description"
-            />
+            {form.watch('hasDisability') && (
+              <>
+                {/* Round 3, lane P2: tick → pick from the catalogue, notes beside. */}
+                <SelectField
+                  form={form}
+                  name="disabilityTypeId"
+                  label="Disability type"
+                  options={disabilityOptions}
+                  allowEmpty
+                  emptyLabel="Not specified"
+                />
+                <TextareaField
+                  form={form}
+                  name="disabilityDescription"
+                  label="Notes"
+                  placeholder="In their words where possible — the accommodation needed, or a condition the list does not name."
+                />
+              </>
+            )}
             <FieldRow>
               <SwitchField
                 form={form}

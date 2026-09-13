@@ -57,6 +57,7 @@ import {
   Users,
   Users2,
   HeartHandshake,
+  Accessibility,
   Languages,
   Workflow,
   Wrench,
@@ -315,6 +316,16 @@ export const hrSetupGroups: HrSetupGroup[] = [
         icon: HeartHandshake,
         description:
           'How one person is tied to another — what the referee, guarantor and next-of-kin screens pick from.',
+      },
+      {
+        // Round 3, lane P2 (register row E-5). The disability was a tick and a free-text box on
+        // the employee and on the dependant; now the tick opens onto this catalogue, and the text
+        // stays beside it as notes.
+        title: 'Disability Types',
+        href: '/administration/hr/disability-types',
+        icon: Accessibility,
+        description:
+          'What the employee and dependant forms pick from once the disability box is ticked.',
       },
       {
         title: 'Identification Types',

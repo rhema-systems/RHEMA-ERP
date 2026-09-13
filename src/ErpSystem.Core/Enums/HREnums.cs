@@ -10192,3 +10192,40 @@ public enum UnionDocumentKind
     [Description("Other")]
     Other = 9
 }
+
+/// <summary>
+/// The axis a disability type is grouped on (round 3, lane P2; register row E-5). Grouping, not a
+/// medical classification: it is what a dropdown is sectioned by and what a headcount report counts.
+/// </summary>
+public enum DisabilityCategory
+{
+    [Description("Physical / mobility")]
+    Physical = 1,
+
+    [Description("Visual")]
+    Visual = 2,
+
+    [Description("Hearing")]
+    Hearing = 3,
+
+    [Description("Speech")]
+    Speech = 4,
+
+    [Description("Intellectual / learning")]
+    Intellectual = 5,
+
+    [Description("Psychosocial / mental health")]
+    Psychosocial = 6,
+
+    [Description("Neurological")]
+    Neurological = 7,
+
+    [Description("Chronic health condition")]
+    ChronicHealth = 8,
+
+    [Description("Multiple")]
+    Multiple = 9,
+
+    [Description("Other")]
+    Other = 99
+}

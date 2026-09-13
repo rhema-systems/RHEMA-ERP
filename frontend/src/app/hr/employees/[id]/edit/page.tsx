@@ -36,6 +36,7 @@ function toFormValues(d: EmployeeDetail): EmployeeFormValues {
     genderDescription: d.genderDescription ?? '',
     hometown: d.hometown ?? '',
     hasDisability: d.hasDisability ?? false,
+    disabilityTypeId: d.disabilityTypeId ?? '',
     disabilityDescription: d.disabilityDescription ?? '',
     bloodType: d.bloodType ?? '',
     isExpatriate: d.isExpatriate,

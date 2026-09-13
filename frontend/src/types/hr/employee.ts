@@ -202,6 +202,9 @@ export interface EmployeeDetail extends Employee {
    */
   hasDisability?: boolean;
   disabilityDescription?: string | null;
+  /** Round 3, lane P2: the catalogue row and its name. The description stays as notes. */
+  disabilityTypeId?: string | null;
+  disabilityTypeName?: string | null;
   address?: string | null;
   city?: string | null;
   state?: string | null;
@@ -320,6 +323,8 @@ export interface CreateEmployeeRequest {
    */
   hasDisability?: boolean;
   disabilityDescription?: string | null;
+  /** Round 3, lane P2: one of the tenant's live disability types; only with hasDisability. */
+  disabilityTypeId?: string | null;
   isFullTime: boolean;
   dateEmployed?: string | null;
   address?: string | null;

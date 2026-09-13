@@ -1568,6 +1568,14 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasIndex(e => e.LocationLevelId);
             entity.HasIndex(e => e.LocationId);
             entity.HasIndex(e => e.CountryId);
+
+            // Round 3, lane P2: the disability catalogue. Restrict — the service refuses the delete
+            // with a count while any employee names the row.
+            entity.HasIndex(e => e.DisabilityTypeId).HasDatabaseName("IX_Employees_DisabilityTypeId");
+            entity.HasOne(e => e.DisabilityType)
+                .WithMany()
+                .HasForeignKey(e => e.DisabilityTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasIndex(e => e.StaffStatus);
             entity.HasIndex(e => e.ManagerId);
             entity.HasIndex(e => e.DateEmployed);
@@ -1717,6 +1725,14 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(e => e.EmployeeId);
             entity.HasIndex(e => e.Relationship);
+
+            // Round 3, lane P2: the dependant's own disability type — a different fact about a
+            // different person from the employee's; both name the same catalogue.
+            entity.HasIndex(e => e.DisabilityTypeId).HasDatabaseName("IX_EmployeeDependents_DisabilityTypeId");
+            entity.HasOne(e => e.DisabilityType)
+                .WithMany()
+                .HasForeignKey(e => e.DisabilityTypeId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(e => e.Employee)
                 .WithMany(e => e.Dependents)
@@ -2589,6 +2605,25 @@ private void ConfigureHREntities(ModelBuilder builder)
             // The pickers all read "active, of these categories, in order".
             entity.HasIndex(e => new { e.TenantId, e.Category, e.IsActive })
                 .HasDatabaseName("IX_RelationshipType_Tenant_Category_Active");
+        });
+
+        // ---- DisabilityType (round 3, lane P2; register row E-5) — the relationship-type shape ----
+        builder.Entity<DisabilityType>(entity =>
+        {
+            entity.Property(e => e.Category).HasConversion<int>();
+
+            entity.HasIndex(e => new { e.TenantId, e.Name })
+                .IsUnique()
+                .HasDatabaseName("IX_DisabilityType_Tenant_Name");
+
+            // Filtered on Code IS NOT NULL: the code is optional.
+            entity.HasIndex(e => new { e.TenantId, e.Code })
+                .IsUnique()
+                .HasFilter("[Code] IS NOT NULL")
+                .HasDatabaseName("IX_DisabilityType_Tenant_Code");
+
+            entity.HasIndex(e => new { e.TenantId, e.Category, e.IsActive })
+                .HasDatabaseName("IX_DisabilityType_Tenant_Category_Active");
         });
 
         builder.Entity<EmployeeGuarantorDocument>(e =>

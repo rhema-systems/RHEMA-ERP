@@ -423,6 +423,7 @@ public static class HrModuleServiceRegistration
         // The relationship catalogue the referee, guarantor, next-of-kin and candidate-referee
         // screens pick from (round 2, lane D2).
         services.AddScoped<IRelationshipTypeService, RelationshipTypeService>();
+        services.AddScoped<IDisabilityTypeService, DisabilityTypeService>(); // round 3, lane P2
         services.AddScoped<ILanguageService, LanguageService>(); // round 3, lane C1
 
         // Teams and committees (round 2, lane F).

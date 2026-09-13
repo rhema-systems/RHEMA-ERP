@@ -26,6 +26,8 @@ import { employeeService } from '@/services/hr/employee.service';
 import { referenceDimensionService } from '@/services/hr/lookup.service';
 import { policySettingsService } from '@/services/hr/policy-settings.service';
 import { contractTypeService } from '@/services/hr/contract-type.service';
+import { disabilityTypeService } from '@/services/hr/disability-type.service';
+import { disabilityTypeOptions } from '@/types/hr/disability-type';
 import {
   GENDER_OPTIONS,
   MARITAL_STATUS_OPTIONS,
@@ -40,6 +42,9 @@ import type { Location, LocationLevel } from '@/types/hr/location';
 
 const opt = z.string().optional().or(z.literal(''));
 
+/** The disability picker's stand-in for an empty optional — a Radix Select item cannot carry ''. */
+const NO_DISABILITY_TYPE = '__none__';
+
 export const employeeSchema = z.object({
   employeeNumber: opt,
   firstName: z.string().min(1, 'First name is required').max(100),
@@ -53,6 +58,7 @@ export const employeeSchema = z.object({
   genderDescription: opt,
   hometown: opt,
   hasDisability: z.boolean(),
+  disabilityTypeId: opt,
   disabilityDescription: opt,
   bloodType: opt,
   isExpatriate: z.boolean(),
@@ -123,6 +129,7 @@ export const emptyEmployee: EmployeeFormValues = {
   genderDescription: '',
   hometown: '',
   hasDisability: false,
+  disabilityTypeId: '',
   disabilityDescription: '',
   bloodType: '',
   isExpatriate: false,
@@ -315,6 +322,13 @@ export function EmployeeForm({
   onImportModeChange,
   isCreate = false,
 }: EmployeeFormProps) {
+  // Round 3, lane P2: the disability catalogue the tick opens onto. Live rows only.
+  const { data: disabilityTypes } = useQuery({
+    queryKey: ['hr', 'disability-types', 'active'],
+    queryFn: () => disabilityTypeService.getActive(),
+  });
+  const disabilityOptions = useMemo(() => disabilityTypeOptions(disabilityTypes ?? []), [disabilityTypes]);
+
   const form = useForm<EmployeeFormValues>({
     resolver: zodResolver(employeeSchema) as any,
     defaultValues,
@@ -605,13 +619,36 @@ export function EmployeeForm({
                 </Label>
               </div>
               {form.watch('hasDisability') && (
-                <Field label="Disability" htmlFor="disabilityDescription">
-                  <Input
-                    id="disabilityDescription"
-                    placeholder="What the employee has told you, in their words where possible"
-                    {...form.register('disabilityDescription')}
-                  />
-                </Field>
+                <div className={GRID3}>
+                  {/* Round 3, lane P2 (register row E-5): tick → pick from the catalogue, notes beside. */}
+                  <Field label="Disability type" htmlFor="disabilityTypeId">
+                    <Select
+                      value={form.watch('disabilityTypeId') || NO_DISABILITY_TYPE}
+                      onValueChange={(v) => form.setValue('disabilityTypeId', v === NO_DISABILITY_TYPE ? '' : v)}
+                    >
+                      <SelectTrigger id="disabilityTypeId" data-testid="employee-disability-type">
+                        <SelectValue placeholder="Pick from the catalogue" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={NO_DISABILITY_TYPE}>Not specified</SelectItem>
+                        {disabilityOptions.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <div className="sm:col-span-2">
+                    <Field label="Notes" htmlFor="disabilityDescription">
+                      <Input
+                        id="disabilityDescription"
+                        placeholder="In their words where possible — the accommodation needed, or a condition the list does not name"
+                        {...form.register('disabilityDescription')}
+                      />
+                    </Field>
+                  </div>
+                </div>
               )}
             </div>
           </Section>
