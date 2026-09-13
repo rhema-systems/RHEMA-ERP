@@ -63,6 +63,15 @@ function Invoke-ExpectedFailure([string]$root, [string]$label) {
     Write-Host "PASS: $label refused"
 }
 
+function Invoke-ExpectedSemanticFailure([string]$root, [string]$label) {
+    $output = & pwsh -NoProfile -File $validator -EvidenceDirectory $root -PackageKind DisposableReset -WriteManifest 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) { throw "Semantic tamper case unexpectedly passed after re-manifesting: $label" }
+    if ($output -cnotmatch [regex]::Escape('Completed disposable-reset backup requires atomic-reservation and COPY_ONLY CHECKSUM completion markers.')) {
+        throw "Semantic tamper case failed for the wrong reason: $label"
+    }
+    Write-Host "PASS: $label refused before manifest publication"
+}
+
 function Update-ArtifactBinding([string]$root, [string]$name) {
     $status = Get-Content -Raw -LiteralPath (Join-Path $root 'reset-status.json') | ConvertFrom-Json
     $status.artifactSha256.PSObject.Properties[$name].Value =
@@ -125,6 +134,16 @@ try {
     & pwsh -NoProfile -File $validator -EvidenceDirectory $markerFailure -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Material-backup/phase-03-publication-failure package did not validate.' }
     Write-Host 'PASS: material backup remains truthfully preserved when phase-03 publication fails'
+
+    foreach ($requiredBackupMarker in @('BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
+        $markerTamper = New-PackageRoot ("MARKER_FAILURE_MISSING_" + $requiredBackupMarker)
+        Copy-Item -Path (Join-Path $markerFailure '*') -Destination $markerTamper
+        @(Get-Content -LiteralPath (Join-Path $markerTamper 'backup-create.txt') |
+            Where-Object { $_ -cne $requiredBackupMarker }) |
+            Set-Content -Encoding ascii -LiteralPath (Join-Path $markerTamper 'backup-create.txt')
+        Update-ArtifactBinding $markerTamper 'backup-create.txt'
+        Invoke-ExpectedSemanticFailure $markerTamper "phase-03-publication-failure backupCompleted without $requiredBackupMarker"
+    }
 
     $durableTamper = New-PackageRoot 'RECOVERY_DURABLE_TAMPER'
     Copy-Item -Path (Join-Path $markerFailure '*') -Destination $durableTamper

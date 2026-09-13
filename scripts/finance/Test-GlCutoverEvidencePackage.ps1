@@ -257,12 +257,21 @@ if ($PackageKind -eq 'DisposableReset') {
         }
     }
 
+    $createPath = Join-Path $root 'backup-create.txt'
+    $create = if (Test-Path -LiteralPath $createPath -PathType Leaf) {
+        @(Get-Content -LiteralPath $createPath | ForEach-Object { $_.Trim() })
+    }
+    else { @() }
+    if ($reset.backupCompleted -eq $true -and
+        ($create -cnotcontains 'BACKUP_PATH_ATOMICALLY_RESERVED' -or
+         $create -cnotcontains 'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
+        throw 'Completed disposable-reset backup requires atomic-reservation and COPY_ONLY CHECKSUM completion markers.'
+    }
+
     if ($reset.backupCreated -eq $true) {
-        $createPath = Join-Path $root 'backup-create.txt'
         $currentHashPath = Join-Path $root 'backup-current.sha256'
         if (-not (Test-Path -LiteralPath $createPath -PathType Leaf) -or
             -not (Test-Path -LiteralPath $currentHashPath -PathType Leaf)) { throw 'Material backup creation/current-hash evidence is missing.' }
-        $create = @(Get-Content -LiteralPath $createPath | ForEach-Object { $_.Trim() })
         $currentHashLine = (Get-Content -Raw -LiteralPath $currentHashPath).Trim()
         if ([string]$reset.backupMediaId -notmatch '^[0-9a-f]{32}$' -or
             $create -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)" -or
@@ -275,9 +284,7 @@ if ($PackageKind -eq 'DisposableReset') {
             $phaseThree = $phaseMarkers[2]
             if ($reset.backupCompleted -ne $true -or $phaseThree.backupCompleted -ne $true -or
                 [long]$phaseThree.backupByteLength -le 0 -or
-                [string]$phaseThree.currentMaterialSha256 -notmatch '^[0-9A-F]{64}$' -or
-                $create -cnotcontains 'BACKUP_PATH_ATOMICALLY_RESERVED' -or
-                $create -cnotcontains 'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') {
+                [string]$phaseThree.currentMaterialSha256 -notmatch '^[0-9A-F]{64}$') {
                 throw 'Durable BACKUP_CREATED requires completed SQL markers, positive length and hash reconciliation.'
             }
         }
