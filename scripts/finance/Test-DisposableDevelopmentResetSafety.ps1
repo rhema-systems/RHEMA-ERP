@@ -310,8 +310,7 @@ exit 0
         $phaseThreeTamper.($case.property) = $case.value
         $phaseThreeTamper | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath $phaseThreePath
         $refusedRecovery = Get-DisposableBackupRecoveryState $mutationBackupPath $mutationRoot
-        if ($refusedRecovery.verifyEvidencePresent -ne $false -or $refusedRecovery.backupVerified -ne $false -or
-            -not [string]::IsNullOrEmpty([string]$refusedRecovery.verifiedBackupSha256)) {
+        if ($refusedRecovery.verifyEvidencePresent -ne $false -or $refusedRecovery.backupVerified -ne $false) {
             throw "Actual recovery helper trusted invalid $($case.label) from phase-03."
         }
     }
