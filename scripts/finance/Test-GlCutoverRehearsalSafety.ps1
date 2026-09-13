@@ -22,6 +22,7 @@ $emptyEvidence = $null
 $transportRoot = $null
 $transportEvidence = $null
 $transportRiskEvidence = $null
+$zeroOutputEvidence = $null
 $priorPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
 try {
     foreach ($case in $cases) {
@@ -115,7 +116,37 @@ exit 0
     }
     Write-Host 'PASS: actual Invoke-Sql transport refuses evidence at the display-width truncation boundary'
 
+    @'
+exit 0
+'@ | Set-Content -Encoding utf8 -LiteralPath (Join-Path $transportRoot 'dotnet.ps1')
+    $zeroOutputEvidence = Join-Path $transportRoot 'zero-output-command-evidence'
+    $repositoryRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+    $executedCommit = (& git -C $repositoryRoot rev-parse HEAD).Trim()
+    $executedTree = (& git -C $repositoryRoot rev-parse 'HEAD^{tree}').Trim()
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_COMMIT', $executedCommit, 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_REVIEWED_TREE', $executedTree, 'Process')
+    foreach ($flagName in $flagNames) { [Environment]::SetEnvironmentVariable($flagName, 'false', 'Process') }
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_REHEARSAL_CONNECTION', 'Server=zero-output-host;Database=RHEMAERP_GL_REHEARSAL_ZERO_OUTPUT;Integrated Security=true', 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', 'Server=zero-output-host;Database=RhemaERP;Integrated Security=true', 'Process')
+    $output = & pwsh -NoProfile -File $script -Mode RehearseFinalClone -EvidenceDirectory $zeroOutputEvidence 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0 -or $output -notmatch 'Final clone assembly mismatch') {
+        throw "Zero-output native evidence probe did not stop at the offline migration-count gate. Output: $output"
+    }
+    $gitDiffEvidence = @(Get-Content -LiteralPath (Join-Path $zeroOutputEvidence 'git-diff-check.log'))
+    if ($gitDiffEvidence.Count -ne 1 -or
+        $gitDiffEvidence[0] -cne 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=git') {
+        throw 'Successful zero-output git diff --check did not atomically publish its explicit command evidence marker.'
+    }
+    if (@(Get-ChildItem -LiteralPath $zeroOutputEvidence -Filter '.git-diff-check.log.*.tmp' -Force).Count -ne 0) {
+        throw 'Successful zero-output command evidence left an unpublished temporary file.'
+    }
+    Write-Host 'PASS: actual zero-output git command atomically publishes explicit sanitized success evidence'
+
     [Environment]::SetEnvironmentVariable('PATH', $priorPath, 'Process')
+    [Environment]::SetEnvironmentVariable(
+        'RHEMA_GL_REHEARSAL_CONNECTION',
+        'Server=target-host;Database=RHEMAERP_GL_REHEARSAL_CLONE_SAFETY;Integrated Security=true',
+        'Process')
     foreach ($name in @('RHEMA_GL_SQLCMD_ARGUMENT_CAPTURE','RHEMA_GL_SQLCMD_PROBE_WIDTH')) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }

@@ -112,11 +112,23 @@ overwrites either automatically. Raw `sqlcmd` output is held only in an outside-
 then deleted; the package validator scans JSON, text, logs, checksums and SQL, independently re-derives pending/
 orphan sets and the exact PASS target-history union, and verifies artifact, identity and ordered backup/restore markers.
 Evidence must be external to the repository or below the dedicated ignored `.artifacts/finance-gl-rehearsal` root.
-The shared sqlcmd transport sets the supported maximum variable-width display (`-y 8000`), omits conflicting
-`-W`/`-Y`, and fails closed if any emitted line reaches that boundary; offline transport evidence proves a
-canonical sentinel beyond character 256 survives the actual `Invoke-Sql` argument path.
+The shared sqlcmd transport sets the supported maximum variable-width display and screen width
+(`-y 8000 -w 8000`), omits conflicting `-W`/`-Y`, and fails closed if any emitted line reaches that boundary.
+Canonical rows are `nvarchar(max)` before SQL-side `SHA2_256` hashing and retain only a bounded stable key plus
+the fixed hash in transport; offline evidence proves a single unwrapped sentinel beyond character 4,000 survives.
+Every required native-command artifact is atomically published with its sanitized command identity, explicit
+success status and exit code, including successful commands such as `git diff --check` that emit no ordinary output.
 The exact target-derived backup path is atomically reserved with OS `FileMode.CreateNew`; SQL then uses a fresh
 media identity with `NOINIT`, `NOSKIP`, and `MEDIANAME`, so a concurrent/pre-existing file is never overwritten.
+
+The approved exact `e66ba924d3575da04abe4370f9c0b60a43c789c7` FINAL-03 run safely reached
+`NO_GO_PREFLIGHT`. Its source fingerprint was unchanged and it discovered 13 pending migrations. Readiness
+stopped on an absent classification schema, three historical-layout `REVIEW` findings, one live historical-FX
+batch `BLOCKER`, and nine active legacy-currency-link `REVIEW` findings. No backup or target was created
+(`backupCreated=false`, `targetCreated=false`). The raw FINAL-03 directory is preserved; package validation was
+rejected only because the successful zero-output `git diff --check` had not created `git-diff-check.log`.
+FINAL-01 and FINAL-02 evidence also remain preserved. This tooling correction does not convert the operational
+NO-GO into approval; a new exact independently reviewed candidate and new evidence directory remain required.
 
 ```powershell
 $env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<secure same-server connection; exact RhemaERP catalog>'

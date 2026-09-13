@@ -149,6 +149,37 @@ function Invoke-Native([string]$filePath, [string[]]$arguments) {
     }
 }
 
+function Write-AtomicNativeCommandEvidence([string]$evidenceFile, [string[]]$sanitizedOutput,
+    [string]$commandName, [int]$exitCode, [bool]$allowFailure) {
+    $evidenceDirectory = Split-Path -Parent $evidenceFile
+    if ([string]::IsNullOrWhiteSpace($evidenceDirectory) -or -not (Test-Path -LiteralPath $evidenceDirectory -PathType Container)) {
+        throw "Native command evidence directory does not exist: $evidenceDirectory"
+    }
+    $status = if ($exitCode -eq 0) { 'SUCCESS' } elseif ($allowFailure) { 'ALLOWED_FAILURE' } else { 'FAILURE' }
+    $safeCommandName = ConvertTo-SanitizedEvidenceLine ([System.IO.Path]::GetFileName($commandName))
+    $marker = "RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=$status|EXIT_CODE=$exitCode|COMMAND=$safeCommandName"
+    $temporaryFile = Join-Path $evidenceDirectory ('.' + [System.IO.Path]::GetFileName($evidenceFile) + '.' + [Guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        $stream = [System.IO.File]::Open($temporaryFile, [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        try {
+            $writer = [System.IO.StreamWriter]::new($stream, [System.Text.UTF8Encoding]::new($false))
+            try {
+                foreach ($line in $sanitizedOutput) { $writer.WriteLine($line) }
+                $writer.WriteLine($marker)
+                $writer.Flush()
+                $stream.Flush($true)
+            }
+            finally { $writer.Dispose() }
+        }
+        finally { if ($null -ne $stream) { $stream.Dispose() } }
+        [System.IO.File]::Move($temporaryFile, $evidenceFile, $false)
+    }
+    finally {
+        if (Test-Path -LiteralPath $temporaryFile) { Remove-Item -LiteralPath $temporaryFile -Force }
+    }
+}
+
 function Invoke-NativeWithEvidence([string]$filePath, [string[]]$arguments, [string]$evidenceFile,
     [switch]$AllowFailure) {
     $priorNativeErrorPreference = $PSNativeCommandUseErrorActionPreference
@@ -162,7 +193,7 @@ function Invoke-NativeWithEvidence([string]$filePath, [string[]]$arguments, [str
     }
 
     $sanitizedOutput = @($output | ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) })
-    $sanitizedOutput | Set-Content -Encoding utf8 -LiteralPath $evidenceFile
+    Write-AtomicNativeCommandEvidence $evidenceFile $sanitizedOutput $filePath $exitCode ([bool]$AllowFailure)
     $sanitizedOutput | ForEach-Object { Write-Host $_ }
     if ($exitCode -ne 0 -and -not $AllowFailure) {
         throw "Native command failed with exit code ${exitCode}: $filePath. Sanitized output: $evidenceFile"
@@ -550,9 +581,10 @@ if ($Mode -eq 'RehearseFinalClone') {
         finally { Pop-Location }
 
         $repositoryMigrations = @(Get-DiscoveredMigrationIds (Join-Path $evidenceDirectoryResolved 'migration-discovery.log'))
+        $repositoryLatestMigration = if ($repositoryMigrations.Count -gt 0) { $repositoryMigrations[-1] } else { '<none>' }
         if ($repositoryMigrations.Count -ne $authoritativeMigrationCount -or
-            $repositoryMigrations[-1] -ne $authoritativeLatestMigration) {
-            throw "Final clone assembly mismatch. Expected $authoritativeMigrationCount migrations ending at $authoritativeLatestMigration; discovered $($repositoryMigrations.Count) ending at $($repositoryMigrations[-1])."
+            $repositoryLatestMigration -ne $authoritativeLatestMigration) {
+            throw "Final clone assembly mismatch. Expected $authoritativeMigrationCount migrations ending at $authoritativeLatestMigration; discovered $($repositoryMigrations.Count) ending at $repositoryLatestMigration."
         }
 
         # Recheck the exact reviewed state immediately before the first SQL contact so a concurrent

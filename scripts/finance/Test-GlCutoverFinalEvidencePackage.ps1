@@ -14,6 +14,11 @@ function Write-Manifest([string]$directory) {
         } | Set-Content -Encoding ascii -LiteralPath $manifest
 }
 
+function Write-CommandEvidenceFixture([string]$file, [string]$command, [string[]]$output = @()) {
+    @($output) + "RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=$command" |
+        Set-Content -Encoding utf8 -LiteralPath (Join-Path $root $file)
+}
+
 function Write-Summary([string]$status, [string[]]$pending) {
     $summary = [ordered]@{
         status=$status; gitHead=$head; gitTree=$tree; reviewedCommit=$head; reviewedTree=$tree; repositoryClean=$true
@@ -54,17 +59,18 @@ try {
     $orphanId = '20260817030000_AddFixedAssetLocationMasterLinks'
     $sourceIds = @(@($migrationIds[0..442]) + $orphanId | Sort-Object)
     $pending = @($migrationIds | Where-Object { $_ -notin $sourceIds })
-    $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'migration-discovery.log')
+    Write-CommandEvidenceFixture 'migration-discovery.log' 'dotnet' $migrationIds
     $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
     $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
     $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
-    $head | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'commit-ancestry.txt')
-    @($head,$tree) | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'git-head-tree.txt')
+    Write-CommandEvidenceFixture 'commit-ancestry.txt' 'git' @($head)
+    Write-CommandEvidenceFixture 'git-head-tree.txt' 'git' @($head,$tree)
     [ordered]@{ reviewedCommit=$head; reviewedTree=$tree; executedCommit=$head; executedTree=$tree; repositoryClean=$true } |
         ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'reviewed-git-state.json')
-    foreach ($file in @('git-diff-check.log','clone-build.log','ef-no-pending-model.log')) { 'offline validated' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root $file) }
+    Write-CommandEvidenceFixture 'git-diff-check.log' 'git'
+    foreach ($file in @('clone-build.log','ef-no-pending-model.log')) { Write-CommandEvidenceFixture $file 'dotnet' @('offline validated') }
     'BLOCKER historical FX evidence' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-readiness.txt')
-    'offline generation passed' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'idempotent-script-generation.log')
+    Write-CommandEvidenceFixture 'idempotent-script-generation.log' 'dotnet' @('offline generation passed')
     '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')
     $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')).Hash
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sha256')
@@ -75,6 +81,18 @@ try {
     Write-Summary 'NO_GO_PREFLIGHT' $pending
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Valid final 456/C8 preflight NO-GO package was rejected.' }
+
+    $gitDiffPath = Join-Path $root 'git-diff-check.log'
+    $validGitDiffEvidence = @(Get-Content -LiteralPath $gitDiffPath)
+    Remove-Item -LiteralPath $gitDiffPath
+    Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'Required rehearsal evidence is missing: git-diff-check.log'
+    $validGitDiffEvidence | Set-Content -Encoding utf8 -LiteralPath $gitDiffPath
+    Clear-Content -LiteralPath $gitDiffPath
+    Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'Required command evidence is empty: git-diff-check.log'
+    @('RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=1|COMMAND=git') |
+        Set-Content -Encoding utf8 -LiteralPath $gitDiffPath
+    Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'Required command evidence has a missing or invalid success marker: git-diff-check.log'
+    $validGitDiffEvidence | Set-Content -Encoding utf8 -LiteralPath $gitDiffPath
 
     $flagsPath = Join-Path $root 'feature-flags.json'; $validFlags = Get-Content -Raw -LiteralPath $flagsPath
     $flags = $validFlags | ConvertFrom-Json; $flags.producerIntentGroups=$true; $flags | ConvertTo-Json | Set-Content -Encoding utf8 $flagsPath
@@ -98,7 +116,7 @@ try {
     @('SOURCE_DATABASE=RhemaERP','TARGET_DATABASE=RHEMAERP_GL_REHEARSAL_FINAL_TEST',('BACKUP_MEDIA_ID=' + ('d' * 32)),'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE','RESTORE_VERIFYONLY_CHECKSUM_COMPLETE','RESTORE_TARGET_COMPLETE','DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE') |
         Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'backup-restore-checkdb.txt')
     (('C' * 64) + '  RHEMAERP_GL_REHEARSAL_FINAL_TEST_COPYONLY.bak') | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'backup.sha256')
-    foreach ($file in @('clone-apply-migrations.log','seed-pass-1.log','seed-pass-2.log')) { 'PASS' | Set-Content -Encoding utf8 (Join-Path $root $file) }
+    foreach ($file in @('clone-apply-migrations.log','seed-pass-1.log','seed-pass-2.log')) { Write-CommandEvidenceFixture $file 'dotnet' @('PASS') }
     $targetIds = @(@($sourceIds) + @($pending) | Sort-Object -Unique)
     $targetIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
     $canonicalInvariantRows = @(
@@ -157,9 +175,10 @@ try {
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii (Join-Path $root 'pending-migrations-idempotent.sha256')
     'BLOCKER historical FX evidence' | Set-Content -Encoding utf8 (Join-Path $root 'source-readiness.txt')
     Write-Summary 'NO_GO_PREFLIGHT' $pending
-    'tampered after summary' | Set-Content -Encoding utf8 (Join-Path $root 'clone-build.log')
+    @('tampered after summary','RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=dotnet') |
+        Set-Content -Encoding utf8 (Join-Path $root 'clone-build.log')
     Assert-Refused 'artifact hash binding is missing or invalid'
-    'offline validated' | Set-Content -Encoding utf8 (Join-Path $root 'clone-build.log')
+    Write-CommandEvidenceFixture 'clone-build.log' 'dotnet' @('offline validated')
     Write-Summary 'NO_GO_PREFLIGHT' $pending
     $unsafeSummary=Get-Content -Raw (Join-Path $root 'summary.json') | ConvertFrom-Json
     $unsafeSummary | Add-Member -NotePropertyName failure -NotePropertyValue 'C:\Users\Operator\source-host failure'

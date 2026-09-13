@@ -83,6 +83,33 @@ foreach ($relative in $required) {
 }
 
 if ($PackageKind -eq 'FinalClone') {
+    $requiredCommandEvidence = [ordered]@{
+        'git-diff-check.log' = 'git'
+        'commit-ancestry.txt' = 'git'
+        'git-head-tree.txt' = 'git'
+        'clone-build.log' = 'dotnet'
+        'ef-no-pending-model.log' = 'dotnet'
+        'migration-discovery.log' = 'dotnet'
+        'idempotent-script-generation.log' = 'dotnet'
+    }
+    if ($summary.status -eq 'PASS') {
+        $requiredCommandEvidence['clone-apply-migrations.log'] = 'dotnet'
+        $requiredCommandEvidence['seed-pass-1.log'] = 'dotnet'
+        $requiredCommandEvidence['seed-pass-2.log'] = 'dotnet'
+    }
+    foreach ($entry in $requiredCommandEvidence.GetEnumerator()) {
+        $commandEvidencePath = Join-Path $root $entry.Key
+        $commandEvidenceLines = @(Get-Content -LiteralPath $commandEvidencePath)
+        if ($commandEvidenceLines.Count -eq 0) {
+            throw "Required command evidence is empty: $($entry.Key)"
+        }
+        $expectedMarker = "RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=$($entry.Value)"
+        if ($commandEvidenceLines[-1] -cne $expectedMarker -or
+            @($commandEvidenceLines | Where-Object { $_ -like 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' }).Count -ne 1) {
+            throw "Required command evidence has a missing or invalid success marker: $($entry.Key)"
+        }
+    }
+
     if (-not [string]::Equals([string]$summary.sourceDatabase, 'RhemaERP', [StringComparison]::OrdinalIgnoreCase) -or
         [string]$summary.targetDatabase -notmatch '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$' -or
         $summary.sameServer -ne $true -or $summary.sourceServer -ne '<REDACTED_SAME_SERVER>' -or
@@ -91,7 +118,7 @@ if ($PackageKind -eq 'FinalClone') {
     }
     $reviewedState = Get-Content -Raw -LiteralPath (Join-Path $root 'reviewed-git-state.json') | ConvertFrom-Json
     $gitHeadTree = @(Get-Content -LiteralPath (Join-Path $root 'git-head-tree.txt') |
-        ForEach-Object { $_.Trim() } | Where-Object { $_ })
+        ForEach-Object { $_.Trim() } | Where-Object { $_ -and $_ -notlike 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' })
     if ($gitHeadTree.Count -ne 2 -or $gitHeadTree[0] -notmatch '^[0-9a-fA-F]{40}$' -or
         $gitHeadTree[1] -notmatch '^[0-9a-fA-F]{40}$' -or
         $reviewedState.repositoryClean -ne $true -or $summary.repositoryClean -ne $true -or
