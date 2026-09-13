@@ -299,7 +299,8 @@ if ($PackageKind -eq 'DisposableReset') {
     $legacyTypesExact = $reset.backupCreated -is [bool] -and $reset.backupPreserved -is [bool] -and
         $reset.backupCompleted -is [bool] -and $reset.backupVerified -is [bool] -and $reset.resetStarted -is [bool] -and
         $reset.backupPhaseMarkerPublished -is [bool] -and $reset.backupHashMatchesVerified -is [bool] -and
-        $reset.verifyEvidencePresent -is [bool] -and $reset.backupByteLength -is [long]
+        $reset.verifyEvidencePresent -is [bool] -and $reset.backupMaterialStateReconciled -is [bool] -and
+        $reset.backupByteLength -is [long]
     $isApprovedLegacy = $legacyTypesExact -and $reset.reviewedCommit -ceq $approvedLegacyCommit -and $reset.reviewedTree -ceq $approvedLegacyTree -and
         $reset.status -ceq 'FAILED_NO_AUTOMATIC_RETRY' -and $reset.phase -ceq 'SOURCE_CAPTURE_COMPLETE' -and
         [string]$reset.backupMediaId -ceq $approvedLegacyMedia -and [long]$reset.backupByteLength -eq 453042176 -and
@@ -307,8 +308,9 @@ if ($PackageKind -eq 'DisposableReset') {
         $reset.backupCreated -eq $true -and $reset.backupPreserved -eq $true -and $reset.backupCompleted -eq $false -and
         $reset.backupVerified -eq $false -and $reset.resetStarted -eq $false -and
         $reset.backupPhaseMarkerPublished -eq $false -and $reset.backupHashMatchesVerified -eq $false -and
-        $reset.verifyEvidencePresent -eq $false -and
-        ($null -eq $reset.PSObject.Properties['sourceFingerprint'] -or [string]$reset.sourceFingerprint -ceq $approvedLegacyFingerprint) -and
+        $reset.verifyEvidencePresent -eq $false -and $reset.backupMaterialStateReconciled -eq $true -and
+        $null -ne $reset.PSObject.Properties['sourceFingerprint'] -and $null -ne $reset.sourceFingerprint -and
+        $reset.sourceFingerprint -is [string] -and $reset.sourceFingerprint -ceq $approvedLegacyFingerprint -and
         $null -eq $identityVersionProperty -and $null -eq $evidenceSchemaProperty -and
         $null -eq $reset.PSObject.Properties['backupFileName'] -and
         $null -eq $reset.PSObject.Properties['backupPathSha256'] -and
@@ -320,7 +322,8 @@ if ($PackageKind -eq 'DisposableReset') {
     }
     if (-not $isApprovedLegacy) {
         $v2BooleanFields = @('backupCreated','backupCompleted','backupPreserved','backupVerified','resetStarted',
-            'backupPhaseMarkerPublished','backupHashMatchesVerified','verifyEvidencePresent','attemptOwnedBackup')
+            'backupPhaseMarkerPublished','backupHashMatchesVerified','verifyEvidencePresent','attemptOwnedBackup',
+            'backupMaterialStateReconciled')
         foreach ($field in $v2BooleanFields) {
             $fieldValue = Get-RequiredNonNullJsonProperty $reset $field 'Disposable-reset V2 status'
             if ($fieldValue -isnot [bool]) { throw "Disposable-reset V2 property '$field' must be Boolean." }
@@ -333,6 +336,9 @@ if ($PackageKind -eq 'DisposableReset') {
             if ((Get-RequiredNonNullJsonProperty $reset $field 'Disposable-reset V2 status') -isnot [string]) {
                 throw "Disposable-reset V2 property '$field' must be String."
             }
+        }
+        if ($reset.backupMaterialStateReconciled -ne $true) {
+            throw 'Disposable-reset V2 backup material state must be reconciled before terminal publication.'
         }
     }
     $ownedProperty = $reset.PSObject.Properties['attemptOwnedBackup']
@@ -396,13 +402,15 @@ if ($PackageKind -eq 'DisposableReset') {
     if ($ownedEmptyReservation -and ($reset.backupCompleted -eq $true -or $reset.backupPreserved -eq $true -or
         [long]$reset.backupByteLength -ne 0 -or -not [string]::IsNullOrEmpty([string]$reset.currentMaterialSha256) -or
         -not [string]::IsNullOrEmpty([string]$reset.backupSha256) -or $reset.backupVerified -eq $true -or
-        $reset.verifyEvidencePresent -eq $true -or $backupPhaseMarkerPublished -or $reset.resetStarted -eq $true)) {
+        $reset.backupHashMatchesVerified -ne $false -or $reset.verifyEvidencePresent -eq $true -or
+        $backupPhaseMarkerPublished -or $reset.resetStarted -eq $true)) {
         throw 'Disposable-reset owned empty reservation contains material, completion, verification, or reset claims.'
     }
     if ($resolvedUnowned -and ($reset.backupCompleted -eq $true -or $reset.backupPreserved -eq $true -or
         [long]$reset.backupByteLength -ne 0 -or -not [string]::IsNullOrEmpty([string]$reset.currentMaterialSha256) -or
         -not [string]::IsNullOrEmpty([string]$reset.backupSha256) -or $reset.backupVerified -eq $true -or
-        $reset.verifyEvidencePresent -eq $true -or $backupPhaseMarkerPublished -or $reset.resetStarted -eq $true)) {
+        $reset.backupHashMatchesVerified -ne $false -or $reset.verifyEvidencePresent -eq $true -or
+        $backupPhaseMarkerPublished -or $reset.resetStarted -eq $true)) {
         throw 'Disposable-reset resolved unowned path contains backup or reset claims.'
     }
     if (-not $isApprovedLegacy -and $reset.backupCreated -eq $true -and $reset.attemptOwnedBackup -ne $true) {

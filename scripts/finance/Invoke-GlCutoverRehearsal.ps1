@@ -722,6 +722,7 @@ function Write-DisposableResetStatus([string]$directory, [string]$status, [strin
         backupCreated = $backupCreated
         backupVerified = $backupVerified
         resetStarted = $resetStarted
+        backupMaterialStateReconciled = $true
         automaticRetry = $false
         automaticCleanup = $false
         completedAtUtc = [DateTime]::UtcNow.ToString('O')

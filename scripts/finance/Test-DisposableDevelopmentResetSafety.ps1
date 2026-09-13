@@ -244,9 +244,9 @@ exit 0
     Write-DisposableResetStatus $stateRoot 'FAILED_NO_AUTOMATIC_RETRY' 'RESET_STARTED' $true $true $true
     $durableState = Get-Content -Raw -LiteralPath (Join-Path $stateRoot 'reset-status.json') | ConvertFrom-Json
     if ($durableState.status -cne 'FAILED_NO_AUTOMATIC_RETRY' -or $durableState.phase -cne 'RESET_STARTED' -or
-        $durableState.resetStarted -ne $true -or
+        $durableState.resetStarted -ne $true -or $durableState.backupMaterialStateReconciled -ne $true -or
         -not (Test-Path -LiteralPath (Join-Path $stateRoot 'phase-05.json') -PathType Leaf)) {
-        throw 'Atomic terminal status did not bind the durable RESET_STARTED phase.'
+        throw 'Atomic terminal status did not bind the durable RESET_STARTED phase and reconciled material state.'
     }
     $gapRefused = $false
     try { Write-DisposablePhaseMarker $stateRoot 7 'INVALID_GAP' } catch { $gapRefused = $true }

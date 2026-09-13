@@ -95,6 +95,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Minimal terminal failure package did not validate.' }
     Write-Host 'PASS: terminal failure package validates and writes a manifest'
 
+    $resolvedUnowned = $null
     foreach ($earlyCase in @(
         @{ label='OFFLINE'; phase='OFFLINE_GATES_COMPLETE'; count=1; resolved=$false },
         @{ label='SOURCE'; phase='SOURCE_CAPTURE_COMPLETE'; count=2; resolved=$false },
@@ -109,12 +110,21 @@ try {
             $earlyStatus.backupMediaId='4' * 32
             $earlyStatus.backupFileName="RhemaERP_DISPOSABLE_RESET_COPYONLY_$('4' * 32).bak"
             $earlyStatus.backupPathSha256='4' * 64
+            $resolvedUnowned = $early
         }
         Complete-Status $early $earlyStatus
         & pwsh -NoProfile -File $validator -EvidenceDirectory $early -PackageKind DisposableReset -WriteManifest
         if ($LASTEXITCODE -ne 0) { throw "Valid early V2 state failed: $($earlyCase.label)" }
     }
     Write-Host 'PASS: V2 NOT_STARTED, OFFLINE, SOURCE_CAPTURE and resolved-path failure states validate truthfully'
+    foreach ($property in @('backupHashMatchesVerified','backupMaterialStateReconciled')) {
+        $contradiction = New-PackageRoot ("RESOLVED_UNOWNED_" + $property)
+        Copy-Item -Path (Join-Path $resolvedUnowned '*') -Destination $contradiction
+        $status = Get-Content -Raw -LiteralPath (Join-Path $contradiction 'reset-status.json') | ConvertFrom-Json
+        $status.$property = if ($property -eq 'backupHashMatchesVerified') { $true } else { $false }
+        Write-Json (Join-Path $contradiction 'reset-status.json') $status
+        Invoke-ExpectedRemanifestFailure $contradiction "resolved-unowned contradiction $property"
+    }
     $ownedEmpty = New-PackageRoot 'OWNED_EMPTY'
     $null = New-Common $ownedEmpty
     Write-Json (Join-Path $ownedEmpty 'phase-01.json') ([ordered]@{schema='RHEMA_DISPOSABLE_RESET_PHASE_V1';ordinal=1;phase='OFFLINE_GATES_COMPLETE'})
@@ -128,11 +138,12 @@ try {
     & pwsh -NoProfile -File $validator -EvidenceDirectory $ownedEmpty -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Owned empty reservation failure did not validate.' }
     Write-Host 'PASS: owned zero-byte reservation is distinct from material backup creation and preservation'
-    foreach ($property in @('backupCompleted','backupPreserved','backupVerified','verifyEvidencePresent')) {
+    foreach ($property in @('backupCompleted','backupPreserved','backupVerified','verifyEvidencePresent',
+        'backupHashMatchesVerified','backupMaterialStateReconciled')) {
         $contradiction = New-PackageRoot ("OWNED_EMPTY_" + $property)
         Copy-Item -Path (Join-Path $ownedEmpty '*') -Destination $contradiction
         $status = Get-Content -Raw -LiteralPath (Join-Path $contradiction 'reset-status.json') | ConvertFrom-Json
-        $status.$property=$true
+        $status.$property=if($property -eq 'backupMaterialStateReconciled'){$false}else{$true}
         Write-Json (Join-Path $contradiction 'reset-status.json') $status
         Invoke-ExpectedRemanifestFailure $contradiction "owned-empty contradiction $property"
     }
@@ -152,16 +163,22 @@ try {
     $legacyStatus.backupCompleted=$false;$legacyStatus.backupPreserved=$true;$legacyStatus.backupByteLength=453042176
     $legacyStatus.backupPhaseMarkerPublished=$false;$legacyStatus.backupMaterialStateReconciled=$true
     $legacyStatus.currentMaterialSha256=$legacyHash;$legacyStatus.backupSha256='';$legacyStatus.backupHashMatchesVerified=$false;$legacyStatus.verifyEvidencePresent=$false
+    $legacyStatus.sourceFingerprint='446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28'
     Complete-Status $legacy $legacyStatus
     & pwsh -NoProfile -File $validator -EvidenceDirectory $legacy -PackageKind DisposableReset -WriteManifest
     if($LASTEXITCODE -ne 0){throw 'Exact approved historical 22b package did not validate.'}
     Write-Host 'PASS: exact documented 22b legacy failure package validates under its strict discriminator'
-    foreach($legacyMutation in @('backupCompleted','backupVerified','backupMediaId','backupByteLength','currentMaterialSha256')){
+    foreach($legacyMutation in @('backupCompleted','backupVerified','backupMediaId','backupByteLength','currentMaterialSha256',
+        'sourceFingerprint','sourceFingerprintMissing','backupMaterialStateReconciled','backupMaterialStateReconciledType')){
         $tamper=New-PackageRoot ("LEGACY_"+$legacyMutation);Copy-Item -Path (Join-Path $legacy '*') -Destination $tamper
         $status=Get-Content -Raw (Join-Path $tamper 'reset-status.json')|ConvertFrom-Json
         if($legacyMutation -in @('backupCompleted','backupVerified')){$status.$legacyMutation=$true}
         elseif($legacyMutation -eq 'backupMediaId'){$status.$legacyMutation='0'*32}
         elseif($legacyMutation -eq 'backupByteLength'){$status.$legacyMutation=1}
+        elseif($legacyMutation -eq 'sourceFingerprint'){$status.$legacyMutation='445|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28'}
+        elseif($legacyMutation -eq 'sourceFingerprintMissing'){$status.PSObject.Properties.Remove('sourceFingerprint')}
+        elseif($legacyMutation -eq 'backupMaterialStateReconciled'){$status.$legacyMutation=$false}
+        elseif($legacyMutation -eq 'backupMaterialStateReconciledType'){$status.backupMaterialStateReconciled='true'}
         else{$status.$legacyMutation='0'*64}
         Write-Json (Join-Path $tamper 'reset-status.json') $status
         Invoke-ExpectedRemanifestFailure $tamper "exact legacy mutation $legacyMutation"
@@ -178,7 +195,8 @@ try {
     }
     $allV2StateFields=@('backupMediaId','backupFileName','backupPathSha256','attemptOwnedBackup','backupCreated',
         'backupCompleted','backupPreserved','backupVerified','resetStarted','backupPhaseMarkerPublished',
-        'backupHashMatchesVerified','verifyEvidencePresent','backupByteLength','currentMaterialSha256','backupSha256')
+        'backupHashMatchesVerified','verifyEvidencePresent','backupMaterialStateReconciled','backupByteLength',
+        'currentMaterialSha256','backupSha256')
     foreach ($property in $allV2StateFields) {
         $nullState = New-PackageRoot ("NULL_" + $property)
         Copy-Item -Path (Join-Path $failed '*') -Destination $nullState
@@ -200,7 +218,13 @@ try {
         Write-Json (Join-Path $trueState 'reset-status.json') $status
         Invoke-ExpectedRemanifestFailure $trueState "unresolved V2 true $property"
     }
-    foreach($case in @(@('backupCreated','false'),@('backupByteLength','0'),@('currentMaterialSha256',$false))){
+    $unreconciled=New-PackageRoot 'FALSE_backupMaterialStateReconciled';Copy-Item -Path (Join-Path $failed '*') -Destination $unreconciled
+    $unreconciledStatus=Get-Content -Raw (Join-Path $unreconciled 'reset-status.json')|ConvertFrom-Json
+    $unreconciledStatus.backupMaterialStateReconciled=$false
+    Write-Json (Join-Path $unreconciled 'reset-status.json') $unreconciledStatus
+    Invoke-ExpectedRemanifestFailure $unreconciled 'unresolved V2 false backupMaterialStateReconciled'
+    foreach($case in @(@('backupCreated','false'),@('backupMaterialStateReconciled','true'),
+        @('backupByteLength','0'),@('currentMaterialSha256',$false))){
         $typed=New-PackageRoot ("TYPE_"+$case[0]);Copy-Item -Path (Join-Path $failed '*') -Destination $typed
         $status=Get-Content -Raw (Join-Path $typed 'reset-status.json')|ConvertFrom-Json;$status.($case[0])=$case[1]
         Write-Json (Join-Path $typed 'reset-status.json') $status
