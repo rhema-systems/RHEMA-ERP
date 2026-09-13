@@ -10,6 +10,30 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Get-SqlEvidenceTokens([string]$evidenceFile) {
+    if (-not (Test-Path -LiteralPath $evidenceFile -PathType Leaf)) { return @() }
+    $raw = Get-Content -Raw -LiteralPath $evidenceFile
+    return @([regex]::Matches($raw, '\S+') | ForEach-Object { $_.Value })
+}
+
+function Assert-UniqueOrderedSqlEvidenceTokens([string]$evidenceFile, [string[]]$expectedTokens,
+    [string]$context) {
+    $actualTokens = @(Get-SqlEvidenceTokens $evidenceFile)
+    $priorIndex = -1
+    foreach ($expectedToken in $expectedTokens) {
+        if ([string]::IsNullOrWhiteSpace($expectedToken) -or $expectedToken -match '\s') {
+            throw "Internal $context evidence-token contract is malformed."
+        }
+        $matchingIndexes = @(for ($index = 0; $index -lt $actualTokens.Count; $index++) {
+            if ([string]::Equals($actualTokens[$index], $expectedToken, [StringComparison]::Ordinal)) { $index }
+        })
+        if ($matchingIndexes.Count -ne 1 -or $matchingIndexes[0] -le $priorIndex) {
+            throw "$context evidence lacks a unique ordered token: $expectedToken"
+        }
+        $priorIndex = $matchingIndexes[0]
+    }
+}
+
 $root = (Resolve-Path -LiteralPath $EvidenceDirectory).Path
 $required = if ($PackageKind -eq 'DisposableReset') {
     @('reset-status.json','RECOVERY.md','reviewed-git-state.json','feature-flags.json')
@@ -259,13 +283,22 @@ if ($PackageKind -eq 'DisposableReset') {
 
     $createPath = Join-Path $root 'backup-create.txt'
     $create = if (Test-Path -LiteralPath $createPath -PathType Leaf) {
-        @(Get-Content -LiteralPath $createPath | ForEach-Object { $_.Trim() })
+        @(Get-SqlEvidenceTokens $createPath)
     }
     else { @() }
-    if ($reset.backupCompleted -eq $true -and
-        ($create -cnotcontains 'BACKUP_PATH_ATOMICALLY_RESERVED' -or
-         $create -cnotcontains 'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
-        throw 'Completed disposable-reset backup requires atomic-reservation and COPY_ONLY CHECKSUM completion markers.'
+    if ($reset.backupCompleted -eq $true) {
+        try {
+            Assert-UniqueOrderedSqlEvidenceTokens $createPath @(
+                'DATABASE=RhemaERP',
+                "BACKUP_MEDIA_ID=$($reset.backupMediaId)",
+                'BACKUP_PATH_ATOMICALLY_RESERVED',
+                'BACKUP_COPY_ONLY_CHECKSUM_START',
+                'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE'
+            ) 'Completed disposable-reset backup'
+        }
+        catch {
+            throw 'Completed disposable-reset backup requires unique ordered database/media, atomic-reservation and COPY_ONLY CHECKSUM markers.'
+        }
     }
 
     if ($reset.backupCreated -eq $true) {
@@ -298,10 +331,18 @@ if ($PackageKind -eq 'DisposableReset') {
         $hashPath = Join-Path $root 'backup.sha256'
         if (-not (Test-Path -LiteralPath $verifyPath -PathType Leaf) -or
             -not (Test-Path -LiteralPath $hashPath -PathType Leaf)) { throw 'BACKUP_VERIFIED proof is incomplete.' }
-        $verify = @(Get-Content -LiteralPath $verifyPath | ForEach-Object { $_.Trim() })
+        $verify = @(Get-SqlEvidenceTokens $verifyPath)
         $hashLine = (Get-Content -Raw -LiteralPath $hashPath).Trim()
         $phaseFourHash = [string]$phaseMarkers[3].backupSha256
         $currentMatchesVerified = [string]$reset.currentMaterialSha256 -ceq $phaseFourHash
+        try {
+            Assert-UniqueOrderedSqlEvidenceTokens $verifyPath @(
+                'DATABASE=RhemaERP',
+                "BACKUP_MEDIA_ID=$($reset.backupMediaId)",
+                'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'
+            ) 'Disposable-reset VERIFYONLY'
+        }
+        catch { throw 'Disposable-reset VERIFYONLY database/media/completion markers are not unique and ordered.' }
         if ($phaseFourHash -notmatch '^[0-9A-F]{64}$' -or
             [string]$phaseMarkers[2].currentMaterialSha256 -cne $phaseFourHash -or
             $reset.backupCompleted -ne $true -or $verify -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE' -or

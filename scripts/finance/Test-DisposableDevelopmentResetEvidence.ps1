@@ -66,7 +66,7 @@ function Invoke-ExpectedFailure([string]$root, [string]$label) {
 function Invoke-ExpectedSemanticFailure([string]$root, [string]$label) {
     $output = & pwsh -NoProfile -File $validator -EvidenceDirectory $root -PackageKind DisposableReset -WriteManifest 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) { throw "Semantic tamper case unexpectedly passed after re-manifesting: $label" }
-    if ($output -cnotmatch [regex]::Escape('Completed disposable-reset backup requires atomic-reservation and COPY_ONLY CHECKSUM completion markers.')) {
+    if ($output -cnotmatch [regex]::Escape('unique ordered database/media')) {
         throw "Semantic tamper case failed for the wrong reason: $label"
     }
     Write-Host "PASS: $label refused before manifest publication"
@@ -90,7 +90,7 @@ try {
     $partialBackup = New-PackageRoot 'VERIFY_FAILURE'
     $null = New-Common $partialBackup
     $partialMedia = 'e' * 32
-    @("BACKUP_MEDIA_ID=$partialMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
+    @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$partialMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
         'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $partialBackup 'backup-create.txt')
     "$('E' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $partialBackup 'backup-current.sha256')
@@ -121,8 +121,12 @@ try {
         })
     }
     $markerMedia = 'f' * 32
-    @("BACKUP_MEDIA_ID=$markerMedia",'BACKUP_PATH_ATOMICALLY_RESERVED',
-        'BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') |
+    $collapsedMarkerFailureEvidence = @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$markerMedia",
+        'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
+        "Processed 55296 pages for database 'RhemaERP', file 'RhemaERP' on file 1.",
+        'BACKUP DATABASE successfully processed 55298 pages in 3.141 seconds.',
+        'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') -join ' '
+    $collapsedMarkerFailureEvidence |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $markerFailure 'backup-create.txt')
     "$('F' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $markerFailure 'backup-current.sha256')
     $markerStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $true $false $false
@@ -138,8 +142,8 @@ try {
     foreach ($requiredBackupMarker in @('BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
         $markerTamper = New-PackageRoot ("MARKER_FAILURE_MISSING_" + $requiredBackupMarker)
         Copy-Item -Path (Join-Path $markerFailure '*') -Destination $markerTamper
-        @(Get-Content -LiteralPath (Join-Path $markerTamper 'backup-create.txt') |
-            Where-Object { $_ -cne $requiredBackupMarker }) |
+        [regex]::Replace((Get-Content -Raw -LiteralPath (Join-Path $markerTamper 'backup-create.txt')),
+            '(?<!\S)' + [regex]::Escape($requiredBackupMarker) + '(?!\S)', '').Trim() |
             Set-Content -Encoding ascii -LiteralPath (Join-Path $markerTamper 'backup-create.txt')
         Update-ArtifactBinding $markerTamper 'backup-create.txt'
         Invoke-ExpectedSemanticFailure $markerTamper "phase-03-publication-failure backupCompleted without $requiredBackupMarker"
@@ -166,9 +170,9 @@ try {
     $mutatedMedia = '1' * 32
     $verifiedHash = 'A' * 64
     $currentHash = 'B' * 64
-    @("BACKUP_MEDIA_ID=$mutatedMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
+    @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mutatedMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
         'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-create.txt')
-    @("BACKUP_MEDIA_ID=$mutatedMedia",'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') |
+    @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mutatedMedia",'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-verify.txt')
     "$verifiedHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup.sha256')
     "$currentHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-current.sha256')

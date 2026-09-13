@@ -67,6 +67,30 @@ function Get-SanitizedExceptionMessage([System.Exception]$exception) {
     ConvertTo-SanitizedEvidenceLine $exception.Message
 }
 
+function Get-SqlEvidenceTokens([string]$evidenceFile) {
+    if (-not (Test-Path -LiteralPath $evidenceFile -PathType Leaf)) { return @() }
+    $raw = Get-Content -Raw -LiteralPath $evidenceFile
+    return @([regex]::Matches($raw, '\S+') | ForEach-Object { $_.Value })
+}
+
+function Assert-UniqueOrderedSqlEvidenceTokens([string]$evidenceFile, [string[]]$expectedTokens,
+    [string]$context) {
+    $actualTokens = @(Get-SqlEvidenceTokens $evidenceFile)
+    $priorIndex = -1
+    foreach ($expectedToken in $expectedTokens) {
+        if ([string]::IsNullOrWhiteSpace($expectedToken) -or $expectedToken -match '\s') {
+            throw "Internal $context evidence-token contract is malformed."
+        }
+        $matchingIndexes = @(for ($index = 0; $index -lt $actualTokens.Count; $index++) {
+            if ([string]::Equals($actualTokens[$index], $expectedToken, [StringComparison]::Ordinal)) { $index }
+        })
+        if ($matchingIndexes.Count -ne 1 -or $matchingIndexes[0] -le $priorIndex) {
+            throw "$context evidence lacks unique ordered token '$expectedToken'; reset is forbidden."
+        }
+        $priorIndex = $matchingIndexes[0]
+    }
+}
+
 function Assert-FinalReviewedGitState([string]$operation = 'RehearseFinalClone') {
     $reviewedCommit = [Environment]::GetEnvironmentVariable($finalReviewedCommitVariable, 'Process')
     $reviewedTree = [Environment]::GetEnvironmentVariable($finalReviewedTreeVariable, 'Process')
@@ -278,14 +302,18 @@ function Invoke-SqlWithSanitizedEvidence([System.Data.SqlClient.SqlConnectionStr
         try { $captured = @(Invoke-Sql $builder $database $query $inputFile $rawOutput 2>&1) }
         catch {
             $captured += $_.Exception.Message
-            @((Get-Content -LiteralPath $rawOutput -ErrorAction SilentlyContinue), $captured) |
-                ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) } |
-                Set-Content -Encoding utf8 -LiteralPath $evidenceFile
+            $sanitizedLines = @(
+                @(Get-Content -LiteralPath $rawOutput -ErrorAction SilentlyContinue)
+                @($captured)
+            ) | ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) }
+            $sanitizedLines | Set-Content -Encoding utf8 -LiteralPath $evidenceFile
             throw "SQL command failed; only sanitized evidence was retained at $evidenceFile."
         }
-        @((Get-Content -LiteralPath $rawOutput -ErrorAction SilentlyContinue), $captured) |
-            ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) } |
-            Set-Content -Encoding utf8 -LiteralPath $evidenceFile
+        $sanitizedLines = @(
+            @(Get-Content -LiteralPath $rawOutput -ErrorAction SilentlyContinue)
+            @($captured)
+        ) | ForEach-Object { ConvertTo-SanitizedEvidenceLine ([string]$_) }
+        $sanitizedLines | Set-Content -Encoding utf8 -LiteralPath $evidenceFile
     }
     finally {
         if (Test-Path -LiteralPath $rawOutput -PathType Leaf) { Remove-Item -LiteralPath $rawOutput -Force }
@@ -826,12 +854,13 @@ SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
         }
         $backupCreated = $true
         $backupSha256 = $materialBackupState.sha256
-        $backupCreateLines = @(Get-Content -LiteralPath $backupCreateEvidence | ForEach-Object { $_.Trim() })
-        foreach ($marker in @('BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
-            if ($backupCreateLines -cnotcontains $marker) {
-                throw "Disposable reset backup creation evidence lacks required marker '$marker'; reset is forbidden."
-            }
-        }
+        Assert-UniqueOrderedSqlEvidenceTokens $backupCreateEvidence @(
+            'DATABASE=RhemaERP',
+            "BACKUP_MEDIA_ID=$backupMediaId",
+            'BACKUP_PATH_ATOMICALLY_RESERVED',
+            'BACKUP_COPY_ONLY_CHECKSUM_START',
+            'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE'
+        ) 'Disposable reset backup creation'
         $backupCompleted = $true
         Write-AtomicTextFile (Join-Path $evidenceDirectory 'backup-current.sha256') `
             "$backupSha256  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" $true
@@ -855,10 +884,11 @@ SELECT N'BACKUP_MEDIA_ID=$backupMediaId';
 RESTORE VERIFYONLY FROM DISK=N'$escapedBackupPath' WITH CHECKSUM;
 SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
 "@ '' $backupVerifyEvidence
-        $backupVerifyLines = @(Get-Content -LiteralPath $backupVerifyEvidence | ForEach-Object { $_.Trim() })
-        if ($backupVerifyLines -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') {
-            throw 'Disposable reset backup VERIFYONLY evidence lacks its completion marker; reset is forbidden.'
-        }
+        Assert-UniqueOrderedSqlEvidenceTokens $backupVerifyEvidence @(
+            'DATABASE=RhemaERP',
+            "BACKUP_MEDIA_ID=$backupMediaId",
+            'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'
+        ) 'Disposable reset backup VERIFYONLY'
         $postVerifyBackupState = Get-DisposableMaterialBackupState $backupPath
         if (-not $postVerifyBackupState.materialized -or $postVerifyBackupState.sha256 -cne $backupSha256) {
             throw 'Verified reset backup material or SHA-256 changed during VERIFYONLY; reset is forbidden.'

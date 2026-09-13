@@ -10,6 +10,7 @@ $attestationValue = 'I_ATTEST_RHEMAERP_DEVELOPMENT_DATA_IS_DISPOSABLE'
 $flags = @('Finance__AccountingEvents__Enabled','Finance__ProducerIntents__Enabled','Finance__ProducerIntentGroups__Enabled')
 $reviewVariables = @('RHEMA_GL_REVIEWED_COMMIT','RHEMA_GL_REVIEWED_TREE')
 $temporaryRoots = [System.Collections.Generic.List[string]]::new()
+$priorPath = [Environment]::GetEnvironmentVariable('PATH', 'Process')
 
 function Invoke-Refusal([string]$name, [string]$expected, [string[]]$arguments) {
     $output = & pwsh -NoProfile -File $script -Mode ResetDisposableDevelopment @arguments 2>&1 | Out-String
@@ -124,7 +125,9 @@ try {
     finally { if (Test-Path -LiteralPath $collisionPath) { Remove-Item -LiteralPath $collisionPath -Force } }
     Write-Host 'PASS: actual pre-dispatch backup reservation helper is available and refuses collisions'
 
-    foreach ($functionName in @('Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
+    foreach ($functionName in @('ConvertTo-SanitizedEvidenceLine','Get-SqlEvidenceTokens',
+        'Assert-UniqueOrderedSqlEvidenceTokens','Invoke-Native','Assert-SqlcmdOutputWidth','Invoke-Sql',
+        'Invoke-SqlWithSanitizedEvidence','Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
         'Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
         'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState','Get-DisposableBackupRecoveryState')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
@@ -134,6 +137,60 @@ try {
         }
         . ([ScriptBlock]::Create($functionAst[0].Extent.Text))
     }
+    $sqlcmdMaxVariableWidth = 8000
+    $sqlcmdScreenWidth = 8000
+    $script:sensitiveEvidenceTokens = [System.Collections.Generic.List[string]]::new()
+    $collapsedTransportRoot = New-ExternalEvidencePath 'COLLAPSED_SQLCMD_TRANSPORT'
+    New-Item -ItemType Directory -Path $collapsedTransportRoot | Out-Null
+    @'
+$captured = @($args)
+$outputIndex = [Array]::IndexOf($captured, '-o')
+if ($outputIndex -lt 0 -or $outputIndex + 1 -ge $captured.Count) { exit 91 }
+$collapsed = [Environment]::GetEnvironmentVariable('RHEMA_GL_COLLAPSED_SQLCMD_OUTPUT', 'Process')
+[System.IO.File]::WriteAllText($captured[$outputIndex + 1], $collapsed + [Environment]::NewLine,
+    [System.Text.UTF8Encoding]::new($false))
+exit 0
+'@ | Set-Content -Encoding utf8 -LiteralPath (Join-Path $collapsedTransportRoot 'sqlcmd.ps1')
+    [Environment]::SetEnvironmentVariable('PATH', "$collapsedTransportRoot$([System.IO.Path]::PathSeparator)$priorPath", 'Process')
+    $collapsedMedia = '9' * 32
+    $expectedCollapsedTokens = @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$collapsedMedia",
+        'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')
+    $collapsedGood = "DATABASE=RhemaERP BACKUP_MEDIA_ID=$collapsedMedia BACKUP_PATH_ATOMICALLY_RESERVED " +
+        "BACKUP_COPY_ONLY_CHECKSUM_START Processed 55296 pages for database 'RhemaERP', file 'RhemaERP' on file 1. " +
+        "100 percent processed. Processed 2 pages for database 'RhemaERP', file 'RhemaERP_log' on file 1. " +
+        "BACKUP DATABASE successfully processed 55298 pages in 3.141 seconds. BACKUP_COPY_ONLY_CHECKSUM_COMPLETE"
+    $collapsedBuilder = [System.Data.SqlClient.SqlConnectionStringBuilder]::new(
+        'Server=synthetic-local;Database=RhemaERP;Integrated Security=true')
+    $collapsedGoodEvidence = Join-Path $collapsedTransportRoot 'collapsed-good.txt'
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_COLLAPSED_SQLCMD_OUTPUT', $collapsedGood, 'Process')
+    Invoke-SqlWithSanitizedEvidence $collapsedBuilder 'master' 'SELECT 1' '' $collapsedGoodEvidence
+    $collapsedPhysicalLines = @(Get-Content -LiteralPath $collapsedGoodEvidence)
+    if ($collapsedPhysicalLines.Count -ne 1 -or $collapsedPhysicalLines[0].Length -lt 300) {
+        throw 'Actual sanitized sqlcmd transport did not reproduce the long single-line backup evidence shape.'
+    }
+    Assert-UniqueOrderedSqlEvidenceTokens $collapsedGoodEvidence $expectedCollapsedTokens 'Synthetic collapsed backup'
+    foreach ($case in @(
+        @{ label='marker absence'; text=$collapsedGood.Replace('BACKUP_PATH_ATOMICALLY_RESERVED ', '') },
+        @{ label='marker reordering'; text=$collapsedGood.Replace(
+            'BACKUP_PATH_ATOMICALLY_RESERVED BACKUP_COPY_ONLY_CHECKSUM_START',
+            'BACKUP_COPY_ONLY_CHECKSUM_START BACKUP_PATH_ATOMICALLY_RESERVED') },
+        @{ label='embedded marker forgery'; text=$collapsedGood.Replace(
+            'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE','FORGED_BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') },
+        @{ label='duplicate marker'; text=$collapsedGood.Replace(
+            'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') }
+    )) {
+        $caseEvidence = Join-Path $collapsedTransportRoot ("collapsed-$($case.label.Replace(' ','-')).txt")
+        [Environment]::SetEnvironmentVariable('RHEMA_GL_COLLAPSED_SQLCMD_OUTPUT', $case.text, 'Process')
+        Invoke-SqlWithSanitizedEvidence $collapsedBuilder 'master' 'SELECT 1' '' $caseEvidence
+        $refused = $false
+        try { Assert-UniqueOrderedSqlEvidenceTokens $caseEvidence $expectedCollapsedTokens 'Synthetic collapsed backup' }
+        catch { $refused = $true }
+        if (-not $refused) { throw "Collapsed sqlcmd evidence unexpectedly accepted $($case.label)." }
+    }
+    Write-Host 'PASS: actual single-line sqlcmd transport accepts unique ordered tokens and refuses absence, reordering, forgery and duplication'
+    [Environment]::SetEnvironmentVariable('PATH', $priorPath, 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_COLLAPSED_SQLCMD_OUTPUT', $null, 'Process')
+
     $stateRoot = New-ExternalEvidencePath 'STATE_MACHINE'
     New-Item -ItemType Directory -Path $stateRoot | Out-Null
     $script:finalReviewedGitState = [pscustomobject]@{ reviewedCommit=$head; reviewedTree=$tree }
@@ -315,6 +372,8 @@ try {
     Write-Host 'PASS: backup proof, identity-drift, partial-failure, no-retry, history, seed, DBCC and sanitization contracts'
 }
 finally {
+    [Environment]::SetEnvironmentVariable('PATH', $priorPath, 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_COLLAPSED_SQLCMD_OUTPUT', $null, 'Process')
     foreach ($name in @($connectionVariable,$attestationVariable) + $flags + $reviewVariables) {
         [Environment]::SetEnvironmentVariable($name, $null, 'Process')
     }
