@@ -15,6 +15,10 @@ function Write-Json([string]$path, $value) {
 }
 
 function Complete-Status([string]$root, [hashtable]$status) {
+    $failedOperation = if ($status.status -eq 'PASS') { 'NOT_APPLICABLE' } else { [string]$status.failedOperation }
+    @('# Disposable RhemaERP reset recovery','',"Last durable phase: $($status.phase)",
+        "Failed operation: $failedOperation","Verified backup available: $(([bool]$status.backupVerified).ToString().ToLowerInvariant())",'',
+        'Do not rerun this reset automatically.') | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'RECOVERY.md')
     $hashes = [ordered]@{}
     Get-ChildItem -LiteralPath $root -File | Where-Object Name -notin @('reset-status.json','manifest.sha256') |
         Sort-Object Name | ForEach-Object { $hashes[$_.Name] = (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash }
@@ -32,24 +36,35 @@ function New-Common([string]$root) {
         accountingEvents=$false; producerIntents=$false; producerIntentGroups=$false;
         source='explicit process environment variables'
     })
-    '# Recovery`nNo automatic retry.' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'RECOVERY.md')
+    '# Recovery pending terminal status.' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'RECOVERY.md')
     $reviewed
 }
 
 function New-Status([string]$terminalStatus, [string]$phase, [bool]$backupCreated,
     [bool]$backupVerified, [bool]$resetStarted) {
-    @{
+    $result = @{
         mode='ResetDisposableDevelopment'; status=$terminalStatus; phase=$phase; database='RhemaERP';
         server='<REDACTED_LOCAL_SERVER>'; repositoryClean=$true; reviewedCommit=('a' * 40);
         reviewedTree=('b' * 40); backupCreated=$backupCreated; backupVerified=$backupVerified;
         resetStarted=$resetStarted; automaticRetry=$false; automaticCleanup=$false
+        backupPhaseMarkerPublished=$backupCreated; backupMaterialStateReconciled=$true
+        backupByteLength=if($backupCreated){1024}else{0}
+        failedOperation=if($terminalStatus -eq 'PASS'){'NOT_APPLICABLE'}else{'SYNTHETIC_OPERATION'}
     }
+    $result
 }
 
 function Invoke-ExpectedFailure([string]$root, [string]$label) {
     $output = & pwsh -NoProfile -File $validator -EvidenceDirectory $root -PackageKind DisposableReset 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) { throw "Tamper case unexpectedly passed: $label" }
     Write-Host "PASS: $label refused"
+}
+
+function Update-ArtifactBinding([string]$root, [string]$name) {
+    $status = Get-Content -Raw -LiteralPath (Join-Path $root 'reset-status.json') | ConvertFrom-Json
+    $status.artifactSha256.PSObject.Properties[$name].Value =
+        (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root $name)).Hash
+    Write-Json (Join-Path $root 'reset-status.json') $status
 }
 
 try {
@@ -65,6 +80,7 @@ try {
     $partialMedia = 'e' * 32
     @("BACKUP_MEDIA_ID=$partialMedia",'BACKUP_COPY_ONLY_CHECKSUM_START','sanitized failure') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $partialBackup 'backup-create.txt')
+    "$('E' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $partialBackup 'backup.sha256')
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'))) {
         Write-Json (Join-Path $partialBackup ("phase-{0:D2}.json" -f $entry[0])) ([ordered]@{
             schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1]
@@ -72,6 +88,7 @@ try {
     }
     $partialStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'BACKUP_CREATED' $true $false $false
     $partialStatus.backupMediaId=$partialMedia; $partialStatus.backupCompleted=$false; $partialStatus.backupPreserved=$true
+    $partialStatus.backupSha256=('E' * 64)
     Complete-Status $partialBackup $partialStatus
     & pwsh -NoProfile -File $validator -EvidenceDirectory $partialBackup -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Partial backup-created/VERIFYONLY-failed recovery package did not validate.' }
@@ -80,6 +97,43 @@ try {
     $partialTamper.backupCreated=$false
     Write-Json (Join-Path $partialBackup 'reset-status.json') $partialTamper
     Invoke-ExpectedFailure $partialBackup 'backup-created marker downgraded after partial failure'
+
+    $markerFailure = New-PackageRoot 'MARKER_FAILURE'
+    $null = New-Common $markerFailure
+    foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'))) {
+        Write-Json (Join-Path $markerFailure ("phase-{0:D2}.json" -f $entry[0])) ([ordered]@{
+            schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1]
+        })
+    }
+    $markerMedia = 'f' * 32
+    @("BACKUP_MEDIA_ID=$markerMedia",'BACKUP_PATH_ATOMICALLY_RESERVED',
+        'BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') |
+        Set-Content -Encoding ascii -LiteralPath (Join-Path $markerFailure 'backup-create.txt')
+    "$('F' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $markerFailure 'backup.sha256')
+    $markerStatus = New-Status 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $true $false $false
+    $markerStatus.backupPhaseMarkerPublished=$false; $markerStatus.backupMaterialStateReconciled=$true
+    $markerStatus.backupByteLength=4096; $markerStatus.backupMediaId=$markerMedia; $markerStatus.backupSha256=('F' * 64)
+    $markerStatus.backupCompleted=$true; $markerStatus.backupPreserved=$true; $markerStatus.failedOperation='PHASE_03_PUBLICATION'
+    Complete-Status $markerFailure $markerStatus
+    & pwsh -NoProfile -File $validator -EvidenceDirectory $markerFailure -PackageKind DisposableReset -WriteManifest
+    if ($LASTEXITCODE -ne 0) { throw 'Material-backup/phase-03-publication-failure package did not validate.' }
+    Write-Host 'PASS: material backup remains truthfully preserved when phase-03 publication fails'
+
+    $durableTamper = New-PackageRoot 'RECOVERY_DURABLE_TAMPER'
+    Copy-Item -Path (Join-Path $markerFailure '*') -Destination $durableTamper
+    (Get-Content -Raw -LiteralPath (Join-Path $durableTamper 'RECOVERY.md')).Replace(
+        'Last durable phase: SOURCE_CAPTURE_COMPLETE','Last durable phase: BACKUP_CREATED') |
+        Set-Content -Encoding utf8 -LiteralPath (Join-Path $durableTamper 'RECOVERY.md')
+    Update-ArtifactBinding $durableTamper 'RECOVERY.md'
+    Invoke-ExpectedFailure $durableTamper 'recovery last-durable-phase mismatch'
+
+    $operationTamper = New-PackageRoot 'RECOVERY_OPERATION_TAMPER'
+    Copy-Item -Path (Join-Path $markerFailure '*') -Destination $operationTamper
+    (Get-Content -Raw -LiteralPath (Join-Path $operationTamper 'RECOVERY.md')).Replace(
+        'Failed operation: PHASE_03_PUBLICATION','Failed operation: VERIFYONLY') |
+        Set-Content -Encoding utf8 -LiteralPath (Join-Path $operationTamper 'RECOVERY.md')
+    Update-ArtifactBinding $operationTamper 'RECOVERY.md'
+    Invoke-ExpectedFailure $operationTamper 'recovery failed-operation mismatch'
 
     Add-Content -Encoding utf8 -LiteralPath (Join-Path $failed 'RECOVERY.md') -Value 'tamper'
     Invoke-ExpectedFailure $failed 'content tamper'

@@ -2393,3 +2393,12 @@ last marker exactly. PowerShell parsing, disposable-reset helper/refusal and evi
 FinalClone safety suite and final evidence/tamper suite all passed serially from the clean implementation commit.
 No database, process connection variable or preserved evidence was accessed. Sol High re-review is required over
 the ledger-only descendant; execution remains prohibited.
+
+Final Sol High review of exact `ffde483e228a65b94ca9070733761c947f96f3ac` returned two P2 corrections.
+Backup material detection still assigned/published phase-03 in one block, so a marker-write failure could cause the
+outer catch to derive `backupCreated=false` despite a nonempty backup. `RECOVERY.md` also used one ambiguous phase
+field rather than separately binding the last durable marker and attempted operation. A final bounded offline
+correction is active to capture nonempty length/SHA immediately after backup SQL, independently reconcile physical
+state again in catch, accept a truthful unverified material-backup terminal package without phase-03, and validate
+separate recovery durable-phase/failed-operation fields with mismatch tamper refusals. No database, connection
+variable or preserved evidence is in scope; execution remains prohibited pending clean gates and Sol High re-review.

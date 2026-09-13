@@ -182,12 +182,10 @@ requires one of these explicit decisions:
    data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
    is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Phase D2 second correction completed offline as exact implementation commit
-`05e7413aeb925901a4ce0532b9cea9bc695fcd9e` after independent review of `1c229037`. The real migration parser and
-recovery writer now execute in regression tests, server-side machine/instance/name/endpoint identity is bound to the
-executing host, fingerprint shape is restricted immediately after capture, and terminal status must equal the last
-atomic durable phase. Execution remains prohibited until the ledger-only descendant receives Sol High approval;
-no database mutation has occurred under this authorization.
+Phase D2 final P2 correction is active offline after review of exact `ffde483e`. Material backup state must remain
+truthful even if phase-03 publication fails, and recovery evidence must separately bind the last durable phase and
+the operation that failed. Execution remains prohibited until the corrected ledger-only descendant receives Sol
+High approval; no database mutation has occurred under this authorization.
 
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
@@ -204,8 +202,10 @@ exact captured source history and fingerprint, and immediately performs the sole
 recreates only `RhemaERP`, applies the exact unique ordered 456/C8 list, seeds twice with byte-identical Finance
 invariants, proves zero-orphan history, and completes DBCC. Terminal success and failure packages use the dedicated
 `DisposableReset` validator, bind every artifact by SHA-256, scan retained text/SQL/Markdown for machine or secret
-material, and atomically write a complete manifest. Any failure preserves backup/evidence, writes recovery
-instructions, and performs no automatic retry, restore, cleanup, or second drop.
+material, and atomically write a complete manifest. Catch independently reconciles nonempty backup length/SHA even
+when phase-03 publication failed and never calls it verified without durable VERIFYONLY evidence. Recovery records
+`Last durable phase` separately from `Failed operation`. Any failure preserves backup/evidence and performs no
+automatic retry, restore, cleanup, or second drop.
 
 After Sol High approval only, an operator may prepare a new external evidence path and run:
 

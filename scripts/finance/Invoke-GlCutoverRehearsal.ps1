@@ -517,6 +517,21 @@ function Get-TextSha256([string]$value) {
     [Convert]::ToHexString($hash)
 }
 
+function Get-DisposableMaterialBackupState([string]$path) {
+    if ([string]::IsNullOrWhiteSpace($path) -or -not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        return [pscustomobject]@{ materialized=$false; byteLength=[long]0; sha256='' }
+    }
+    $file = Get-Item -LiteralPath $path
+    if ($file.Length -le 0) {
+        return [pscustomobject]@{ materialized=$false; byteLength=[long]0; sha256='' }
+    }
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash
+    if ($hash -notmatch '^[0-9A-F]{64}$') {
+        throw 'Material disposable-reset backup could not be bound to an exact SHA-256.'
+    }
+    [pscustomobject]@{ materialized=$true; byteLength=[long]$file.Length; sha256=$hash }
+}
+
 function New-AtomicBackupReservation([string]$path) {
     $stream = $null
     try {
@@ -608,11 +623,13 @@ function Write-DisposableResetStatus([string]$directory, [string]$status, [strin
     Write-AtomicTextFile (Join-Path $directory 'reset-status.json') ($payload | ConvertTo-Json -Depth 8) $true
 }
 
-function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupVerified, [string]$phase) {
+function Write-DisposableRecoveryInstructions([string]$directory, [bool]$backupVerified,
+    [string]$lastDurablePhase, [string]$failedOperation) {
     $content = @(
         '# Disposable RhemaERP reset recovery',
         '',
-        "Status phase: $phase",
+        "Last durable phase: $lastDurablePhase",
+        "Failed operation: $failedOperation",
         "Verified backup available: $($backupVerified.ToString().ToLowerInvariant())",
         '',
         'Do not rerun this reset automatically.',
@@ -748,6 +765,7 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
         $backupMediaId = [Guid]::NewGuid().ToString('N')
         New-AtomicBackupReservation $backupPath
         $backupCreateEvidence = Join-Path $evidenceDirectory 'backup-create.txt'
+        $materialBackupState = $null
         try {
             Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
 SET NOCOUNT ON;
@@ -765,25 +783,15 @@ SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
 "@ '' $backupCreateEvidence
         }
         finally {
-            # The local file length is checked even when sqlcmd/marker handling fails. Once SQL has
-            # written any backup bytes, recovery evidence must never fall back to backupCreated=false.
-            if (Test-Path -LiteralPath $backupPath -PathType Leaf) {
-                $backupFileLength = (Get-Item -LiteralPath $backupPath).Length
-                if ($backupFileLength -gt 0) {
-                    if (-not (Test-Path -LiteralPath (Join-Path $evidenceDirectory 'phase-03.json') -PathType Leaf)) {
-                        Write-DisposablePhaseMarker $evidenceDirectory 3 'BACKUP_CREATED' @{
-                            backupMediaId = $backupMediaId
-                            backupByteLength = $backupFileLength
-                            backupCreated = $true
-                            backupVerified = $false
-                            resetStarted = $false
-                        }
-                    }
-                    $backupCreated = $true
-                    Write-DisposableRecoveryInstructions $evidenceDirectory $false 'BACKUP_CREATED_VERIFY_PENDING'
-                }
-            }
+            # This is the first operation after the BACKUP sqlcmd returns or throws. It captures
+            # material file state before any phase marker can fail to publish.
+            $materialBackupState = Get-DisposableMaterialBackupState $backupPath
         }
+        if (-not $materialBackupState.materialized) {
+            throw 'Disposable reset backup did not create a nonempty recovery artifact.'
+        }
+        $backupCreated = $true
+        $backupSha256 = $materialBackupState.sha256
         $backupCreateLines = @(Get-Content -LiteralPath $backupCreateEvidence | ForEach-Object { $_.Trim() })
         foreach ($marker in @('BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
             if ($backupCreateLines -cnotcontains $marker) {
@@ -791,7 +799,19 @@ SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
             }
         }
         $backupCompleted = $true
-        if (-not $backupCreated) { throw 'Disposable reset backup did not create a nonempty recovery artifact.' }
+        Write-AtomicTextFile (Join-Path $evidenceDirectory 'backup.sha256') `
+            "$backupSha256  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" $true
+        $phase = 'PHASE_03_PUBLICATION'
+        Write-DisposablePhaseMarker $evidenceDirectory 3 'BACKUP_CREATED' @{
+            backupMediaId = $backupMediaId
+            backupByteLength = $materialBackupState.byteLength
+            backupSha256 = $backupSha256
+            backupCreated = $true
+            backupVerified = $false
+            resetStarted = $false
+        }
+        Write-DisposableRecoveryInstructions $evidenceDirectory $false 'BACKUP_CREATED' 'NOT_APPLICABLE'
+        $phase = 'BACKUP_VERIFYONLY'
         $backupVerifyEvidence = Join-Path $evidenceDirectory 'backup-verify.txt'
         Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' @"
 SET NOCOUNT ON;
@@ -804,13 +824,10 @@ SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
         if ($backupVerifyLines -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') {
             throw 'Disposable reset backup VERIFYONLY evidence lacks its completion marker; reset is forbidden.'
         }
-        if (-not (Test-Path -LiteralPath $backupPath -PathType Leaf)) {
-            throw 'Verified reset backup is not locally readable for SHA-256; reset is forbidden.'
+        $postVerifyBackupState = Get-DisposableMaterialBackupState $backupPath
+        if (-not $postVerifyBackupState.materialized -or $postVerifyBackupState.sha256 -cne $backupSha256) {
+            throw 'Verified reset backup material or SHA-256 changed during VERIFYONLY; reset is forbidden.'
         }
-        $backupSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupPath).Hash
-        if ($backupSha256 -notmatch '^[0-9A-F]{64}$') { throw 'Verified reset backup SHA-256 is invalid; reset is forbidden.' }
-        "$backupSha256  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii `
-            -LiteralPath (Join-Path $evidenceDirectory 'backup.sha256')
         $backupStillExists = [int](Invoke-SqlScalar $databaseTarget.Builder 'master' @"
 DECLARE @exists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
 INSERT @exists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
@@ -825,7 +842,7 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
             resetStarted = $false
         }
         $backupVerified = $true
-        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'BACKUP_VERIFIED'
+        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'BACKUP_VERIFIED' 'NOT_APPLICABLE'
 
         $phase = 'IDENTITY_RECHECK_AND_RESET'
         $preMutationGitState = Assert-FinalReviewedGitState 'ResetDisposableDevelopment'
@@ -936,7 +953,7 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
             resetStarted = $true
         }
         $resetStarted = $true
-        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'RESET_STARTED'
+        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'RESET_STARTED' 'NOT_APPLICABLE'
         try {
             Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'master' '' $destructiveSqlPath `
                 (Join-Path $evidenceDirectory 'reset-database.log')
@@ -1018,27 +1035,43 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
             repositoryClean = $true
             finalMigrationCount = $authoritativeMigrationCount
         }
-        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'PASS'
+        Write-DisposableRecoveryInstructions $evidenceDirectory $true 'COMPLETE' 'NOT_APPLICABLE'
         Write-DisposableResetStatus $evidenceDirectory 'PASS' 'COMPLETE' $true $true $true @{
             sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; finalMigrationCount = 456
             latestMigration = $authoritativeLatestMigration; orphanMigrationCount = 0; backupSha256 = $backupSha256
             invariantSha256 = $firstInvariant; seedPasses = 2; dbcc = 'PASS'; backupMediaId = $backupMediaId
-            backupCompleted = $true
+            backupCompleted = $true; backupPhaseMarkerPublished = $true; backupMaterialStateReconciled = $true
+            backupByteLength = $materialBackupState.byteLength; verifyEvidencePresent = $true
         }
         Write-DisposableResetEvidenceManifest $evidenceDirectory
         Write-Host "Disposable RhemaERP development reset passed. Evidence: $evidenceDirectory"
     }
     catch {
         $safeFailure = Get-SanitizedExceptionMessage $_.Exception
-        Write-DisposableRecoveryInstructions $evidenceDirectory $backupVerified $phase
         $durablePhase = Get-DisposableLastDurablePhase $evidenceDirectory
         $durableOrdinal = @(Get-ChildItem -LiteralPath $evidenceDirectory -File -Filter 'phase-*.json').Count
-        $durableBackupCreated = $durableOrdinal -ge 3
-        $durableBackupVerified = $durableOrdinal -ge 4
+        $backupPhaseMarkerPublished = $durableOrdinal -ge 3
+        $reconciledBackupState = Get-DisposableMaterialBackupState $backupPath
+        $durableBackupCreated = [bool]$reconciledBackupState.materialized
+        if ($durableBackupCreated) {
+            $backupSha256 = $reconciledBackupState.sha256
+            Write-AtomicTextFile (Join-Path $evidenceDirectory 'backup.sha256') `
+                "$backupSha256  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" $true
+        }
+        $verifyEvidenceValid = $false
+        $verifyEvidencePath = Join-Path $evidenceDirectory 'backup-verify.txt'
+        if ($durableBackupCreated -and (Test-Path -LiteralPath $verifyEvidencePath -PathType Leaf)) {
+            $verifyEvidenceValid = @(Get-Content -LiteralPath $verifyEvidencePath | ForEach-Object { $_.Trim() }) `
+                -ccontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'
+        }
+        $durableBackupVerified = $durableOrdinal -ge 4 -and $verifyEvidenceValid
         $durableResetStarted = $durableOrdinal -ge 5
+        Write-DisposableRecoveryInstructions $evidenceDirectory $durableBackupVerified $durablePhase $phase
         Write-DisposableResetStatus $evidenceDirectory 'FAILED_NO_AUTOMATIC_RETRY' $durablePhase $durableBackupCreated $durableBackupVerified $durableResetStarted @{
             sourceFingerprint = $sourceFingerprint; failure = $safeFailure; failedOperation = $phase; backupPreserved = $durableBackupCreated
             backupMediaId = $backupMediaId; backupSha256 = $backupSha256; backupCompleted = $backupCompleted
+            backupPhaseMarkerPublished = $backupPhaseMarkerPublished; backupMaterialStateReconciled = $true
+            backupByteLength = $reconciledBackupState.byteLength; verifyEvidencePresent = $verifyEvidenceValid
         }
         try { Write-DisposableResetEvidenceManifest $evidenceDirectory }
         catch { Write-Warning (Get-SanitizedExceptionMessage $_.Exception) }

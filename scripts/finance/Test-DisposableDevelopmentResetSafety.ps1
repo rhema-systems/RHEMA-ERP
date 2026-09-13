@@ -126,7 +126,7 @@ try {
 
     foreach ($functionName in @('Write-AtomicTextFile','Write-DisposablePhaseMarker','Get-DisposableLastDurablePhase',
         'Write-DisposableResetStatus','Write-DisposableRecoveryInstructions','Assert-DisposableServerSideLocality',
-        'Test-DisposableSourceFingerprint')) {
+        'Test-DisposableSourceFingerprint','Get-DisposableMaterialBackupState')) {
         $functionAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
             $node.Name -eq $functionName }, $true))
         if ($functionAst.Count -ne 1 -or $functionAst[0].Extent.StartOffset -ge $dispatcherOffset) {
@@ -156,15 +156,48 @@ try {
     catch { $mismatchRefused = $true }
     if (-not $mismatchRefused) { throw 'Terminal status accepted a phase other than the last durable marker.' }
     foreach ($transition in @(
-        @('BACKUP_CREATED_VERIFY_PENDING',$false),@('BACKUP_VERIFIED',$true),@('RESET_STARTED',$true),
-        @('PASS',$true),@('FAILED_OUTER_CATCH',$false))) {
-        Write-DisposableRecoveryInstructions $stateRoot $transition[1] $transition[0]
+        @('BACKUP_CREATED',$false,'NOT_APPLICABLE'),@('BACKUP_VERIFIED',$true,'NOT_APPLICABLE'),
+        @('RESET_STARTED',$true,'NOT_APPLICABLE'),@('COMPLETE',$true,'NOT_APPLICABLE'),
+        @('RESET_STARTED',$false,'FAILED_OUTER_CATCH'))) {
+        Write-DisposableRecoveryInstructions $stateRoot $transition[1] $transition[0] $transition[2]
         $recovery = Get-Content -Raw -LiteralPath (Join-Path $stateRoot 'RECOVERY.md')
-        if ($recovery -notmatch [regex]::Escape("Status phase: $($transition[0])")) {
+        if ($recovery -notmatch [regex]::Escape("Last durable phase: $($transition[0])") -or
+            $recovery -notmatch [regex]::Escape("Failed operation: $($transition[2])")) {
             throw "Actual recovery helper did not atomically publish transition $($transition[0])."
         }
     }
     Write-Host 'PASS: durable terminal phase/status and every recovery transition execute under StrictMode'
+
+    $markerFailureRoot = New-ExternalEvidencePath 'MARKER_FAILURE_STATE'
+    New-Item -ItemType Directory -Path $markerFailureRoot | Out-Null
+    Write-DisposablePhaseMarker $markerFailureRoot 1 'OFFLINE_GATES_COMPLETE'
+    Write-DisposablePhaseMarker $markerFailureRoot 2 'SOURCE_CAPTURE_COMPLETE'
+    $materialBackupPath = Join-Path $markerFailureRoot 'material-backup.bak'
+    [System.IO.File]::WriteAllBytes($materialBackupPath, [System.Text.Encoding]::UTF8.GetBytes('material backup bytes'))
+    $materialState = Get-DisposableMaterialBackupState $materialBackupPath
+    if (-not $materialState.materialized -or $materialState.byteLength -le 0 -or
+        $materialState.sha256 -notmatch '^[0-9A-F]{64}$') {
+        throw 'Actual material-backup helper did not capture nonempty file state and SHA-256.'
+    }
+    New-Item -ItemType Directory -Path (Join-Path $markerFailureRoot 'phase-03.json') | Out-Null
+    $publicationRefused = $false
+    try { Write-DisposablePhaseMarker $markerFailureRoot 3 'BACKUP_CREATED' }
+    catch { $publicationRefused = $true }
+    if (-not $publicationRefused -or (Get-DisposableLastDurablePhase $markerFailureRoot) -cne 'SOURCE_CAPTURE_COMPLETE') {
+        throw 'Synthetic phase-03 publication failure did not preserve the actual last durable phase.'
+    }
+    Write-DisposableRecoveryInstructions $markerFailureRoot $false 'SOURCE_CAPTURE_COMPLETE' 'PHASE_03_PUBLICATION'
+    Write-DisposableResetStatus $markerFailureRoot 'FAILED_NO_AUTOMATIC_RETRY' 'SOURCE_CAPTURE_COMPLETE' $true $false $false @{
+        failedOperation='PHASE_03_PUBLICATION'; backupPhaseMarkerPublished=$false;
+        backupMaterialStateReconciled=$true; backupByteLength=$materialState.byteLength;
+        backupSha256=$materialState.sha256; backupPreserved=$true
+    }
+    $markerFailureStatus = Get-Content -Raw -LiteralPath (Join-Path $markerFailureRoot 'reset-status.json') | ConvertFrom-Json
+    if ($markerFailureStatus.backupCreated -ne $true -or $markerFailureStatus.backupPreserved -ne $true -or
+        $markerFailureStatus.backupVerified -ne $false -or $markerFailureStatus.phase -cne 'SOURCE_CAPTURE_COMPLETE') {
+        throw 'Marker-publication failure terminal evidence did not truthfully preserve material backup state.'
+    }
+    Write-Host 'PASS: material backup remains truthful when actual phase-03 publication fails'
 
     Assert-DisposableServerSideLocality 'localhost' 'LOCALHOST' '' 'LOCALHOST' '' '' 'localhost'
     foreach ($case in @(
@@ -194,8 +227,10 @@ try {
     $orderedMarkers = @(
         'New-AtomicBackupReservation $backupPath',
         'BACKUP DATABASE [RhemaERP]',
+        '$materialBackupState = Get-DisposableMaterialBackupState $backupPath',
+        "Write-DisposablePhaseMarker `$evidenceDirectory 3 'BACKUP_CREATED'",
         'RESTORE VERIFYONLY',
-        "`$backupSha256 = (Get-FileHash",
+        '$postVerifyBackupState = Get-DisposableMaterialBackupState $backupPath',
         "`$backupVerified = `$true",
         "Assert-FinalReviewedGitState 'ResetDisposableDevelopment'",
         'DISPOSABLE_RESET_IDENTITY_DRIFT',

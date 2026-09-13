@@ -148,8 +148,42 @@ if ($PackageKind -eq 'DisposableReset') {
     if ([string]$reset.phase -cne $lastDurablePhase) {
         throw 'Disposable-reset terminal status phase does not exactly equal the final durable phase marker.'
     }
-    if (($phases -ccontains 'BACKUP_CREATED') -ne [bool]$reset.backupCreated) {
-        throw 'Disposable-reset status and durable BACKUP_CREATED marker disagree.'
+    $recoveryLines = @(Get-Content -LiteralPath (Join-Path $root 'RECOVERY.md'))
+    $recoveryDurable = @($recoveryLines | Where-Object { $_ -match '^Last durable phase: (?<value>[A-Z0-9_]+)$' })
+    $recoveryOperation = @($recoveryLines | Where-Object { $_ -match '^Failed operation: (?<value>[A-Z0-9_]+)$' })
+    $recoveryVerified = @($recoveryLines | Where-Object { $_ -match '^Verified backup available: (?:true|false)$' })
+    if ($recoveryDurable.Count -ne 1 -or $recoveryOperation.Count -ne 1 -or $recoveryVerified.Count -ne 1) {
+        throw 'Disposable-reset recovery evidence must contain one restricted durable-phase and failed-operation field.'
+    }
+    $recoveryDurableValue = ($recoveryDurable[0] -replace '^Last durable phase: ','')
+    $recoveryOperationValue = ($recoveryOperation[0] -replace '^Failed operation: ','')
+    $recoveryVerifiedValue = ($recoveryVerified[0] -replace '^Verified backup available: ','')
+    if ($recoveryDurableValue -cne [string]$reset.phase) {
+        throw 'Disposable-reset recovery last durable phase disagrees with terminal status/phase evidence.'
+    }
+    if ($reset.status -eq 'PASS') {
+        if ($recoveryOperationValue -cne 'NOT_APPLICABLE') {
+            throw 'Disposable-reset PASS recovery evidence must have no failed operation.'
+        }
+    }
+    elseif ([string]$reset.failedOperation -notmatch '^[A-Z0-9_]+$' -or
+        $recoveryOperationValue -cne [string]$reset.failedOperation) {
+        throw 'Disposable-reset failure recovery operation disagrees with terminal status evidence.'
+    }
+    if ($recoveryVerifiedValue -cne ([bool]$reset.backupVerified).ToString().ToLowerInvariant()) {
+        throw 'Disposable-reset recovery verified-backup field disagrees with terminal status evidence.'
+    }
+    $backupPhaseMarkerPublished = $phases -ccontains 'BACKUP_CREATED'
+    if ($backupPhaseMarkerPublished -and $reset.backupCreated -ne $true) {
+        throw 'Disposable-reset durable BACKUP_CREATED marker cannot be downgraded by terminal status.'
+    }
+    if (-not $backupPhaseMarkerPublished -and $reset.backupCreated -eq $true -and
+        ($reset.status -ne 'FAILED_NO_AUTOMATIC_RETRY' -or $reset.backupPhaseMarkerPublished -ne $false -or
+         $reset.backupMaterialStateReconciled -ne $true -or [long]$reset.backupByteLength -le 0)) {
+        throw 'Disposable-reset material backup without phase-03 lacks truthful reconciliation evidence.'
+    }
+    if ([bool]$reset.backupPhaseMarkerPublished -ne $backupPhaseMarkerPublished) {
+        throw 'Disposable-reset phase-03 publication status disagrees with the durable marker set.'
     }
     if (($phases -ccontains 'BACKUP_VERIFIED') -ne [bool]$reset.backupVerified) {
         throw 'Disposable-reset status and durable BACKUP_VERIFIED marker disagree.'
@@ -223,10 +257,15 @@ if ($PackageKind -eq 'DisposableReset') {
 
     if ($reset.backupCreated -eq $true) {
         $createPath = Join-Path $root 'backup-create.txt'
-        if (-not (Test-Path -LiteralPath $createPath -PathType Leaf)) { throw 'BACKUP_CREATED evidence is missing.' }
+        $hashPath = Join-Path $root 'backup.sha256'
+        if (-not (Test-Path -LiteralPath $createPath -PathType Leaf) -or
+            -not (Test-Path -LiteralPath $hashPath -PathType Leaf)) { throw 'Material backup creation/hash evidence is missing.' }
         $create = @(Get-Content -LiteralPath $createPath | ForEach-Object { $_.Trim() })
+        $hashLine = (Get-Content -Raw -LiteralPath $hashPath).Trim()
         if ([string]$reset.backupMediaId -notmatch '^[0-9a-f]{32}$' -or
-            $create -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)") {
+            $create -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)" -or
+            $hashLine -notmatch '^(?<hash>[0-9A-F]{64})  RhemaERP_DISPOSABLE_RESET_COPYONLY\.bak$' -or
+            $Matches.hash -cne [string]$reset.backupSha256) {
             throw 'Disposable-reset backup creation markers or media identity are invalid.'
         }
         if (($reset.status -eq 'PASS' -or $reset.backupCompleted -eq $true) -and
