@@ -118,6 +118,9 @@ Canonical rows are `nvarchar(max)` before SQL-side `SHA2_256` hashing and retain
 the fixed hash in transport; offline evidence proves a single unwrapped sentinel beyond character 4,000 survives.
 Every required native-command artifact is atomically published with its sanitized command identity, explicit
 success status and exit code, including successful commands such as `git diff --check` that emit no ordinary output.
+When fresh discovery finds zero pending migrations, no dotnet generation command is fabricated: the generation
+artifact instead uses the bound `NOT_REQUIRED`/`ZERO_PENDING_MIGRATIONS` schema, which validation accepts only
+after independently deriving an empty pending set.
 The exact target-derived backup path is atomically reserved with OS `FileMode.CreateNew`; SQL then uses a fresh
 media identity with `NOINIT`, `NOSKIP`, and `MEDIANAME`, so a concurrent/pre-existing file is never overwritten.
 

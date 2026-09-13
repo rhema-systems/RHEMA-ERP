@@ -94,6 +94,37 @@ try {
     Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'Required command evidence has a missing or invalid success marker: git-diff-check.log'
     $validGitDiffEvidence | Set-Content -Encoding utf8 -LiteralPath $gitDiffPath
 
+    $generationPath = Join-Path $root 'idempotent-script-generation.log'
+    $idempotentScriptPath = Join-Path $root 'pending-migrations-idempotent.sql'
+    $idempotentHashPath = Join-Path $root 'pending-migrations-idempotent.sha256'
+    $zeroPending = @()
+    $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
+    Clear-Content -LiteralPath (Join-Path $root 'orphan-history.txt')
+    '-- NO PENDING MIGRATIONS AT FRESH DISCOVERY' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
+    $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
+    "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
+    $notRequiredMarker = 'RHEMA_IDEMPOTENT_SCRIPT_GENERATION_V1|STATUS=NOT_REQUIRED|REASON=ZERO_PENDING_MIGRATIONS|PENDING_COUNT=0'
+    $notRequiredMarker | Set-Content -Encoding utf8 -LiteralPath $generationPath
+    Write-Summary 'NO_GO_PREFLIGHT' $zeroPending
+    & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
+    if ($LASTEXITCODE -ne 0) { throw 'Valid zero-pending final preflight NO-GO package was rejected.' }
+    Remove-Item -LiteralPath $generationPath
+    Write-Summary 'NO_GO_PREFLIGHT' $zeroPending; Assert-Refused 'Required rehearsal evidence is missing: idempotent-script-generation.log'
+    'RHEMA_IDEMPOTENT_SCRIPT_GENERATION_V1|STATUS=NOT_REQUIRED|REASON=ZERO_PENDING_MIGRATIONS|PENDING_COUNT=1' |
+        Set-Content -Encoding utf8 -LiteralPath $generationPath
+    Write-Summary 'NO_GO_PREFLIGHT' $zeroPending; Assert-Refused 'Zero-pending idempotent-script evidence is missing or invalid'
+    Write-CommandEvidenceFixture 'idempotent-script-generation.log' 'dotnet' @('fabricated generation')
+    Write-Summary 'NO_GO_PREFLIGHT' $zeroPending; Assert-Refused 'Zero-pending idempotent-script evidence is missing or invalid'
+
+    $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
+    $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
+    '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
+    $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
+    "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
+    Write-CommandEvidenceFixture 'idempotent-script-generation.log' 'dotnet' @('offline generation passed')
+
     $flagsPath = Join-Path $root 'feature-flags.json'; $validFlags = Get-Content -Raw -LiteralPath $flagsPath
     $flags = $validFlags | ConvertFrom-Json; $flags.producerIntentGroups=$true; $flags | ConvertTo-Json | Set-Content -Encoding utf8 $flagsPath
     Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'does not prove C6, C7 and C8 explicitly false'; $validFlags | Set-Content -Encoding utf8 $flagsPath
@@ -139,6 +170,27 @@ try {
     Write-Summary 'PASS' $pending
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Valid final 456/C8 PASS package was rejected.' }
+
+    $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
+    Clear-Content -LiteralPath (Join-Path $root 'orphan-history.txt')
+    $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
+    '-- NO PENDING MIGRATIONS AT FRESH DISCOVERY' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
+    $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
+    "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
+    $notRequiredMarker | Set-Content -Encoding utf8 -LiteralPath $generationPath
+    Write-Summary 'PASS' $zeroPending
+    & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
+    if ($LASTEXITCODE -ne 0) { throw 'Valid zero-pending final PASS package was rejected.' }
+
+    $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
+    $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
+    $orphanId | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'orphan-history.txt')
+    $targetIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
+    '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath $idempotentScriptPath
+    $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $idempotentScriptPath).Hash
+    "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath $idempotentHashPath
+    Write-CommandEvidenceFixture 'idempotent-script-generation.log' 'dotnet' @('offline generation passed')
 
     $badTarget=@($targetIds); $badTarget[0]='00000000000000_SameCountMutation'; $badTarget | Sort-Object | Set-Content -Encoding ascii (Join-Path $root 'target-migration-history.txt')
     Write-Summary 'PASS' $pending; Assert-Refused 'exactly source history union the ordered pending delta'

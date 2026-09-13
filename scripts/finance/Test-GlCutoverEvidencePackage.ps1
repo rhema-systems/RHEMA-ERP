@@ -90,7 +90,6 @@ if ($PackageKind -eq 'FinalClone') {
         'clone-build.log' = 'dotnet'
         'ef-no-pending-model.log' = 'dotnet'
         'migration-discovery.log' = 'dotnet'
-        'idempotent-script-generation.log' = 'dotnet'
     }
     if ($summary.status -eq 'PASS') {
         $requiredCommandEvidence['clone-apply-migrations.log'] = 'dotnet'
@@ -172,6 +171,24 @@ if ($PackageKind -eq 'FinalClone') {
     if ($pending.Count -ne [int]$summary.pendingMigrationCount -or
         (@($summary.pendingMigrations) -join "`n") -ne ($pending -join "`n")) {
         throw 'Final-clone pending-migration evidence does not match summary.json.'
+    }
+    $generationEvidence = @(Get-Content -LiteralPath (Join-Path $root 'idempotent-script-generation.log'))
+    if ($generationEvidence.Count -eq 0) {
+        throw 'Required idempotent-script generation evidence is empty.'
+    }
+    if ($derivedPending.Count -eq 0) {
+        $expectedNotRequired = 'RHEMA_IDEMPOTENT_SCRIPT_GENERATION_V1|STATUS=NOT_REQUIRED|REASON=ZERO_PENDING_MIGRATIONS|PENDING_COUNT=0'
+        if ($generationEvidence.Count -ne 1 -or $generationEvidence[0] -cne $expectedNotRequired) {
+            throw 'Zero-pending idempotent-script evidence is missing or invalid.'
+        }
+    }
+    else {
+        $expectedGenerationMarker = 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|STATUS=SUCCESS|EXIT_CODE=0|COMMAND=dotnet'
+        if ($generationEvidence[-1] -cne $expectedGenerationMarker -or
+            @($generationEvidence | Where-Object { $_ -like 'RHEMA_NATIVE_COMMAND_EVIDENCE_V1|*' }).Count -ne 1 -or
+            @($generationEvidence | Where-Object { $_ -like 'RHEMA_IDEMPOTENT_SCRIPT_GENERATION_V1|*' }).Count -ne 0) {
+            throw 'Pending-migration idempotent-script generation lacks valid native dotnet success evidence.'
+        }
     }
     $before = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')).Trim()
     $after = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')).Trim()

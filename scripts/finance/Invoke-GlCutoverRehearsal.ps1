@@ -607,7 +607,7 @@ if ($Mode -eq 'RehearseFinalClone') {
         $idempotentScript = Join-Path $evidenceDirectoryResolved 'pending-migrations-idempotent.sql'
         if ($pendingMigrations.Count -eq 0) {
             '-- NO PENDING MIGRATIONS AT FRESH DISCOVERY' | Set-Content -Encoding ascii -LiteralPath $idempotentScript
-            'No pending migrations; no EF SQL generation was required.' | Set-Content -Encoding utf8 `
+            'RHEMA_IDEMPOTENT_SCRIPT_GENERATION_V1|STATUS=NOT_REQUIRED|REASON=ZERO_PENDING_MIGRATIONS|PENDING_COUNT=0' | Set-Content -Encoding utf8 `
                 -LiteralPath (Join-Path $evidenceDirectoryResolved 'idempotent-script-generation.log')
         }
         else {

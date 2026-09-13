@@ -2263,3 +2263,11 @@ tampered evidence. An offline exercise of the actual `RehearseFinalClone` path p
 `git diff --check` creates exactly the expected artifact before the synthetic migration-count stop. PowerShell
 parsing, complete rehearsal safety/refusal and final 456/C8 evidence/tamper suites passed. FINAL-01/02/03 remain
 preserved and the recorded operational NO-GO remains unchanged. No database or connection variable was accessed.
+
+Sol High re-review of exact `0445c35dd06c909a5d4b5701e26af485ca6a55b1` found one P2 compatibility gap:
+the legitimate zero-pending path recorded that EF generation was unnecessary without the native-command marker
+that final-package validation required unconditionally. A bounded offline correction is active to emit a
+distinct structured `NOT_REQUIRED`/`ZERO_PENDING_MIGRATIONS` artifact and accept it only when validation
+independently derives an empty pending set. Normal nonempty pending ranges continue to require actual dotnet
+`SUCCESS`/zero evidence. Positive zero-pending PASS and NO-GO fixtures plus missing/tampered marker refusals are
+required. No database, connection-variable or preserved evidence access is in scope.
