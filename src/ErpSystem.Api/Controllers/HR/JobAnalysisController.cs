@@ -628,6 +628,19 @@ public class JobAnalysisController : ControllerBase
     public async Task<ActionResult<JobValuationSummaryDto>> RecalculateValuation(Guid jobDescriptionId)
         => Ok(await _jobDescriptionService.RecalculateValuationAsync(jobDescriptionId));
 
+    /// <summary>
+    /// The author's proposed grade (round 3, lane J2; D-11): the suggestion is the system's, this is
+    /// the human's answer to it. Null clears the proposal back to the suggestion. Answers the fresh
+    /// valuation so the screen re-renders from one read.
+    /// </summary>
+    [Authorize(Policy = HrPermissions.JobArchitectureWritePolicy)]
+    [HttpPut("descriptions/{jobDescriptionId:guid}/proposed-grade")]
+    public async Task<ActionResult<JobValuationSummaryDto>> SetProposedGrade(Guid jobDescriptionId, [FromBody] SetProposedSalaryGradeDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        return Ok(await _jobDescriptionService.SetProposedSalaryGradeAsync(jobDescriptionId, dto));
+    }
+
     #endregion
 
     #region Responsibility KPIs

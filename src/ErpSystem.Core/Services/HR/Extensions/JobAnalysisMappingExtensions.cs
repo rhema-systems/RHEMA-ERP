@@ -43,6 +43,11 @@ public static class JobAnalysisMappingExtensions
             SuggestedSalaryGradeId = entity.SuggestedSalaryGradeId,
             SuggestedSalaryGradeName = entity.SuggestedSalaryGrade != null ? entity.SuggestedSalaryGrade.Name : null,
             ValuationNotes = entity.ValuationNotes,
+            ProposedSalaryGradeId = entity.ProposedSalaryGradeId,
+            ProposedSalaryGradeName = entity.ProposedSalaryGrade?.Name,
+            ProposedSalaryGradeNote = entity.ProposedSalaryGradeNote,
+            PositionSalaryGradeId = entity.Position?.SalaryGradeId,
+            PositionSalaryGradeName = entity.Position?.SalaryGrade?.Name,
             AutonomyLevel = entity.AutonomyLevel,
             DecisionMakingScope = entity.DecisionMakingScope,
             FinancialAuthorityLimit = entity.FinancialAuthorityLimit,
@@ -128,6 +133,11 @@ public static class JobAnalysisMappingExtensions
             SuggestedSalaryGradeId = entity.SuggestedSalaryGradeId,
             SuggestedSalaryGradeName = entity.SuggestedSalaryGrade != null ? entity.SuggestedSalaryGrade.Name : null,
             ValuationNotes = entity.ValuationNotes,
+            ProposedSalaryGradeId = entity.ProposedSalaryGradeId,
+            ProposedSalaryGradeName = entity.ProposedSalaryGrade?.Name,
+            ProposedSalaryGradeNote = entity.ProposedSalaryGradeNote,
+            PositionSalaryGradeId = entity.Position?.SalaryGradeId,
+            PositionSalaryGradeName = entity.Position?.SalaryGrade?.Name,
             AutonomyLevel = entity.AutonomyLevel,
             DecisionMakingScope = entity.DecisionMakingScope,
             FinancialAuthorityLimit = entity.FinancialAuthorityLimit,
@@ -180,14 +190,17 @@ public static class JobAnalysisMappingExtensions
             JobSubFamilyId = dto.JobSubFamilyId,
             JobLevelId = dto.JobLevelId,
             StaffLevelId = dto.StaffLevelId,
-            SuggestedSalaryGradeId = dto.SuggestedSalaryGradeId,
+            // Round 3, lane J2: SuggestedSalaryGradeId is the valuation's output and is not taken
+            // from the payload; the proposal is the author's.
+            ProposedSalaryGradeId = dto.ProposedSalaryGradeId,
+            ProposedSalaryGradeNote = dto.ProposedSalaryGradeNote,
             UnionId = dto.UnionId,
             IsBargainingUnitRole = dto.IsBargainingUnitRole,
             OccupationCode = dto.OccupationCode,
             EssentialFunctionsSummary = dto.EssentialFunctionsSummary,
             IntendedEmploymentType = dto.IntendedEmploymentType,
             RoleCriticality = dto.RoleCriticality,
-            RoleIntrinsicValue = dto.RoleIntrinsicValue,
+            // D-9: the intrinsic value is derived from the job's own rows; nothing types it any more.
             IndustryBenchmarkSalary = dto.IndustryBenchmarkSalary,
             ValuationNotes = dto.ValuationNotes,
             AutonomyLevel = dto.AutonomyLevel,
@@ -213,11 +226,13 @@ public static class JobAnalysisMappingExtensions
         // JobDescriptionService.UpdateAsync refuses a status that contradicts the record.
         entity.NextReviewDate = dto.NextReviewDate;
         entity.ReviewCycleMonths = dto.ReviewCycleMonths;
-        entity.RoleIntrinsicValue = dto.RoleIntrinsicValue;
+        // Round 3, lane J2: RoleIntrinsicValue is derived (D-9) and SuggestedSalaryGradeId is the
+        // valuation's output (D-11) — neither is taken from an edit any more. The proposal is.
         entity.RoleCriticality = dto.RoleCriticality;
         entity.IndustryBenchmarkSalary = dto.IndustryBenchmarkSalary;
-        entity.SuggestedSalaryGradeId = dto.SuggestedSalaryGradeId;
         entity.ValuationNotes = dto.ValuationNotes;
+        entity.ProposedSalaryGradeId = dto.ProposedSalaryGradeId;
+        entity.ProposedSalaryGradeNote = dto.ProposedSalaryGradeNote;
         entity.AutonomyLevel = dto.AutonomyLevel;
         entity.DecisionMakingScope = dto.DecisionMakingScope;
         entity.FinancialAuthorityLimit = dto.FinancialAuthorityLimit;

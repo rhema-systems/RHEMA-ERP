@@ -338,6 +338,12 @@ export interface JobDescription {
   suggestedSalaryGradeId?: string | null;
   suggestedSalaryGradeName?: string | null;
   valuationNotes?: string | null;
+  /** Round 3, lane J2 (D-11): the author's proposal beside the suggestion, and the post's actual grade. */
+  proposedSalaryGradeId?: string | null;
+  proposedSalaryGradeName?: string | null;
+  proposedSalaryGradeNote?: string | null;
+  positionSalaryGradeId?: string | null;
+  positionSalaryGradeName?: string | null;
   autonomyLevel?: DecisionAuthorityLevel | null;
   decisionMakingScope?: string | null;
   financialAuthorityLimit?: number | null;
@@ -793,9 +799,13 @@ export interface CreateJobDescription {
   occupationCode?: string | null;
   essentialFunctionsSummary?: string | null;
   roleCriticality?: RoleCriticalityLevel | null;
+  /** ⚠ IGNORED by the server since round 3, lane J2 (D-9): the intrinsic value is derived. Carried for the replace-style PUT only. */
   roleIntrinsicValue?: number | null;
   industryBenchmarkSalary?: number | null;
   valuationNotes?: string | null;
+  /** The author's proposed grade (D-11). Must travel on every PUT — `UpdateEntity` replaces the column. */
+  proposedSalaryGradeId?: string | null;
+  proposedSalaryGradeNote?: string | null;
   autonomyLevel?: DecisionAuthorityLevel | null;
   decisionMakingScope?: string | null;
   financialAuthorityLimit?: number | null;
@@ -832,8 +842,12 @@ export interface JobValuationSummary {
   jobTitle: string;
   totalQualificationValue: number;
   totalCompetencyValue: number;
+  /** DERIVED since round 3, lane J2 (D-9): the two totals above. Nothing types it any more. */
   roleIntrinsicValue: number;
-  /** Server-computed: the three figures above added together. */
+  isIntrinsicValueDerived: boolean;
+  /** What an author typed before the value became derived — informational, no longer counted. */
+  legacyTypedIntrinsicValue?: number | null;
+  /** Server-computed: qualifications + competencies. */
   totalEstimatedValue: number;
   roleCriticality?: RoleCriticalityLevel | null;
   roleCriticalityName?: string | null;
@@ -844,6 +858,19 @@ export interface JobValuationSummary {
   suggestedSalaryGradeName?: string | null;
   suggestedGradeMinSalary?: number | null;
   suggestedGradeMaxSalary?: number | null;
+  /** 'Band' | 'Notches' | null — what the suggestion's range was read from. */
+  suggestedGradeBasis?: string | null;
+  /** The matcher's one sentence: which band contains the midpoint, or that none does and which is nearest. */
+  suggestedGradeNote?: string | null;
+  nearestSalaryGradeId?: string | null;
+  nearestSalaryGradeName?: string | null;
+  nearestGradeMinSalary?: number | null;
+  nearestGradeMaxSalary?: number | null;
+  proposedSalaryGradeId?: string | null;
+  proposedSalaryGradeName?: string | null;
+  proposedSalaryGradeNote?: string | null;
+  positionSalaryGradeId?: string | null;
+  positionSalaryGradeName?: string | null;
   valuationNotes?: string | null;
   qualificationLines: JobValuationLine[];
   competencyLines: JobValuationLine[];
@@ -1282,4 +1309,10 @@ export interface ManpowerBudgetWorkbookImportResult {
   skipped: number;
   errors: ManpowerBudgetWorkbookRowError[];
   lines: ManpowerBudgetLine[];
+}
+
+/** Round 3, lane J2 (D-11): the author's proposed grade. Null follows the suggestion. */
+export interface SetProposedSalaryGradeRequest {
+  proposedSalaryGradeId: string | null;
+  proposedSalaryGradeNote: string | null;
 }

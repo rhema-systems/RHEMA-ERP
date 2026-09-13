@@ -42,6 +42,7 @@ import type {
   JobResponsibilityKpi,
   JobSubFamily,
   JobValuationSummary,
+  SetProposedSalaryGradeRequest,
   JobWorkingCondition,
   ManpowerBudget,
   AddLinesFromEstablishmentResult,
@@ -168,6 +169,15 @@ class JobArchitectureService {
    */
   recalculateValuation(id: string) {
     return apiService.post<JobValuationSummary>(`${this.jobs}/descriptions/${id}/valuation`);
+  }
+
+  /**
+   * The author's proposed grade beside the suggestion (round 3, lane J2; D-11). Null follows the
+   * suggestion. Refused on an approved description and for a grade that is not the tenant's.
+   * Answers the fresh valuation.
+   */
+  setProposedGrade(id: string, body: SetProposedSalaryGradeRequest) {
+    return apiService.put<JobValuationSummary>(`${this.jobs}/descriptions/${id}/proposed-grade`, body);
   }
 
   submitJobDescription(id: string) {

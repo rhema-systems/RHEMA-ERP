@@ -578,15 +578,16 @@ export function JobDescriptionForm({
           <CardTitle>Valuation &amp; authority</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-3">
-          <div className="space-y-2">
+          {/*
+            Round 3, lane J2 (decision D-9): the intrinsic value is DERIVED — the sum of the money
+            entered against the job's qualifications and competencies — so there is nothing to type
+            here any more. The figure, and how it was reached, are on the Valuation tab.
+          */}
+          <div className="space-y-2" data-testid="intrinsic-value-derived">
             <Label>Intrinsic value</Label>
-            <Input
-              type="number"
-              min={0}
-              step="0.01"
-              value={form.roleIntrinsicValue ?? ''}
-              onChange={(e) => set('roleIntrinsicValue', toMoney(e.target.value))}
-            />
+            <p className="rounded-md border border-dashed px-3 py-2 text-sm text-muted-foreground">
+              Worked out from the values on the qualifications and competencies — see the Valuation tab.
+            </p>
           </div>
 
           <div className="space-y-2">

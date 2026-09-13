@@ -6005,6 +6005,12 @@ private void ConfigureHREntities(ModelBuilder builder)
                 .HasForeignKey(x => x.SuggestedSalaryGradeId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            // Round 3, lane J2 (D-11): the author's proposed grade beside the system's suggestion.
+            entity.HasOne(x => x.ProposedSalaryGrade)
+                .WithMany()
+                .HasForeignKey(x => x.ProposedSalaryGradeId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasOne(x => x.StaffLevel)
                 .WithMany()
                 .HasForeignKey(x => x.StaffLevelId)

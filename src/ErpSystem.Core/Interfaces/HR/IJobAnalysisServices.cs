@@ -138,6 +138,9 @@ public interface IJobDescriptionService
     /// <summary>Computes the valuation and stores it on the job description. Refuses an approved one.</summary>
     Task<JobValuationSummaryDto> RecalculateValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default);
 
+    /// <summary>The author's proposed grade beside the suggestion (round 3, lane J2; D-11). Refuses an approved description and a stranger grade.</summary>
+    Task<JobValuationSummaryDto> SetProposedSalaryGradeAsync(Guid jobDescriptionId, SetProposedSalaryGradeDto dto, CancellationToken cancellationToken = default);
+
     // Responsibility KPI operations
     Task<JobResponsibilityKpiDto> AddResponsibilityKpiAsync(CreateJobResponsibilityKpiDto createDto, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobResponsibilityKpiDto>> GetResponsibilityKpisAsync(Guid responsibilityId, CancellationToken cancellationToken = default);

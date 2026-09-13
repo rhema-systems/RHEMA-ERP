@@ -14,6 +14,8 @@ export function toWritePayload(form: CreateJobDescription): CreateJobDescription
     jobLevelId: form.jobLevelId || undefined,
     staffLevelId: form.staffLevelId || undefined,
     suggestedSalaryGradeId: form.suggestedSalaryGradeId || undefined,
+    proposedSalaryGradeId: form.proposedSalaryGradeId || undefined,
+    proposedSalaryGradeNote: form.proposedSalaryGradeNote || undefined,
     unionId: form.unionId || undefined,
     occupationCode: form.occupationCode || undefined,
     essentialFunctionsSummary: form.essentialFunctionsSummary || undefined,
@@ -49,6 +51,9 @@ export function toFormValues(jd: JobDescription): CreateJobDescription {
     jobLevelId: jd.jobLevelId ?? null,
     staffLevelId: jd.staffLevelId ?? null,
     suggestedSalaryGradeId: jd.suggestedSalaryGradeId ?? null,
+    // Round 3, lane J2: the author's proposal is set on the Valuation tab; an edit must carry it, not clear it.
+    proposedSalaryGradeId: jd.proposedSalaryGradeId ?? null,
+    proposedSalaryGradeNote: jd.proposedSalaryGradeNote ?? null,
     unionId: jd.unionId ?? null,
     isBargainingUnitRole: jd.isBargainingUnitRole,
     occupationCode: jd.occupationCode ?? null,

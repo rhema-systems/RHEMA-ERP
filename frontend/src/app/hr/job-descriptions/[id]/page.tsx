@@ -38,6 +38,7 @@ import { MedicalRequirementsPanel } from '@/components/hr/job-analysis/MedicalRe
 import { PhysicalDemandsPanel } from '@/components/hr/job-analysis/PhysicalDemandsPanel';
 import { PpeRequirementsPanel } from '@/components/hr/job-analysis/PpeRequirementsPanel';
 import { QualificationsPanel } from '@/components/hr/job-analysis/QualificationsPanel';
+import { ProposedGradeCard } from '@/components/hr/job-analysis/ProposedGradeCard';
 import { ReportingRelationshipsPanel } from '@/components/hr/job-analysis/ReportingRelationshipsPanel';
 import { ResponsibilitiesPanel } from '@/components/hr/job-analysis/ResponsibilitiesPanel';
 import { WorkingConditionsPanel } from '@/components/hr/job-analysis/WorkingConditionsPanel';
@@ -639,7 +640,12 @@ export default function JobDescriptionDetailPage() {
           <Card>
             <CardContent className="grid gap-4 pt-6 sm:grid-cols-2">
               <Field label="Criticality" value={jd.roleCriticalityName ?? jd.roleCriticality} />
-              <Field label="Intrinsic value" value={fmtMoney(jd.roleIntrinsicValue)} />
+              {/* Round 3, lane J2 (D-9): derived from the job's own rows — the live figure, not a typed one. */}
+              <Field
+                label="Intrinsic value (derived)"
+                value={fmtMoney(valuation?.roleIntrinsicValue)}
+                sub="Σ qualification values + Σ competency values"
+              />
               <Field label="Benchmark salary" value={fmtMoney(jd.industryBenchmarkSalary)} />
               <Field
                 label="Estimated range"
@@ -649,8 +655,14 @@ export default function JobDescriptionDetailPage() {
                     : `${fmtMoney(jd.estimatedSalaryLow)} – ${fmtMoney(jd.estimatedSalaryHigh)}`
                 }
               />
-              {/* Payroll owns the grade store; this is a suggestion, never an assignment. */}
+              {/* Payroll owns the grade store; three grades, kept apart (D-11): suggested, proposed, actual. */}
               <Field label="Suggested salary grade" value={jd.suggestedSalaryGradeName} />
+              <Field
+                label="Proposed salary grade"
+                value={jd.proposedSalaryGradeName}
+                sub={jd.proposedSalaryGradeNote ?? undefined}
+              />
+              <Field label="Grade on the position" value={jd.positionSalaryGradeName} />
               <Field label="Autonomy" value={jd.autonomyLevel} />
               <Field label="Decision scope" value={jd.decisionMakingScope} />
               <Field label="Financial authority" value={fmtMoney(jd.financialAuthorityLimit)} />
@@ -664,6 +676,15 @@ export default function JobDescriptionDetailPage() {
             </CardContent>
           </Card>
 
+          {valuation && (
+            <ProposedGradeCard
+              jobDescriptionId={id}
+              valuation={valuation}
+              canAuthor={canAuthor}
+              onSaved={refresh}
+            />
+          )}
+
           {/* Where the figures above came from — shown only for a valuation this screen just ran,
               because the breakdown is not stored on the record. */}
           {valuation && (
@@ -675,16 +696,14 @@ export default function JobDescriptionDetailPage() {
                 <dl className="grid gap-3 sm:grid-cols-4">
                   <Field label="Qualifications" value={fmtMoney(valuation.totalQualificationValue)} />
                   <Field label="Competencies" value={fmtMoney(valuation.totalCompetencyValue)} />
-                  <Field label="Role intrinsic value" value={fmtMoney(valuation.roleIntrinsicValue)} />
+                  <Field label="Derived intrinsic value" value={fmtMoney(valuation.roleIntrinsicValue)} />
                   <Field label="Total" value={fmtMoney(valuation.totalEstimatedValue)} />
                 </dl>
 
-                {valuation.suggestedGradeMinSalary != null && (
+                {valuation.legacyTypedIntrinsicValue != null && valuation.legacyTypedIntrinsicValue > 0 && (
                   <p className="text-sm text-muted-foreground">
-                    Matched to {valuation.suggestedSalaryGradeName} (
-                    {fmtMoney(valuation.suggestedGradeMinSalary)} –{' '}
-                    {fmtMoney(valuation.suggestedGradeMaxSalary)}). The post&rsquo;s actual grade is set
-                    on the position, not here.
+                    A typed intrinsic value of {fmtMoney(valuation.legacyTypedIntrinsicValue)} is still on the
+                    record from before the value became derived; it is no longer counted.
                   </p>
                 )}
 

@@ -481,6 +481,7 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await EnsureProposedGradeAsync(createDto.ProposedSalaryGradeId, GetTenantId(), cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         await RequireCoherentClassificationAsync(
@@ -616,6 +617,7 @@ public class JobDescriptionService : IJobDescriptionService
         await RequireCoherentClassificationAsync(
             updateDto.JobFamilyId, updateDto.JobSubFamilyId, updateDto.JobLevelId, cancellationToken);
 
+        await EnsureProposedGradeAsync(updateDto.ProposedSalaryGradeId, tenantId, cancellationToken);
         updateDto.UpdateEntity(entity);
 
         await _jobDescriptionRepository.UpdateAsync(entity);
@@ -1923,12 +1925,98 @@ public class JobDescriptionService : IJobDescriptionService
         return await ValueRoleAsync(jobDescriptionId, persist: true, cancellationToken);
     }
 
+    /// <summary>The author's proposed grade (round 3, lane J2; D-11). Null clears it back to the suggestion.</summary>
+    public async Task<JobValuationSummaryDto> SetProposedSalaryGradeAsync(
+        Guid jobDescriptionId, SetProposedSalaryGradeDto dto, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireAuthorableJobDescriptionAsync(jobDescriptionId);
+        await EnsureProposedGradeAsync(dto.ProposedSalaryGradeId, entity.TenantId, cancellationToken);
+        entity.ProposedSalaryGradeId = dto.ProposedSalaryGradeId ?? entity.SuggestedSalaryGradeId;
+        entity.ProposedSalaryGradeNote = string.IsNullOrWhiteSpace(dto.ProposedSalaryGradeNote) ? null : dto.ProposedSalaryGradeNote.Trim();
+        entity.StampUpdated(_currentUserProvider);
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return await ValueRoleAsync(jobDescriptionId, persist: false, cancellationToken);
+    }
+
+    /// <summary>A proposed grade must be one of the tenant's live grades — payroll's projection, read here.</summary>
+    private async Task EnsureProposedGradeAsync(Guid? gradeId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (gradeId is not { } id) return;
+        var grades = await _salaryGradeRepository.GetAllAsync(tenantId, includeInactive: false, cancellationToken);
+        if (grades.All(g => g.Id != id))
+            throw JobArchitectureException.Invalid("That salary grade is not one of this organisation's live grades.");
+    }
+
+    /// <summary>A grade and the range it answers for: its own band when one is set, else its notch amounts.</summary>
+    private sealed record GradeBand(SalaryGrade Grade, decimal Min, decimal Max, string Basis)
+    {
+        public decimal Midpoint => (Min + Max) / 2m;
+        public decimal Width => Max - Min;
+    }
+
+    /// <summary>
+    /// Every live grade with a usable range (round 3, lane J2). Step 0 of the lane read the dev
+    /// tenant: the projected grades DO carry bands (M1 32,110–51,332 … S3 2,707–5,145), several of
+    /// them overlapping, plus harness litter with identical 50,000–80,000 bands — so "first band
+    /// that contains the midpoint" and "nearest by MIN" were both wrong for different reasons. A
+    /// grade whose band is blank (0..0) falls back to the min and max of its notch amounts; one
+    /// with neither is not a candidate.
+    /// </summary>
+    private async Task<List<GradeBand>> LoadGradeBandsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var grades = await _salaryGradeRepository.GetAllAsync(tenantId, includeInactive: false, cancellationToken);
+        var gradeIds = grades.Select(g => g.Id).ToList();
+        var notchRanges = await _unitOfWork.Repository<SalaryLevel>().GetQueryable().AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && gradeIds.Contains(l.SalaryGradeId))
+            .SelectMany(l => l.Notches.Where(n => !n.IsDeleted).Select(n => new { l.SalaryGradeId, n.SalaryAmount }))
+            .GroupBy(x => x.SalaryGradeId)
+            .Select(g => new { GradeId = g.Key, Min = g.Min(x => x.SalaryAmount), Max = g.Max(x => x.SalaryAmount) })
+            .ToListAsync(cancellationToken);
+        var byGrade = notchRanges.ToDictionary(x => x.GradeId, x => (x.Min, x.Max));
+
+        var bands = new List<GradeBand>();
+        foreach (var g in grades)
+        {
+            if (g.MaxSalary > 0 && g.MaxSalary >= g.MinSalary)
+                bands.Add(new GradeBand(g, g.MinSalary, g.MaxSalary, "Band"));
+            else if (byGrade.TryGetValue(g.Id, out var r) && r.Max > 0)
+                bands.Add(new GradeBand(g, r.Min, r.Max, "Notches"));
+        }
+        return bands;
+    }
+
+    /// <summary>
+    /// The band that contains the midpoint — when several do (the bands overlap at their edges),
+    /// the one the midpoint sits most centrally in, then the narrower, then by code so the answer is
+    /// stable. When none does there is NO suggestion: the nearest band is returned as information
+    /// only, and the proposal is the author's to make.
+    /// </summary>
+    private static (GradeBand? Match, GradeBand? Nearest) MatchGrade(decimal midpoint, IReadOnlyList<GradeBand> bands)
+    {
+        if (midpoint <= 0 || bands.Count == 0) return (null, null);
+        var match = bands
+            .Where(b => b.Min <= midpoint && midpoint <= b.Max)
+            .OrderBy(b => Math.Abs(b.Midpoint - midpoint))
+            .ThenBy(b => b.Width)
+            .ThenBy(b => b.Grade.Code)
+            .FirstOrDefault();
+        if (match != null) return (match, null);
+        var nearest = bands
+            .OrderBy(b => midpoint < b.Min ? b.Min - midpoint : midpoint - b.Max)
+            .ThenBy(b => b.Grade.Code)
+            .First();
+        return (null, nearest);
+    }
+
     private async Task<JobValuationSummaryDto> ValueRoleAsync(
         Guid jobDescriptionId, bool persist, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var jd = await _jobDescriptionRepository.GetQueryable()
             .Include(x => x.SuggestedSalaryGrade)
+            .Include(x => x.ProposedSalaryGrade)
+            .Include(x => x.Position).ThenInclude(p => p.SalaryGrade)
             .FirstOrDefaultAsync(x => x.Id == jobDescriptionId && x.TenantId == tenantId, cancellationToken);
         if (jd == null)
             throw JobArchitectureException.NotFound($"Job description with ID '{jobDescriptionId}' not found.");
@@ -1938,12 +2026,13 @@ public class JobDescriptionService : IJobDescriptionService
         var competencies = (await _competencyRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
             .Where(c => c.TenantId == tenantId).ToList();
 
+        // D-9: the intrinsic value IS the sum of what the job's own rows are worth. The figure an
+        // author once typed into RoleIntrinsicValue is reported but no longer counted.
         var totalQual = qualifications.Sum(q => q.MonetaryValue ?? 0m);
         var totalComp = competencies.Sum(c => c.MonetaryValue ?? 0m);
-        var roleValue = jd.RoleIntrinsicValue ?? 0m;
-        var totalEstimated = totalQual + totalComp + roleValue;
+        var totalEstimated = totalQual + totalComp;
 
-        // Midpoint blends the computed value with any external industry benchmark.
+        // Midpoint blends the derived value with any external industry benchmark.
         decimal midpoint;
         if (jd.IndustryBenchmarkSalary.HasValue && jd.IndustryBenchmarkSalary.Value > 0 && totalEstimated > 0)
             midpoint = (totalEstimated + jd.IndustryBenchmarkSalary.Value) / 2m;
@@ -1955,24 +2044,34 @@ public class JobDescriptionService : IJobDescriptionService
         decimal? low = midpoint > 0 ? Math.Round(midpoint * 0.9m, 2) : (decimal?)null;
         decimal? high = midpoint > 0 ? Math.Round(midpoint * 1.1m, 2) : (decimal?)null;
 
-        // Match a salary grade whose band contains the midpoint (tenant-scoped); else nearest by min salary.
-        SalaryGrade? suggestedGrade = null;
-        if (midpoint > 0)
-        {
-            var grades = await _salaryGradeRepository.GetAllAsync(jd.TenantId, includeInactive: false, cancellationToken);
-            suggestedGrade = grades.FirstOrDefault(g => g.MinSalary <= midpoint && midpoint <= g.MaxSalary)
-                          ?? grades.OrderBy(g => Math.Abs(g.MinSalary - midpoint)).FirstOrDefault();
-        }
+        var bands = midpoint > 0 ? await LoadGradeBandsAsync(jd.TenantId, cancellationToken) : new List<GradeBand>();
+        var (match, nearest) = MatchGrade(midpoint, bands);
+        string? note = midpoint <= 0
+            ? "Nothing to match yet: value the qualifications and competencies, or enter a benchmark."
+            : match != null
+                ? $"{match.Grade.Name} ({match.Grade.Code}) contains the midpoint of {midpoint:N2} — band {match.Min:N2}–{match.Max:N2}, read from the grade's {(match.Basis == "Band" ? "own band" : "notch amounts")}."
+                : nearest != null
+                    ? $"No grade band contains the midpoint of {midpoint:N2}. The nearest is {nearest.Grade.Name} ({nearest.Grade.Code}, {nearest.Min:N2}–{nearest.Max:N2}); the proposed grade is yours to set."
+                    : "No grade carries a usable band or notch range yet, so nothing can be matched.";
 
         // Only when asked. The read path computes the same figures and leaves the record alone.
         if (persist)
         {
             jd.EstimatedSalaryLow = low;
             jd.EstimatedSalaryHigh = high;
-            jd.SuggestedSalaryGradeId = suggestedGrade?.Id;
+            jd.SuggestedSalaryGradeId = match?.Grade.Id;
+            // D-11: the proposal defaults to the suggestion until the author sets it.
+            if (jd.ProposedSalaryGradeId == null && match != null)
+            {
+                jd.ProposedSalaryGradeId = match.Grade.Id;
+                jd.ProposedSalaryGrade = match.Grade;
+            }
             await _jobDescriptionRepository.UpdateAsync(jd);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
+
+        var proposedName = jd.ProposedSalaryGrade?.Name
+            ?? bands.FirstOrDefault(b => b.Grade.Id == jd.ProposedSalaryGradeId)?.Grade.Name;
 
         return new JobValuationSummaryDto
         {
@@ -1980,15 +2079,26 @@ public class JobDescriptionService : IJobDescriptionService
             JobTitle = jd.JobTitle,
             TotalQualificationValue = totalQual,
             TotalCompetencyValue = totalComp,
-            RoleIntrinsicValue = roleValue,
+            LegacyTypedIntrinsicValue = jd.RoleIntrinsicValue,
             RoleCriticality = jd.RoleCriticality,
             IndustryBenchmarkSalary = jd.IndustryBenchmarkSalary,
             EstimatedSalaryLow = low,
             EstimatedSalaryHigh = high,
-            SuggestedSalaryGradeId = suggestedGrade?.Id,
-            SuggestedSalaryGradeName = suggestedGrade?.Name,
-            SuggestedGradeMinSalary = suggestedGrade?.MinSalary,
-            SuggestedGradeMaxSalary = suggestedGrade?.MaxSalary,
+            SuggestedSalaryGradeId = match?.Grade.Id,
+            SuggestedSalaryGradeName = match?.Grade.Name,
+            SuggestedGradeMinSalary = match?.Min,
+            SuggestedGradeMaxSalary = match?.Max,
+            SuggestedGradeBasis = match?.Basis,
+            SuggestedGradeNote = note,
+            NearestSalaryGradeId = nearest?.Grade.Id,
+            NearestSalaryGradeName = nearest?.Grade.Name,
+            NearestGradeMinSalary = nearest?.Min,
+            NearestGradeMaxSalary = nearest?.Max,
+            ProposedSalaryGradeId = jd.ProposedSalaryGradeId,
+            ProposedSalaryGradeName = proposedName,
+            ProposedSalaryGradeNote = jd.ProposedSalaryGradeNote,
+            PositionSalaryGradeId = jd.Position?.SalaryGradeId,
+            PositionSalaryGradeName = jd.Position?.SalaryGrade?.Name,
             ValuationNotes = jd.ValuationNotes,
             QualificationLines = qualifications
                 .Select(q => new JobValuationLineDto { Id = q.Id, Name = q.Title, MonetaryValue = q.MonetaryValue })

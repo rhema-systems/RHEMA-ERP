@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) and T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) BUILT 2026-09-13. Five slices remain; J2 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) and J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) BUILT 2026-09-13. Four slices remain; P2 next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -167,7 +167,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 12 | **T1** — profile grouped navigation · ✅ **DONE 2026-09-13 · 24 static** (screen walk owed) | none | `hr-employee-docs/run-t1.mjs` + screen walk | |
 | 13 | **T2** — record tabs: Movements, Probation, Separation, Leave, Attendance, Benefits, Salary changes · ✅ **DONE 2026-09-13 · 54** (screen walk owed) | none | `hr-employee-docs/run-t2.mjs` (static + live reads) + screen walk | |
 | 14 | **T3** — record tabs: Training, Appraisals & goals, Discipline, Awards, Assets, Medical, Travel, Orientation, Succession · ✅ **DONE 2026-09-13 · 70** (screen walk owed) | none | `hr-employee-docs/run-t3.mjs` (static + live reads) + screen walk | |
-| 15 | **J2** — derived intrinsic value, proposed grade, the matcher | `AddJobDescriptionProposedGrade` | `hr-jobarch/run-j2.mjs` | |
+| 15 | **J2** — derived intrinsic value, proposed grade, the matcher · ✅ **DONE 2026-09-13 · 67 ×2** | `20260913214947_AddJobDescriptionProposedGrade` | `hr-jobarch/run-j2.mjs` | |
 | 16 | **P2** — the disability catalogue | `AddDisabilityTypes` | `hr-employee-docs/run-p2.mjs` | |
 | 17 | **P3** — drop the contract leave columns | `DropContractLeaveColumns` | `hr-probation/run-p3.mjs` | |
 | 18 | **X** — allowances and deductions (probe → editor or read-only) | none | `hr-payroll-membership/run-x.mjs` | the probe decides; can move earlier |
@@ -534,6 +534,37 @@ now all present. The rail badges a count only where one is cheap: `ProfileTabNav
 tabs. **Screen walk owed** with T1/T2. Harness lesson: never guess a route for a live check — read
 the service's `baseUrl` (`/medical-expense-claims`, `/employee-orientations`,
 `/succession-candidates` are kebab; the design note's PascalCase names were the controllers').
+
+**Lane J2 log (2026-09-13).** Migration `20260913214947_AddJobDescriptionProposedGrade` (guarded SQL;
+scratch Up/Up/Down/Down/Up; two nullable columns, one index, one Restrict FK on `JobDescriptions`).
+**Step 0 disproved § 5.7's hypothesis:** `SELECT Code, MinSalary, MaxSalary FROM SalaryGrades` on the
+dev tenant shows the eight projected grades WITH real bands (M1 32,110–51,332 … S3 2,707–5,145,
+notch ranges identical to the bands, several bands overlapping at their edges) plus nine harness-litter
+grades all 50,000–80,000 — so "first band that contains the midpoint" and "nearest by MIN" were wrong
+for different reasons than an empty band. *Matcher:* the containing band, most central first when
+bands overlap, then the narrower, then by code; a 0..0 band falls back to the grade's notch amounts
+(`SuggestedGradeBasis` Band/Notches); no containing band → NO suggestion, a sentence
+(`SuggestedGradeNote`) and the nearest band as information (`Nearest*`), never written as the
+suggestion. *D-9:* `RoleIntrinsicValue` and `SuggestedSalaryGradeId` are accepted on create/update
+for wire compatibility and IGNORED (the mappers no longer write them); the summary's
+`RoleIntrinsicValue` is the derived Σ (`IsIntrinsicValueDerived`, `LegacyTypedIntrinsicValue`
+informational); `TotalEstimatedValue` = qualifications + competencies. *D-11:* `ProposedSalaryGradeId`
++ `ProposedSalaryGradeNote` on the description; `PUT descriptions/{id}/proposed-grade` (Write policy,
+authorable statuses only, grade must be one of the tenant's live grades — `EnsureProposedGradeAsync`
+also guards create and update); storing the valuation defaults the proposal to the suggestion and a
+re-run never overwrites the author's; null follows the suggestion again. `PositionSalaryGradeId/Name`
+on the record and the summary (the JD read now includes `Position.SalaryGrade`). *Frontend:* the
+form's intrinsic-value input became a note; the edit payload carries the proposal (the PUT is a
+replace — an omission clears it, proven); `ProposedGradeCard` on the Valuation tab shows suggested ·
+proposed · on-the-position with the matcher's sentence and a picker over the live grades. Harness 67
+×2 (`hr-jobarch/run-j2.mjs`) computes the expected match in JS from the tenant's own grade list.
+Regression: J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229; **slice 14 asserted the old
+rule** (typed intrinsic value and supplied suggestion round-tripping, the total counting the typed
+figure) and was updated to D-9/D-11 (116 → 114). Deviation: none of the plan's; the position's grade
+is read from the entity nav because no position DTO carries `SalaryGradeId`. Harness lessons: child
+update routes are `qualifications/{id}` and `competencies/{id}`, not nested under the description;
+`var entity = createDto.ToEntity();` appears fifteen times in the service — scope an anchor to its
+method; `SalaryEntities.cs` declares no namespace.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

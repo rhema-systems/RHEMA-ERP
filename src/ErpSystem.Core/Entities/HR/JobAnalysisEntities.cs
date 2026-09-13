@@ -95,6 +95,21 @@ public class JobDescription : TenantEntity
     [MaxLength(2000)]
     public string? ValuationNotes { get; set; }
 
+    /// <summary>
+    /// The grade the author PROPOSES for the post (round 3, lane J2; decision D-11). The suggestion
+    /// above is the system's output and stays read-only; this is the human's answer to it, defaulted
+    /// to the suggestion when the valuation is stored and otherwise the author's. The post's ACTUAL
+    /// grade is on the position, where payroll reads it — neither of these assigns it.
+    /// </summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+
+    [ForeignKey(nameof(ProposedSalaryGradeId))]
+    public virtual SalaryGrade? ProposedSalaryGrade { get; set; }
+
+    /// <summary>Why the proposal differs from the suggestion, when it does.</summary>
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
+
     // ───────────────────────── Authority & Financial Limits ─────────────────────────
     /// <summary>Level of decision-making authority/autonomy the role carries.</summary>
     public DecisionAuthorityLevel? AutonomyLevel { get; set; }

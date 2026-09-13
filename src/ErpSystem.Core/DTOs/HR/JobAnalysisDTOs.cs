@@ -58,6 +58,12 @@ public class JobDescriptionDto : BaseDto
     public Guid? SuggestedSalaryGradeId { get; set; }
     public string? SuggestedSalaryGradeName { get; set; }
     public string? ValuationNotes { get; set; }
+    // Round 3, lane J2 (D-11): the author's proposal beside the suggestion, and the post's actual grade.
+    public Guid? ProposedSalaryGradeId { get; set; }
+    public string? ProposedSalaryGradeName { get; set; }
+    public string? ProposedSalaryGradeNote { get; set; }
+    public Guid? PositionSalaryGradeId { get; set; }
+    public string? PositionSalaryGradeName { get; set; }
 
     // Authority & financial limits
     public DecisionAuthorityLevel? AutonomyLevel { get; set; }
@@ -209,8 +215,17 @@ public class CreateJobDescriptionDto : CreateDtoBase
     /// <summary>Staff level (MGT / SNR / JNR) the role is graded against.</summary>
     public Guid? StaffLevelId { get; set; }
 
-    /// <summary>Payroll-owned salary grade suggested by the valuation. Read-only reference.</summary>
+    /// <summary>
+    /// Payroll-owned salary grade suggested by the valuation. Read-only: accepted for wire
+    /// compatibility and IGNORED on write since round 3, lane J2 — the valuation is the only writer.
+    /// </summary>
     public Guid? SuggestedSalaryGradeId { get; set; }
+
+    /// <summary>The author's proposed grade (round 3, lane J2; D-11). Must be one of the tenant's live grades.</summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
 
     /// <summary>Union the role falls under when <see cref="IsBargainingUnitRole"/> is set.</summary>
     public Guid? UnionId { get; set; }
@@ -225,6 +240,11 @@ public class CreateJobDescriptionDto : CreateDtoBase
 
     public RoleCriticalityLevel? RoleCriticality { get; set; }
 
+    /// <summary>
+    /// ⚠ IGNORED on write since round 3, lane J2 (decision D-9): the intrinsic value is DERIVED —
+    /// the sum of the values on the job's qualifications and competencies. Kept so an old client's
+    /// payload still binds.
+    /// </summary>
     public decimal? RoleIntrinsicValue { get; set; }
 
     public decimal? IndustryBenchmarkSalary { get; set; }
@@ -288,9 +308,14 @@ public class UpdateJobDescriptionDto : UpdateDtoBase
     public RoleCriticalityLevel? RoleCriticality { get; set; }
     [Range(0, double.MaxValue)]
     public decimal? IndustryBenchmarkSalary { get; set; }
+    /// <summary>Read-only since round 3, lane J2 — accepted and IGNORED; the valuation writes it.</summary>
     public Guid? SuggestedSalaryGradeId { get; set; }
     [MaxLength(2000)]
     public string? ValuationNotes { get; set; }
+    /// <summary>The author's proposed grade (round 3, lane J2; D-11). Null clears the proposal back to the suggestion.</summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
 
     // Authority & financial limits
     public DecisionAuthorityLevel? AutonomyLevel { get; set; }
@@ -2017,8 +2042,11 @@ public class NameCountDto
 #region Job Valuation DTOs
 
 /// <summary>
-/// Computed job-evaluation summary: rolls up per-item monetary values + role intrinsic value
-/// into an estimated salary range and a suggested salary grade.
+/// Computed job-evaluation summary (round 3, lane J2; decisions D-9 and D-11): the job's intrinsic
+/// value is DERIVED — Σ qualification values + Σ competency values — blended with the typed
+/// industry benchmark, banded ±10 %, and matched to a salary grade whose band contains the
+/// midpoint. No band → no suggestion, and a sentence saying so. The author's PROPOSED grade and
+/// the position's ACTUAL grade travel beside the suggestion so the three are never confused.
 /// </summary>
 public class JobValuationSummaryDto
 {
@@ -2027,8 +2055,12 @@ public class JobValuationSummaryDto
 
     public decimal TotalQualificationValue { get; set; }
     public decimal TotalCompetencyValue { get; set; }
-    public decimal RoleIntrinsicValue { get; set; }
-    public decimal TotalEstimatedValue => TotalQualificationValue + TotalCompetencyValue + RoleIntrinsicValue;
+    /// <summary>Derived: the two totals above. The typed figure of old is no longer an input (D-9).</summary>
+    public decimal RoleIntrinsicValue => TotalQualificationValue + TotalCompetencyValue;
+    public bool IsIntrinsicValueDerived => true;
+    /// <summary>What an author typed before the value became derived — informational, no longer counted.</summary>
+    public decimal? LegacyTypedIntrinsicValue { get; set; }
+    public decimal TotalEstimatedValue => TotalQualificationValue + TotalCompetencyValue;
 
     public RoleCriticalityLevel? RoleCriticality { get; set; }
     public string? RoleCriticalityName => RoleCriticality?.ToString();
@@ -2041,11 +2073,38 @@ public class JobValuationSummaryDto
     public string? SuggestedSalaryGradeName { get; set; }
     public decimal? SuggestedGradeMinSalary { get; set; }
     public decimal? SuggestedGradeMaxSalary { get; set; }
+    /// <summary>"Band" when the grade's min/max were used, "Notches" when its notch amounts stood in for a blank band; null when nothing matched.</summary>
+    public string? SuggestedGradeBasis { get; set; }
+    /// <summary>The matcher's one sentence: which band contains the midpoint, or that none does and which is nearest.</summary>
+    public string? SuggestedGradeNote { get; set; }
+    /// <summary>When no band contains the midpoint: the closest one, as information — never written as the suggestion.</summary>
+    public Guid? NearestSalaryGradeId { get; set; }
+    public string? NearestSalaryGradeName { get; set; }
+    public decimal? NearestGradeMinSalary { get; set; }
+    public decimal? NearestGradeMaxSalary { get; set; }
+
+    /// <summary>The author's proposal (D-11): defaults to the suggestion when the valuation is stored; theirs afterwards.</summary>
+    public Guid? ProposedSalaryGradeId { get; set; }
+    public string? ProposedSalaryGradeName { get; set; }
+    public string? ProposedSalaryGradeNote { get; set; }
+
+    /// <summary>The post's actual grade, from the position — payroll's fact, shown for comparison.</summary>
+    public Guid? PositionSalaryGradeId { get; set; }
+    public string? PositionSalaryGradeName { get; set; }
 
     public string? ValuationNotes { get; set; }
 
     public List<JobValuationLineDto> QualificationLines { get; set; } = new();
     public List<JobValuationLineDto> CompetencyLines { get; set; } = new();
+}
+
+/// <summary>The author's proposed grade for a job description (round 3, lane J2; D-11). Null clears the proposal back to the suggestion.</summary>
+public class SetProposedSalaryGradeDto
+{
+    public Guid? ProposedSalaryGradeId { get; set; }
+
+    [MaxLength(500)]
+    public string? ProposedSalaryGradeNote { get; set; }
 }
 
 /// <summary>A single valued item (qualification or competency) in the valuation breakdown.</summary>
