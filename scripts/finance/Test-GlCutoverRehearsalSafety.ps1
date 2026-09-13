@@ -71,28 +71,42 @@ $outputIndex = [Array]::IndexOf($captured, '-o')
 if ($outputIndex -lt 0 -or $outputIndex + 1 -ge $captured.Count) { exit 91 }
 $width = [int]$env:RHEMA_GL_SQLCMD_PROBE_WIDTH
 if ($width -ge 8000) { $line = 'X' * 8000 }
-else { $line = 'CANONICAL|' + ('X' * 400) + '|TAIL_AFTER_256' }
-$line | Set-Content -Encoding utf8 -LiteralPath $captured[$outputIndex + 1]
+else { $line = 'CANONICAL|' + ('X' * ($width - 30)) + '|TAIL_AFTER_4000' }
+
+# Model sqlcmd's two independent lossy defaults. The probe succeeds intact only when the actual
+# Invoke-Sql transport supplies both compatible, sufficiently wide options.
+$variableIndex = [Array]::IndexOf($captured, '-y')
+$variableWidth = if ($variableIndex -ge 0) { [int]$captured[$variableIndex + 1] } else { 256 }
+if ($line.Length -gt $variableWidth) { $line = $line.Substring(0, $variableWidth) }
+$screenIndex = [Array]::IndexOf($captured, '-w')
+$screenWidth = if ($screenIndex -ge 0) { [int]$captured[$screenIndex + 1] } else { 80 }
+$rendered = for ($offset = 0; $offset -lt $line.Length; $offset += $screenWidth) {
+    $line.Substring($offset, [Math]::Min($screenWidth, $line.Length - $offset))
+}
+$rendered | Set-Content -Encoding utf8 -LiteralPath $captured[$outputIndex + 1]
 exit 0
 '@ | Set-Content -Encoding utf8 -LiteralPath (Join-Path $transportRoot 'sqlcmd.ps1')
     [Environment]::SetEnvironmentVariable('PATH', "$transportRoot$([System.IO.Path]::PathSeparator)$priorPath", 'Process')
     $capturePath = Join-Path $transportRoot 'arguments.txt'
     [Environment]::SetEnvironmentVariable('RHEMA_GL_SQLCMD_ARGUMENT_CAPTURE', $capturePath, 'Process')
     [Environment]::SetEnvironmentVariable('RHEMA_GL_SOURCE_READONLY_CONNECTION', 'Server=transport-probe;Database=RhemaERP;Integrated Security=true', 'Process')
-    [Environment]::SetEnvironmentVariable('RHEMA_GL_SQLCMD_PROBE_WIDTH', '512', 'Process')
+    [Environment]::SetEnvironmentVariable('RHEMA_GL_SQLCMD_PROBE_WIDTH', '4500', 'Process')
     $output = & pwsh -NoProfile -File $script -Mode InspectSource -EvidenceDirectory $transportEvidence 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) { throw "Offline sqlcmd transport probe failed: $output" }
     $transportArguments = @(Get-Content -LiteralPath $capturePath)
     $widthIndex = [Array]::IndexOf($transportArguments, '-y')
+    $screenWidthIndex = [Array]::IndexOf($transportArguments, '-w')
     if ($widthIndex -lt 0 -or $transportArguments[$widthIndex + 1] -ne '8000' -or
+        $screenWidthIndex -lt 0 -or $transportArguments[$screenWidthIndex + 1] -ne '8000' -or
         $transportArguments -ccontains '-W' -or $transportArguments -ccontains '-Y') {
-        throw "Actual Invoke-Sql transport did not use conflict-free '-y 8000': $($transportArguments -join ' ')"
+        throw "Actual Invoke-Sql transport did not use compatible '-y 8000 -w 8000': $($transportArguments -join ' ')"
     }
-    $wideEvidenceLine = (Get-Content -LiteralPath (Join-Path $transportEvidence 'source-readiness.txt') | Select-Object -First 1)
-    if ($wideEvidenceLine.Length -le 256 -or -not $wideEvidenceLine.EndsWith('TAIL_AFTER_256', [StringComparison]::Ordinal)) {
-        throw 'Actual Invoke-Sql transport lost the canonical tail beyond character 256.'
+    $wideEvidenceLines = @(Get-Content -LiteralPath (Join-Path $transportEvidence 'source-readiness.txt'))
+    if ($wideEvidenceLines.Count -ne 1 -or $wideEvidenceLines[0].Length -le 4000 -or
+        -not $wideEvidenceLines[0].EndsWith('TAIL_AFTER_4000', [StringComparison]::Ordinal)) {
+        throw 'Actual Invoke-Sql transport truncated at 4,000 characters or screen-wrapped the canonical row.'
     }
-    Write-Host 'PASS: actual Invoke-Sql transport retains canonical tail content beyond character 256'
+    Write-Host 'PASS: actual Invoke-Sql transport retains a single canonical line and tail beyond character 4000'
 
     [Environment]::SetEnvironmentVariable('RHEMA_GL_SQLCMD_PROBE_WIDTH', '8000', 'Process')
     $output = & pwsh -NoProfile -File $script -Mode InspectSource -EvidenceDirectory $transportRiskEvidence 2>&1 | Out-String
@@ -199,6 +213,7 @@ exit 0
     foreach ($requiredText in @(
         '$authoritativeMigrationCount = 456',
         '$sqlcmdMaxVariableWidth = 8000',
+        '$sqlcmdScreenWidth = 8000',
         "'20260908120000_AddProducerIntentGroupsC8'",
         'Assert-TargetAbsent $target',
         'COPY_ONLY, CHECKSUM, NOINIT, NOSKIP, MEDIANAME=',
@@ -264,6 +279,18 @@ exit 0
     if ($finalInvariantText -match 'seed must not create (journal|account transaction|posting event)') {
         throw 'Final-clone invariants incorrectly assume an empty historical business dataset.'
     }
+    $canonicalConcatCount = [regex]::Matches($finalInvariantText, '(?i)\bCONCAT\(').Count
+    $maxCanonicalConcatCount = [regex]::Matches(
+        $finalInvariantText, "(?i)CONCAT\(CAST\(N'' AS nvarchar\(max\)\),").Count
+    $sqlSideRowHashCount = [regex]::Matches(
+        $finalInvariantText, "(?i)CONVERT\(varchar\(64\),HASHBYTES\('SHA2_256',CONCAT\(CAST\(N'' AS nvarchar\(max\)\),").Count
+    $stableKeyedHashCount = [regex]::Matches(
+        $finalInvariantText, "(?im)^SELECT\s+N'[^']+\|'\s+\+\s+CONVERT\(nvarchar\((?:36|150)\),[^\r\n]+\+\s+CONVERT\(varchar\(64\),HASHBYTES").Count
+    if ($canonicalConcatCount -lt 20 -or $maxCanonicalConcatCount -ne $canonicalConcatCount -or
+        $sqlSideRowHashCount -ne $canonicalConcatCount -or $stableKeyedHashCount -ne $canonicalConcatCount) {
+        throw "Every canonical CONCAT must begin with nvarchar(max), be SHA2_256-hashed inside SQL, and retain a stable key. CONCAT=$canonicalConcatCount max=$maxCanonicalConcatCount hash=$sqlSideRowHashCount keyed=$stableKeyedHashCount"
+    }
+    Write-Host 'PASS: every canonical row uses nvarchar(max) CONCAT and a stable-keyed fixed SQL-side SHA2_256 hash'
     Write-Host 'PASS: final 456/C8, absent-target, no-overwrite, backup/restore/DBCC and preflight NO-GO contracts'
 }
 finally {

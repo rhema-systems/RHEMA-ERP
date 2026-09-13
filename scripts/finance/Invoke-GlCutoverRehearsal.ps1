@@ -29,6 +29,7 @@ $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
 $authoritativeMigrationCount = 456
 $authoritativeLatestMigration = '20260908120000_AddProducerIntentGroupsC8'
 $sqlcmdMaxVariableWidth = 8000
+$sqlcmdScreenWidth = 8000
 $finalCutoverFlags = @(
     'Finance__AccountingEvents__Enabled',
     'Finance__ProducerIntents__Enabled',
@@ -181,10 +182,12 @@ function Invoke-Sql([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, 
     [string]$query, [string]$inputFile = '', [string]$outputFile = '') {
     # -I keeps QUOTED_IDENTIFIER enabled for the generated baseline's filtered and
     # computed-column indexes. sqlcmd otherwise defaults it off for input scripts.
-    # sqlcmd defaults variable-length display to 256 characters. Canonical cutover rows are wider,
-    # so use the supported 8000-character maximum. -W conflicts with -y and is deliberately absent.
+    # sqlcmd defaults variable-length display to 256 characters and screen width to 80 characters.
+    # Canonical SQL emits fixed-width SHA-256 row hashes, but all shared evidence transport still pins
+    # both supported maxima. -W conflicts with -y and is deliberately absent.
     $arguments = @('-S', $builder.DataSource, '-d', $database, '-b', '-C', '-I', '-h', '-1',
-        '-y', $sqlcmdMaxVariableWidth.ToString([Globalization.CultureInfo]::InvariantCulture))
+        '-y', $sqlcmdMaxVariableWidth.ToString([Globalization.CultureInfo]::InvariantCulture),
+        '-w', $sqlcmdScreenWidth.ToString([Globalization.CultureInfo]::InvariantCulture))
     $oldPassword = [Environment]::GetEnvironmentVariable('SQLCMDPASSWORD', 'Process')
     try {
         if ($builder.IntegratedSecurity) {
