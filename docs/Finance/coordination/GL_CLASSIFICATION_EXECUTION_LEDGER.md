@@ -2281,3 +2281,15 @@ marker. Positive zero-pending PASS and preflight NO-GO packages validate, and mi
 native zero-pending markers fail closed. PowerShell parsing, the complete rehearsal safety/refusal suite, final
 456/C8 package/tamper suite and diff checks passed. No database, connection variable or preserved evidence
 directory was accessed; Sol High re-review remains required over the ledger-only handoff descendant.
+
+The approved FINAL-04 operational rehearsal executed exact clean HEAD
+`3d7a9413bb07e46101d0d45537c105f81bf50c22` and tree
+`3d673ffcdda54aacca8ab6cb675e035492cbbe9d`. Repository evidence proved authoritative 456/C8; the source had
+13 pending migrations and retained the unchanged fingerprint
+`446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28`. All C6-C8 flags were explicitly false.
+The run returned `NO_GO_PREFLIGHT` on `CLASSIFICATION_SCHEMA_ABSENT=1` and
+`LIVE_FX_REVALUATION_BATCH=1`, with required review for `HISTORICAL_PUBLISHED_LAYOUTS=3` and
+`ACTIVE_LEGACY_CURRENCY_LINKS=9`. No backup or target was created, and the independent target-database count
+was zero. Final-package validation passed and wrote its manifest. The external FINAL-04 evidence package remains
+preserved outside the repository. This records a successfully evidenced fail-closed stop only; it does not clear
+the two blockers, resolve the two review sets, or authorize cutover.

@@ -133,6 +133,19 @@ rejected only because the successful zero-output `git diff --check` had not crea
 FINAL-01 and FINAL-02 evidence also remain preserved. This tooling correction does not convert the operational
 NO-GO into approval; a new exact independently reviewed candidate and new evidence directory remain required.
 
+The approved FINAL-04 operational run executed exact HEAD
+`3d7a9413bb07e46101d0d45537c105f81bf50c22`, tree
+`3d673ffcdda54aacca8ab6cb675e035492cbbe9d`, from a clean repository. Repository discovery proved 456
+migrations ending at `20260908120000_AddProducerIntentGroupsC8`; source discovery left 13 pending and preserved
+the unchanged fingerprint `446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28`. All three
+cutover flags were explicitly false. Readiness correctly returned `NO_GO_PREFLIGHT` for two blockers
+(`CLASSIFICATION_SCHEMA_ABSENT=1`, `LIVE_FX_REVALUATION_BATCH=1`) and two review sets
+(`HISTORICAL_PUBLISHED_LAYOUTS=3`, `ACTIVE_LEGACY_CURRENCY_LINKS=9`). It created neither backup nor target,
+and an independent check found zero target databases (`backupCreated=false`, `targetCreated=false`, target DB
+count `0`). Final-package validation passed and wrote the manifest. The external FINAL-04 evidence directory
+remains preserved and is not copied into this repository. This is durable proof of a safe stop, not cutover
+approval; every blocker and review finding remains open.
+
 ```powershell
 $env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<secure same-server connection; exact RhemaERP catalog>'
 $env:RHEMA_GL_REHEARSAL_CONNECTION = '<same server; absent RHEMAERP_GL_REHEARSAL_* catalog>'
