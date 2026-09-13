@@ -564,10 +564,20 @@ function Get-DisposableBackupRecoveryState([string]$path, [string]$evidenceDirec
     $material = Get-DisposableMaterialBackupState $path
     $verifiedHash = ''
     $verifyEvidencePresent = $false
+    $phaseThreePath = Join-Path $evidenceDirectory 'phase-03.json'
     $phaseFourPath = Join-Path $evidenceDirectory 'phase-04.json'
-    if (Test-Path -LiteralPath $phaseFourPath -PathType Leaf) {
+    if ((Test-Path -LiteralPath $phaseThreePath -PathType Leaf) -and
+        (Test-Path -LiteralPath $phaseFourPath -PathType Leaf)) {
+        $phaseThree = Get-Content -Raw -LiteralPath $phaseThreePath | ConvertFrom-Json
         $phaseFour = Get-Content -Raw -LiteralPath $phaseFourPath | ConvertFrom-Json
-        if ($phaseFour.schema -eq 'RHEMA_DISPOSABLE_RESET_PHASE_V1' -and
+        $phaseThreeDatabaseProperty = $phaseThree.PSObject.Properties['database']
+        $phaseThreeMediaProperty = $phaseThree.PSObject.Properties['backupMediaId']
+        $phaseThreeDatabase = if ($null -eq $phaseThreeDatabaseProperty) { '' } else { [string]$phaseThreeDatabaseProperty.Value }
+        $phaseThreeMediaId = if ($null -eq $phaseThreeMediaProperty) { '' } else { [string]$phaseThreeMediaProperty.Value }
+        $durableBackupIdentityValid = $phaseThree.schema -ceq 'RHEMA_DISPOSABLE_RESET_PHASE_V1' -and
+            $phaseThree.phase -ceq 'BACKUP_CREATED' -and $phaseThreeDatabase -ceq 'RhemaERP' -and
+            $phaseThreeMediaId -cmatch '^[0-9a-f]{32}$'
+        if ($durableBackupIdentityValid -and $phaseFour.schema -eq 'RHEMA_DISPOSABLE_RESET_PHASE_V1' -and
             $phaseFour.phase -eq 'BACKUP_VERIFIED' -and [string]$phaseFour.backupSha256 -match '^[0-9A-F]{64}$') {
             $verifiedHash = [string]$phaseFour.backupSha256
         }
@@ -576,9 +586,18 @@ function Get-DisposableBackupRecoveryState([string]$path, [string]$evidenceDirec
         if ($verifiedHash -and (Test-Path -LiteralPath $verifiedHashPath -PathType Leaf) -and
             (Test-Path -LiteralPath $verifyEvidencePath -PathType Leaf)) {
             $recordedVerifiedHash = (Get-Content -Raw -LiteralPath $verifiedHashPath).Trim()
-            $verifyLines = @(Get-Content -LiteralPath $verifyEvidencePath | ForEach-Object { $_.Trim() })
+            $orderedVerifyTokensValid = $false
+            try {
+                Assert-UniqueOrderedSqlEvidenceTokens $verifyEvidencePath @(
+                    'DATABASE=RhemaERP',
+                    "BACKUP_MEDIA_ID=$phaseThreeMediaId",
+                    'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'
+                ) 'Disposable-reset recovery VERIFYONLY'
+                $orderedVerifyTokensValid = $true
+            }
+            catch { $orderedVerifyTokensValid = $false }
             $verifyEvidencePresent = $recordedVerifiedHash -ceq "$verifiedHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" -and
-                $verifyLines -ccontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'
+                $orderedVerifyTokensValid
         }
     }
     $hashMatchesVerified = $material.materialized -and $verifiedHash -and $material.sha256 -ceq $verifiedHash
@@ -866,6 +885,7 @@ SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
             "$backupSha256  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" $true
         $phase = 'PHASE_03_PUBLICATION'
         Write-DisposablePhaseMarker $evidenceDirectory 3 'BACKUP_CREATED' @{
+            database = 'RhemaERP'
             backupMediaId = $backupMediaId
             backupByteLength = $materialBackupState.byteLength
             currentMaterialSha256 = $backupSha256

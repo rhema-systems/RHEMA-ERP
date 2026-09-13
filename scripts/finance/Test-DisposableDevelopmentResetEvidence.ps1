@@ -97,6 +97,7 @@ try {
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'))) {
         $marker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1] }
         if ($entry[0] -eq 3) {
+            $marker.database='RhemaERP'; $marker.backupMediaId=$partialMedia
             $marker.backupCompleted=$true; $marker.backupByteLength=1024; $marker.currentMaterialSha256=('E' * 64)
         }
         Write-Json (Join-Path $partialBackup ("phase-{0:D2}.json" -f $entry[0])) $marker
@@ -172,13 +173,15 @@ try {
     $currentHash = 'B' * 64
     @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mutatedMedia",'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START',
         'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-create.txt')
-    @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mutatedMedia",'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') |
+    (@('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mutatedMedia",'The backup set on file 1 is valid.',
+        'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') -join ' ') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-verify.txt')
     "$verifiedHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup.sha256')
     "$currentHash  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $postVerifyMutation 'backup-current.sha256')
     foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'),@(4,'BACKUP_VERIFIED'))) {
         $marker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=$entry[0]; phase=$entry[1] }
         if ($entry[0] -eq 3) {
+            $marker.database='RhemaERP'; $marker.backupMediaId=$mutatedMedia
             $marker.backupCompleted=$true; $marker.backupByteLength=2048; $marker.currentMaterialSha256=$verifiedHash
         }
         if ($entry[0] -eq 4) { $marker.backupSha256=$verifiedHash }
@@ -254,7 +257,8 @@ try {
     @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mediaId",'BACKUP_PATH_ATOMICALLY_RESERVED',
         'BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup-create.txt')
-    @('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mediaId",'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') |
+    (@('DATABASE=RhemaERP',"BACKUP_MEDIA_ID=$mediaId",'The backup set on file 1 is valid.',
+        'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') -join ' ') |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup-verify.txt')
     "$('D' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup.sha256')
     "$('D' * 64)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'backup-current.sha256')
@@ -276,6 +280,7 @@ try {
     for ($index=0; $index -lt $phaseNames.Count; $index++) {
         $phaseMarker = [ordered]@{ schema='RHEMA_DISPOSABLE_RESET_PHASE_V1'; ordinal=($index + 1); phase=$phaseNames[$index] }
         if (($index + 1) -eq 3) {
+            $phaseMarker.database='RhemaERP'; $phaseMarker.backupMediaId=$mediaId
             $phaseMarker.backupCompleted=$true; $phaseMarker.backupByteLength=1024
             $phaseMarker.currentMaterialSha256=('D' * 64)
         }

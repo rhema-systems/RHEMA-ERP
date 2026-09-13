@@ -316,9 +316,11 @@ if ($PackageKind -eq 'DisposableReset') {
         if ($backupPhaseMarkerPublished) {
             $phaseThree = $phaseMarkers[2]
             if ($reset.backupCompleted -ne $true -or $phaseThree.backupCompleted -ne $true -or
+                [string]$phaseThree.database -cne 'RhemaERP' -or
+                [string]$phaseThree.backupMediaId -cne [string]$reset.backupMediaId -or
                 [long]$phaseThree.backupByteLength -le 0 -or
                 [string]$phaseThree.currentMaterialSha256 -notmatch '^[0-9A-F]{64}$') {
-                throw 'Durable BACKUP_CREATED requires completed SQL markers, positive length and hash reconciliation.'
+                throw 'Durable BACKUP_CREATED requires database/media identity, completed SQL markers, positive length and hash reconciliation.'
             }
         }
     }

@@ -261,13 +261,63 @@ exit 0
     $mutationBackupPath = Join-Path $mutationRoot 'verified-then-mutated.bak'
     [System.IO.File]::WriteAllBytes($mutationBackupPath, [System.Text.Encoding]::UTF8.GetBytes('verified bytes'))
     $originalState = Get-DisposableMaterialBackupState $mutationBackupPath
-    foreach ($entry in @(@(1,'OFFLINE_GATES_COMPLETE'),@(2,'SOURCE_CAPTURE_COMPLETE'),@(3,'BACKUP_CREATED'))) {
-        Write-DisposablePhaseMarker $mutationRoot $entry[0] $entry[1]
+    $recoveryMediaId = '8' * 32
+    Write-DisposablePhaseMarker $mutationRoot 1 'OFFLINE_GATES_COMPLETE'
+    Write-DisposablePhaseMarker $mutationRoot 2 'SOURCE_CAPTURE_COMPLETE'
+    Write-DisposablePhaseMarker $mutationRoot 3 'BACKUP_CREATED' @{
+        database='RhemaERP'; backupMediaId=$recoveryMediaId; backupCompleted=$true;
+        backupByteLength=$originalState.byteLength; currentMaterialSha256=$originalState.sha256
     }
     Write-DisposablePhaseMarker $mutationRoot 4 'BACKUP_VERIFIED' @{ backupSha256=$originalState.sha256 }
     "$($originalState.sha256)  RhemaERP_DISPOSABLE_RESET_COPYONLY.bak" |
         Set-Content -Encoding ascii -LiteralPath (Join-Path $mutationRoot 'backup.sha256')
-    'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE' | Set-Content -Encoding ascii -LiteralPath (Join-Path $mutationRoot 'backup-verify.txt')
+    $coalescedVerifyEvidence = "DATABASE=RhemaERP BACKUP_MEDIA_ID=$recoveryMediaId " +
+        "The backup set on file 1 is valid. RESTORE_VERIFYONLY_CHECKSUM_COMPLETE"
+    $verifyEvidencePath = Join-Path $mutationRoot 'backup-verify.txt'
+    $coalescedVerifyEvidence | Set-Content -Encoding ascii -LiteralPath $verifyEvidencePath
+    $reconciledVerified = Get-DisposableBackupRecoveryState $mutationBackupPath $mutationRoot
+    if ($reconciledVerified.backupVerified -ne $true -or $reconciledVerified.verifyEvidencePresent -ne $true -or
+        $reconciledVerified.hashMatchesVerified -ne $true -or
+        $reconciledVerified.verifiedBackupSha256 -cne $originalState.sha256 -or
+        $reconciledVerified.currentMaterialSha256 -cne $originalState.sha256) {
+        throw 'Actual recovery helper did not accept exact unique ordered tokens from coalesced VERIFYONLY evidence.'
+    }
+    foreach ($case in @(
+        @{ label='missing completion'; text=$coalescedVerifyEvidence.Replace(' RESTORE_VERIFYONLY_CHECKSUM_COMPLETE','') },
+        @{ label='duplicate completion'; text=$coalescedVerifyEvidence.Replace(
+            'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE','RESTORE_VERIFYONLY_CHECKSUM_COMPLETE RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') },
+        @{ label='reordered completion'; text="DATABASE=RhemaERP RESTORE_VERIFYONLY_CHECKSUM_COMPLETE BACKUP_MEDIA_ID=$recoveryMediaId" },
+        @{ label='embedded completion forgery'; text=$coalescedVerifyEvidence.Replace(
+            'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE','FORGED_RESTORE_VERIFYONLY_CHECKSUM_COMPLETE') },
+        @{ label='database identity tamper'; text=$coalescedVerifyEvidence.Replace('DATABASE=RhemaERP','DATABASE=Other') },
+        @{ label='media identity tamper'; text=$coalescedVerifyEvidence.Replace($recoveryMediaId, ('7' * 32)) }
+    )) {
+        $case.text | Set-Content -Encoding ascii -LiteralPath $verifyEvidencePath
+        $refusedRecovery = Get-DisposableBackupRecoveryState $mutationBackupPath $mutationRoot
+        if ($refusedRecovery.verifyEvidencePresent -ne $false -or $refusedRecovery.backupVerified -ne $false -or
+            $refusedRecovery.hashMatchesVerified -ne $true -or
+            $refusedRecovery.verifiedBackupSha256 -cne $originalState.sha256) {
+            throw "Actual recovery helper did not fail closed for coalesced VERIFYONLY $($case.label)."
+        }
+    }
+    $phaseThreePath = Join-Path $mutationRoot 'phase-03.json'
+    $phaseThreeOriginal = Get-Content -Raw -LiteralPath $phaseThreePath
+    foreach ($case in @(
+        @{ label='durable database identity'; property='database'; value='Other' },
+        @{ label='durable media identity'; property='backupMediaId'; value=('6' * 32) }
+    )) {
+        $phaseThreeTamper = $phaseThreeOriginal | ConvertFrom-Json
+        $phaseThreeTamper.($case.property) = $case.value
+        $phaseThreeTamper | ConvertTo-Json -Depth 8 | Set-Content -Encoding utf8 -LiteralPath $phaseThreePath
+        $refusedRecovery = Get-DisposableBackupRecoveryState $mutationBackupPath $mutationRoot
+        if ($refusedRecovery.verifyEvidencePresent -ne $false -or $refusedRecovery.backupVerified -ne $false -or
+            -not [string]::IsNullOrEmpty([string]$refusedRecovery.verifiedBackupSha256)) {
+            throw "Actual recovery helper trusted invalid $($case.label) from phase-03."
+        }
+    }
+    $phaseThreeOriginal | Set-Content -Encoding utf8 -LiteralPath $phaseThreePath
+    Write-Host 'PASS: coalesced recovery binds durable database/media and refuses missing, duplicate, reordered, embedded or mismatched tokens'
+    $coalescedVerifyEvidence | Set-Content -Encoding ascii -LiteralPath $verifyEvidencePath
     [System.IO.File]::WriteAllBytes($mutationBackupPath, [System.Text.Encoding]::UTF8.GetBytes('mutated bytes after verify'))
     $reconciledMutation = Get-DisposableBackupRecoveryState $mutationBackupPath $mutationRoot
     if ($reconciledMutation.backupVerified -ne $false -or $reconciledMutation.verifyEvidencePresent -ne $true -or
