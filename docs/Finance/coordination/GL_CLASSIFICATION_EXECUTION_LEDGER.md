@@ -2470,3 +2470,21 @@ also validates and retains its focused marker-removal refusals. All offline suit
 variable or external evidence directory was accessed during correction. The historical attempt remains preserved; a
 new absent evidence directory and independent Sol High approval of the ledger-only descendant are required before any
 new reset attempt.
+
+Sol High review of exact `1ff91c5cc0b9ffdbb03f1427e4ff6cc9c9834cc1` found one P1 remaining in the
+catch/recovery path: `Get-DisposableBackupRecoveryState` still used physical-line `-ccontains` for
+`RESTORE_VERIFYONLY_CHECKSUM_COMPLETE`, so coalesced sqlcmd evidence would be downgraded even though the producer and
+validator had adopted token parsing. The bounded correction completed at exact implementation boundary
+`d96bb149bd13f842b8d461ee718c4bc8f24076c9` (tree `93e6366c9bf79adab98de14038c73d46eee3b44d`)
+through implementation commit `a83cdee37f1a5c9cc9078060a591dc6949c2904b` plus its focused test-semantics child.
+
+Recovery now reads exact durable phase-03 `database` and `backupMediaId` identity, requires `RhemaERP` and a valid
+media ID, and invokes the shared exact unique ordered token contract for database, media and VERIFY completion.
+Coalesced positive recovery proves the original verified hash/current hash/verification state. Missing, duplicate,
+reordered, embedded-marker, wrong-database, wrong-media and malformed durable-identity cases all downgrade verification
+fail-closed. The existing post-VERIFY byte mutation test then restores valid coalesced evidence and proves the immutable
+verified hash remains recorded while current-hash mismatch forces `backupVerified=false`. Disposable reset
+safety/helper and evidence/tamper suites, FinalClone safety/parser and evidence/tamper suites, PowerShell parsing and
+diff checks passed serially. No database, connection variable, preserved runtime evidence or backup was accessed.
+The historical failed run remains unchanged; a new absent evidence directory and Sol High approval of the ledger-only
+descendant are required before another reset attempt.

@@ -212,6 +212,15 @@ duplication even when sqlcmd emits one physical line. Sanitized evidence publica
 line records rather than string-collapsing nested arrays. Any new reset attempt requires a new absent external evidence
 directory plus independent review and approval of the ledger-only descendant.
 
+Sol High review of exact `1ff91c5c` found the catch/recovery helper still used standalone-line matching for the
+VERIFYONLY completion marker. The P1 correction completed at exact implementation boundary
+`d96bb149bd13f842b8d461ee718c4bc8f24076c9` (tree `93e6366c9bf79adab98de14038c73d46eee3b44d`).
+Recovery now uses the same unique ordered token contract and trusts VERIFY evidence only when `DATABASE=RhemaERP` and
+the exact `BACKUP_MEDIA_ID` agree with the durable phase-03 database/media identity. Coalesced recovery tests cover a
+positive verified state; missing, duplicate, reordered, embedded, wrong-database and wrong-media tokens; and
+post-verification material mutation with truthful verification downgrade. The preserved failed runtime evidence and
+backup were not accessed or changed. A new attempt remains prohibited pending Sol High approval.
+
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
 `-ConfirmDisposableDevelopmentReset`, the exact process attestation shown below, reviewed commit/tree equality,
