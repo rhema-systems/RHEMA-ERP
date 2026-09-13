@@ -104,11 +104,16 @@ read-only readiness diagnostics. Any `BLOCKER` or explicit `REVIEW` finding prod
 durable `NO_GO_PREFLIGHT` evidence before a backup or target exists. Only a clean preflight may proceed through
 the target-derived absent backup check, `COPY_ONLY`/`CHECKSUM`, `RESTORE VERIFYONLY`, prefix-safe restore,
 `DBCC CHECKDB ... PHYSICAL_ONLY`, exact pending-delta application, two real seed passes, and byte-identical
-Finance invariant evidence. Failures preserve evidence and any exact target/backup; the harness never drops or
+Finance invariant evidence. That canonical content includes C2 balances/exposures, C4 period/initialization
+authority, and the material JournalEntry/AccountTransaction/FinancePostingEvent rows—not merely counts.
+Any active legacy currency link is `REVIEW` and stops before backup unless separately reviewed proof establishes
+complete Phase 4 equivalence. Failures preserve evidence and any exact target/backup; the harness never drops or
 overwrites either automatically. Raw `sqlcmd` output is held only in an outside-package temporary file, sanitized,
 then deleted; the package validator scans JSON, text, logs, checksums and SQL, independently re-derives pending/
 orphan sets and the exact PASS target-history union, and verifies artifact, identity and ordered backup/restore markers.
 Evidence must be external to the repository or below the dedicated ignored `.artifacts/finance-gl-rehearsal` root.
+The exact target-derived backup path is atomically reserved with OS `FileMode.CreateNew`; SQL then uses a fresh
+media identity with `NOINIT`, `NOSKIP`, and `MEDIANAME`, so a concurrent/pre-existing file is never overwritten.
 
 ```powershell
 $env:RHEMA_GL_SOURCE_READONLY_CONNECTION = '<secure same-server connection; exact RhemaERP catalog>'
@@ -134,7 +139,8 @@ or retry against a different source. Cleanup remains a separate explicit `DropRe
   verify the restored target history equals that fresh source history before applying anything.
 - [ ] Run every migration preflight in order. Do not weaken or bypass the Phase 2 singleton-role, Phase 3
   immutable-layout, Phase 4 historical-FX, Phase 5 governed-segment, or C1-C8 lineage checks.
-- [ ] Take a `COPY_ONLY` backup with `CHECKSUM`, record the SHA-256 checksum, run `RESTORE VERIFYONLY`, and
+- [ ] Atomically reserve the absent target-derived backup with `FileMode.CreateNew`; take a `COPY_ONLY` backup
+  with `CHECKSUM`, `NOINIT`, `NOSKIP` and the recorded fresh media identity; record the SHA-256, run `RESTORE VERIFYONLY`, and
   prove that the backup can restore to a new prefix-validated rehearsal database.
 - [ ] Run `DBCC CHECKDB ... PHYSICAL_ONLY` on the restored rehearsal database before migration.
 - [ ] Use only `scripts/finance/Invoke-GlCutoverRehearsal.ps1` with a target matching

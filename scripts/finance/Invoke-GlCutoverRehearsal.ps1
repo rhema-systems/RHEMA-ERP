@@ -397,6 +397,18 @@ if ($Mode -eq 'InspectSource') {
     return
 }
 
+function New-AtomicBackupReservation([string]$path) {
+    $stream = $null
+    try {
+        # FileMode.CreateNew is an atomic OS create-if-absent operation. It throws if any file won
+        # the race, so the harness can never claim or overwrite a pre-existing backup artifact.
+        $stream = [System.IO.File]::Open($path, [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        if ($stream.Length -ne 0) { throw 'Atomic backup reservation was unexpectedly nonempty.' }
+    }
+    finally { if ($null -ne $stream) { $stream.Dispose() } }
+}
+
 if ($Mode -eq 'RehearseFinalClone' -and
     ($TargetConnectionEnvironmentVariable -ne 'RHEMA_GL_REHEARSAL_CONNECTION' -or
      $SourceConnectionEnvironmentVariable -ne 'RHEMA_GL_SOURCE_READONLY_CONNECTION')) {
@@ -613,18 +625,24 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
         $sourceDatabase = $source.Database.Replace(']', ']]')
         $sourceDataLogical = $dataFiles[0].Name.Replace("'", "''")
         $sourceLogLogical = $logFiles[0].Name.Replace("'", "''")
+        # CreateNew is the atomic no-overwrite boundary after the SQL-side advisory preflight.
+        # The unique media identity and NOINIT/NOSKIP then bind SQL to this invocation's reservation.
+        $backupMediaId = [Guid]::NewGuid().ToString('N')
+        New-AtomicBackupReservation $backupPath
         $backupRestoreEvidence = Join-Path $evidenceDirectoryResolved 'backup-restore-checkdb.txt'
         Invoke-SqlWithSanitizedEvidence $source.Builder 'master' @"
 SET NOCOUNT ON;
 SELECT N'SOURCE_DATABASE=RhemaERP';
 SELECT N'TARGET_DATABASE=$($target.Database)';
+SELECT N'BACKUP_MEDIA_ID=$backupMediaId';
+SELECT N'BACKUP_PATH_ATOMICALLY_RESERVED';
 DECLARE @backupExists table(FileExists int, FileIsDirectory int, ParentDirectoryExists int);
 INSERT @backupExists EXEC master.dbo.xp_fileexist N'$escapedBackupPath';
-IF EXISTS (SELECT 1 FROM @backupExists WHERE FileExists=1)
-    THROW 51000, 'The exact target-derived rehearsal backup appeared after preflight; refusing to overwrite it.', 1;
+IF NOT EXISTS (SELECT 1 FROM @backupExists WHERE FileExists=1 AND FileIsDirectory=0)
+    THROW 51000, 'The exact atomically reserved rehearsal backup disappeared before SQL backup.', 1;
 SELECT N'BACKUP_COPY_ONLY_CHECKSUM_START';
 BACKUP DATABASE [$sourceDatabase] TO DISK=N'$escapedBackupPath'
-WITH COPY_ONLY, CHECKSUM, INIT, NAME=N'GL cutover guarded final clone';
+WITH COPY_ONLY, CHECKSUM, NOINIT, NOSKIP, MEDIANAME=N'$backupMediaId', NAME=N'GL cutover guarded final clone';
 SELECT N'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE';
 RESTORE VERIFYONLY FROM DISK=N'$escapedBackupPath' WITH CHECKSUM;
 SELECT N'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE';
@@ -706,6 +724,8 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
             targetCreated = $true
             backupCreated = $true
             backupSha256 = $backupSha256
+            backupMediaId = $backupMediaId
+            backupReservation = 'FILEMODE_CREATE_NEW'
             backupRestoreEvidenceSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath $backupRestoreEvidence).Hash
             targetMigrationHistorySha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectoryResolved 'target-migration-history.txt')).Hash
             pendingMigrationScriptSha256 = $idempotentSha256

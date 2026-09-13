@@ -79,6 +79,73 @@ FROM dbo.AccountingBookSelectionEvidence ORDER BY TenantId,Id;
 SELECT CONCAT(N'SELECTION_EVIDENCE_BOOK|',Id,N'|',TenantId,N'|',AccountingBookSelectionEvidenceId,N'|',AccountingBookId,N'|',
   SelectionOrder,N'|',AccountingBookCodeSnapshot,N'|',AuthorityFingerprint,N'|',IsDeleted)
 FROM dbo.AccountingBookSelectionEvidenceBooks ORDER BY TenantId,AccountingBookSelectionEvidenceId,SelectionOrder,Id;
+SELECT CONCAT(N'ACCOUNT_BALANCE|',Id,N'|',TenantId,N'|',AccountId,N'|',FiscalPeriodId,N'|',AccountingBookId,N'|',BookClassification,N'|',Currency,N'|',
+  OpeningBalance,N'|',OpeningBalanceType,N'|',PeriodDebits,N'|',PeriodCredits,N'|',PeriodNetMovement,N'|',ClosingBalance,N'|',ClosingBalanceType,N'|',
+  YearToDateDebits,N'|',YearToDateCredits,N'|',YearToDateNetMovement,N'|',COALESCE(SegmentString,N''),N'|',COALESCE(DepartmentSegment,N''),N'|',
+  COALESCE(CostCenterSegment,N''),N'|',COALESCE(ProjectSegment,N''),N'|',COALESCE(LocationSegment,N''),N'|',
+  COALESCE(CONVERT(nvarchar(50),ExchangeRate),N''),N'|',COALESCE(CONVERT(nvarchar(50),BaseCurrencyEquivalent),N''),N'|',
+  COALESCE(CONVERT(nvarchar(50),UnrealizedGainLoss),N''),N'|',TransactionCount,N'|',COALESCE(CONVERT(nvarchar(33),LastTransactionDate,126),N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),LastTransactionUserId),N''),N'|',CONVERT(nvarchar(33),LastUpdated,126),N'|',IsReconciled,N'|',
+  COALESCE(CONVERT(nvarchar(33),LastReconciledDate,126),N''),N'|',COALESCE(CONVERT(nvarchar(50),ReconciliationDiscrepancy),N''),N'|',IsLocked,N'|',
+  COALESCE(CONVERT(nvarchar(33),LockedDate,126),N''),N'|',COALESCE(CONVERT(nvarchar(36),LockedByUserId),N''),N'|',HasActivity,N'|',IsZeroBalance,N'|',
+  IsNegativeBalance,N'|',COALESCE(Notes,N''),N'|',IsDeleted)
+FROM dbo.AccountBalances ORDER BY TenantId,AccountingBookId,FiscalPeriodId,AccountId,Id;
+SELECT CONCAT(N'ACCOUNT_CURRENCY_EXPOSURE|',Id,N'|',TenantId,N'|',AccountId,N'|',AccountingBookId,N'|',AccountingBookCode,N'|',
+  FunctionalCurrencyCode,N'|',TransactionCurrencyCode,N'|',SignedForeignBalance,N'|',SignedFunctionalBalance,N'|',TransactionCount,N'|',
+  COALESCE(CONVERT(nvarchar(33),FirstTransactionDate,126),N''),N'|',COALESCE(CONVERT(nvarchar(33),LastTransactionDate,126),N''),N'|',
+  CONVERT(nvarchar(33),LastRebuiltAt,126),N'|',SourceFingerprint,N'|',IsDeleted)
+FROM dbo.AccountCurrencyExposures ORDER BY TenantId,AccountingBookId,AccountId,TransactionCurrencyCode,Id;
+SELECT CONCAT(N'ACCOUNTING_BOOK_PERIOD|',Id,N'|',TenantId,N'|',AccountingBookId,N'|',FiscalPeriodId,N'|',PeriodStatus,N'|',
+  COALESCE(CONVERT(nvarchar(10),PendingStatus),N''),N'|',COALESCE(PendingReason,N''),N'|',COALESCE(CONVERT(nvarchar(36),RequestedByUserId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(33),RequestedAtUtc,126),N''),N'|',COALESCE(CONVERT(nvarchar(36),WorkflowInstanceId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),DecidedByUserId),N''),N'|',COALESCE(CONVERT(nvarchar(33),DecidedAtUtc,126),N''),N'|',COALESCE(DecisionReason,N''),N'|',IsDeleted)
+FROM dbo.AccountingBookPeriods ORDER BY TenantId,AccountingBookId,FiscalPeriodId,Id;
+SELECT CONCAT(N'ACCOUNTING_BOOK_INITIALIZATION|',Id,N'|',TenantId,N'|',AccountingBookId,N'|',Version,N'|',
+  COALESCE(CONVERT(nvarchar(36),SupersedesInitializationId),N''),N'|',Mode,N'|',InitializationStatus,N'|',CONVERT(nvarchar(33),CutoffDate,126),N'|',
+  CutoffFiscalPeriodId,N'|',COALESCE(CONVERT(nvarchar(36),SourceAccountingBookId),N''),N'|',IdempotencyKey,N'|',Reason,N'|',TotalDebits,N'|',TotalCredits,N'|',
+  RequiredAccountCount,N'|',CoveredAccountCount,N'|',EvidenceFingerprint,N'|',ReconciliationFingerprint,N'|',PreparedByUserId,N'|',
+  CONVERT(nvarchar(33),PreparedAtUtc,126),N'|',COALESCE(CONVERT(nvarchar(36),WorkflowInstanceId),N''),N'|',COALESCE(CONVERT(nvarchar(36),ApprovedByUserId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(33),ApprovedAtUtc,126),N''),N'|',COALESCE(CONVERT(nvarchar(36),RejectedByUserId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(33),RejectedAtUtc,126),N''),N'|',COALESCE(CONVERT(nvarchar(36),DecidedByUserId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(33),DecidedAtUtc,126),N''),N'|',COALESCE(DecisionReason,N''),N'|',IsDeleted)
+FROM dbo.AccountingBookInitializations ORDER BY TenantId,AccountingBookId,Version,Id;
+SELECT CONCAT(N'ACCOUNTING_BOOK_INITIALIZATION_LINE|',Id,N'|',TenantId,N'|',AccountingBookInitializationId,N'|',AccountId,N'|',CurrencyCode,N'|',
+  OpeningDebit,N'|',OpeningCredit,N'|',BaseBookSignedBalance,N'|',OpeningAdjustment,N'|',IsDeleted)
+FROM dbo.AccountingBookInitializationLines ORDER BY TenantId,AccountingBookInitializationId,AccountId,CurrencyCode,Id;
+SELECT CONCAT(N'JOURNAL_ENTRY|',Id,N'|',TenantId,N'|',JournalEntryNumber,N'|',JournalType,N'|',CONVERT(nvarchar(33),EntryDate,126),N'|',Description,N'|',
+  COALESCE(ReferenceNumber,N''),N'|',COALESCE(SourceModule,N''),N'|',COALESCE(OriginModuleCode,N''),N'|',COALESCE(CONVERT(nvarchar(36),SourceDocumentId),N''),N'|',
+  COALESCE(SourceDocumentType,N''),N'|',TotalDebitAmount,N'|',TotalCreditAmount,N'|',BalanceDifference,N'|',IsBalanced,N'|',IsMultiCurrency,N'|',
+  COALESCE(PrimaryCurrency,N''),N'|',BookClassification,N'|',AccountingBookId,N'|',FiscalPeriodId,N'|',COALESCE(CONVERT(nvarchar(33),PostingDate,126),N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),PostedByUserId),N''),N'|',PostingStatus,N'|',RequiresApproval,N'|',COALESCE(ApprovalStatus,N''),N'|',
+  COALESCE(ApprovalWorkflowId,N''),N'|',COALESCE(CONVERT(nvarchar(36),ApprovedByUserId),N''),N'|',COALESCE(CONVERT(nvarchar(33),ApprovedDate,126),N''),N'|',
+  COALESCE(RejectionReason,N''),N'|',COALESCE(WithdrawalReason,N''),N'|',COALESCE(CONVERT(nvarchar(36),WithdrawnByUserId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(33),WithdrawnDate,126),N''),N'|',IsReversed,N'|',COALESCE(CONVERT(nvarchar(33),ReversalDate,126),N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),ReversalJournalEntryId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),OriginalJournalEntryId),N''),N'|',COALESCE(ReversalType,N''),N'|',COALESCE(ReversalReason,N''),N'|',IsRevaluationEntry,N'|',
+  COALESCE(RevaluationBatchNumber,N''),N'|',COALESCE(RevaluationType,N''),N'|',IsAutoReversalEntry,N'|',IsRecurring,N'|',
+  COALESCE(CONVERT(nvarchar(36),RecurringTemplateId),N''),N'|',COALESCE(RecurrenceFrequency,N''),N'|',COALESCE(CONVERT(nvarchar(33),NextRecurrenceDate,126),N''),N'|',
+  IsImported,N'|',COALESCE(ImportBatchReference,N''),N'|',COALESCE(Notes,N''),N'|',COALESCE(EntryTag,N''),N'|',Priority,N'|',HasAttachments,N'|',AttachmentCount,N'|',IsDeleted)
+FROM dbo.JournalEntries ORDER BY TenantId,AccountingBookId,EntryDate,JournalEntryNumber,Id;
+SELECT CONCAT(N'ACCOUNT_TRANSACTION|',Id,N'|',TenantId,N'|',AccountId,N'|',JournalEntryId,N'|',COALESCE(CONVERT(nvarchar(36),FinanceDimensionSetId),N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),FinanceDimensionSnapshotId),N''),N'|',CONVERT(nvarchar(33),TransactionDate,126),N'|',COALESCE(Description,N''),N'|',DebitAmount,N'|',CreditAmount,N'|',
+  FunctionalCurrencyCode,N'|',COALESCE(TransactionCurrency,N''),N'|',COALESCE(CONVERT(nvarchar(50),TransactionDebitAmount),N''),N'|',COALESCE(CONVERT(nvarchar(50),TransactionCreditAmount),N''),N'|',
+  COALESCE(CONVERT(nvarchar(50),ForeignCurrencyAmount),N''),N'|',COALESCE(CONVERT(nvarchar(50),ExchangeRate),N''),N'|',COALESCE(CONVERT(nvarchar(36),ExchangeRateId),N''),N'|',
+  COALESCE(ExchangeRateSource,N''),N'|',COALESCE(CONVERT(nvarchar(33),ExchangeRateDate,126),N''),N'|',COALESCE(SourceModule,N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),SourceDocumentId),N''),N'|',COALESCE(CONVERT(nvarchar(36),SourceDocumentLineId),N''),N'|',COALESCE(SourceDocumentType,N''),N'|',
+  COALESCE(SourceReferenceNumber,N''),N'|',BookClassification,N'|',AccountingBookId,N'|',FiscalPeriodId,N'|',PostingStatus,N'|',IsReversed,N'|',
+  COALESCE(CONVERT(nvarchar(33),PostedDate,126),N''),N'|',COALESCE(CONVERT(nvarchar(33),ReversalDate,126),N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),ReversalTransactionId),N''),N'|',COALESCE(CONVERT(nvarchar(36),OriginalTransactionId),N''),N'|',
+  COALESCE(ReversalType,N''),N'|',COALESCE(ReversalReason,N''),N'|',COALESCE(SegmentString,N''),N'|',IsRevaluationEntry,N'|',
+  COALESCE(RevaluationBatchNumber,N''),N'|',COALESCE(RevaluationType,N''),N'|',LineNumber,N'|',COALESCE(Notes,N''),N'|',COALESCE(TransactionTag,N''),N'|',IsDeleted)
+FROM dbo.AccountTransactions ORDER BY TenantId,AccountingBookId,JournalEntryId,LineNumber,Id;
+SELECT CONCAT(N'FINANCE_POSTING_EVENT|',Id,N'|',TenantId,N'|',SourceModule,N'|',COALESCE(OriginModuleCode,N''),N'|',SourceDocumentType,N'|',SourceDocumentId,N'|',
+  PostingAction,N'|',COALESCE(SourceDocumentReference,N''),N'|',COALESCE(IdempotencyKey,N''),N'|',COALESCE(RequestFingerprintVersion,N''),N'|',
+  COALESCE(RequestFingerprint,N''),N'|',COALESCE(CONVERT(nvarchar(36),JournalEntryId),N''),N'|',PostingStatus,N'|',CONVERT(nvarchar(33),PostingDate,126),N'|',
+  CONVERT(nvarchar(33),RequestedAt,126),N'|',COALESCE(CONVERT(nvarchar(33),PostedAt,126),N''),N'|',COALESCE(CONVERT(nvarchar(36),RequestedByUserId),N''),N'|',
+  TotalDebitAmount,N'|',TotalCreditAmount,N'|',FunctionalCurrencyCode,N'|',HasForeignCurrencyLines,N'|',COALESCE(PrimaryTransactionCurrencyCode,N''),N'|',
+  COALESCE(CONVERT(nvarchar(36),PrimaryExchangeRateId),N''),N'|',COALESCE(CONVERT(nvarchar(50),PrimaryExchangeRate),N''),N'|',COALESCE(CONVERT(nvarchar(33),PrimaryExchangeRateDate,126),N''),N'|',
+  BookClassification,N'|',AccountingBookId,N'|',COALESCE(ErrorMessage,N''),N'|',IsDeleted)
+FROM dbo.FinancePostingEvents ORDER BY TenantId,AccountingBookId,PostingDate,SourceDocumentId,PostingAction,Id;
 SELECT CONCAT(N'ACCOUNTING_EVENT|',Id,N'|',TenantId,N'|',OriginatingModuleCode,N'|',SourceDocumentType,N'|',SourceDocumentId,N'|',
   PostingAction,N'|',IdempotencyKey,N'|',EventKind,N'|',Version,N'|',RootAccountingEventId,N'|',COALESCE(CONVERT(nvarchar(36),SupersedesAccountingEventId),N''),N'|',
   COALESCE(CONVERT(nvarchar(36),CorrectsAccountingEventId),N''),N'|',COALESCE(CONVERT(nvarchar(36),ReversesAccountingEventId),N''),N'|',COALESCE(CONVERT(nvarchar(36),AccountingBookSelectionEvidenceId),N''),N'|',

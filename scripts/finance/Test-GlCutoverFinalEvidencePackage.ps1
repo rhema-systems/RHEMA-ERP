@@ -26,6 +26,8 @@ function Write-Summary([string]$status, [string[]]$pending) {
     }
     if ($status -eq 'PASS') {
         $summary.backupSha256 = 'C' * 64
+        $summary.backupMediaId = 'd' * 32
+        $summary.backupReservation = 'FILEMODE_CREATE_NEW'
         $summary.pendingMigrationScriptSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')).Hash
         $summary.invariantPass1Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'invariants-pass-1.txt')).Hash
         $summary.invariantPass2Sha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'invariants-pass-2.txt')).Hash
@@ -93,13 +95,26 @@ try {
     $reviewed.executedTree = $tree; $reviewed | ConvertTo-Json | Set-Content -Encoding utf8 (Join-Path $root 'reviewed-git-state.json')
 
     'READY' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-readiness.txt')
-    @('SOURCE_DATABASE=RhemaERP','TARGET_DATABASE=RHEMAERP_GL_REHEARSAL_FINAL_TEST','BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE','RESTORE_VERIFYONLY_CHECKSUM_COMPLETE','RESTORE_TARGET_COMPLETE','DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE') |
+    @('SOURCE_DATABASE=RhemaERP','TARGET_DATABASE=RHEMAERP_GL_REHEARSAL_FINAL_TEST',('BACKUP_MEDIA_ID=' + ('d' * 32)),'BACKUP_PATH_ATOMICALLY_RESERVED','BACKUP_COPY_ONLY_CHECKSUM_START','BACKUP_COPY_ONLY_CHECKSUM_COMPLETE','RESTORE_VERIFYONLY_CHECKSUM_COMPLETE','RESTORE_TARGET_COMPLETE','DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE') |
         Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'backup-restore-checkdb.txt')
     (('C' * 64) + '  RHEMAERP_GL_REHEARSAL_FINAL_TEST_COPYONLY.bak') | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'backup.sha256')
     foreach ($file in @('clone-apply-migrations.log','seed-pass-1.log','seed-pass-2.log')) { 'PASS' | Set-Content -Encoding utf8 (Join-Path $root $file) }
     $targetIds = @(@($sourceIds) + @($pending) | Sort-Object -Unique)
     $targetIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'target-migration-history.txt')
-    @('ACCOUNT|1|1000|Cash','ACCOUNT_SEGMENT_VALUE|1|1000|00','PRODUCER_INTENT_GROUP|1|Approved') | Set-Content -Encoding utf8 (Join-Path $root 'invariants-pass-1.txt')
+    $canonicalInvariantRows = @(
+        'ACCOUNT|1|1000|Cash',
+        'ACCOUNT_SEGMENT_VALUE|1|1000|00',
+        'ACCOUNT_BALANCE|1|1000|10.00',
+        'ACCOUNT_CURRENCY_EXPOSURE|1|USD|20.00',
+        'ACCOUNTING_BOOK_PERIOD|1|Open',
+        'ACCOUNTING_BOOK_INITIALIZATION|1|Approved',
+        'ACCOUNTING_BOOK_INITIALIZATION_LINE|1|10.00|10.00',
+        'JOURNAL_ENTRY|1|JE-001|Posted',
+        'ACCOUNT_TRANSACTION|1|1000|10.00',
+        'FINANCE_POSTING_EVENT|1|INV|Posted',
+        'PRODUCER_INTENT_GROUP|1|Approved'
+    )
+    $canonicalInvariantRows | Set-Content -Encoding utf8 (Join-Path $root 'invariants-pass-1.txt')
     Copy-Item (Join-Path $root 'invariants-pass-1.txt') (Join-Path $root 'invariants-pass-2.txt')
     $invariantHash=(Get-FileHash -Algorithm SHA256 (Join-Path $root 'invariants-pass-1.txt')).Hash
     @("$invariantHash  invariants-pass-1.txt","$invariantHash  invariants-pass-2.txt") | Set-Content -Encoding ascii (Join-Path $root 'checksums.sha256')
@@ -111,18 +126,26 @@ try {
     Write-Summary 'PASS' $pending; Assert-Refused 'exactly source history union the ordered pending delta'
     $targetIds | Set-Content -Encoding ascii (Join-Path $root 'target-migration-history.txt')
 
-    $markers=Get-Content (Join-Path $root 'backup-restore-checkdb.txt'); $markers[4]='RESTORE_TARGET_COMPLETE'; $markers | Set-Content -Encoding utf8 (Join-Path $root 'backup-restore-checkdb.txt')
+    $markers=Get-Content (Join-Path $root 'backup-restore-checkdb.txt'); $verifyIndex=[Array]::IndexOf($markers,'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'); $markers[$verifyIndex]='RESTORE_TARGET_COMPLETE'; $markers | Set-Content -Encoding utf8 (Join-Path $root 'backup-restore-checkdb.txt')
     Write-Summary 'PASS' $pending; Assert-Refused 'identity-inconsistent'
-    $markers[4]='RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'; $markers | Set-Content -Encoding utf8 (Join-Path $root 'backup-restore-checkdb.txt')
+    $markers[$verifyIndex]='RESTORE_VERIFYONLY_CHECKSUM_COMPLETE'; $markers | Set-Content -Encoding utf8 (Join-Path $root 'backup-restore-checkdb.txt')
 
     Write-Summary 'PASS' $pending
     Add-Content -Encoding utf8 -LiteralPath (Join-Path $root 'backup-restore-checkdb.txt') -Value ' '
     Assert-Refused 'backup/restore/DBCC evidence hash disagrees'
     $markers | Set-Content -Encoding utf8 (Join-Path $root 'backup-restore-checkdb.txt')
 
-    @('ACCOUNT|1|1001|Cash','ACCOUNT_SEGMENT_VALUE|1|1000|00','PRODUCER_INTENT_GROUP|1|Approved') | Set-Content -Encoding utf8 (Join-Path $root 'invariants-pass-2.txt')
-    Write-Summary 'PASS' $pending; Assert-Refused 'two-pass invariant hashes are not identical'
-    Copy-Item (Join-Path $root 'invariants-pass-1.txt') (Join-Path $root 'invariants-pass-2.txt') -Force
+    foreach ($prefix in @('ACCOUNT_BALANCE|','ACCOUNT_CURRENCY_EXPOSURE|','ACCOUNTING_BOOK_PERIOD|',
+        'ACCOUNTING_BOOK_INITIALIZATION|','ACCOUNTING_BOOK_INITIALIZATION_LINE|','JOURNAL_ENTRY|',
+        'ACCOUNT_TRANSACTION|','FINANCE_POSTING_EVENT|')) {
+        $mutatedRows = @($canonicalInvariantRows)
+        $index = 0..($mutatedRows.Count-1) | Where-Object { $mutatedRows[$_].StartsWith($prefix, [StringComparison]::Ordinal) } | Select-Object -First 1
+        $mutatedRows[$index] = $mutatedRows[$index] + '|SAME_COUNT_MUTATION'
+        $mutatedRows | Set-Content -Encoding utf8 (Join-Path $root 'invariants-pass-2.txt')
+        Write-Summary 'PASS' $pending
+        Assert-Refused 'two-pass invariant hashes are not identical'
+    }
+    $canonicalInvariantRows | Set-Content -Encoding utf8 (Join-Path $root 'invariants-pass-2.txt')
 
     'SELECT 1; -- Server=secret-host' | Set-Content -Encoding ascii (Join-Path $root 'pending-migrations-idempotent.sql')
     $changed=(Get-FileHash -Algorithm SHA256 (Join-Path $root 'pending-migrations-idempotent.sql')).Hash

@@ -59,8 +59,8 @@ IF OBJECT_ID(N'dbo.FxRevaluationBatches', N'U') IS NOT NULL
 
 IF OBJECT_ID(N'dbo.AccountCurrencyLinks', N'U') IS NOT NULL
     EXEC(N'
-      SELECT N''ACTIVE_LEGACY_CURRENCY_LINKS'' AS FindingCode, N''PREFLIGHT'' AS Severity, COUNT_BIG(*) AS AffectedRows,
-             N''Each active legacy currency link must have an unambiguous enabled active-book posting classification whose default matches RevaluationRequired.'' AS OperatorMessage
+      SELECT N''ACTIVE_LEGACY_CURRENCY_LINKS'' AS FindingCode, N''REVIEW'' AS Severity, COUNT_BIG(*) AS AffectedRows,
+             N''Final clone must stop before backup unless separately reviewed evidence fully proves Phase 4 equivalence for every active legacy currency link.'' AS OperatorMessage
       FROM dbo.AccountCurrencyLinks WHERE IsDeleted=0 AND IsActive=1 HAVING COUNT_BIG(*)>0;');
 
 IF OBJECT_ID(N'dbo.AccountSegmentValues', N'U') IS NOT NULL

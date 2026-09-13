@@ -198,12 +198,18 @@ if ($PackageKind -eq 'FinalClone') {
         $requiredMarkers = @(
             'SOURCE_DATABASE=RhemaERP',
             "TARGET_DATABASE=$($summary.targetDatabase)",
+            "BACKUP_MEDIA_ID=$($summary.backupMediaId)",
+            'BACKUP_PATH_ATOMICALLY_RESERVED',
             'BACKUP_COPY_ONLY_CHECKSUM_START',
             'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE',
             'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE',
             'RESTORE_TARGET_COMPLETE',
             'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE'
         )
+        if ([string]$summary.backupMediaId -notmatch '^[0-9a-f]{32}$' -or
+            [string]$summary.backupReservation -ne 'FILEMODE_CREATE_NEW') {
+            throw 'PASS backup media identity is missing or malformed.'
+        }
         $priorMarkerIndex = -1
         foreach ($marker in $requiredMarkers) {
             $matching = @($backupEvidenceLines | Where-Object { $_ -eq $marker })

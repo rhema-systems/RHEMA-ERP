@@ -150,7 +150,9 @@ try {
         '$authoritativeMigrationCount = 456',
         "'20260908120000_AddProducerIntentGroupsC8'",
         'Assert-TargetAbsent $target',
-        'COPY_ONLY, CHECKSUM, INIT',
+        'COPY_ONLY, CHECKSUM, NOINIT, NOSKIP, MEDIANAME=',
+        '[System.IO.FileMode]::CreateNew',
+        'BACKUP_PATH_ATOMICALLY_RESERVED',
         'RESTORE VERIFYONLY',
         'DBCC CHECKDB',
         'This harness never overwrites it',
@@ -163,9 +165,46 @@ try {
             throw "Final clone safety contract is missing: $requiredText"
         }
     }
+    $legacyCloneMarker = "if (`$Mode -eq 'RehearseClone') {"
+    $legacyCloneIndex = $scriptText.IndexOf($legacyCloneMarker, [StringComparison]::Ordinal)
+    if ($legacyCloneIndex -lt 0) { throw 'Could not isolate the final-clone implementation from the historical clone path.' }
+    $finalModeText = $scriptText.Substring(0, $legacyCloneIndex)
+    if ($finalModeText -match 'COPY_ONLY,\s*CHECKSUM,\s*INIT\b' -or
+        $finalModeText -notmatch 'COPY_ONLY,\s*CHECKSUM,\s*NOINIT,\s*NOSKIP,\s*MEDIANAME=') {
+        throw 'Final clone backup must use the fresh unpredictable media identity and no-overwrite NOINIT/NOSKIP pattern.'
+    }
+    $reservationProbe = Join-Path ([System.IO.Path]::GetTempPath()) "RHEMAERP_GL_RESERVATION_$([Guid]::NewGuid().ToString('N')).bak"
+    try {
+        $firstReservation = [System.IO.File]::Open($reservationProbe, [System.IO.FileMode]::CreateNew,
+            [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+        $firstReservation.Dispose()
+        $secondCreateRefused = $false
+        try {
+            $unexpected = [System.IO.File]::Open($reservationProbe, [System.IO.FileMode]::CreateNew,
+                [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+            $unexpected.Dispose()
+        }
+        catch [System.IO.IOException] { $secondCreateRefused = $true }
+        if (-not $secondCreateRefused) { throw 'Atomic CreateNew reservation did not refuse an existing backup path.' }
+    }
+    finally { if (Test-Path -LiteralPath $reservationProbe) { Remove-Item -LiteralPath $reservationProbe -Force } }
+    Write-Host 'PASS: atomic backup reservation refuses an already-created exact path'
+    $sourceReadinessText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'sql\gl-source-readiness.sql')
+    if ($sourceReadinessText -notmatch "ACTIVE_LEGACY_CURRENCY_LINKS'' AS FindingCode, N''REVIEW'' AS Severity" -or
+        -not $scriptText.Contains("`$readinessText -match '(?im)\b(BLOCKER|REVIEW)\b'")) {
+        throw 'Active legacy currency links are not guaranteed to stop final clone before backup for Phase 4 review.'
+    }
+    $syntheticLegacyFinding = 'ACTIVE_LEGACY_CURRENCY_LINKS REVIEW 1'
+    if ($syntheticLegacyFinding -notmatch '(?im)\b(BLOCKER|REVIEW)\b') {
+        throw 'Synthetic active legacy currency-link finding did not trigger the final pre-backup stop predicate.'
+    }
+    Write-Host 'PASS: active legacy currency links force REVIEW and the final pre-backup stop predicate'
+
     $finalInvariantText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql')
     foreach ($requiredText in @('20260908120000_AddProducerIntentGroupsC8', 'ACCOUNT|', 'ACCOUNT_SEGMENT_VALUE|',
-        'APPLICABILITY_POLICY|', 'SELECTION_EVIDENCE|', 'ACCOUNTING_EVENT|', 'ACCOUNTING_EVENT_POSTING|',
+        'ACCOUNT_BALANCE|', 'ACCOUNT_CURRENCY_EXPOSURE|', 'ACCOUNTING_BOOK_PERIOD|',
+        'ACCOUNTING_BOOK_INITIALIZATION|', 'ACCOUNTING_BOOK_INITIALIZATION_LINE|', 'JOURNAL_ENTRY|',
+        'ACCOUNT_TRANSACTION|', 'FINANCE_POSTING_EVENT|', 'APPLICABILITY_POLICY|', 'SELECTION_EVIDENCE|', 'ACCOUNTING_EVENT|', 'ACCOUNTING_EVENT_POSTING|',
         'AccountingEventProducerReceipts', 'PRODUCER_INTENT_GROUP|', 'PRODUCER_INTENT_GROUP_MEMBER|', 'CONTROL_COUNTS')) {
         if ($finalInvariantText -notmatch [regex]::Escape($requiredText)) {
             throw "Final-clone invariant contract is missing: $requiredText"

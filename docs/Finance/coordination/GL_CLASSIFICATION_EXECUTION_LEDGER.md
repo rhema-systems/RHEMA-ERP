@@ -2197,3 +2197,11 @@ identity-bound backup/VERIFYONLY/restore/DBCC proof, canonicalizes Accounts, Acc
 authority/state, and retains only sanitized SQL derivatives. Offline PowerShell parsing, the complete safety-
 refusal suite, final 456/C8 PASS/NO-GO package validation and all tamper/refusal cases passed. No database or
 configured connection was accessed; final Sol High re-review remains required over the ledger-only descendant.
+
+Sol High re-review of exact `f26dbdac6e74d8d59d1e9b47331870145130fdef` remained `CHANGES_REQUIRED` for
+three bounded rehearsal defects: missing canonical C2 balance/exposure, C4 period/initialization and material
+journal/transaction/posting-event row content; active legacy currency links emitted non-stopping `PREFLIGHT`;
+and the final backup used overwrite-capable `INIT` after an advisory existence check. A narrow offline correction
+is active to add each row-content domain with same-count mutation refusals, make legacy links a pre-backup
+`REVIEW`, and atomically reserve the exact target-derived backup before no-overwrite SQL media creation. No
+database, migration or configured environment connection is in scope.

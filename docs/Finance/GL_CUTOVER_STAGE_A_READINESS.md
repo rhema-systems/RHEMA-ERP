@@ -53,6 +53,9 @@ discovers 456 migrations ending at `20260908120000_AddProducerIntentGroupsC8`; a
 delta or returns fail-closed NO-GO evidence without bypassing any migration preflight. That operational mode now
 also requires exact independently reviewed commit/tree process values and a wholly clean tracked/untracked worktree
 before connection parsing; retained evidence binds reviewed and executed identities and is independently reconciled.
+Its current final-cutover invariant snapshot includes row content for C2 balances/exposures, C4 period/opening
+authority and material journal/transaction/posting-event state. Active legacy currency links force pre-backup
+`REVIEW`, and backup creation uses atomic `FileMode.CreateNew` reservation plus no-overwrite SQL media identity.
 
 ## Database safety boundary
 
