@@ -24766,10 +24766,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "CorrectsProducerIntentGroupId");
 
-                    b.HasIndex("TenantId", "GroupFingerprint")
+                    b.HasIndex("TenantId", "IdempotencyKey")
                         .IsUnique();
 
-                    b.HasIndex("TenantId", "IdempotencyKey")
+                    b.HasIndex("TenantId", "GroupFingerprint")
                         .IsUnique();
 
                     b.HasIndex("TenantId", "ReversesProducerIntentGroupId");

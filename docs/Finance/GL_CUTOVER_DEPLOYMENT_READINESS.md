@@ -2,6 +2,13 @@
 
 Status: **code candidate only — deployment is not authorized**
 
+D3 status: the disposable-development reset is paused after runtime attempt 02 recreated `RhemaERP` and the
+retained migration chain failed from zero. The database now has zero applied migrations and only
+`__EFMigrationsHistory`. A verified attempt-02 recovery backup remains preserved externally (453,042,176 bytes,
+SHA-256 `2025FBD47411BD483DFB1CDC221032955668B08AFDB8CD0B322A3BB83E6DB05A`). The source archive and that
+evidence must not be changed. A new current-model baseline is prepared for independent Sol High review; no reset
+retry is authorized by this document.
+
 Frozen integrated candidate: `cbc0d3c91142c63c4ea40f08f11d633752268367`
 
 Candidate provenance: exact Stage B5 commit `cc132ac329b6a4e7187e57bd8108cbc8492822d6` was
@@ -47,18 +54,28 @@ active producer request surface.
 - Finance accounting-book frontend tests: 33 passed; targeted ESLint passed.
 - Active non-migration V1 type/catalogue scan: zero matches. Procurement and HR account-writer scan:
   zero matches.
-- EF model parity: no pending model changes. No-connect migration discovery: 456 entries, ending at C8.
-- The 13-migration idempotent cutover artifact contains 13 migration-history rows, is 265,374 bytes, and
+- EF model parity: no pending model changes. No-connect migration discovery now returns exactly one compiled
+  disposable-development baseline, `20260913162402_DisposableDevelopmentCurrentModelBaseline`.
+- Historical evidence: the pre-D3 13-migration idempotent cutover artifact contained 13 migration-history rows, was 265,374 bytes, and
   has SHA-256 `CDBC813157F551BF192845DFBC05D74D55C6029620EA54A41A99E35769CF3D01`.
 
 This evidence is repository-local. It does not replace independent review or environment rehearsal.
 
 ## Migration inventory and unapplied set
 
-Repository-only discovery must return exactly **456** migrations and end at
-`20260908120000_AddProducerIntentGroupsC8`. Migration discovery must be run with `--no-connect`; model
-parity and script generation use EF design-time metadata and must not be given an environment connection
-string. These checks do not prove that any environment has applied the migrations.
+Repository-only discovery on the D3 candidate must return exactly **one** migration:
+`20260913162402_DisposableDevelopmentCurrentModelBaseline`. Migration discovery must be run with `--no-connect`; model
+parity and script generation use EF design-time metadata with an explicit synthetic unreachable process-scoped
+connection override so application configuration is never inspected or used. These checks do not prove that any
+environment has applied the migrations.
+
+The complete former 456-migration source chain is retained under
+`src/ErpSystem.Data/LegacyMigrationsArchive` and explicitly excluded from compilation. It is recoverable audit
+source, not an executable chain and not fake history. The baseline is a true zero-to-current migration from the
+current model; its snapshot is current, future EF migrations continue normally from it, and its `Up` carries the
+final reviewed C5-C8 database-only trigger authority after creating the C1-C8 relational schema. The baseline is
+authorized only for the explicitly disposable local-development reset. It is not an upgrade path for databases
+that contain any legacy migration history.
 
 The last authorized Stage A read-only fingerprint of configured `RHEMAERP` ended at
 `20260902140000_AddFixedAssetDepreciationConventionEvidence`. On that evidence, the minimum known cutover
@@ -83,7 +100,7 @@ must obtain a new read-only migration-history snapshot immediately before rehear
 pending delta. Historical/orphan history IDs recorded in Stage A must be preserved and investigated; they
 must not be deleted or silently stamped to make counts agree.
 
-The code-candidate check generated an idempotent script for the full 13-migration cutover range (from the
+The pre-D3 code-candidate check generated an idempotent script for the full 13-migration cutover range (from the
 last recorded applied migration through C8). Full-history idempotent generation from migration zero remains
 blocked by a pre-existing legacy `AspNetRoles` data-operation/model-metadata mismatch. Deployment does not
 require replaying the repository's entire history against an existing database, but the exact pending range
@@ -98,7 +115,10 @@ documented Phase 4 stop. The operational cutover path is `RehearseFinalClone`. I
 configuration fallback: both connection strings and all three disabled flags must be explicit process values.
 It also requires the exact independently reviewed commit and tree as process values and refuses a descendant,
 another tree, or any tracked/untracked workspace change before parsing a connection or contacting SQL Server.
-It first binds that clean executed HEAD/tree into evidence, builds, proves EF model parity, discovers exactly 456 migrations ending at C8, captures source history,
+On the D3 candidate it first binds that clean executed HEAD/tree into evidence, builds, proves EF model parity,
+and discovers exactly the one baseline identity. Any source with legacy migration history is outside this
+disposable baseline and must fail closed; `RehearseFinalClone` is not authorized to apply the baseline to such a
+source or to fabricate/stamp replacement history. The historical final-clone behavior then captures source history,
 derives and records the exact pending delta, generates and hashes its bounded idempotent SQL artifact, and runs
 read-only readiness diagnostics. Any `BLOCKER` or explicit `REVIEW` finding produces
 durable `NO_GO_PREFLIGHT` evidence before a backup or target exists. Only a clean preflight may proceed through
@@ -251,7 +271,7 @@ separate `RESTORE VERIFYONLY`, and records SHA-256. It then persists monotonic `
 one SQL batch acquires the reset lock, rechecks server machine/instance/name/endpoint plus database/backup identity,
 quiesces the source, proves the
 exact captured source history and fingerprint, and immediately performs the sole drop/recreate. A successful reset
-recreates only `RhemaERP`, applies the exact unique ordered 456/C8 list, seeds twice with byte-identical Finance
+recreates only `RhemaERP`, applies the one exact current-model baseline, seeds twice with byte-identical Finance
 invariants, proves zero-orphan history, and completes DBCC. Terminal success and failure packages use the dedicated
 `DisposableReset` validator, bind every artifact by SHA-256, scan retained text/SQL/Markdown for machine or secret
 material, and atomically write a complete manifest. Catch independently reconciles nonempty backup length and a
@@ -313,7 +333,7 @@ or retry against a different source. Cleanup remains a separate explicit `DropRe
   producer-receipt, and owner back-reference identities.
 - [ ] Exercise failure injection after owner mutation and before commit, prove rollback, then prove durable
   failure evidence is written only after rollback.
-- [ ] Re-run backend/frontend, EF model-parity, 456-migration discovery, idempotent-script, credential-scan,
+- [ ] Re-run backend/frontend, EF model-parity, exact one-baseline discovery, zero-to-current script, credential-scan,
   ancestry, diff, and clean-status gates from the frozen candidate.
 - [ ] Obtain independent Finance/DBA review of migration evidence, balances, source identity, retry behavior,
   feature flags, backup/restore evidence, and rollback decision points.
@@ -350,7 +370,7 @@ after root-cause correction and another isolated rehearsal.
 A release is **NO-GO** unless all of the following are attached to the change record: independently approved
 candidate SHA; exact pending-migration list; successful isolated clone rehearsal; verified backup and restore;
 two-pass seed checksum; module posting/retry reconciliation; zero-error code and frontend gates; EF parity;
-exact 456 no-connect migration discovery; idempotent SQL artifact checksum; explicit disabled flag values; and
+exact one-baseline no-connect migration discovery; zero-to-current SQL artifact checksum; explicit disabled flag values; and
 named deployment, Finance, DBA, independent-review, and rollback owners.
 
 No item in this document authorizes migration application or feature enablement by itself.

@@ -27,8 +27,8 @@ $supersededMigrations = @(
     '20260312013725_AddProjectResourceRoutingRequirements'
 )
 $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
-$authoritativeMigrationCount = 456
-$authoritativeLatestMigration = '20260908120000_AddProducerIntentGroupsC8'
+$authoritativeMigrationCount = 1
+$authoritativeLatestMigration = '20260913162402_DisposableDevelopmentCurrentModelBaseline'
 $sqlcmdMaxVariableWidth = 8000
 $sqlcmdScreenWidth = 8000
 $finalCutoverFlags = @(
@@ -285,12 +285,21 @@ function Invoke-SqlScalar([System.Data.SqlClient.SqlConnectionStringBuilder]$bui
 
 function Get-SourceFingerprint([System.Data.SqlClient.SqlConnectionStringBuilder]$builder, [string]$database) {
     [string](Invoke-SqlScalar $builder $database @"
-SELECT CONCAT(
-    (SELECT COUNT_BIG(*) FROM dbo.__EFMigrationsHistory), '|',
-    (SELECT MAX(MigrationId) FROM dbo.__EFMigrationsHistory), '|',
-    (SELECT COUNT_BIG(*) FROM dbo.FxRevaluationBatches WHERE IsDeleted=0), '|',
-    (SELECT COUNT_BIG(*) FROM dbo.AccountCurrencyLinks WHERE IsDeleted=0 AND IsActive=1), '|',
-    (SELECT COUNT_BIG(*) FROM dbo.JournalEntries WHERE IsDeleted=0));
+DECLARE @migrationCount bigint=0, @latest nvarchar(150)=N'EMPTY', @fx bigint=0, @links bigint=0, @journals bigint=0;
+IF OBJECT_ID(N'dbo.__EFMigrationsHistory',N'U') IS NOT NULL
+    EXEC sys.sp_executesql N'SELECT @count=COUNT_BIG(*),@latest=COALESCE(MAX(MigrationId),N''EMPTY'') FROM dbo.__EFMigrationsHistory;',
+        N'@count bigint OUTPUT,@latest nvarchar(150) OUTPUT', @count=@migrationCount OUTPUT,@latest=@latest OUTPUT;
+IF OBJECT_ID(N'dbo.FxRevaluationBatches',N'U') IS NOT NULL AND COL_LENGTH(N'dbo.FxRevaluationBatches',N'IsDeleted') IS NOT NULL
+    EXEC sys.sp_executesql N'SELECT @count=COUNT_BIG(*) FROM dbo.FxRevaluationBatches WHERE IsDeleted=0;',
+        N'@count bigint OUTPUT', @count=@fx OUTPUT;
+IF OBJECT_ID(N'dbo.AccountCurrencyLinks',N'U') IS NOT NULL AND COL_LENGTH(N'dbo.AccountCurrencyLinks',N'IsDeleted') IS NOT NULL
+   AND COL_LENGTH(N'dbo.AccountCurrencyLinks',N'IsActive') IS NOT NULL
+    EXEC sys.sp_executesql N'SELECT @count=COUNT_BIG(*) FROM dbo.AccountCurrencyLinks WHERE IsDeleted=0 AND IsActive=1;',
+        N'@count bigint OUTPUT', @count=@links OUTPUT;
+IF OBJECT_ID(N'dbo.JournalEntries',N'U') IS NOT NULL AND COL_LENGTH(N'dbo.JournalEntries',N'IsDeleted') IS NOT NULL
+    EXEC sys.sp_executesql N'SELECT @count=COUNT_BIG(*) FROM dbo.JournalEntries WHERE IsDeleted=0;',
+        N'@count bigint OUTPUT', @count=@journals OUTPUT;
+SELECT CONCAT(@migrationCount,N'|',@latest,N'|',@fx,N'|',@links,N'|',@journals);
 "@)
 }
 
@@ -509,8 +518,13 @@ function Assert-DisposableServerSideLocality([string]$dataSource, [string]$sqlMa
 }
 
 function Test-DisposableSourceFingerprint([string]$fingerprint) {
-    return -not [string]::IsNullOrWhiteSpace($fingerprint) -and
-        $fingerprint -cmatch '^\d+\|\d{14}_[A-Za-z0-9_]+\|\d+\|\d+\|\d+$'
+    if ([string]::IsNullOrWhiteSpace($fingerprint) -or
+        $fingerprint -cnotmatch '^(?<count>\d+)\|(?<latest>EMPTY|\d{14}_[A-Za-z0-9_]+)\|\d+\|\d+\|\d+$') {
+        return $false
+    }
+    $migrationCount = [uint64]$Matches.count
+    return ($migrationCount -eq 0 -and $Matches.latest -ceq 'EMPTY') -or
+        ($migrationCount -gt 0 -and $Matches.latest -cne 'EMPTY')
 }
 
 function Assert-DisposableConnectionUnambiguous([System.Data.SqlClient.SqlConnectionStringBuilder]$builder) {
@@ -797,11 +811,11 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
         $repositoryMigrations = @(Get-DiscoveredMigrationIds (Join-Path $evidenceDirectory 'migration-discovery.log'))
         $repositoryLatest = if ($repositoryMigrations.Count) { $repositoryMigrations[-1] } else { '<none>' }
         if ($repositoryMigrations.Count -ne $authoritativeMigrationCount -or $repositoryLatest -ne $authoritativeLatestMigration) {
-            throw "Disposable reset requires authoritative 456/C8 repository history; found $($repositoryMigrations.Count)/$repositoryLatest."
+            throw "Disposable reset requires the authoritative disposable-development baseline; found $($repositoryMigrations.Count)/$repositoryLatest."
         }
         if (@($repositoryMigrations | Sort-Object -Unique).Count -ne $authoritativeMigrationCount -or
             (@($repositoryMigrations | Sort-Object) -join "`n") -cne ($repositoryMigrations -join "`n")) {
-            throw 'Disposable reset requires the exact unique ordered authoritative 456 migration identity list before DROP.'
+            throw 'Disposable reset requires the exact authoritative disposable-development baseline identity before DROP.'
         }
         $repositoryMigrations | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'repository-migration-history.txt')
         $repositoryHistoryHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $evidenceDirectory 'repository-migration-history.txt')).Hash
@@ -1004,7 +1018,7 @@ SELECT COALESCE(MAX(FileExists),0) FROM @exists;
         $sourceFingerprintParts = @($sourceFingerprint -split '\|')
         if ($sourceFingerprintParts.Count -ne 5 -or
             $sourceFingerprintParts[0] -notmatch '^\d+$' -or
-            $sourceFingerprintParts[1] -notmatch '^\d{14}_[A-Za-z0-9_]+$' -or
+            $sourceFingerprintParts[1] -notmatch '^(?:EMPTY|\d{14}_[A-Za-z0-9_]+)$' -or
             $sourceFingerprintParts[2] -notmatch '^\d+$' -or
             $sourceFingerprintParts[3] -notmatch '^\d+$' -or
             $sourceFingerprintParts[4] -notmatch '^\d+$') {
@@ -1057,11 +1071,26 @@ IF EXISTS (
     SELECT MigrationId FROM #ExpectedHistory
     EXCEPT SELECT MigrationId COLLATE Latin1_General_100_BIN2 FROM [RhemaERP].dbo.__EFMigrationsHistory)
     THROW 51206, 'DISPOSABLE_RESET_FINAL_HISTORY_DRIFT', 1;
-DECLARE @actualMigrationCount bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.__EFMigrationsHistory);
-DECLARE @actualLatest nvarchar(150)=(SELECT MAX(MigrationId) FROM [RhemaERP].dbo.__EFMigrationsHistory);
-DECLARE @actualFx bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.FxRevaluationBatches WHERE IsDeleted=0);
-DECLARE @actualLinks bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.AccountCurrencyLinks WHERE IsDeleted=0 AND IsActive=1);
-DECLARE @actualJournals bigint=(SELECT COUNT_BIG(*) FROM [RhemaERP].dbo.JournalEntries WHERE IsDeleted=0);
+DECLARE @actualMigrationCount bigint=0, @actualLatest nvarchar(150)=N'EMPTY', @actualFx bigint=0,
+        @actualLinks bigint=0, @actualJournals bigint=0;
+IF OBJECT_ID(N'[RhemaERP].dbo.__EFMigrationsHistory',N'U') IS NOT NULL
+    EXEC [RhemaERP].sys.sp_executesql
+        N'SELECT @count=COUNT_BIG(*),@latest=COALESCE(MAX(MigrationId),N''EMPTY'') FROM dbo.__EFMigrationsHistory;',
+        N'@count bigint OUTPUT,@latest nvarchar(150) OUTPUT',
+        @count=@actualMigrationCount OUTPUT,@latest=@actualLatest OUTPUT;
+IF OBJECT_ID(N'[RhemaERP].dbo.FxRevaluationBatches',N'U') IS NOT NULL
+   AND COL_LENGTH(N'[RhemaERP].dbo.FxRevaluationBatches',N'IsDeleted') IS NOT NULL
+    EXEC [RhemaERP].sys.sp_executesql N'SELECT @count=COUNT_BIG(*) FROM dbo.FxRevaluationBatches WHERE IsDeleted=0;',
+        N'@count bigint OUTPUT', @count=@actualFx OUTPUT;
+IF OBJECT_ID(N'[RhemaERP].dbo.AccountCurrencyLinks',N'U') IS NOT NULL
+   AND COL_LENGTH(N'[RhemaERP].dbo.AccountCurrencyLinks',N'IsDeleted') IS NOT NULL
+   AND COL_LENGTH(N'[RhemaERP].dbo.AccountCurrencyLinks',N'IsActive') IS NOT NULL
+    EXEC [RhemaERP].sys.sp_executesql N'SELECT @count=COUNT_BIG(*) FROM dbo.AccountCurrencyLinks WHERE IsDeleted=0 AND IsActive=1;',
+        N'@count bigint OUTPUT', @count=@actualLinks OUTPUT;
+IF OBJECT_ID(N'[RhemaERP].dbo.JournalEntries',N'U') IS NOT NULL
+   AND COL_LENGTH(N'[RhemaERP].dbo.JournalEntries',N'IsDeleted') IS NOT NULL
+    EXEC [RhemaERP].sys.sp_executesql N'SELECT @count=COUNT_BIG(*) FROM dbo.JournalEntries WHERE IsDeleted=0;',
+        N'@count bigint OUTPUT', @count=@actualJournals OUTPUT;
 IF @actualMigrationCount <> $($sourceFingerprintParts[0]) OR
    @actualLatest COLLATE Latin1_General_100_BIN2 <> N'$($sourceFingerprintParts[1])' COLLATE Latin1_General_100_BIN2 OR
    @actualFx <> $($sourceFingerprintParts[2]) OR @actualLinks <> $($sourceFingerprintParts[3]) OR
@@ -1113,7 +1142,7 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
         $finalHistory = @(Get-MigrationHistory $databaseTarget.Builder 'RhemaERP')
         $finalHistory | Set-Content -Encoding ascii -LiteralPath (Join-Path $evidenceDirectory 'target-migration-history.txt')
         if (($finalHistory -join "`n") -ne ($repositoryMigrations -join "`n")) {
-            throw 'Reset RhemaERP history is not exactly authoritative repository 456/C8 with zero orphans.'
+            throw 'Reset RhemaERP history is not exactly the authoritative disposable-development baseline with zero orphans.'
         }
         Write-DisposablePhaseMarker $evidenceDirectory 7 'MIGRATIONS_APPLIED' @{
             finalMigrationCount = $finalHistory.Count
@@ -1169,7 +1198,7 @@ SELECT N'DBCC_CHECKDB_COMPLETE';
         }
         Write-DisposableRecoveryInstructions $evidenceDirectory $true 'COMPLETE' 'NOT_APPLICABLE'
         Write-DisposableResetStatus $evidenceDirectory 'PASS' 'COMPLETE' $true $true $true @{
-            sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = 456; finalMigrationCount = 456
+            sourceFingerprint = $sourceFingerprint; repositoryMigrationCount = $authoritativeMigrationCount; finalMigrationCount = $authoritativeMigrationCount
             latestMigration = $authoritativeLatestMigration; orphanMigrationCount = 0; backupSha256 = $verifiedBackupSha256
             invariantSha256 = $firstInvariant; seedPasses = 2; dbcc = 'PASS'; backupMediaId = $backupMediaId
             backupFileName = $backupFileName

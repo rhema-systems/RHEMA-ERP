@@ -398,7 +398,11 @@ exit 0
     if (-not (Test-DisposableSourceFingerprint '446|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28')) {
         throw 'Valid restricted source fingerprint was refused.'
     }
+    if (-not (Test-DisposableSourceFingerprint '0|EMPTY|0|0|0')) {
+        throw 'Valid schema-empty disposable source fingerprint was refused.'
+    }
     foreach ($invalidFingerprint in @('', '446|latest|1|9|28', '446|20260902140000_Good|1|9|28|extra',
+        '1|EMPTY|0|0|0', '0|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0',
         "446|20260902140000_Good|1|9|28`nsecret")) {
         if (Test-DisposableSourceFingerprint $invalidFingerprint) { throw 'Invalid source fingerprint was accepted.' }
     }
@@ -446,7 +450,7 @@ exit 0
         'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT',
         'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET',
         "Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'",
-        'Reset RhemaERP history is not exactly authoritative repository 456/C8 with zero orphans',
+        'Reset RhemaERP history is not exactly the authoritative disposable-development baseline with zero orphans',
         'Second disposable reset seed changed canonical Finance invariants',
         "'FAILED_NO_AUTOMATIC_RETRY'",
         'no retry, restore, or cleanup was attempted',

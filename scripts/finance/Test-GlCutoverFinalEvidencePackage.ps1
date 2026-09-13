@@ -24,9 +24,9 @@ function Write-Summary([string]$status, [string[]]$pending) {
         status=$status; gitHead=$head; gitTree=$tree; reviewedCommit=$head; reviewedTree=$tree; repositoryClean=$true
         sourceDatabase='RhemaERP'; targetDatabase='RHEMAERP_GL_REHEARSAL_FINAL_TEST'
         sourceServer='<REDACTED_SAME_SERVER>'; targetServer='<REDACTED_SAME_SERVER>'; sameServer=$true
-        repositoryMigrationCount=456; latestMigration='20260908120000_AddProducerIntentGroupsC8'
+        repositoryMigrationCount=1; latestMigration='20260913162402_DisposableDevelopmentCurrentModelBaseline'
         pendingMigrationCount=$pending.Count; pendingMigrations=@($pending)
-        sourceFingerprint='456|20260908120000_AddProducerIntentGroupsC8|1|9|28'
+        sourceFingerprint='1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28'
         cutoverFlagsExplicitlyFalse=$true; targetCreated=($status -eq 'PASS'); backupCreated=($status -eq 'PASS')
     }
     if ($status -eq 'PASS') {
@@ -55,9 +55,9 @@ function Assert-Refused([string]$expected) {
 
 try {
     New-Item -ItemType Directory -Path $root | Out-Null
-    $migrationIds = @(1..455 | ForEach-Object { '{0:D14}_SyntheticMigration{1:D3}' -f $_,$_ }) + '20260908120000_AddProducerIntentGroupsC8'
-    $orphanId = '20260817030000_AddFixedAssetLocationMasterLinks'
-    $sourceIds = @(@($migrationIds[0..442]) + $orphanId | Sort-Object)
+    $migrationIds = @('20260913162402_DisposableDevelopmentCurrentModelBaseline')
+    $orphanId = '20260902140000_AddFixedAssetDepreciationConventionEvidence'
+    $sourceIds = @($orphanId)
     $pending = @($migrationIds | Where-Object { $_ -notin $sourceIds })
     Write-CommandEvidenceFixture 'migration-discovery.log' 'dotnet' $migrationIds
     $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
@@ -74,13 +74,13 @@ try {
     '-- synthetic exact pending-range idempotent SQL' | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')
     $idempotentHash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sql')).Hash
     "$idempotentHash  pending-migrations-idempotent.sql" | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations-idempotent.sha256')
-    '456|20260908120000_AddProducerIntentGroupsC8|1|9|28' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
-    '456|20260908120000_AddProducerIntentGroupsC8|1|9|28' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
+    '1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')
+    '1|20260902140000_AddFixedAssetDepreciationConventionEvidence|1|9|28' | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'source-fingerprint-after.txt')
     [ordered]@{ accountingEvents=$false; producerIntents=$false; producerIntentGroups=$false; source='explicit process environment variables' } |
         ConvertTo-Json | Set-Content -Encoding utf8 -LiteralPath (Join-Path $root 'feature-flags.json')
     Write-Summary 'NO_GO_PREFLIGHT' $pending
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
-    if ($LASTEXITCODE -ne 0) { throw 'Valid final 456/C8 preflight NO-GO package was rejected.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Valid final baseline preflight NO-GO package was rejected.' }
 
     $gitDiffPath = Join-Path $root 'git-diff-check.log'
     $validGitDiffEvidence = @(Get-Content -LiteralPath $gitDiffPath)
@@ -129,8 +129,8 @@ try {
     $flags = $validFlags | ConvertFrom-Json; $flags.producerIntentGroups=$true; $flags | ConvertTo-Json | Set-Content -Encoding utf8 $flagsPath
     Write-Summary 'NO_GO_PREFLIGHT' $pending; Assert-Refused 'does not prove C6, C7 and C8 explicitly false'; $validFlags | Set-Content -Encoding utf8 $flagsPath
 
-    $badPending = @($pending[1..($pending.Count-1)])
-    $badPending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
+    $badPending = @()
+    Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')
     Write-Summary 'NO_GO_PREFLIGHT' $badPending; Assert-Refused 'repository history minus source history'
     $pending | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'pending-migrations.txt')
 
@@ -169,7 +169,7 @@ try {
     @("$invariantHash  invariants-pass-1.txt","$invariantHash  invariants-pass-2.txt") | Set-Content -Encoding ascii (Join-Path $root 'checksums.sha256')
     Write-Summary 'PASS' $pending
     & pwsh -NoProfile -File $validator -PackageKind FinalClone -EvidenceDirectory $root -WriteManifest
-    if ($LASTEXITCODE -ne 0) { throw 'Valid final 456/C8 PASS package was rejected.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Valid final baseline PASS package was rejected.' }
 
     $migrationIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $root 'source-migration-history.txt')
     Clear-Content -LiteralPath (Join-Path $root 'pending-migrations.txt')

@@ -18,6 +18,16 @@ function Get-RequiredNonNullJsonProperty($value, [string]$name, [string]$context
     return $property.Value
 }
 
+function Test-DisposableSourceFingerprintShape([string]$fingerprint) {
+    if ([string]::IsNullOrWhiteSpace($fingerprint) -or
+        $fingerprint -cnotmatch '^(?<count>\d+)\|(?<latest>EMPTY|\d{14}_[A-Za-z0-9_]+)\|\d+\|\d+\|\d+$') {
+        return $false
+    }
+    $migrationCount = [uint64]$Matches.count
+    return ($migrationCount -eq 0 -and $Matches.latest -ceq 'EMPTY') -or
+        ($migrationCount -gt 0 -and $Matches.latest -cne 'EMPTY')
+}
+
 function Get-SqlEvidenceTokens([string]$evidenceFile) {
     if (-not (Test-Path -LiteralPath $evidenceFile -PathType Leaf)) { return @() }
     $raw = Get-Content -Raw -LiteralPath $evidenceFile
@@ -253,10 +263,10 @@ if ($PackageKind -eq 'DisposableReset') {
         $repositoryIds = @(Get-Content -LiteralPath (Join-Path $root 'migration-discovery.log') | ForEach-Object {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         })
-        if ($repositoryIds.Count -ne 456 -or $repositoryIds[-1] -cne '20260908120000_AddProducerIntentGroupsC8' -or
-            @($repositoryIds | Sort-Object -Unique).Count -ne 456 -or
+        if ($repositoryIds.Count -ne 1 -or $repositoryIds[-1] -cne '20260913162402_DisposableDevelopmentCurrentModelBaseline' -or
+            @($repositoryIds | Sort-Object -Unique).Count -ne 1 -or
             (@($repositoryIds | Sort-Object) -join "`n") -cne ($repositoryIds -join "`n")) {
-            throw 'Disposable-reset repository history is not the exact unique ordered 456/C8 list.'
+            throw 'Disposable-reset repository history is not the exact authoritative disposable-development baseline.'
         }
         $repositoryHistoryPath = Join-Path $root 'repository-migration-history.txt'
         if (-not (Test-Path -LiteralPath $repositoryHistoryPath -PathType Leaf) -or
@@ -266,7 +276,7 @@ if ($PackageKind -eq 'DisposableReset') {
         if (Test-Path -LiteralPath (Join-Path $root 'target-migration-history.txt') -PathType Leaf) {
             $targetIds = @(Get-Content -LiteralPath (Join-Path $root 'target-migration-history.txt'))
             if (($targetIds -join "`n") -cne ($repositoryIds -join "`n")) {
-                throw 'Disposable-reset target history is not exactly repository 456/C8 with zero orphans.'
+                throw 'Disposable-reset target history is not exactly the repository baseline with zero orphans.'
             }
         }
     }
@@ -547,7 +557,13 @@ if ($PackageKind -eq 'DisposableReset') {
         }
         $sourceFingerprint = (Get-Content -Raw -LiteralPath (Join-Path $root 'source-fingerprint-before.txt')).Trim()
         $resetLines = @(Get-Content -LiteralPath (Join-Path $root 'reset-database.log') | ForEach-Object { $_.Trim() })
-        if ($sourceFingerprint -cne [string]$reset.sourceFingerprint -or
+        $sourceHistory = @(Get-Content -LiteralPath (Join-Path $root 'source-migration-history.txt') |
+            Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+        $fingerprintParts = @($sourceFingerprint -split '\|')
+        $expectedLatest = if ($sourceHistory.Count -eq 0) { 'EMPTY' } else { $sourceHistory[-1] }
+        if (-not (Test-DisposableSourceFingerprintShape $sourceFingerprint) -or
+            [uint64]$fingerprintParts[0] -ne $sourceHistory.Count -or $fingerprintParts[1] -cne $expectedLatest -or
+            $sourceFingerprint -cne [string]$reset.sourceFingerprint -or
             $resetLines -cnotcontains "SOURCE_FINAL_FINGERPRINT=$sourceFingerprint") {
             throw 'Disposable-reset PASS does not bind the captured fingerprint to the final quiescent recheck.'
         }
@@ -630,10 +646,10 @@ if ($PackageKind -eq 'FinalClone') {
             if ($_.Trim() -match '^(?<id>\d{14}_[^\s]+)') { $Matches.id }
         }
     )
-    if ($migrationIds.Count -ne 456 -or $migrationIds[-1] -ne '20260908120000_AddProducerIntentGroupsC8') {
-        throw "Final-clone migration evidence is not authoritative 456/C8. Count=$($migrationIds.Count); Latest=$($migrationIds[-1])."
+    if ($migrationIds.Count -ne 1 -or $migrationIds[-1] -ne '20260913162402_DisposableDevelopmentCurrentModelBaseline') {
+        throw "Final-clone migration evidence is not the authoritative disposable-development baseline. Count=$($migrationIds.Count); Latest=$($migrationIds[-1])."
     }
-    if (@($migrationIds | Sort-Object -Unique).Count -ne 456 -or
+    if (@($migrationIds | Sort-Object -Unique).Count -ne 1 -or
         (@($migrationIds | Sort-Object) -join "`n") -ne ($migrationIds -join "`n")) {
         throw 'Final-clone migration evidence contains duplicate or out-of-order migration IDs.'
     }

@@ -1,8 +1,8 @@
 SET NOCOUNT ON;
 SET XACT_ABORT ON;
 
-IF NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId=N'20260908120000_AddProducerIntentGroupsC8')
-    THROW 51100, 'GLF001: final C8 migration is not applied.', 1;
+IF NOT EXISTS (SELECT 1 FROM dbo.__EFMigrationsHistory WHERE MigrationId=N'20260913162402_DisposableDevelopmentCurrentModelBaseline')
+    THROW 51100, 'GLF001: disposable-development baseline with final C8 schema is not applied.', 1;
 IF OBJECT_ID(N'dbo.AccountingEvents', N'U') IS NULL
    OR OBJECT_ID(N'dbo.AccountingEventProducerReceipts', N'U') IS NULL
    OR OBJECT_ID(N'dbo.ProducerIntentGroups', N'U') IS NULL

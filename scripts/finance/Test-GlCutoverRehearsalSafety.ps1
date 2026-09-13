@@ -265,10 +265,10 @@ exit 0
 
     $scriptText = Get-Content -Raw -LiteralPath $script
     foreach ($requiredText in @(
-        '$authoritativeMigrationCount = 456',
+        '$authoritativeMigrationCount = 1',
         '$sqlcmdMaxVariableWidth = 8000',
         '$sqlcmdScreenWidth = 8000',
-        "'20260908120000_AddProducerIntentGroupsC8'",
+        "'20260913162402_DisposableDevelopmentCurrentModelBaseline'",
         'Assert-TargetAbsent $target',
         'COPY_ONLY, CHECKSUM, NOINIT, NOSKIP, MEDIANAME=',
         '[System.IO.FileMode]::CreateNew',
@@ -322,7 +322,7 @@ exit 0
     Write-Host 'PASS: active legacy currency links force REVIEW and the final pre-backup stop predicate'
 
     $finalInvariantText = Get-Content -Raw -LiteralPath (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql')
-    foreach ($requiredText in @('20260908120000_AddProducerIntentGroupsC8', 'ACCOUNT|', 'ACCOUNT_SEGMENT_VALUE|',
+    foreach ($requiredText in @('20260913162402_DisposableDevelopmentCurrentModelBaseline', 'ACCOUNT|', 'ACCOUNT_SEGMENT_VALUE|',
         'ACCOUNT_BALANCE|', 'ACCOUNT_CURRENCY_EXPOSURE|', 'ACCOUNTING_BOOK_PERIOD|',
         'ACCOUNTING_BOOK_INITIALIZATION|', 'ACCOUNTING_BOOK_INITIALIZATION_LINE|', 'JOURNAL_ENTRY|',
         'ACCOUNT_TRANSACTION|', 'FINANCE_POSTING_EVENT|', 'APPLICABILITY_POLICY|', 'SELECTION_EVIDENCE|', 'ACCOUNTING_EVENT|', 'ACCOUNTING_EVENT_POSTING|',
@@ -346,7 +346,7 @@ exit 0
         throw "Every canonical CONCAT must begin with nvarchar(max), be SHA2_256-hashed inside SQL, and retain a stable key. CONCAT=$canonicalConcatCount max=$maxCanonicalConcatCount hash=$sqlSideRowHashCount keyed=$stableKeyedHashCount"
     }
     Write-Host 'PASS: every canonical row uses nvarchar(max) CONCAT and a stable-keyed fixed SQL-side SHA2_256 hash'
-    Write-Host 'PASS: final 456/C8, absent-target, no-overwrite, backup/restore/DBCC and preflight NO-GO contracts'
+    Write-Host 'PASS: final baseline, absent-target, no-overwrite, backup/restore/DBCC and preflight NO-GO contracts'
 }
 finally {
     [Environment]::SetEnvironmentVariable('PATH', $priorPath, 'Process')

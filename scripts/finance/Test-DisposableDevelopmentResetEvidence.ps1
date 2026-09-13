@@ -424,13 +424,11 @@ try {
     foreach ($name in @('reset-build.log','ef-no-pending-model.log')) {
         "${native}dotnet" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass $name)
     }
-    $repositoryIds = @(1..455 | ForEach-Object { '{0:D14}_Migration{1:D3}' -f $_,$_ }) +
-        '20260908120000_AddProducerIntentGroupsC8'
+    $repositoryIds = @('20260913162402_DisposableDevelopmentCurrentModelBaseline')
     @($repositoryIds + "${native}dotnet") | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'migration-discovery.log')
     $repositoryIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'repository-migration-history.txt')
-    $sourceIds = @($repositoryIds | Select-Object -First 443)
-    $sourceIds | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'source-migration-history.txt')
-    $fingerprint = "443|$($sourceIds[-1])|0|0|0"
+    '' | Set-Content -NoNewline -Encoding ascii -LiteralPath (Join-Path $pass 'source-migration-history.txt')
+    $fingerprint = '0|EMPTY|0|0|0'
     $fingerprint | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'source-fingerprint-before.txt')
     "RHEMAERP_DATABASE_IDENTITY_SHA256=$('A' * 64)" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'source-database-identity.sha256')
     "LOCAL_SQL_INSTANCE_IDENTITY_SHA256=$('B' * 64)" | Set-Content -Encoding ascii -LiteralPath (Join-Path $pass 'source-server-identity.sha256')
@@ -480,7 +478,25 @@ try {
     Complete-Status $pass $passStatus
     & pwsh -NoProfile -File $validator -EvidenceDirectory $pass -PackageKind DisposableReset -WriteManifest
     if ($LASTEXITCODE -ne 0) { throw 'Complete disposable-reset PASS package did not validate.' }
-    Write-Host 'PASS: complete 456/C8 reset package validates and writes a manifest'
+    Write-Host 'PASS: complete disposable-development baseline reset package validates and writes a manifest'
+
+    foreach ($fingerprintTamper in @(
+        @{ label='EMPTY_WITH_NONZERO_COUNT'; value='1|EMPTY|0|0|0' },
+        @{ label='HISTORY_COUNT_MISMATCH'; value='1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0' }
+    )) {
+        $tamperRoot = New-PackageRoot ("FINGERPRINT_" + $fingerprintTamper.label)
+        Copy-Item -Path (Join-Path $pass '*') -Destination $tamperRoot
+        $fingerprintTamper.value | Set-Content -Encoding ascii -LiteralPath (Join-Path $tamperRoot 'source-fingerprint-before.txt')
+        $resetLogPath = Join-Path $tamperRoot 'reset-database.log'
+        (Get-Content -Raw -LiteralPath $resetLogPath).Replace(
+            "SOURCE_FINAL_FINGERPRINT=$fingerprint", "SOURCE_FINAL_FINGERPRINT=$($fingerprintTamper.value)") |
+            Set-Content -Encoding ascii -LiteralPath $resetLogPath
+        $tamperStatus = Get-Content -Raw -LiteralPath (Join-Path $tamperRoot 'reset-status.json') |
+            ConvertFrom-Json -AsHashtable
+        $tamperStatus.sourceFingerprint = $fingerprintTamper.value
+        Complete-Status $tamperRoot $tamperStatus
+        Invoke-ExpectedRemanifestFailure $tamperRoot "baseline source fingerprint $($fingerprintTamper.label)"
+    }
 
     Add-Content -Encoding ascii -LiteralPath (Join-Path $pass 'reset-invariants-pass-2.txt') -Value 'tamper'
     Invoke-ExpectedFailure $pass 'PASS invariant/content tamper'
