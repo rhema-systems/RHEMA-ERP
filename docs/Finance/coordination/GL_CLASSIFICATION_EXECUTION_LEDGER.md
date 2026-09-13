@@ -2402,3 +2402,17 @@ correction is active to capture nonempty length/SHA immediately after backup SQL
 state again in catch, accept a truthful unverified material-backup terminal package without phase-03, and validate
 separate recovery durable-phase/failed-operation fields with mismatch tamper refusals. No database, connection
 variable or preserved evidence is in scope; execution remains prohibited pending clean gates and Sol High re-review.
+
+The final D2 P2 correction completed as clean direct-child commit
+`5edfcf7303625790ff9e2c6e19fc52707e9a03bf` (tree
+`408f0385264c5e5cdf8143284e9f1cf2aee4b287`). The first post-BACKUP operation now captures nonempty file length and
+SHA-256 before phase-03 publication. Catch independently repeats that physical reconciliation and writes truthful
+`backupCreated`/`backupPreserved` evidence even if phase-03 was never published, while `backupVerified` remains false
+without both durable phase-04 and the exact VERIFYONLY marker. `RECOVERY.md` now records `Last durable phase` and
+`Failed operation` separately; the validator binds both plus verified-backup state to terminal status and durable
+markers. Actual helper tests simulate a material backup followed by phase-03 publication failure, and package tests
+accept that truthful unverified terminal state while refusing backup downgrade, durable-phase mismatch and failed-
+operation mismatch tampering. PowerShell parsing, disposable reset safety/helper and evidence/tamper suites, existing
+FinalClone safety/parser regression and final evidence/tamper suites all passed serially from the clean implementation
+commit. No database, process connection variable or preserved evidence was accessed. Sol High re-review is required
+over the ledger-only descendant; reset execution remains prohibited.
