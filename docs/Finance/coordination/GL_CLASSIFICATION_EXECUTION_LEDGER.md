@@ -2229,3 +2229,15 @@ offline fake-sqlcmd exercise of the real transport proves a sentinel after chara
 8000-character line fails closed. Exact-candidate parse, complete safety/refusal, final evidence/tamper, diff and
 clean-status gates passed. No database, migration or configured connection was accessed; Sol High re-review is
 required over the ledger-only handoff descendant.
+
+Sol High re-review of exact `a9828986a49b477a15b6d5a62cfc02806d880c9b` remained `CHANGES_REQUIRED`
+because SQL Server could cap canonical Unicode `CONCAT` results at 4,000 characters and sqlcmd screen wrapping
+was not pinned independently of variable-width display. The bounded direct-child correction
+`5f2cb45b` now constructs every canonical row with an explicit `nvarchar(max)` operand, hashes all material
+row content inside SQL with `SHA2_256`, and emits only a bounded stable key plus fixed 64-character hash.
+Shared `Invoke-Sql` supplies compatible exact `-y 8000 -w 8000`, continues to exclude `-W`/`-Y`, and retains
+the fail-closed 8,000-character boundary guard. The actual fake-sqlcmd path models both truncating and wrapping
+defaults and proves one intact line with a sentinel beyond character 4,000. Offline PowerShell parsing, the
+complete safety/refusal suite, final 456/C8 evidence/tamper validation and diff checks passed. No database,
+migration or configured connection was accessed; final Sol High re-review remains required over this
+ledger-only handoff descendant.
