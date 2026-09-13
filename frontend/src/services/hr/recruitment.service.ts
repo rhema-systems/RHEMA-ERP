@@ -29,6 +29,7 @@ import type {
   RequisitionHistoryEntry,
   ShortlistingCriteria,
   ShortlistingCriteriaForm,
+  ShortlistingCriteriaShape,
   StaffRequisition,
   StaffRequisitionStatus,
   StaffRequisitionStatusSummary,
@@ -354,6 +355,11 @@ class JobVacancyService {
 
   getCriteria(vacancyId: string): Promise<ShortlistingCriteria[]> {
     return apiService.get<ShortlistingCriteria[]>(`${this.baseUrl}/${vacancyId}/criteria`);
+  }
+
+  /** The server's table of what each criterion type is made of (round 3, lane K). */
+  getCriteriaShapes(): Promise<ShortlistingCriteriaShape[]> {
+    return apiService.get<ShortlistingCriteriaShape[]>(`${this.baseUrl}/criteria/shapes`);
   }
 
   addCriteria(vacancyId: string, payload: ShortlistingCriteriaForm): Promise<ShortlistingCriteria> {

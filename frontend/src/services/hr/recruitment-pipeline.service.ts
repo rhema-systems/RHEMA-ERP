@@ -14,6 +14,8 @@ import type {
   CandidateDocument,
   CandidateDocumentType,
   CandidateInterest,
+  CandidateLanguage,
+  CandidateLanguageForm,
   CandidateNote,
   CandidateNoteForm,
   CandidateQualification,
@@ -54,6 +56,7 @@ import type {
   ShortlistSummary,
   StageApplicationsQuery,
   UpdateApplicantTestResult,
+  UpdateJobApplicationSource,
   UpdateJobCandidate,
   UpdateRecruitmentPipeline,
   UpdateRecruitmentPipelineStage,
@@ -197,6 +200,16 @@ class JobCandidateService {
     return apiService.downloadBlob(`${this.baseUrl}/${id}/photo`);
   }
 
+  /** The gated route `GatedPhoto` / `PhotoDialog` fetch the photograph from (round 3, lane C2). */
+  photoUrl(id: string): string {
+    return `${this.baseUrl}/${id}/photo`;
+  }
+
+  /** HR sets the photograph through the scanned gate — same category as the careers upload. */
+  uploadPhoto(id: string, file: File): Promise<{ url: string; hasPhoto: boolean }> {
+    return hrDocumentService.upload<{ url: string; hasPhoto: boolean }>(`${this.baseUrl}/${id}/photo`, file);
+  }
+
   // ── sub-resources ────────────────────────────────────────────────────────
   // Each create posts to the candidate-scoped route; the server takes the candidate from the route
   // and ignores any id in the body, so there is no need to send one.
@@ -283,6 +296,26 @@ class JobCandidateService {
 
   deleteSkill(skillId: string): Promise<void> {
     return apiService.delete<void>(`${this.baseUrl}/skills/${skillId}`);
+  }
+
+  // Languages (round 3, lane C1 — the door; C2 — the tab). Same route shape as skills.
+  getLanguages(candidateId: string): Promise<CandidateLanguage[]> {
+    return apiService.get<CandidateLanguage[]>(`${this.baseUrl}/${candidateId}/languages`);
+  }
+
+  addLanguage(candidateId: string, payload: CandidateLanguageForm): Promise<CandidateLanguage> {
+    return apiService.post<CandidateLanguage>(`${this.baseUrl}/${candidateId}/languages`, payload);
+  }
+
+  updateLanguage(candidateId: string, languageId: string, payload: CandidateLanguageForm): Promise<CandidateLanguage> {
+    return apiService.put<CandidateLanguage>(`${this.baseUrl}/${candidateId}/languages/${languageId}`, {
+      ...payload,
+      id: languageId,
+    });
+  }
+
+  deleteLanguage(languageId: string): Promise<void> {
+    return apiService.delete<void>(`${this.baseUrl}/languages/${languageId}`);
   }
 
   getInterests(candidateId: string): Promise<CandidateInterest[]> {
@@ -410,6 +443,11 @@ class JobApplicationService {
 
   getShortlisted(vacancyId: string): Promise<JobApplicationSummary[]> {
     return apiService.get<JobApplicationSummary[]>(`${this.baseUrl}/vacancy/${vacancyId}/shortlisted`);
+  }
+
+  /** HR corrects the source and the advert an application came through (round 3, lane A). */
+  updateSource(id: string, payload: UpdateJobApplicationSource): Promise<JobApplication> {
+    return apiService.patch<JobApplication>(`${this.baseUrl}/${id}/source`, payload);
   }
 
   create(payload: CreateJobApplication): Promise<JobApplication> {

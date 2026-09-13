@@ -1,10 +1,12 @@
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Recruitment;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -21,6 +23,11 @@ public class JobVacancyService : IJobVacancyService
     private readonly IStaffRequisitionRepository _requisitionRepository;
     private readonly IJobPostingRepository _postingRepository;
     private readonly IVacancyPipelineStageAssignmentRepository _stageAssignmentRepository;
+    private readonly IGenericRepository<JobShortlistingCriteriaValue> _criteriaValueRepository;
+    private readonly IGenericRepository<Skill> _skillMasterRepository;
+    private readonly IGenericRepository<Qualification> _qualificationMasterRepository;
+    private readonly IGenericRepository<Certification> _certificationMasterRepository;
+    private readonly IGenericRepository<Language> _languageMasterRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<JobVacancyService> _logger;
@@ -34,6 +41,11 @@ public class JobVacancyService : IJobVacancyService
         IStaffRequisitionRepository requisitionRepository,
         IJobPostingRepository postingRepository,
         IVacancyPipelineStageAssignmentRepository stageAssignmentRepository,
+        IGenericRepository<JobShortlistingCriteriaValue> criteriaValueRepository,
+        IGenericRepository<Skill> skillMasterRepository,
+        IGenericRepository<Qualification> qualificationMasterRepository,
+        IGenericRepository<Certification> certificationMasterRepository,
+        IGenericRepository<Language> languageMasterRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         ILogger<JobVacancyService> logger)
@@ -46,6 +58,11 @@ public class JobVacancyService : IJobVacancyService
         _requisitionRepository = requisitionRepository;
         _postingRepository = postingRepository;
         _stageAssignmentRepository = stageAssignmentRepository;
+        _criteriaValueRepository = criteriaValueRepository;
+        _skillMasterRepository = skillMasterRepository;
+        _qualificationMasterRepository = qualificationMasterRepository;
+        _certificationMasterRepository = certificationMasterRepository;
+        _languageMasterRepository = languageMasterRepository;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
@@ -128,7 +145,13 @@ public class JobVacancyService : IJobVacancyService
     public async Task<JobVacancyDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedAsync(id);
-        return entity.ToDto();
+        var dto = entity.ToDto();
+        // Round 3, lane K (D-7): derived on the read, never stored — the criteria are the truth.
+        var tenantId = GetTenantId();
+        var criteria = await _criteriaRepository.GetByVacancyIdAsync(id);
+        dto.UsesProtectedCharacteristicCriterion = criteria.Any(c =>
+            c.TenantId == tenantId && !c.IsDeleted && ShortlistingCriteriaShapes.Of(c.Type)?.IsProtectedCharacteristic == true);
+        return dto;
     }
 
     public async Task<JobVacancyDto?> GetByVacancyNumberAsync(string vacancyNumber, CancellationToken cancellationToken = default)
@@ -802,13 +825,18 @@ public class JobVacancyService : IJobVacancyService
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
         await GetOwnedAsync(createDto.JobVacancyId);
-        RequireScorableCriterion(createDto.Type);
+        var values = await ResolveCriterionValuesAsync(
+            createDto.Type, createDto.IsMandatory, createDto.Values, createDto.RequiredValue,
+            createDto.MinValue, createDto.MaxValue, createDto.RequiredSkillId, createDto.RequiredQualificationId, current);
 
         var entity = createDto.ToEntity(current, createdByUserId);
+        entity.RequiredValue = MirrorLabels(entity.Type, values, createDto.RequiredValue, legacyShape: createDto.Values is null);
         await _criteriaRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        await WriteCriterionValuesAsync(entity, values, current, cancellationToken);
         await MarkApplicationScoresStaleAsync(createDto.JobVacancyId, cancellationToken);
-        return entity.ToDto();
+        return WithValues(entity.ToDto(), values);
     }
 
     public async Task<IEnumerable<JobShortlistingCriteriaDto>> GetCriteriaAsync(Guid vacancyId, CancellationToken cancellationToken = default)
@@ -822,13 +850,172 @@ public class JobVacancyService : IJobVacancyService
     public async Task<JobShortlistingCriteriaDto> UpdateCriteriaAsync(UpdateJobShortlistingCriteriaDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCriteriaAsync(updateDto.Id);
-        RequireScorableCriterion(updateDto.Type);
+        var tenantId = GetTenantId();
+        var values = await ResolveCriterionValuesAsync(
+            updateDto.Type, updateDto.IsMandatory, updateDto.Values, updateDto.RequiredValue,
+            updateDto.MinValue, updateDto.MaxValue, updateDto.RequiredSkillId, updateDto.RequiredQualificationId, tenantId);
 
         entity.UpdateEntity(updateDto, updatedByUserId);
+        entity.RequiredValue = MirrorLabels(entity.Type, values, updateDto.RequiredValue, legacyShape: updateDto.Values is null);
         await _criteriaRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        // Replace-set: retire what is there, write what was sent — through the repository, never by
+        // adding to the tracked parent's collection (the tracked-graph trap).
+        var existing = await _criteriaValueRepository.FindAsync(v => v.JobShortlistingCriteriaId == entity.Id && !v.IsDeleted);
+        if (existing.Any())
+        {
+            await _criteriaValueRepository.DeleteRangeAsync(existing);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        await WriteCriterionValuesAsync(entity, values, tenantId, cancellationToken);
         await MarkApplicationScoresStaleAsync(entity.JobVacancyId, cancellationToken);
-        return entity.ToDto();
+        return WithValues(entity.ToDto(), values);
+    }
+
+    /// <summary>
+    /// The DTO's values are the rows just written — read off the list, never off the parent's
+    /// navigation. ⚠ Assigning <c>entity.Values</c> on a tracked parent whose retired children fixup
+    /// had attached severed a required relationship at the NEXT save (marking scores stale), which
+    /// only happens on a vacancy with applications — so it passed the create-only probes and failed
+    /// the first real edit. The tracked-graph trap, again.
+    /// </summary>
+    private static JobShortlistingCriteriaDto WithValues(JobShortlistingCriteriaDto dto, List<JobShortlistingCriteriaValue> values)
+    {
+        dto.Values = values
+            .OrderBy(v => v.SortOrder)
+            .Select(v => new JobShortlistingCriteriaValueDto
+            {
+                Id = v.Id, Kind = v.Kind, ReferenceId = v.ReferenceId, Label = v.Label, SortOrder = v.SortOrder,
+            })
+            .ToList();
+        return dto;
+    }
+
+    /// <summary>
+    /// Round 3, lane K: the rules a criterion must satisfy before it is stored, and the accepted
+    /// values resolved against their catalogues. Register row R-8 (values from the setups) and R-5
+    /// fixes 2 and 8 (a blank value list passed everyone; a mandatory Other disqualified nobody),
+    /// decision D-7 (Gender and Age may never be mandatory).
+    /// </summary>
+    /// <remarks>
+    /// <para>The shape table (<see cref="ShortlistingCriteriaShapes"/>) is the single source of what a
+    /// type needs. A catalogue id must be the tenant's live row and its name is mirrored into the
+    /// label; a gender must be a member of the enum (or "Any"); text is trimmed. Duplicates collapse.
+    /// A legacy caller that sends only the comma-separated <c>RequiredValue</c> (or a
+    /// <c>RequiredSkillId</c> / <c>RequiredQualificationId</c>) gets the same rows derived from it,
+    /// so the old shape keeps working and the new column fills for everyone.</para>
+    /// </remarks>
+    private async Task<List<JobShortlistingCriteriaValue>> ResolveCriterionValuesAsync(
+        JobShortlistingCriteriaType type, bool isMandatory, List<ShortlistingCriteriaValueInputDto>? inputs,
+        string? legacyRequiredValue, decimal? minValue, decimal? maxValue,
+        Guid? legacySkillId, Guid? legacyQualificationId, Guid tenantId)
+    {
+        RequireScorableCriterion(type);
+        var shape = ShortlistingCriteriaShapes.Of(type)!;
+
+        if (isMandatory && !shape.AllowsMandatory)
+            throw new InvalidOperationException(shape.MandatoryRefusal ?? $"A {shape.Label} criterion cannot be mandatory.");
+
+        if (shape.IsNumeric)
+        {
+            if (minValue is null && maxValue is null)
+                throw new InvalidOperationException($"A {shape.Label} criterion needs a minimum or a maximum — without a bound it measures nothing.");
+            return new List<JobShortlistingCriteriaValue>();
+        }
+
+        var kind = shape.ValueKind ?? ShortlistingValueKind.Text;
+        var candidates = new List<(Guid? Id, string? Label)>();
+        if (inputs is not null)
+        {
+            candidates.AddRange(inputs.Select(i => (i.ReferenceId, i.Label)));
+        }
+        else
+        {
+            // Legacy shape: the comma-separated list, plus the single catalogue id the old columns carried.
+            if (!string.IsNullOrWhiteSpace(legacyRequiredValue))
+                candidates.AddRange(legacyRequiredValue
+                    .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(l => ((Guid?)null, (string?)l)));
+            if (kind == ShortlistingValueKind.Skill && legacySkillId is { } sid) candidates.Add((sid, null));
+            if (kind == ShortlistingValueKind.Qualification && legacyQualificationId is { } qid) candidates.Add((qid, null));
+        }
+
+        var master = kind switch
+        {
+            ShortlistingValueKind.Skill => (await _skillMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            ShortlistingValueKind.Qualification => (await _qualificationMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            ShortlistingValueKind.Certification => (await _certificationMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            ShortlistingValueKind.Language => (await _languageMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            _ => new Dictionary<Guid, string>(),
+        };
+
+        var rows = new List<JobShortlistingCriteriaValue>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (id, rawLabel) in candidates)
+        {
+            Guid? referenceId = null;
+            string label;
+            if (id is { } key)
+            {
+                if (kind is ShortlistingValueKind.Text or ShortlistingValueKind.Gender)
+                    throw new InvalidOperationException($"A {shape.Label} criterion takes typed values, not a catalogue id.");
+                if (!master.TryGetValue(key, out var name))
+                    throw new InvalidOperationException($"The {shape.Label.ToLowerInvariant()} chosen is not in the catalogue. Pick one from the list.");
+                referenceId = key;
+                label = name;
+            }
+            else
+            {
+                label = rawLabel?.Trim() ?? string.Empty;
+                if (label.Length == 0) continue;
+                if (kind == ShortlistingValueKind.Gender)
+                {
+                    if (label.Equals("any", StringComparison.OrdinalIgnoreCase)) label = "Any";
+                    else if (Enum.TryParse<Gender>(label, ignoreCase: true, out var gender) && Enum.IsDefined(typeof(Gender), gender)) label = gender.ToString();
+                    else throw new InvalidOperationException($"'{label}' is not a gender the register knows. Tick the genders the role is open to.");
+                }
+            }
+            var dedupeKey = referenceId?.ToString() ?? $"text:{label}";
+            if (!seen.Add(dedupeKey)) continue;
+            rows.Add(new JobShortlistingCriteriaValue
+            {
+                TenantId = tenantId, Kind = kind, ReferenceId = referenceId, Label = label, SortOrder = rows.Count,
+            });
+        }
+
+        if (rows.Count == 0 && shape.RequiresValues)
+            throw new InvalidOperationException(
+                $"A {shape.Label} criterion needs at least one accepted value — with none it passes every candidate and measures nothing.");
+        return rows;
+    }
+
+    /// <summary>
+    /// The label list mirrored onto the parent, so rows and readers that only know the text still
+    /// agree. A LEGACY caller (no <c>values</c> on the payload) keeps its text exactly as sent — the
+    /// rows are derived from it, the text is not rewritten from them; lane 5b asserts the echo, and a
+    /// legacy single catalogue id must not append its name to what the caller typed.
+    /// </summary>
+    private static string? MirrorLabels(JobShortlistingCriteriaType type, List<JobShortlistingCriteriaValue> values, string? legacyRequiredValue, bool legacyShape)
+    {
+        var shape = ShortlistingCriteriaShapes.Of(type);
+        if (shape?.IsNumeric == true || legacyShape) return string.IsNullOrWhiteSpace(legacyRequiredValue) ? null : legacyRequiredValue.Trim();
+        if (values.Count == 0) return null;
+        var joined = string.Join(", ", values.Select(v => v.Label));
+        return joined.Length <= 500 ? joined : joined[..500];
+    }
+
+    private async Task WriteCriterionValuesAsync(JobShortlistingCriteria entity, List<JobShortlistingCriteriaValue> values, Guid tenantId, CancellationToken cancellationToken)
+    {
+        foreach (var value in values)
+        {
+            value.JobShortlistingCriteriaId = entity.Id;
+            value.TenantId = tenantId;
+            await _criteriaValueRepository.AddAsync(value);
+        }
+        if (values.Count > 0)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // ⚠ Deliberately NOT `entity.Values = values` — see WithValues.
     }
 
     /// <summary>

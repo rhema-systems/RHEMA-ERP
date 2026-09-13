@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -74,7 +74,10 @@ export default function VacancyScreeningPage() {
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [autoOpen, setAutoOpen] = useState(false);
+  // Round 3, lane K (R-5 fix 8): the vacancy's own threshold (`AutoShortlistMinScore`, set on the
+  // vacancy form and never read by anything until now) is the dialog's starting value.
   const [minScore, setMinScore] = useState('70');
+  const [minScoreSeeded, setMinScoreSeeded] = useState(false);
   const [requireMandatory, setRequireMandatory] = useState(true);
   const [autoNotes, setAutoNotes] = useState('');
   const [bulkResult, setBulkResult] = useState<BulkOperationResult | null>(null);
@@ -84,6 +87,11 @@ export default function VacancyScreeningPage() {
     queryFn: () => jobVacancyService.getById(vacancyId),
     enabled: !!vacancyId,
   });
+  useEffect(() => {
+    if (minScoreSeeded || !vacancy.data) return;
+    if (vacancy.data.autoShortlistMinScore != null) setMinScore(String(vacancy.data.autoShortlistMinScore));
+    setMinScoreSeeded(true);
+  }, [vacancy.data, minScoreSeeded]);
 
   const summary = useQuery({
     queryKey: ['hr', 'shortlist-summary', vacancyId],
@@ -652,6 +660,12 @@ export default function VacancyScreeningPage() {
           <div className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="auto-min-score">Minimum score (1–100)</Label>
+              {vacancy.data?.autoShortlistMinScore != null && (
+                <p className="text-xs text-muted-foreground">
+                  The vacancy&apos;s own threshold is {vacancy.data.autoShortlistMinScore}. Applications on a
+                  vacancy with no criteria carry no score and are never shortlisted this way.
+                </p>
+              )}
               <Input
                 id="auto-min-score"
                 type="number"

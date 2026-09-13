@@ -27,6 +27,13 @@ public interface IJobCandidateService
     Task<JobCandidateDto> UpdateAsync(UpdateJobCandidateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Round 3, lane C2: HR sets a candidate's photograph from a scanned upload record. The careers
+    /// side has had its own door since the documents commit; a walk-in candidate recorded by HR had
+    /// no way to get a face onto the list at all.
+    /// </summary>
+    Task<JobCandidateDto> SetProfilePhotoAsync(Guid candidateId, Guid fileUploadRecordId, Guid updatedByUserId, CancellationToken cancellationToken = default);
+
     // Talent pool — basic (kept for backwards compat)
     Task<bool> AddToTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> RemoveFromTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default);

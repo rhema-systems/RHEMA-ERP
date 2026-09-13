@@ -111,6 +111,69 @@ public class JobCandidateController : ControllerBase
             inline: true, ct);
     }
 
+    /// <summary>
+    /// Sets a candidate's profile photograph from HR (round 3, lane C2).
+    /// </summary>
+    /// <remarks>
+    /// The careers side has uploaded photographs through the gate since the documents commit, but a
+    /// candidate HR records by hand — a walk-in, a referral — had no door at all, and the HR screens
+    /// never rendered the photograph either way. Same category as the careers upload
+    /// (<c>hr-candidate-photos</c>), no DMS registration (an avatar carries no retention value), and
+    /// the same two writes on the record. Answers the same shape as the careers door: the gated
+    /// route to fetch the image, never a public URL.
+    /// </remarks>
+    [HttpPost("{id:guid}/photo")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UploadPhoto(Guid id, IFormFile file, CancellationToken ct = default)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "No file provided." });
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+        if (!Guid.TryParse(_currentUser.UserId, out var userId))
+            return BadRequest("The signed-in user could not be resolved.");
+
+        // Owned by the tenant before any bytes are stored — a miss is a 404, not an orphaned upload.
+        var candidate = await LoadCandidateAsync(id, tenantId, ct);
+        if (candidate is null)
+            return NotFound();
+
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                ActorUserId = userId,
+                ActorName = _currentUser.UserName ?? "hr",
+                Category = ControlledFileUploadCategories.HrCandidatePhotos,
+                File = file,
+                Registration = null,
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
+
+        try
+        {
+            await _service.SetProfilePhotoAsync(id, document.FileUploadRecordId, userId, ct);
+        }
+        catch (Exception ex)
+        {
+            await _hrDocuments.RollbackAsync(document, tenantId, userId, ct);
+            if (ex is ArgumentException)
+                return NotFound(new { message = ex.Message });
+            throw;
+        }
+
+        return Ok(new { url = Url.Action(nameof(DownloadPhoto), new { id }), hasPhoto = true });
+    }
+
     /// <summary>Streams one of a candidate's uploaded documents.</summary>
     [HttpGet("{id:guid}/documents/{documentId:guid}/download")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]

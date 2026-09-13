@@ -263,6 +263,7 @@ public partial class ApplicationDbContext
     public DbSet<RecruitmentPipeline> RecruitmentPipelines { get; set; } = null!;
     public DbSet<RecruitmentPipelineStage> RecruitmentPipelineStages { get; set; } = null!;
     public DbSet<JobShortlistingCriteria> JobShortlistingCriterias { get; set; } = null!;
+    public DbSet<JobShortlistingCriteriaValue> JobShortlistingCriteriaValues { get; set; } = null!;
     public DbSet<JobCandidate> JobCandidates { get; set; } = null!;
     public DbSet<JobCandidateQualification> JobCandidateQualifications { get; set; } = null!;
     public DbSet<JobCandidateWorkHistory> JobCandidateWorkHistories { get; set; } = null!;
@@ -7910,6 +7911,18 @@ private void ConfigureHREntities(ModelBuilder builder)
             entity.HasOne(x => x.JobVacancy)
                 .WithMany(x => x.ShortlistingCriteria)
                 .HasForeignKey(x => x.JobVacancyId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // ---- JobShortlistingCriteriaValue (round 3, lane K) ----
+        builder.Entity<JobShortlistingCriteriaValue>(entity =>
+        {
+            entity.HasIndex(x => x.JobShortlistingCriteriaId).HasDatabaseName("IX_ShortlistingCriteriaValue_CriteriaId");
+            entity.Property(x => x.Kind).HasConversion<int>();
+
+            entity.HasOne(x => x.Criteria)
+                .WithMany(x => x.Values)
+                .HasForeignKey(x => x.JobShortlistingCriteriaId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 

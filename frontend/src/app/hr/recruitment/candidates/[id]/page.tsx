@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Loader2, Pencil, Star } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { GatedPhoto, PhotoDialog } from '@/components/hr/common/PhotoDialog';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { CandidateDocumentsPanel } from '@/components/hr/recruitment/CandidateDocumentsPanel';
 import { CandidateNotesPanel } from '@/components/hr/recruitment/CandidateNotesPanel';
@@ -18,6 +19,7 @@ import { EngagementTimelinePanel } from '@/components/hr/recruitment/EngagementT
 import { TalentPoolPanel } from '@/components/hr/recruitment/TalentPoolPanel';
 import {
   CandidateInterestsTab,
+  CandidateLanguagesTab,
   CandidateQualificationsTab,
   CandidateRefereesTab,
   CandidateSkillsTab,
@@ -47,6 +49,9 @@ export default function CandidateDetailPage() {
   const canRecruit = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
   const canRecruitAdmin = hasPermission('HR.Recruitment.Admin');
   const [tab, setTab] = useState('overview');
+  const [photoOpen, setPhotoOpen] = useState(false);
+  const [photoVersion, setPhotoVersion] = useState(0);
+  const queryClient = useQueryClient();
 
   const { data: c, isLoading, isError } = useQuery({
     queryKey: ['hr', 'candidate-detail', id],
@@ -90,7 +95,23 @@ export default function CandidateDetailPage() {
         description={`${c.candidateNumber} · ${c.email}`}
         backHref="/hr/recruitment/candidates"
         actions={
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            {/* Round 3, lane C2 (register row R-2): the photograph the HR view never rendered. The
+                download route existed since the documents commit with nothing calling it. */}
+            <button
+              type="button"
+              className="rounded-full ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+              title={c.hasPhoto ? 'View or replace the photograph' : 'Add a photograph'}
+              onClick={() => setPhotoOpen(true)}
+            >
+              <GatedPhoto
+                endpoint={jobCandidateService.photoUrl(id)}
+                enabled={!!c.hasPhoto}
+                version={photoVersion}
+                alt={c.fullName}
+                className="h-10 w-10"
+              />
+            </button>
             <Button variant="outline" onClick={downloadCv}>
               <Download className="mr-2 h-4 w-4" />
               CV
@@ -113,6 +134,23 @@ export default function CandidateDetailPage() {
         }
       />
 
+      <PhotoDialog
+        open={photoOpen}
+        onOpenChange={setPhotoOpen}
+        title={`Photograph — ${c.fullName}`}
+        description="Shown on the candidate list and beside every application they make."
+        endpoint={jobCandidateService.photoUrl(id)}
+        hasPhoto={!!c.hasPhoto}
+        upload={(file) => jobCandidateService.uploadPhoto(id, file)}
+        onUploaded={() => {
+          setPhotoVersion((v) => v + 1);
+          void queryClient.invalidateQueries({ queryKey: ['hr', 'candidate-detail', id] });
+          void queryClient.invalidateQueries({ queryKey: ['hr', 'candidates'] });
+        }}
+        subjectLabel={c.fullName}
+        canWrite={canRecruit}
+      />
+
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="overview">Overview</TabsTrigger>
@@ -123,6 +161,7 @@ export default function CandidateDetailPage() {
           <TabsTrigger value="work">Work history</TabsTrigger>
           <TabsTrigger value="referees">Referees</TabsTrigger>
           <TabsTrigger value="skills">Skills</TabsTrigger>
+          <TabsTrigger value="languages">Languages</TabsTrigger>
           <TabsTrigger value="interests">Interests</TabsTrigger>
           <TabsTrigger value="documents">Documents</TabsTrigger>
           <TabsTrigger value="notes">Notes</TabsTrigger>
@@ -142,6 +181,19 @@ export default function CandidateDetailPage() {
                 <InfoRow label="City" value={c.city} />
                 <InfoRow label="Digital address" value={c.digitalAddress} />
                 <InfoRow label="Postal address" value={c.postalAddress} />
+                {/* The national-ID trio (round 3, lane C1; register row R-3a). */}
+                <InfoRow
+                  label="Identity document"
+                  value={
+                    c.nationalIdTypeName || c.nationalIdNumber
+                      ? [c.nationalIdTypeName, c.nationalIdNumber].filter(Boolean).join(' · ')
+                      : null
+                  }
+                />
+                <InfoRow
+                  label="Document expiry"
+                  value={c.nationalIdExpiryDate ? formatDate(c.nationalIdExpiryDate) : null}
+                />
                 <InfoRow
                   label="Talent pool"
                   value={
@@ -281,11 +333,19 @@ export default function CandidateDetailPage() {
         <TabsContent value="skills" className="mt-4">
           <CandidateSkillsTab candidateId={id} />
         </TabsContent>
+        <TabsContent value="languages" className="mt-4">
+          <CandidateLanguagesTab candidateId={id} />
+        </TabsContent>
         <TabsContent value="interests" className="mt-4">
           <CandidateInterestsTab candidateId={id} />
         </TabsContent>
         <TabsContent value="documents" className="mt-4">
-          <CandidateDocumentsPanel candidateId={id} canEdit={isHr} />
+          <CandidateDocumentsPanel
+            candidateId={id}
+            canEdit={isHr}
+            identityLabel={[c.nationalIdTypeName, c.nationalIdNumber].filter(Boolean).join(' ') || null}
+            referees={c.referees.map((r) => ({ id: r.id, fullName: r.fullName }))}
+          />
         </TabsContent>
         <TabsContent value="notes" className="mt-4">
           <CandidateNotesPanel candidateId={id} canEdit={isHr} />

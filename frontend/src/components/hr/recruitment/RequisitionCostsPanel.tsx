@@ -26,6 +26,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
 import { SupplierPicker } from '@/components/hr/common/SupplierPicker';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatMoney, humanizeEnum } from '@/lib/hr/attendance-format';
@@ -360,14 +361,7 @@ export function RequisitionCostsPanel({
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="currency">Currency</Label>
-                <Select value={form.currency} onValueChange={(v) => setForm({ ...form, currency: v })} disabled={isApprovedEdit}>
-                  <SelectTrigger id="currency"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {(currencies ?? []).map((c) => (
-                      <SelectItem key={c.code} value={c.code}>{c.code} — {c.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <CurrencyPicker id="currency" value={form.currency} onChange={(v) => setForm({ ...form, currency: v })} options={currencies} disabled={isApprovedEdit} />
                 <p className="text-xs text-muted-foreground">Finance&apos;s currencies. The rate is read for the cost date; nobody types one.</p>
               </div>
             </div>

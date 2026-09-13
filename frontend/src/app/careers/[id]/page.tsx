@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, MapPin, Send } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +33,11 @@ import { candidateService, publicCareersService } from '@/services/hr/careers.se
 export default function CareersVacancyPage() {
   const params = useParams();
   const id = (params?.id as string) ?? '';
+  // The advert this link was shared from (round 3, lane A): `/careers/{id}?posting={postingId}`.
+  // Carried on the application so HR sees which advert brought the applicant, and the source
+  // follows the advert's channel. Only one of this vacancy's live adverts counts.
+  const searchParams = useSearchParams();
+  const postingParam = searchParams?.get('posting') ?? '';
   const router = useRouter();
   const { toast } = useToast();
 
@@ -56,10 +61,13 @@ export default function CareersVacancyPage() {
     enabled: !!tenant.data?.id && !!id,
   });
 
+  const posting = (vacancy.data?.postings ?? []).find((p) => p.id === postingParam) ?? null;
+
   const apply = useMutation({
     mutationFn: () =>
       candidateService.apply({
         vacancyId: id,
+        jobPostingId: posting?.id ?? null,
         coverLetter: coverLetter.trim() || null,
         yearsOfExperience: years === '' ? null : Number(years),
         availableFrom: availableFrom || null,
@@ -211,6 +219,7 @@ export default function CareersVacancyPage() {
             <DialogTitle>Apply — {v.jobTitle}</DialogTitle>
             <DialogDescription>
               Your saved candidate profile goes with this application. Keep it up to date.
+              {posting && ` You came through the ${posting.channelName} advert; we record that.`}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">

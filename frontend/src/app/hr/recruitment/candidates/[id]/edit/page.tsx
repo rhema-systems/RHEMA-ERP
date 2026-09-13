@@ -58,6 +58,9 @@ export default function EditCandidatePage() {
       linkedInProfile: data.linkedInProfile ?? null,
       portfolioUrl: data.portfolioUrl ?? null,
       gitHubUrl: data.gitHubUrl ?? null,
+      nationalIdTypeId: data.nationalIdTypeId ?? null,
+      nationalIdNumber: data.nationalIdNumber ?? null,
+      nationalIdExpiryDate: data.nationalIdExpiryDate?.slice(0, 10) ?? null,
       isInTalentPool: data.isInTalentPool,
     });
   }, [data, form]);
@@ -75,6 +78,9 @@ export default function EditCandidatePage() {
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,
+        nationalIdTypeId: values.nationalIdTypeId || null,
+        nationalIdNumber: values.nationalIdNumber?.trim() || null,
+        nationalIdExpiryDate: values.nationalIdExpiryDate || null,
       }),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['hr', 'candidate', id] });

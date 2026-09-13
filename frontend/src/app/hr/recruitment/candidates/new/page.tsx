@@ -38,6 +38,9 @@ export default function NewCandidatePage() {
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,
+        nationalIdTypeId: values.nationalIdTypeId || null,
+        nationalIdNumber: values.nationalIdNumber?.trim() || null,
+        nationalIdExpiryDate: values.nationalIdExpiryDate || null,
       }),
     onSuccess: (created) => {
       toast({ title: 'Candidate created', description: created.candidateNumber });

@@ -361,7 +361,12 @@ export default function VacancyDetailPage() {
         </TabsContent>
 
         <TabsContent value="criteria" className="pt-4">
-          <VacancyCriteriaPanel vacancyId={id} canManage={isHr} canRemove={canAdministerRecruitment} />
+          <VacancyCriteriaPanel
+            vacancyId={id}
+            canManage={isHr}
+            canRemove={canAdministerRecruitment}
+            usesProtectedCharacteristic={!!v.usesProtectedCharacteristicCriterion}
+          />
         </TabsContent>
 
         {/* ⚠ Stage OWNERS, not the application board — /pipeline moves applications between

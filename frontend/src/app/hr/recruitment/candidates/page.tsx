@@ -12,6 +12,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { GatedPhoto } from '@/components/hr/common/PhotoDialog';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useAuth } from '@/hooks/use-auth';
 import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
@@ -63,9 +64,19 @@ function CandidateTable({
           >
             <TableCell className="font-mono text-xs text-muted-foreground">{c.candidateNumber}</TableCell>
             <TableCell className="font-medium">
-              <Link href={`/hr/recruitment/candidates/${c.id}`} className="hover:underline">
-                {c.fullName}
-              </Link>
+              {/* Round 3, lane C2 (register row R-2): the photograph through the gate, fetched only
+                  when the record says one is on file. */}
+              <div className="flex items-center gap-3">
+                <GatedPhoto
+                  endpoint={jobCandidateService.photoUrl(c.id)}
+                  enabled={!!c.hasPhoto}
+                  alt={c.fullName}
+                  className="h-8 w-8"
+                />
+                <Link href={`/hr/recruitment/candidates/${c.id}`} className="hover:underline">
+                  {c.fullName}
+                </Link>
+              </div>
             </TableCell>
             <TableCell className="text-sm">{c.email}</TableCell>
             <TableCell className="text-sm">{c.phone || '—'}</TableCell>

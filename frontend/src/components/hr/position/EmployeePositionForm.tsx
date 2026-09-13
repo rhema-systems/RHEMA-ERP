@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select';
 import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 import { CertificationPicker } from '@/components/hr/common/CertificationPicker';
+import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
 import { employeePositionService } from '@/services/hr/employee-position.service';
 import { SKILL_LEVEL_OPTIONS, type EmployeePosition } from '@/types/hr/position';
 import type { StaffLevelListItem } from '@/types/hr/staff-level';
@@ -958,24 +959,15 @@ export function EmployeePositionForm({
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="requiredGuarantorCurrencyCode">Currency</Label>
-                  <Select
-                    value={form.watch('requiredGuarantorCurrencyCode') || NONE}
-                    onValueChange={(v) =>
-                      form.setValue('requiredGuarantorCurrencyCode', v === NONE ? '' : v)
-                    }
-                  >
-                    <SelectTrigger id="requiredGuarantorCurrencyCode">
-                      <SelectValue placeholder="HR default" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={NONE}>HR default</SelectItem>
-                      {(currencies ?? []).map((c) => (
-                        <SelectItem key={c.code} value={c.code}>
-                          {c.code} — {c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <CurrencyPicker
+                    id="requiredGuarantorCurrencyCode"
+                    value={form.watch('requiredGuarantorCurrencyCode') || ''}
+                    onChange={(v) => form.setValue('requiredGuarantorCurrencyCode', v)}
+                    options={currencies}
+                    allowEmpty
+                    emptyLabel="HR default"
+                    placeholder="HR default"
+                  />
                 </div>
                 <p className="col-span-2 text-xs text-muted-foreground">
                   Each holder&apos;s Documents tab shows whether their guarantors meet this. Sureties

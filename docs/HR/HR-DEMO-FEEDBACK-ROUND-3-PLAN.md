@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11. Thirteen slices remain; C2 next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-13. Ten slices remain; G next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -159,9 +159,9 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 4 | **S** — the salary change request · ✅ **DONE 2026-09-11 · 65 ×2** | `20260911091344_AddEmployeeSalaryChangeRequest` (+ `CompanyHrPolicySettings.SalaryChangeRequiresApproval`) | `hr-payroll-membership/run-s.mjs` | the PDF's first bullet |
 | 5 | **J1** — prefill from the position, optional text, clone to another position, `CertificationId` · ✅ **DONE 2026-09-11 · 42 ×2** | none | `hr-jobarch/run-j1.mjs` | |
 | 6 | **C1** — candidate identity trio, `Language` master, certification fields, document description · ✅ **DONE 2026-09-11 · 96 ×2** | `AddCandidateIdentityLanguagesAndCertification` | `hr-recruitment/run-c1.mjs` | schema before screens |
-| 7 | **C2** — careers + HR candidate screens, photo, currency picker, languages tab, document restructure | none | `hr-recruitment/run-c2.mjs` + screen walk | |
-| 8 | **K** — catalogue-driven criteria values + the nine scoring fixes + D-7 | `AddCriteriaCatalogueValues` | `hr-recruitment/run-k.mjs` (extends `run-lane5b.mjs`) | |
-| 9 | **A** — application source and posting | none | `hr-recruitment/run-a.mjs` | |
+| 7 | **C2** — careers + HR candidate screens, photo, currency picker, languages tab, document restructure · ✅ **DONE 2026-09-12 · 89 ×2** | none | `hr-recruitment/run-c2.mjs` + screen walk | |
+| 8 | **K** — catalogue-driven criteria values + the nine scoring fixes + D-7 · ✅ **DONE 2026-09-12 · 81 ×2** | `20260912211938_AddCriteriaCatalogueValues` | `hr-recruitment/run-k.mjs` (extends `run-lane5b.mjs`) | |
+| 9 | **A** — application source and posting · ✅ **DONE 2026-09-13 · 44 ×2** | none | `hr-recruitment/run-a.mjs` | |
 | 10 | **G** — stage flags + pre-employment providers | `AddPreEmploymentCheckProviders` | `hr-recruitment/run-g.mjs` | |
 | 11 | **U** — union contacts, documents, logo | `AddUnionContactsDocumentsLogo` | new `hr-unions/run-u.mjs` | |
 | 12 | **T1** — profile grouped navigation | none | screen walk + static assertions | |
@@ -297,6 +297,104 @@ and `hireDate`; repaired to the round-2b rule. Two assertions in slices B and D 
 to pass a delete that the W3 sweep gated to `HR.Recruitment.Admin` — stale expectations, not
 regressions, left for the harness owner. Screen walk owed for the Languages page; the candidate
 screens themselves are lane C2.
+
+**Lane C2 log (2026-09-12).** No migration. *Photograph (R-2):* `HasPhoto` on the candidate read,
+summary and careers-profile DTOs, derived from the gated upload record (or the legacy URL on
+pre-privacy rows) through one `HasPhotoOnFile()`; a new HR door `POST api/job-candidates/{id}/photo`
+(`RecruitmentWrite`, `hr-candidate-photos`, no DMS registration, rollback on a failed write, 404
+before any bytes for a foreign id) so a walk-in candidate HR records can get a face; the HR list
+renders a `GatedPhoto` beside the name, the detail a `PhotoDialog` with the HR upload, the careers
+profile a `PhotoPanel` over its own routes — each fetches only when the flag says so. *Currency
+(R-3b):* one `CurrencyPicker` + `CurrencyField` in `components/hr/common`, HR route by default or the
+anonymous catalogue for a tenant, replacing the five ad-hoc selects (position form, guarantors,
+requisition costs, development panel, careers profile). *Pickers (R-3c/d/e):* the public
+qualification catalogue now carries the row's kind; the careers form narrows the list by the chosen
+type and asks for free text only under "Not listed"; skills and languages pick from the public
+catalogues with the name mirrored, certificate fields only under the tick; the HR tabs do the same
+(type-filtered lookup, cert fields under the tick, a new Languages tab over the C1 door); the HR
+candidate form carries the national-ID trio and the overview shows it. *Documents (R-3f, D-17):* the
+careers documents page defaults to `Resume` (§ 3 defect 5 closed), offers neither moved type and
+takes a description; the HR panel splits into documents / identity document / reference letters
+with the generic dropdown over `CANDIDATE_GENERIC_DOCUMENT_TYPES`.
+
+⚠ **Found while building:** (1) **the careers save dropped `QualificationId` and `SkillId` on every
+profile save** — both were on `ExternalQualificationDto`/`ExternalSkillDto` since the portal shipped
+and neither was ever written, so the pickers the PDF asked for had nothing to store or re-open; now
+the C1 language rule generalised (`ResolveCatalogueOrText`: the tenant's row or typed text, the name
+mirrored, an unknown id refused with the noun in the message). (2) **`GetWithFullDetailsAsync`
+never included the qualification or skill catalogue rows** and there is no lazy loading, so every
+mapper's `Qualification?.Name` / `Skill?.Name` was null on the detail and the careers profile read
+(the careers read also preferred the free text over the catalogue name — reversed). (3) No
+`IdCard`-style column exists this lane to tie a reference letter to its referee: D-17's "attaches to
+a `JobCandidateReferee` row" is carried by the document's `description` ("Reference letter from
+<name>", "ID document — <type number>"), written identically by both screens and read back by the
+other side; a referee link column is the follow-on if the demo asks. Deviation: HR's candidate form
+still carries no expected-salary fields (read-only from HR by design), so the HR side of R-3b is the
+detail's display only. Type-check: baseline 33 only (the careers pages were checked under a
+temporary tsconfig — `tsconfig.hr-slice.json` does not include `external-portal`). Screen walk
+owed: careers profile (photo, trio + scan, pickers, referee letters), careers documents, HR list
+avatar, HR detail photo dialog, Languages tab, documents panel, the five currency pickers.
+
+**Lane K log (2026-09-12).** Migration `20260912211938_AddCriteriaCatalogueValues` (guarded SQL;
+proven twice on the dev database and fresh Up/Down/Up on a scratch one). `JobShortlistingCriteriaValue`
+rows — kind (skill / qualification / certification / language / gender / text), the catalogue id
+where there is one, the label always filled — as a replace-set on the criterion save through the
+repository; `RequiredValue` stays as the mirrored label list for the new shape and is kept VERBATIM
+for a legacy caller (lane 5b sends the comma list plus the single catalogue id, and asserts the echo;
+the rows are derived from both). `ShortlistingCriteriaShapes` (Core, one table) served at
+`GET api/job-vacancies/criteria/shapes` and read by `JobVacancyService` to refuse what the panel
+refuses: Gender and Age never mandatory (D-7, the reason in the message), Other never mandatory, a
+blank value list on a type the engine reads, a bound-less numeric criterion, an unknown catalogue id,
+a word that is not a gender, a catalogue id on a typed-text type. The vacancy read derives
+`UsesProtectedCharacteristicCriterion`; the panel shows the D-7 note and the row badges. The nine
+fixes: Other passes with 0 and its weight leaves the total (`CriterionScoreResult.AutoEvaluated`);
+no criteria → `AutoScore = null`, `HasCriteria = false`, never auto-shortlisted (was 100); list arms
+match ids first and labels second over the rows (`EvaluateListCriterion`), the legacy single-id
+short-circuit kept; Gender compares register members and accepts several; Location accepts several
+cities; Certification values from the catalogue matched on the mirrored name (the candidate side
+carries no certification id); Language matched by catalogue id, which the application snapshot now
+carries (`SnapshotLanguage.LanguageId`, both builders); numeric near-misses score partially on
+BOTH sides of a bound (above a ceiling scored 0); the panel defaults to Exact like the server; the
+screening dialog seeds its threshold from the vacancy's own `AutoShortlistMinScore`. Panel rebuilt:
+shapes from the server, catalogue pickers per kind (skills, qualifications, certifications,
+languages), the gender register as ticks, typed values for Location and Other, the mandatory tick
+blocked with the shape's reason. Manifest row `JobShortlistingCriteriaValues` as `optional` (rows
+exist only when a list criterion is saved). Type-check: baseline 33 only. Screen walk owed: the
+criteria dialog per type, the D-7 note, the screening threshold.
+
+⚠ **Found while building:** (1) **the tracked-graph trap, again** — assigning `entity.Values` on the
+tracked parent after retiring the old rows severed a required relationship at the NEXT save, which is
+the score-staleness mark and runs only on a vacancy WITH applications: every create-only probe
+passed and the first real edit failed. The DTO's values now come from the rows just written, the
+navigation is never touched. (2) Lane 5b's legacy create asserts `requiredValue` echoes verbatim
+while also sending `requiredQualificationId`; mirroring the catalogue name onto the text broke it —
+hence the verbatim rule for the legacy shape. Deviation: the D-7 flag is derived on the vacancy read
+(a second criteria query), not stored.
+
+**Lane A log (2026-09-13).** No migration. `ApplicationSourceMap.FromChannel` (Core, one map:
+CompanyWebsite→CompanyWebsite, LinkedIn→LinkedIn, JobBoard/Indeed/Glassdoor→JobBoard,
+Agency→RecruitmentAgency, Newspaper→NewspaperAd, InternalPortal/Other→Other). The careers draft/apply
+payload carries `jobPostingId`; the portal resolves it (this vacancy's, not removed — else 400 in
+words), records it and takes the source from the channel; with no posting the source is
+CompanyWebsite whatever the payload typed — the candidate no longer chooses their own source (§ 3
+defect 6 closed). `PublicVacancyDto.Postings` (published only) on the detail AND the list (the
+public list read now includes `JobPostings`); the careers page reads `?posting=`, sends it and tells
+the candidate which advert brought them; the postings panel copies each advert's own
+`/careers/{vacancyId}?posting={id}`. HR: `POST job-applications` (a caller at last — the
+"Record an application" dialog on the applications page: vacancy, candidate by email, source typed,
+advert from the vacancy's own) now checks the vacancy, the candidate and the advert;
+`UpdateJobApplicationSourceDto` + `PATCH job-applications/{id}/source` (RecruitmentWrite; an advert
+not the vacancy's, a removed one, or a non-member source refused in words) behind a "Correct" link
+on the application detail, which now names the advert's channel and title (`JobPostingTitle` on the
+read). Harness reuses the slice-F fixture and mints LinkedIn, Agency and draft Newspaper adverts.
+Type-check: baseline 33 only. Screen walk owed: the record dialog, the correction dialog, the
+careers apply hint, the copy-link button.
+
+Deviations: the HR-typed source is KEPT when HR also names an advert (HR says what it was; the
+derivation is the careers surface's rule); the draft advert stays valid on the HR door (only a
+REMOVED advert is refused — a draft is still this vacancy's). Harness lesson: `POST job-postings`
+requires `description`. The "stranger's advert" fence is proven against any other live advert in
+the tenant; when none exists the assertion says so rather than failing.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

@@ -7,6 +7,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Recruitment;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -347,6 +348,16 @@ public class JobVacancyController : ControllerBase
     // =========================================================================
     // SHORTLISTING CRITERIA
     // =========================================================================
+
+    /// <summary>
+    /// What each criterion type is made of — its value source, whether it may be mandatory, whether
+    /// it names a protected characteristic (round 3, lane K; plan § 5.4). One table on the server,
+    /// so the criteria panel no longer carries a hand-copied map that drifts from the engine.
+    /// </summary>
+    [HttpGet("criteria/shapes")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public ActionResult<IEnumerable<ShortlistingCriteriaShapeDto>> GetCriteriaShapes()
+        => Ok(ShortlistingCriteriaShapes.All.Select(s => s.ToDto()));
 
     [HttpGet("{vacancyId:guid}/criteria")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]

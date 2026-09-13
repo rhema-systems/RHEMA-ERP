@@ -187,6 +187,7 @@ public class JobVacancyRepository : GenericRepository<JobVacancy>, IJobVacancyRe
             .Include(v => v.Requisition).ThenInclude(r => r.JobDescription)
             .Include(v => v.Requisition).ThenInclude(r => r.OrganizationUnit)
             .Include(v => v.Requisition).ThenInclude(r => r.Location)
+            .Include(v => v.JobPostings)
             .Where(v => v.TenantId == tenantId)
             .Where(v => v.VacancyStatus == JobVacancyStatus.Published && !v.IsDeleted)
             .Where(v => v.ApplicationDeadline == null || v.ApplicationDeadline >= asOfUtc);

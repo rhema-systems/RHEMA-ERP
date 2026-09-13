@@ -478,6 +478,14 @@ export interface JobVacancy {
   shortlistApprovalStatus?: string | null;
   shortlistSubmittedByName?: string | null;
   shortlistApprovedByName?: string | null;
+  /**
+   * The vacancy's own auto-shortlist threshold, set on the form (round 3, lane K: the screening
+   * dialog now starts from it — nothing read it before).
+   */
+  autoShortlistMinScore?: number | null;
+  autoShortlistRequireAllMandatory?: boolean;
+  /** Derived on the read (round 3, lane K; D-7): a Gender or Age criterion is on this vacancy. */
+  usesProtectedCharacteristicCriterion?: boolean;
 }
 
 export interface JobVacancySummary {
@@ -594,6 +602,54 @@ export const SHORTLISTING_COMPARISON_OPERATORS = [
 ] as const;
 export type ShortlistingComparisonOperator = (typeof SHORTLISTING_COMPARISON_OPERATORS)[number];
 
+/** HREnums.cs `ShortlistingValueKind` — what one accepted value refers to (round 3, lane K). */
+export const SHORTLISTING_VALUE_KINDS = [
+  'Text',
+  'Skill',
+  'Qualification',
+  'Certification',
+  'Language',
+  'Gender',
+] as const;
+export type ShortlistingValueKind = (typeof SHORTLISTING_VALUE_KINDS)[number];
+
+/** One accepted value on a criterion: a catalogue row (name mirrored), a gender member, or typed text. */
+export interface ShortlistingCriteriaValue {
+  id: string;
+  kind: ShortlistingValueKind;
+  kindName: string;
+  referenceId?: string | null;
+  label: string;
+  sortOrder: number;
+}
+
+/** The value on the save: a catalogue id (the server mirrors its name) or a typed label. */
+export interface ShortlistingCriteriaValueInput {
+  referenceId?: string | null;
+  label?: string | null;
+}
+
+/**
+ * What a criterion type is made of — `GET api/job-vacancies/criteria/shapes` (round 3, lane K).
+ * The server's table, so the panel no longer carries a hand-copied map that drifts from the engine.
+ */
+export interface ShortlistingCriteriaShape {
+  type: ShortlistingCriteriaType;
+  typeName: string;
+  label: string;
+  valueKind?: ShortlistingValueKind | null;
+  valueKindName?: string | null;
+  isList: boolean;
+  isNumeric: boolean;
+  requiresValues: boolean;
+  allowsMandatory: boolean;
+  isProtectedCharacteristic: boolean;
+  isAutoEvaluated: boolean;
+  operators: ShortlistingComparisonOperator[];
+  hint: string;
+  mandatoryRefusal?: string | null;
+}
+
 export interface ShortlistingCriteria {
   id: string;
   jobVacancyId: string;
@@ -620,6 +676,8 @@ export interface ShortlistingCriteria {
   weight: number;
   comparisonOperator?: ShortlistingComparisonOperator | null;
   comparisonOperatorName?: string | null;
+  /** The accepted values, one row each (round 3, lane K); `requiredValue` mirrors their labels. */
+  values: ShortlistingCriteriaValue[];
 }
 
 export interface VacancyAttachment {
@@ -665,6 +723,11 @@ export interface ShortlistingCriteriaForm {
   requiredQualificationId?: string | null;
   weight: number;
   comparisonOperator?: ShortlistingComparisonOperator | null;
+  /**
+   * The accepted values as the WHOLE set (round 3, lane K). Omitted (undefined) keeps the legacy
+   * comma-separated `requiredValue`; an empty list on a type that needs values is refused (422).
+   */
+  values?: ShortlistingCriteriaValueInput[];
 }
 
 // ── pipeline stage assignments (stage owners) ──────────────────────────────
@@ -882,6 +945,13 @@ export interface HrPagedResult<T> {
  * ⚠ `salaryRangeMin`/`salaryRangeMax`/`salaryCurrencyCode` are **null unless `isSalaryVisible`**.
  * The server nulls them; the screen must not assume a range exists.
  */
+export interface PublicVacancyPosting {
+  id: string;
+  channel: JobPostingChannel;
+  channelName: string;
+  title: string;
+}
+
 export interface PublicVacancy {
   id: string;
   vacancyNumber: string;
@@ -908,4 +978,6 @@ export interface PublicVacancy {
   requiresPracticalTest: boolean;
   /** The advert body, from the requisition's job description. The board's whole point. */
   jobDescription?: string | null;
+  /** The live adverts (round 3, lane A) — a posting link names one with `?posting=`. */
+  postings: PublicVacancyPosting[];
 }

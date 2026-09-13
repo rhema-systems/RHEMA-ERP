@@ -307,6 +307,13 @@ public static class RecruitmentMappingExtensions
             RequiresWrittenTest        = entity.RequiresWrittenTest,
             RequiresPracticalTest      = entity.RequiresPracticalTest,
             JobDescription             = entity.Requisition?.JobDescription?.JobSummary,
+            // Round 3, lane A: the live adverts, so a posting link can name one. Only what an
+            // applicant may come through — published, not removed or expired.
+            Postings                   = (entity.JobPostings ?? Array.Empty<JobPosting>())
+                .Where(p => !p.IsDeleted && p.Status == JobPostingStatus.Published)
+                .OrderBy(p => p.Channel)
+                .Select(p => new PublicVacancyPostingDto { Id = p.Id, Channel = p.Channel, Title = p.Title })
+                .ToList(),
         };
     }
 
@@ -721,6 +728,17 @@ public static class RecruitmentMappingExtensions
             RequiredQualificationId = entity.RequiredQualificationId,
             Weight = entity.Weight,
             ComparisonOperator = entity.ComparisonOperator,
+            // Filtered here as well as on the read: a replace-set save retires rows in the SAME
+            // context it then maps, and fixup re-attaches the just-retired children (the candidate
+            // profile lesson).
+            Values = entity.Values
+                .Where(v => !v.IsDeleted)
+                .OrderBy(v => v.SortOrder)
+                .Select(v => new JobShortlistingCriteriaValueDto
+                {
+                    Id = v.Id, Kind = v.Kind, ReferenceId = v.ReferenceId, Label = v.Label, SortOrder = v.SortOrder,
+                })
+                .ToList(),
         };
     }
 
@@ -827,6 +845,7 @@ public static class RecruitmentMappingExtensions
             NationalIdExpiryDate = entity.NationalIdExpiryDate,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
         };
     }
@@ -843,9 +862,19 @@ public static class RecruitmentMappingExtensions
             City = entity.City,
             CountryName = entity.Country?.Name ?? string.Empty,
             IsInTalentPool = entity.IsInTalentPool,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
         };
     }
+
+    /// <summary>
+    /// Round 3, lane C2: one answer to "is there a photograph" for every candidate DTO. The gated
+    /// upload record is the live column; the legacy public URL still counts for rows written before
+    /// photos went private (the download endpoint serves neither, but the flag must not lie about
+    /// what the record holds).
+    /// </summary>
+    public static bool HasPhotoOnFile(this JobCandidate entity)
+        => entity.ProfilePhotoFileUploadRecordId != null || !string.IsNullOrWhiteSpace(entity.ProfilePhotoUrl);
 
     public static JobCandidateDetailDto ToDetailDto(this JobCandidate entity)
     {
@@ -895,6 +924,7 @@ public static class RecruitmentMappingExtensions
             NationalIdExpiryDate = entity.NationalIdExpiryDate,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
             Qualifications = entity.Qualifications.Select(q => q.ToDto()).ToList(),
             WorkHistories = entity.WorkHistories.Select(w => w.ToDto()).ToList(),
@@ -1404,6 +1434,7 @@ public static class RecruitmentMappingExtensions
             WorkAuthorizationStatus = entity.WorkAuthorizationStatus,
             CvFilePath = entity.CvFilePath,
             ProfilePhotoUrl = entity.ProfilePhotoUrl,
+            HasPhoto = entity.HasPhotoOnFile(),
             ApplicationCount = entity.Applications?.Count ?? 0,
             IsInTalentPool = entity.IsInTalentPool,
             TalentPoolAddedDate = entity.TalentPoolAddedDate,
@@ -1562,6 +1593,7 @@ public static class RecruitmentMappingExtensions
             Source = entity.Source,
             JobPostingId = entity.JobPostingId,
             JobPostingChannel = entity.JobPosting?.Channel.ToString(),
+            JobPostingTitle = entity.JobPosting?.Title,
             YearsOfExperience = entity.YearsOfExperience,
             AvailableFrom = entity.AvailableFrom,
             CoverLetter = entity.CoverLetter,
@@ -1652,6 +1684,7 @@ public static class RecruitmentMappingExtensions
             Source = entity.Source,
             JobPostingId = entity.JobPostingId,
             JobPostingChannel = entity.JobPosting?.Channel.ToString(),
+            JobPostingTitle = entity.JobPosting?.Title,
             YearsOfExperience = entity.YearsOfExperience,
             AvailableFrom = entity.AvailableFrom,
             CoverLetter = entity.CoverLetter,

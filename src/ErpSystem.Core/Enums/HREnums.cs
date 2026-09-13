@@ -2327,6 +2327,32 @@ public enum ValueMatchStrategy
 }
 
 /// <summary>
+/// What one accepted value on a shortlisting criterion refers to (round 3, lane K; register row
+/// R-8). A catalogue kind carries the row id and its name; Gender carries the enum member's name;
+/// Text is a typed label (a city for Location, anything for Other).
+/// </summary>
+public enum ShortlistingValueKind
+{
+    [Description("Text")]
+    Text = 0,
+
+    [Description("Skill")]
+    Skill = 1,
+
+    [Description("Qualification")]
+    Qualification = 2,
+
+    [Description("Certification")]
+    Certification = 3,
+
+    [Description("Language")]
+    Language = 4,
+
+    [Description("Gender")]
+    Gender = 5,
+}
+
+/// <summary>
 /// Approval state of the completed shortlist before candidates are contacted.
 /// </summary>
 public enum ShortlistApprovalStatus

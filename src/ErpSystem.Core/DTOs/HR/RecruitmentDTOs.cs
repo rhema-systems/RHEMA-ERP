@@ -83,6 +83,12 @@ public class JobVacancyDto : BaseDto
     public decimal? AutoShortlistMinScore { get; set; }
     public bool AutoShortlistRequireAllMandatory { get; set; }
 
+    /// <summary>
+    /// Derived (round 3, lane K; decision D-7): the vacancy carries a Gender or Age criterion. Such a
+    /// criterion may inform a score, never disqualify — the screen says so wherever this is true.
+    /// </summary>
+    public bool UsesProtectedCharacteristicCriterion { get; set; }
+
     public Guid? WorkflowInstanceId { get; set; }
 
     // Shortlist approval
@@ -748,6 +754,55 @@ public class JobShortlistingCriteriaDto : BaseDto
     public int Weight { get; set; }
     public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
     public string? ComparisonOperatorName => ComparisonOperator?.ToString();
+    /// <summary>The accepted values, one row each (round 3, lane K). <c>RequiredValue</c> above mirrors their labels.</summary>
+    public List<JobShortlistingCriteriaValueDto> Values { get; set; } = new();
+}
+
+/// <summary>One accepted value on a criterion (round 3, lane K; register row R-8).</summary>
+public class JobShortlistingCriteriaValueDto
+{
+    public Guid Id { get; set; }
+    public ShortlistingValueKind Kind { get; set; }
+    public string KindName => Kind.ToString();
+    /// <summary>The catalogue row for a catalogue kind; null for Gender and Text.</summary>
+    public Guid? ReferenceId { get; set; }
+    /// <summary>The catalogue name (mirrored), the gender member, or the typed text.</summary>
+    public string Label { get; set; } = string.Empty;
+    public int SortOrder { get; set; }
+}
+
+/// <summary>
+/// An accepted value on the criterion save: a catalogue id (its name is mirrored), a gender
+/// member's name, or typed text. The kind follows the criterion's type; the server resolves it.
+/// </summary>
+public class ShortlistingCriteriaValueInputDto
+{
+    public Guid? ReferenceId { get; set; }
+
+    [MaxLength(200)]
+    public string? Label { get; set; }
+}
+
+/// <summary>
+/// What a criterion type is made of — served by <c>GET api/job-vacancies/criteria/shapes</c>
+/// (round 3, lane K; plan § 5.4) so the panel and the service agree on one table.
+/// </summary>
+public class ShortlistingCriteriaShapeDto
+{
+    public JobShortlistingCriteriaType Type { get; set; }
+    public string TypeName => Type.ToString();
+    public string Label { get; set; } = string.Empty;
+    public ShortlistingValueKind? ValueKind { get; set; }
+    public string? ValueKindName => ValueKind?.ToString();
+    public bool IsList { get; set; }
+    public bool IsNumeric { get; set; }
+    public bool RequiresValues { get; set; }
+    public bool AllowsMandatory { get; set; }
+    public bool IsProtectedCharacteristic { get; set; }
+    public bool IsAutoEvaluated { get; set; }
+    public List<string> Operators { get; set; } = new();
+    public string Hint { get; set; } = string.Empty;
+    public string? MandatoryRefusal { get; set; }
 }
 
 public class CreateJobShortlistingCriteriaDto : CreateDtoBase
@@ -783,6 +838,13 @@ public class CreateJobShortlistingCriteriaDto : CreateDtoBase
     public int Weight { get; set; } = 1;
 
     public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>
+    /// The accepted values, as the whole set (round 3, lane K). Null keeps the legacy shape: the
+    /// comma-separated <c>RequiredValue</c> is split into text values. An empty list on a type that
+    /// needs values is refused — a blank criterion passes every candidate.
+    /// </summary>
+    public List<ShortlistingCriteriaValueInputDto>? Values { get; set; }
 }
 
 public class UpdateJobShortlistingCriteriaDto : UpdateDtoBase
@@ -815,6 +877,9 @@ public class UpdateJobShortlistingCriteriaDto : UpdateDtoBase
     public int Weight { get; set; }
 
     public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>The accepted values, as the whole set (round 3, lane K). Null keeps the legacy comma-separated shape.</summary>
+    public List<ShortlistingCriteriaValueInputDto>? Values { get; set; }
 }
 
 #endregion
@@ -877,6 +942,12 @@ public class JobCandidateDto : BaseDto
     // Documents
     public string? CvFilePath { get; set; }
     public string? ProfilePhotoUrl { get; set; }
+    /// <summary>
+    /// Whether a photograph is on file (round 3, lane C2). Derived from the gated upload record, or
+    /// the legacy URL on rows written before photos went private; the screen fetches
+    /// <c>GET /{id}/photo</c> only when this is true.
+    /// </summary>
+    public bool HasPhoto { get; set; }
     public int ApplicationCount { get; set; }
 }
 
@@ -890,6 +961,8 @@ public class JobCandidateSummaryDto
     public string City { get; set; } = string.Empty;
     public string CountryName { get; set; } = string.Empty;
     public bool IsInTalentPool { get; set; }
+    /// <summary>Round 3, lane C2 — the list shows a face beside the name when one is on file.</summary>
+    public bool HasPhoto { get; set; }
     public int ApplicationCount { get; set; }
 }
 
@@ -1462,6 +1535,8 @@ public class JobApplicationDto : BaseDto
     public string SourceName => Source.ToString();
     public Guid? JobPostingId { get; set; }
     public string? JobPostingChannel { get; set; }
+    /// <summary>The advert's own title (round 3, lane A), so the detail can say which posting it came through.</summary>
+    public string? JobPostingTitle { get; set; }
     public int? YearsOfExperience { get; set; }
     public DateTime? AvailableFrom { get; set; }
     public string? CoverLetter { get; set; }
@@ -1588,6 +1663,18 @@ public class InternalSubmitDraftDto
 
     [MaxLength(5000)]
     public string? CoverLetter { get; set; }
+}
+
+/// <summary>
+/// HR corrects how an application arrived (round 3, lane A; register row R-4): the source, and
+/// the advert it came through — which must belong to the application's vacancy.
+/// </summary>
+public class UpdateJobApplicationSourceDto
+{
+    [Required]
+    public ApplicationSource Source { get; set; }
+
+    public Guid? JobPostingId { get; set; }
 }
 
 public class CreateJobApplicationDto : CreateDtoBase
@@ -4594,7 +4681,13 @@ public class CreateJobOfferNoteDto : CreateDtoBase
 public class ApplicationAutoScoreDto
 {
     public Guid ApplicationId { get; set; }
-    public decimal AutoScore { get; set; }
+    /// <summary>
+    /// Null when the vacancy has no criteria (round 3, lane K): nothing was measured, so nothing is
+    /// scored — and an unscored application is never auto-shortlisted. It used to be 100.
+    /// </summary>
+    public decimal? AutoScore { get; set; }
+    /// <summary>False when the vacancy has no criteria to score against.</summary>
+    public bool HasCriteria { get; set; } = true;
     public DateTime ScoredAt { get; set; }
     public bool AllMandatoryPassed { get; set; }
     public decimal TotalWeight { get; set; }
@@ -4613,6 +4706,11 @@ public class CriterionScoreResult
     public decimal RawScore { get; set; }
     public decimal WeightedScore { get; set; }
     public string? Notes { get; set; }
+    /// <summary>
+    /// False for a criterion the engine does not score (Other): it contributes nothing and its
+    /// weight is left out of the total, so it neither lifts nor lowers anybody (round 3, lane K).
+    /// </summary>
+    public bool AutoEvaluated { get; set; } = true;
 }
 
 /// <summary>
@@ -5184,6 +5282,21 @@ public class PublicVacancyDto
 
     /// <summary>Pre-computed description for the public job advert (rich text / markdown).</summary>
     public string? JobDescription            { get; set; }
+
+    /// <summary>
+    /// The vacancy's live adverts (round 3, lane A): a posting link carries one of these ids as
+    /// <c>?posting=</c>, and an application made through it records the posting and takes its
+    /// source from the channel.
+    /// </summary>
+    public List<PublicVacancyPostingDto> Postings { get; set; } = new();
+}
+
+public class PublicVacancyPostingDto
+{
+    public Guid Id { get; set; }
+    public JobPostingChannel Channel { get; set; }
+    public string ChannelName => Channel.ToString();
+    public string Title { get; set; } = string.Empty;
 }
 
 /// <summary>
@@ -5589,6 +5702,8 @@ public class CandidatePortalProfileDto
     // Documents
     public string? CvFilePath { get; set; }
     public string? ProfilePhotoUrl { get; set; }
+    /// <summary>Round 3, lane C2: whether a photograph is on file — the profile page fetches it through <c>GET profile/photo</c> only then.</summary>
+    public bool HasPhoto { get; set; }
     public bool IsInTalentPool { get; set; }
     public List<JobCandidateWorkHistoryDto> WorkHistories { get; set; } = new();
     public List<JobCandidateQualificationDto> Qualifications { get; set; } = new();
@@ -5715,7 +5830,13 @@ public class CandidatePortalSaveDraftDto
     public string? CoverLetter { get; set; }
     public int? YearsOfExperience { get; set; }
     public DateTime? AvailableFrom { get; set; }
+    /// <summary>
+    /// ⚠ Not read (round 3, lane A). The careers surface is the company website; an application made
+    /// from a posting link takes its source from the posting's channel. Kept so old clients bind.
+    /// </summary>
     public ErpSystem.Core.Enums.ApplicationSource Source { get; set; } = ErpSystem.Core.Enums.ApplicationSource.CompanyWebsite;
+    /// <summary>The advert the candidate came through (`/careers/{vacancyId}?posting={id}`); must belong to the vacancy.</summary>
+    public Guid? JobPostingId { get; set; }
     public bool AddToTalentPool { get; set; }
 }
 

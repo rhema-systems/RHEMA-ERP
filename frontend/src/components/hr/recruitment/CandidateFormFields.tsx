@@ -12,6 +12,7 @@ import {
   TextField,
 } from '@/components/hr/employee/tabs/fields';
 import { countryService } from '@/services/hr/country.service';
+import { identificationTypeService } from '@/services/hr/lookup.service';
 import { GENDERS } from '@/types/hr/recruitment-pipeline';
 
 export const candidateSchema = z.object({
@@ -30,7 +31,14 @@ export const candidateSchema = z.object({
   linkedInProfile: z.string().max(200).optional().nullable(),
   portfolioUrl: z.string().max(200).optional().nullable(),
   gitHubUrl: z.string().max(200).optional().nullable(),
+  // National identity (round 3, lanes C1/C2) — the employee's trio, carried across at hire.
+  nationalIdTypeId: z.string().optional().nullable(),
+  nationalIdNumber: z.string().max(50).optional().nullable(),
+  nationalIdExpiryDate: z.string().optional().nullable(),
   isInTalentPool: z.boolean(),
+}).refine((v) => !v.nationalIdNumber?.trim() || !!v.nationalIdTypeId, {
+  message: 'Say which document the number is from',
+  path: ['nationalIdTypeId'],
 });
 
 export type CandidateFormValues = z.infer<typeof candidateSchema>;
@@ -51,6 +59,9 @@ export const emptyCandidate: CandidateFormValues = {
   linkedInProfile: null,
   portfolioUrl: null,
   gitHubUrl: null,
+  nationalIdTypeId: null,
+  nationalIdNumber: null,
+  nationalIdExpiryDate: null,
   isInTalentPool: false,
 };
 
@@ -68,6 +79,11 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
   const countries = useQuery({
     queryKey: ['hr', 'countries', 'active'],
     queryFn: () => countryService.getActive(),
+  });
+  // The tenant's identity documents (Ghana Card, passport, …) — the server refuses any other type.
+  const idTypes = useQuery({
+    queryKey: ['hr', 'identification-types', 'active'],
+    queryFn: () => identificationTypeService.getActive(),
   });
 
   return (
@@ -96,6 +112,23 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
                 label: g === 'PreferNotToSay' ? 'Prefer not to say' : g,
               }))}
             />
+            <div />
+          </FieldRow>
+          {/* Round 3, lane C1/C2 (register row R-3a): the national identity document. At hire it
+              becomes the employee's first identification card, unverified. */}
+          <FieldRow>
+            <SelectField
+              form={form}
+              name="nationalIdTypeId"
+              label="Identity document"
+              allowEmpty
+              emptyLabel="Not recorded"
+              options={(idTypes.data ?? []).map((t) => ({ value: t.id, label: t.name }))}
+            />
+            <TextField form={form} name="nationalIdNumber" label="Document number" />
+          </FieldRow>
+          <FieldRow>
+            <DateField form={form} name="nationalIdExpiryDate" label="Document expiry" />
             <div />
           </FieldRow>
         </CardContent>

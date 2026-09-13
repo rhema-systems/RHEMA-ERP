@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { Camera, Paperclip } from 'lucide-react';
+import { CurrencyField } from '@/components/hr/common/CurrencyPicker';
 import { hrCurrencyService } from '@/services/hr/hr-currency.service';
 import { Badge } from '@/components/ui/badge';
 import { employeeService } from '@/services/hr/employee.service';
@@ -372,15 +373,11 @@ export function GuarantorsTab({ employeeId }: { employeeId: string }) {
                 label="Amount guaranteed"
                 step="0.01"
               />
-              <SelectField
+              {/* Finance owns this list; the server refuses a code it does not hold. */}
+              <CurrencyField
                 form={form}
                 name="amountGuaranteedCurrencyCode"
-                label="Currency"
-                // Finance owns this list; the server refuses a code it does not hold.
-                options={(currencies ?? []).map((c) => ({
-                  value: c.code,
-                  label: `${c.code} — ${c.name}`,
-                }))}
+                options={currencies}
                 allowEmpty
                 emptyLabel="HR default"
               />

@@ -1,5 +1,7 @@
 'use client';
 
+import { useEffect } from 'react';
+import type { UseFormReturn } from 'react-hook-form';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
@@ -17,12 +19,16 @@ import { RelationshipField } from '@/components/hr/employee/tabs/address-fields'
 import { RELATIONSHIP_SCOPES } from '@/types/hr/relationship-type';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import { qualificationService } from '@/services/hr/lookup.service';
+import { languageService } from '@/services/hr/language.service';
 import { skillService } from '@/services/hr/skill.service';
 import { jobCandidateService } from '@/services/hr/recruitment-pipeline.service';
 import {
+  LANGUAGE_PROFICIENCIES,
   PROFICIENCY_LEVELS,
   QUALIFICATION_TYPES,
   type CandidateInterest,
+  type CandidateLanguage,
+  type CandidateLanguageForm,
   type CandidateQualification,
   type CandidateReferee,
   type CandidateSkill,
@@ -30,7 +36,7 @@ import {
 } from '@/types/hr/recruitment-pipeline';
 
 /**
- * The five list-shaped collections on a candidate record.
+ * The six list-shaped collections on a candidate record (languages joined in round 3, lane C2).
  *
  * All five ride `ResourceCollectionTab` — the same table-plus-dialog used by the 13 employee
  * sub-resource tabs. Documents and notes are not here: documents need the multipart upload gate and
@@ -42,14 +48,19 @@ import {
 
 // ── qualifications ─────────────────────────────────────────────────────────
 
-const qualificationSchema = z.object({
-  qualificationType: z.string().min(1, 'Type is required'),
-  qualificationId: z.string().optional().nullable(),
-  qualificationFreeText: z.string().max(200).optional().nullable(),
-  institution: z.string().min(1, 'Institution is required').max(200),
-  dateAwarded: z.string().min(1, 'Date awarded is required'),
-  grade: z.string().max(100).optional().nullable(),
-});
+const qualificationSchema = z
+  .object({
+    qualificationType: z.string().min(1, 'Type is required'),
+    qualificationId: z.string().optional().nullable(),
+    qualificationFreeText: z.string().max(200).optional().nullable(),
+    institution: z.string().min(1, 'Institution is required').max(200),
+    dateAwarded: z.string().min(1, 'Date awarded is required'),
+    grade: z.string().max(100).optional().nullable(),
+  })
+  .refine((v) => !!v.qualificationId || !!v.qualificationFreeText?.trim(), {
+    message: 'Pick a qualification from the lookup or name it',
+    path: ['qualificationFreeText'],
+  });
 type QualificationForm = z.infer<typeof qualificationSchema>;
 
 export function CandidateQualificationsTab({ candidateId }: { candidateId: string }) {
@@ -98,39 +109,72 @@ export function CandidateQualificationsTab({ candidateId }: { candidateId: strin
         dateAwarded: q.dateAwarded,
         grade: q.grade ?? null,
       })}
-      dialogHint="Pick from the qualifications lookup, or name the award if it is not listed."
+      dialogHint="Choose the kind first; the lookup narrows to it. Name the award only when it is not listed."
       renderFields={(form) => (
-        <div className="space-y-4">
-          <FieldRow>
-            <SelectField
-              form={form}
-              name="qualificationType"
-              label="Type"
-              required
-              options={QUALIFICATION_TYPES.map((t) => ({ value: t, label: humanizeEnum(t) }))}
-            />
-            <SelectField
-              form={form}
-              name="qualificationId"
-              label="From the lookup"
-              allowEmpty
-              emptyLabel="Not listed"
-              options={(catalogue.data ?? []).map((q: any) => ({ value: q.id, label: q.name }))}
-            />
-          </FieldRow>
-          <TextField
-            form={form}
-            name="qualificationFreeText"
-            label="Qualification name (if not listed)"
-          />
-          <FieldRow>
-            <TextField form={form} name="institution" label="Institution" required />
-            <DateField form={form} name="dateAwarded" label="Date awarded" required />
-          </FieldRow>
-          <TextField form={form} name="grade" label="Grade / class" />
-        </div>
+        <QualificationFields
+          form={form}
+          catalogue={(catalogue.data ?? []) as { id: string; name: string; type: string }[]}
+        />
       )}
     />
+  );
+}
+
+/**
+ * Round 3, lane C2 (register row R-3c): the type drives the lookup — an Education row offers the
+ * degrees and diplomas, a Certification row the certificates — and the free-text box appears only
+ * when nothing listed fits. A catalogue row picked under one type is dropped when the type moves.
+ */
+function QualificationFields({
+  form,
+  catalogue,
+}: {
+  form: UseFormReturn<QualificationForm>;
+  catalogue: { id: string; name: string; type: string }[];
+}) {
+  const type = form.watch('qualificationType');
+  const qualificationId = form.watch('qualificationId') || '';
+  // Experience and TechnicalSkills are not catalogue kinds; the whole list is offered for them.
+  const typed = catalogue.filter((q) => q.type === type);
+  const offered = typed.length > 0 ? typed : catalogue;
+  const listed = !!qualificationId && offered.some((q) => q.id === qualificationId);
+
+  useEffect(() => {
+    if (qualificationId && !listed && catalogue.length > 0) {
+      form.setValue('qualificationId', null, { shouldDirty: true });
+    }
+    // form is stable; re-running on every keystroke elsewhere is not wanted.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qualificationId, listed, catalogue.length]);
+
+  return (
+    <div className="space-y-4">
+      <FieldRow>
+        <SelectField
+          form={form}
+          name="qualificationType"
+          label="Type"
+          required
+          options={QUALIFICATION_TYPES.map((t) => ({ value: t, label: humanizeEnum(t) }))}
+        />
+        <SelectField
+          form={form}
+          name="qualificationId"
+          label="From the lookup"
+          allowEmpty
+          emptyLabel="Not listed"
+          options={offered.map((q) => ({ value: q.id, label: q.name }))}
+        />
+      </FieldRow>
+      {!listed && (
+        <TextField form={form} name="qualificationFreeText" label="Qualification name" required />
+      )}
+      <FieldRow>
+        <TextField form={form} name="institution" label="Institution" required />
+        <DateField form={form} name="dateAwarded" label="Date awarded" required />
+      </FieldRow>
+      <TextField form={form} name="grade" label="Grade / class" />
+    </div>
   );
 }
 
@@ -139,7 +183,8 @@ function normaliseQualification(values: QualificationForm) {
     ...values,
     qualificationType: values.qualificationType as CandidateQualification['qualificationType'],
     qualificationId: values.qualificationId || null,
-    qualificationFreeText: values.qualificationFreeText || null,
+    // With a catalogue row the name comes from the row; typed text is only kept when there is none.
+    qualificationFreeText: values.qualificationId ? null : values.qualificationFreeText || null,
     grade: values.grade || null,
   };
 }
@@ -331,6 +376,9 @@ const skillSchema = z.object({
   yearsOfExperience: z.coerce.number().int().min(0).max(50).optional().nullable(),
   isCertified: z.boolean(),
   certificationName: z.string().max(200).optional().nullable(),
+  certificationNumber: z.string().max(100).optional().nullable(),
+  certifyingBody: z.string().max(200).optional().nullable(),
+  certificationExpiryDate: z.string().optional().nullable(),
 });
 type SkillForm = z.infer<typeof skillSchema>;
 
@@ -359,7 +407,18 @@ export function CandidateSkillsTab({ candidateId }: { candidateId: string }) {
         {
           header: 'Certified',
           cell: (s) =>
-            s.isCertified ? <StatusBadge status={s.certificationName || 'Active'} /> : '—',
+            s.isCertified ? (
+              <span className="text-sm">
+                <StatusBadge status={s.certificationName || 'Active'} />
+                {(s.certificationNumber || s.certifyingBody) && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {[s.certificationNumber, s.certifyingBody].filter(Boolean).join(' · ')}
+                  </span>
+                )}
+              </span>
+            ) : (
+              '—'
+            ),
         },
       ]}
       schema={skillSchema}
@@ -370,6 +429,9 @@ export function CandidateSkillsTab({ candidateId }: { candidateId: string }) {
         yearsOfExperience: null,
         isCertified: false,
         certificationName: null,
+        certificationNumber: null,
+        certifyingBody: null,
+        certificationExpiryDate: null,
       }}
       toForm={(s) => ({
         skillId: s.skillId ?? null,
@@ -378,46 +440,213 @@ export function CandidateSkillsTab({ candidateId }: { candidateId: string }) {
         yearsOfExperience: s.yearsOfExperience ?? null,
         isCertified: s.isCertified,
         certificationName: s.certificationName ?? null,
+        certificationNumber: s.certificationNumber ?? null,
+        certifyingBody: s.certifyingBody ?? null,
+        certificationExpiryDate: s.certificationExpiryDate?.slice(0, 10) ?? null,
       })}
-      dialogHint="The free-text name is always stored; linking to the skills catalogue is optional."
+      dialogHint="Pick from the skills catalogue, or name the skill if it is not listed. Certificate details appear once the skill is marked certified."
       renderFields={(form) => (
-        <div className="space-y-4">
-          <FieldRow>
-            <TextField form={form} name="skillName" label="Skill" required />
-            <SelectField
-              form={form}
-              name="skillId"
-              label="Catalogue skill"
-              allowEmpty
-              emptyLabel="Not listed"
-              options={(catalogue.data ?? []).map((s: any) => ({ value: s.id, label: s.name }))}
-            />
-          </FieldRow>
-          <FieldRow>
-            <SelectField
-              form={form}
-              name="proficiency"
-              label="Proficiency"
-              allowEmpty
-              options={PROFICIENCY_LEVELS.map((p) => ({ value: p, label: humanizeEnum(p) }))}
-            />
-            <NumberField form={form} name="yearsOfExperience" label="Years of experience" />
-          </FieldRow>
-          <SwitchField form={form} name="isCertified" label="Certified" />
-          <TextField form={form} name="certificationName" label="Certification name" />
-        </div>
+        <SkillFields form={form} catalogue={(catalogue.data ?? []) as { id: string; name: string }[]} />
       )}
     />
   );
 }
 
+/**
+ * Round 3, lane C2 (register row R-3d): a catalogue pick mirrors its name into the stored text
+ * (the server keeps both), the free-text box is offered only when nothing listed fits, and the
+ * four certificate fields appear only under the tick — the server clears them together anyway.
+ */
+function SkillFields({
+  form,
+  catalogue,
+}: {
+  form: UseFormReturn<SkillForm>;
+  catalogue: { id: string; name: string }[];
+}) {
+  const skillId = form.watch('skillId') || '';
+  const isCertified = form.watch('isCertified');
+  const picked = catalogue.find((s) => s.id === skillId);
+
+  useEffect(() => {
+    if (!picked) return;
+    if (form.getValues('skillName') !== picked.name) {
+      form.setValue('skillName', picked.name, { shouldValidate: true, shouldDirty: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [picked?.id]);
+
+  return (
+    <div className="space-y-4">
+      <FieldRow>
+        <SelectField
+          form={form}
+          name="skillId"
+          label="Skill (from the catalogue)"
+          allowEmpty
+          emptyLabel="Not listed"
+          options={catalogue.map((s) => ({ value: s.id, label: s.name }))}
+        />
+        {picked ? (
+          <div className="space-y-2 text-sm">
+            <span className="text-xs text-muted-foreground">Stored as</span>
+            <p className="pt-2 font-medium">{picked.name}</p>
+          </div>
+        ) : (
+          <TextField form={form} name="skillName" label="Skill name" required />
+        )}
+      </FieldRow>
+      <FieldRow>
+        <SelectField
+          form={form}
+          name="proficiency"
+          label="Proficiency"
+          allowEmpty
+          options={PROFICIENCY_LEVELS.map((p) => ({ value: p, label: humanizeEnum(p) }))}
+        />
+        <NumberField form={form} name="yearsOfExperience" label="Years of experience" />
+      </FieldRow>
+      <SwitchField form={form} name="isCertified" label="Certified" />
+      {isCertified && (
+        <div className="space-y-4 rounded-md border bg-muted/30 p-3">
+          <FieldRow>
+            <TextField form={form} name="certificationName" label="Certification name" required />
+            <TextField form={form} name="certificationNumber" label="Certificate number" />
+          </FieldRow>
+          <FieldRow>
+            <TextField form={form} name="certifyingBody" label="Certifying body" />
+            <DateField form={form} name="certificationExpiryDate" label="Expires" />
+          </FieldRow>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function cleanSkill(values: SkillForm) {
+  const certified = values.isCertified;
   return {
     ...values,
     skillId: values.skillId || null,
     proficiency: (values.proficiency || null) as CandidateSkill['proficiency'],
     yearsOfExperience: values.yearsOfExperience ?? null,
-    certificationName: values.certificationName || null,
+    certificationName: certified ? values.certificationName || null : null,
+    certificationNumber: certified ? values.certificationNumber || null : null,
+    certifyingBody: certified ? values.certifyingBody || null : null,
+    certificationExpiryDate: certified ? values.certificationExpiryDate || null : null,
+  };
+}
+
+// ── languages ──────────────────────────────────────────────────────────────
+
+const languageSchema = z
+  .object({
+    languageId: z.string().optional().nullable(),
+    languageName: z.string().max(100).optional().nullable(),
+    proficiency: z.string().min(1, 'Proficiency is required'),
+  })
+  .refine((v) => !!v.languageId || !!v.languageName?.trim(), {
+    message: 'Pick a language from the catalogue or name it',
+    path: ['languageName'],
+  });
+type LanguageForm = z.infer<typeof languageSchema>;
+
+/**
+ * Round 3, lane C2 (register row R-3e). HR had no view of a candidate's languages at all while the
+ * Language criterion scored them; the door arrived in C1, this is the tab. A catalogue row or a
+ * typed name — the server mirrors the name from the row.
+ */
+export function CandidateLanguagesTab({ candidateId }: { candidateId: string }) {
+  const catalogue = useQuery({
+    queryKey: ['hr', 'languages', 'active'],
+    queryFn: () => languageService.getActive(),
+  });
+
+  return (
+    <ResourceCollectionTab<CandidateLanguage, LanguageForm>
+      parentId={candidateId}
+      title="languages"
+      singular="language"
+      queryKey={['hr', 'candidate-languages', candidateId]}
+      invalidateKeys={[['hr', 'candidate-detail', candidateId]]}
+      list={(id) => jobCandidateService.getLanguages(id)}
+      create={(id, values) => jobCandidateService.addLanguage(id, cleanLanguage(values))}
+      update={(id, lid, values) => jobCandidateService.updateLanguage(id, lid, cleanLanguage(values))}
+      remove={(_id, lid) => jobCandidateService.deleteLanguage(lid)}
+      getId={(l) => l.id}
+      columns={[
+        {
+          header: 'Language',
+          cell: (l) => (
+            <span>
+              {l.languageName}
+              {l.languageCode && <span className="ml-2 text-xs text-muted-foreground">{l.languageCode}</span>}
+            </span>
+          ),
+        },
+        { header: 'Proficiency', cell: (l) => humanizeEnum(l.proficiency) },
+        { header: 'From the catalogue', cell: (l) => (l.languageId ? 'Yes' : 'Typed') },
+      ]}
+      schema={languageSchema}
+      emptyForm={{ languageId: null, languageName: null, proficiency: 'ProfessionalWorking' }}
+      toForm={(l) => ({
+        languageId: l.languageId ?? null,
+        languageName: l.languageId ? null : l.languageName,
+        proficiency: l.proficiency,
+      })}
+      dialogHint="Pick from the language catalogue, or type the name if it is not listed."
+      renderFields={(form) => (
+        <LanguageFields form={form} catalogue={(catalogue.data ?? []).map((l) => ({ id: l.id, name: l.name }))} />
+      )}
+    />
+  );
+}
+
+function LanguageFields({
+  form,
+  catalogue,
+}: {
+  form: UseFormReturn<LanguageForm>;
+  catalogue: { id: string; name: string }[];
+}) {
+  const languageId = form.watch('languageId') || '';
+  const picked = catalogue.find((l) => l.id === languageId);
+  return (
+    <div className="space-y-4">
+      <FieldRow>
+        <SelectField
+          form={form}
+          name="languageId"
+          label="Language (from the catalogue)"
+          allowEmpty
+          emptyLabel="Not listed"
+          options={catalogue.map((l) => ({ value: l.id, label: l.name }))}
+        />
+        {picked ? (
+          <div className="space-y-2 text-sm">
+            <span className="text-xs text-muted-foreground">Stored as</span>
+            <p className="pt-2 font-medium">{picked.name}</p>
+          </div>
+        ) : (
+          <TextField form={form} name="languageName" label="Language name" required />
+        )}
+      </FieldRow>
+      <SelectField
+        form={form}
+        name="proficiency"
+        label="Proficiency"
+        required
+        options={LANGUAGE_PROFICIENCIES.map((p) => ({ value: p, label: humanizeEnum(p) }))}
+      />
+    </div>
+  );
+}
+
+function cleanLanguage(values: LanguageForm): CandidateLanguageForm {
+  return {
+    languageId: values.languageId || null,
+    languageName: values.languageId ? null : values.languageName?.trim() || null,
+    proficiency: values.proficiency as CandidateLanguageForm['proficiency'],
   };
 }
 

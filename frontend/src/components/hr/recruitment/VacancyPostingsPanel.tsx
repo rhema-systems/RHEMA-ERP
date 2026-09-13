@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, Loader2, Megaphone, Paperclip, Plus, Send, TimerOff, Trash2 } from 'lucide-react';
+import { ExternalLink, Link2, Loader2, Megaphone, Paperclip, Plus, Send, TimerOff, Trash2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -133,6 +133,18 @@ export function VacancyPostingsPanel({
   });
 
   const rows = postings.data ?? [];
+
+  /** `/careers/{vacancyId}?posting={postingId}` on this host — the advert's own apply link. */
+  const careersLink = (postingId: string) =>
+    `${typeof window !== 'undefined' ? window.location.origin : ''}/careers/${vacancyId}?posting=${postingId}`;
+  const copyCareersLink = async (postingId: string) => {
+    try {
+      await navigator.clipboard.writeText(careersLink(postingId));
+      toast({ title: 'Link copied', description: 'Paste it on the advert; applications made from it name this advert.' });
+    } catch {
+      toast({ title: careersLink(postingId) });
+    }
+  };
   const vacancyIsPublished = vacancyStatus === 'Published';
 
   return (
@@ -180,6 +192,7 @@ export function VacancyPostingsPanel({
                 <TableHead>Status</TableHead>
                 <TableHead>Published</TableHead>
                 <TableHead>Expires</TableHead>
+                <TableHead>Careers link</TableHead>
                 <TableHead className="text-right">Applications</TableHead>
                 <TableHead className="w-40" />
               </TableRow>
@@ -207,6 +220,19 @@ export function VacancyPostingsPanel({
                   </TableCell>
                   <TableCell>{formatDate(p.actualPublishDate ?? p.publishDate)}</TableCell>
                   <TableCell>{formatDate(p.expiryDate)}</TableCell>
+                  <TableCell>
+                    {/* Round 3, lane A: the link to put on THIS advert. An application made from
+                        it carries the posting and takes its source from the channel. */}
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      title={careersLink(p.id)}
+                      onClick={() => copyCareersLink(p.id)}
+                    >
+                      <Link2 className="mr-1 h-3.5 w-3.5" /> Copy link
+                    </Button>
+                  </TableCell>
                   <TableCell className="text-right tabular-nums">{p.applicationCount}</TableCell>
                   <TableCell>
                     <div className="flex items-center justify-end gap-1">

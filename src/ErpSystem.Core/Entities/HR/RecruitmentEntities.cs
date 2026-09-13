@@ -694,6 +694,45 @@ public class JobShortlistingCriteria : TenantEntity
     public int Weight { get; set; } = 1;
 	
 	public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>
+    /// The accepted values (round 3, lane K; register row R-8): catalogue rows, gender members or
+    /// typed text, one row each. <see cref="RequiredValue"/> is kept as the mirrored label list so
+    /// rows written before this lane keep scoring; the engine reads these first and the labels second.
+    /// </summary>
+    public virtual ICollection<JobShortlistingCriteriaValue> Values { get; set; } = new List<JobShortlistingCriteriaValue>();
+}
+
+/// <summary>
+/// One accepted value on a shortlisting criterion (round 3, lane K; register row R-8; plan § 5.4).
+/// </summary>
+/// <remarks>
+/// <para><see cref="Kind"/> says what <see cref="ReferenceId"/> points at — a Skill, Qualification,
+/// Certification or Language catalogue row — or that the value is a Gender member or plain text.
+/// <see cref="Label"/> is ALWAYS filled: the catalogue name mirrored at save time, the enum member's
+/// name, or the typed text — so a criterion stays readable if the catalogue row is renamed or
+/// retired, and the label-second match path has something to read.</para>
+///
+/// <para>The rows are a replace-set on the criterion save: every save carries the whole list, and a
+/// row left out is retired. The parent's <c>RequiredValue</c> is rewritten from the labels on the
+/// same save.</para>
+/// </remarks>
+public class JobShortlistingCriteriaValue : TenantEntity
+{
+    public Guid JobShortlistingCriteriaId { get; set; }
+
+    [ForeignKey(nameof(JobShortlistingCriteriaId))]
+    public virtual JobShortlistingCriteria Criteria { get; set; } = null!;
+
+    public ShortlistingValueKind Kind { get; set; }
+
+    /// <summary>The catalogue row, for a catalogue kind. Null for Gender and Text.</summary>
+    public Guid? ReferenceId { get; set; }
+
+    [MaxLength(200)]
+    public string Label { get; set; } = string.Empty;
+
+    public int SortOrder { get; set; }
 }
 
 // =============================================================================
@@ -1509,6 +1548,9 @@ public sealed class SnapshotLanguage
     public string NormalisedName { get; init; } = string.Empty;
     public string DisplayName    { get; init; } = string.Empty;
     public int    Proficiency    { get; init; }  // LanguageProficiency enum value
+
+    /// <summary>Catalogue Language ID, when the candidate picked from the catalogue (round 3, lane K — id-first matching).</summary>
+    public Guid? LanguageId { get; init; }
 }
 
 /// <summary>Frozen work-history entry within <see cref="ApplicationCandidateSnapshot"/>.</summary>

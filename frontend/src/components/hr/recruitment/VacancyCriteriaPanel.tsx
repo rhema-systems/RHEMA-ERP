@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, ListChecks, Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
+import { AlertTriangle, ListChecks, Loader2, Pencil, Plus, ShieldAlert, Trash2, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,12 +29,14 @@ import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { useToast } from '@/hooks/use-toast';
+import { certificationService } from '@/services/hr/certification.service';
+import { languageService } from '@/services/hr/language.service';
 import { jobVacancyService } from '@/services/hr/recruitment.service';
 import { skillService } from '@/services/hr/skill.service';
 import { qualificationService } from '@/services/hr/lookup.service';
+import { GENDERS } from '@/types/hr/recruitment-pipeline';
 import {
   MANDATORY_MATCH_MODES,
-  SHORTLISTING_COMPARISON_OPERATORS,
   SHORTLISTING_CRITERIA_TYPES,
   VALUE_MATCH_STRATEGIES,
 } from '@/types/hr/recruitment';
@@ -43,73 +45,31 @@ import type {
   ShortlistingComparisonOperator,
   ShortlistingCriteria,
   ShortlistingCriteriaForm,
+  ShortlistingCriteriaShape,
   ShortlistingCriteriaType,
+  ShortlistingCriteriaValueInput,
   ValueMatchStrategy,
 } from '@/types/hr/recruitment';
 
-// ── what each criterion type actually uses ──────────────────────────────────
-// Read off JobApplicationService.EvaluateCriterion rather than guessed. A form that offers an
-// input the engine never reads for the chosen type is a form that lies about what it will do.
-type Shape = {
-  label: string;
-  /** Numeric arm — min/max and a comparison operator. */
-  numeric?: boolean;
-  /** Comma-separated list of required values, matched with mode + strategy. */
-  list?: boolean;
-  /** A single free-text value (no list semantics). */
-  single?: boolean;
-  /** Which catalogue, if any, gives an ID-first exact match. */
-  catalogue?: 'skill' | 'qualification';
-  /** Operators the engine honours for this type; undefined = all of them. */
-  operators?: readonly ShortlistingComparisonOperator[];
-  hint: string;
+// ── what each criterion type is made of ─────────────────────────────────────
+// Round 3, lane K: read from the SERVER (`GET job-vacancies/criteria/shapes`), the same table
+// the service enforces, so this panel cannot drift from the engine again. The map below is only
+// the label fallback while the shapes load.
+const TYPE_LABELS: Record<ShortlistingCriteriaType, string> = {
+  Qualification: 'Qualification',
+  EducationLevel: 'Education level',
+  Skill: 'Skill',
+  Certification: 'Certification',
+  Language: 'Language',
+  YearsOfExperience: 'Years of experience',
+  Age: 'Age',
+  Gender: 'Gender',
+  Location: 'Location',
+  Other: 'Other',
 };
 
-const SHAPES: Record<ShortlistingCriteriaType, Shape> = {
-  Qualification: {
-    label: 'Qualification',
-    list: true,
-    catalogue: 'qualification',
-    hint: 'Pick a catalogue qualification for an exact match, or list names to match on text — a candidate holding the catalogue one passes immediately.',
-  },
-  EducationLevel: {
-    label: 'Education level',
-    list: true,
-    catalogue: 'qualification',
-    hint: 'Scored exactly like Qualification: catalogue match first, then the listed names.',
-  },
-  Skill: {
-    label: 'Skill',
-    list: true,
-    catalogue: 'skill',
-    hint: 'Pick a catalogue skill for an exact match, or list skill names to match on text.',
-  },
-  Certification: { label: 'Certification', list: true, hint: 'List the certifications by name.' },
-  Language: { label: 'Language', list: true, hint: 'List the languages. No list means every candidate passes.' },
-  YearsOfExperience: {
-    label: 'Years of experience',
-    numeric: true,
-    operators: ['GreaterThanOrEqual', 'GreaterThan', 'LessThan', 'LessThanOrEqual', 'Equals', 'Between'],
-    hint: 'Between uses both bounds; the greater/less operators use one. A near miss still scores partially.',
-  },
-  Age: {
-    label: 'Age',
-    numeric: true,
-    operators: ['GreaterThanOrEqual', 'GreaterThan', 'LessThan', 'LessThanOrEqual', 'Equals', 'Between'],
-    hint: 'Computed from date of birth at the time of scoring.',
-  },
-  Gender: { label: 'Gender', single: true, hint: 'A gender name, or “any”. Anything left blank passes everyone.' },
-  Location: {
-    label: 'Location',
-    single: true,
-    operators: ['Equals', 'Contains'],
-    hint: 'Matched against the candidate’s city. Contains is the default; Equals demands the whole city name.',
-  },
-  Other: {
-    label: 'Other',
-    hint: '⚠ Not auto-evaluated. Every candidate passes this criterion with a neutral score — use it only for something a person judges off-system.',
-  },
-};
+/** A picked value in the editor: a catalogue row (id + name) or typed text. */
+type PickedValue = { referenceId: string | null; label: string };
 
 const blank = (): ShortlistingCriteriaForm => ({
   criteriaName: '',
@@ -120,13 +80,17 @@ const blank = (): ShortlistingCriteriaForm => ({
   maxValue: null,
   isMandatory: true,
   matchMode: 'AnyMatched',
-  matchStrategy: 'Contains',
+  // ⚠ Exact, matching the server's default (R-5 fix 9). The panel used to default to Contains
+  // while the service defaulted to Exact, so a row saved without touching the dropdown was
+  // scored one way and displayed another.
+  matchStrategy: 'Exact',
   requiredSkillId: null,
   requiredQualificationId: null,
   // ⚠ Never null. `Weight` is a non-nullable int on both DTOs, so `null` is rejected 400 by the
   // JSON reader before the handler runs — which is exactly what the old form did.
   weight: 1,
   comparisonOperator: null,
+  values: [],
 });
 
 const NONE = '__none__';
@@ -141,12 +105,26 @@ const toForm = (c: ShortlistingCriteria): ShortlistingCriteriaForm => ({
   maxValue: c.maxValue ?? null,
   isMandatory: c.isMandatory,
   matchMode: c.matchMode ?? 'AnyMatched',
-  matchStrategy: c.matchStrategy ?? 'Contains',
+  matchStrategy: c.matchStrategy ?? 'Exact',
   requiredSkillId: c.requiredSkillId ?? null,
   requiredQualificationId: c.requiredQualificationId ?? null,
   weight: c.weight ?? 1,
   comparisonOperator: c.comparisonOperator ?? null,
+  values: c.values ?? [],
 });
+
+/** The rows the editor starts from: the value rows, or the legacy comma list when there are none. */
+const initialPicked = (c: ShortlistingCriteria | null): PickedValue[] => {
+  if (!c) return [];
+  if (c.values && c.values.length > 0) {
+    return c.values.map((v) => ({ referenceId: v.referenceId ?? null, label: v.label }));
+  }
+  return (c.requiredValue ?? '')
+    .split(',')
+    .map((v) => v.trim())
+    .filter(Boolean)
+    .map((label) => ({ referenceId: null, label }));
+};
 
 /**
  * What an application is scored against for this vacancy.
@@ -156,14 +134,16 @@ const toForm = (c: ShortlistingCriteria): ShortlistingCriteriaForm => ({
  * vacancy that already has applicants — which is why the panel says so rather than leaving it to
  * be discovered.
  *
- * ⚠ Rebuilt 2026-09-01 (lane 5b). The previous version sent `minimumScore` and `displayOrder`,
- * neither of which exists on the DTO, and never sent `type` at all — so every criterion it made
- * was stored as the undefined enum `0` and passed every candidate. Those rows are flagged below.
+ * Round 3, lane K (register rows R-5, R-8; decision D-7): the accepted values come from the HR
+ * setups — the skill, qualification, certification and language catalogues, the gender register
+ * — as rows, not a comma-separated box; Gender and Age can never be mandatory and the panel says
+ * why; Other is not auto-evaluated and cannot be mandatory either.
  */
 export function VacancyCriteriaPanel({
   vacancyId,
   canManage,
   canRemove,
+  usesProtectedCharacteristic = false,
 }: {
   vacancyId: string;
   canManage: boolean;
@@ -172,16 +152,20 @@ export function VacancyCriteriaPanel({
    *
    * DELETE api/job-vacancies/criteria/{id} is gated on RecruitmentAdminPolicy while the POST and
    * PUT beside it take RecruitmentWritePolicy, so an HR user who can add a criterion cannot
-   * delete one. The panel used to offer Remove to anyone who could add, and it answered 403 with
-   * a toast saying nothing about why (probed 2026-09-01, lane 5b). Hide it instead.
+   * delete one. Hide Remove rather than answer 403 with a toast explaining nothing.
    */
   canRemove: boolean;
+  /** The vacancy read's derived flag (D-7): a Gender or Age criterion is on file. */
+  usesProtectedCharacteristic?: boolean;
 }) {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<ShortlistingCriteria | null>(null);
   const [form, setForm] = useState<ShortlistingCriteriaForm>(blank);
+  const [picked, setPicked] = useState<PickedValue[]>([]);
+  const [typedValue, setTypedValue] = useState('');
+  const [pickerChoice, setPickerChoice] = useState<string>('');
 
   const criteria = useQuery({
     queryKey: ['hr', 'vacancy-criteria', vacancyId],
@@ -189,38 +173,96 @@ export function VacancyCriteriaPanel({
     enabled: !!vacancyId,
   });
 
-  const shape = SHAPES[form.type];
+  const shapes = useQuery({
+    queryKey: ['hr', 'vacancy-criteria', 'shapes'],
+    queryFn: () => jobVacancyService.getCriteriaShapes(),
+    staleTime: 60 * 60 * 1000,
+  });
+  const shapeOf = (type: ShortlistingCriteriaType | 0): ShortlistingCriteriaShape | undefined =>
+    typeof type === 'string' ? shapes.data?.find((s) => s.type === type) : undefined;
+  const shape = shapeOf(form.type);
+  const valueKind = shape?.valueKind ?? null;
 
-  // Only fetched when a catalogue-backed type is selected — a vacancy screen should not pull
+  // Only fetched when a catalogue-backed kind is selected — a vacancy screen should not pull
   // 186 qualifications to render a years-of-experience criterion.
   const skills = useQuery({
     queryKey: ['hr', 'skills', 'active'],
     queryFn: () => skillService.getActive(),
-    enabled: open && shape.catalogue === 'skill',
+    enabled: open && valueKind === 'Skill',
   });
   const qualifications = useQuery({
     queryKey: ['hr', 'qualifications', 'active'],
     queryFn: () => qualificationService.getActive(),
-    enabled: open && shape.catalogue === 'qualification',
+    enabled: open && valueKind === 'Qualification',
   });
+  const certifications = useQuery({
+    queryKey: ['hr', 'certifications', 'active'],
+    queryFn: () => certificationService.getAll({ activeOnly: true }),
+    enabled: open && valueKind === 'Certification',
+  });
+  const languages = useQuery({
+    queryKey: ['hr', 'languages', 'active'],
+    queryFn: () => languageService.getActive(),
+    enabled: open && valueKind === 'Language',
+  });
+
+  const catalogue: { id: string; name: string }[] = useMemo(() => {
+    switch (valueKind) {
+      case 'Skill':
+        return (skills.data ?? []).map((s) => ({ id: s.id, name: s.name }));
+      case 'Qualification':
+        return (qualifications.data ?? []).map((q) => ({ id: q.id, name: q.name }));
+      case 'Certification':
+        return (certifications.data ?? []).map((c) => ({ id: c.id, name: c.name }));
+      case 'Language':
+        return (languages.data ?? []).map((l) => ({ id: l.id, name: l.name }));
+      default:
+        return [];
+    }
+  }, [valueKind, skills.data, qualifications.data, certifications.data, languages.data]);
+  const catalogueLoading =
+    (valueKind === 'Skill' && skills.isLoading) ||
+    (valueKind === 'Qualification' && qualifications.isLoading) ||
+    (valueKind === 'Certification' && certifications.isLoading) ||
+    (valueKind === 'Language' && languages.isLoading);
 
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ['hr', 'vacancy-criteria', vacancyId] });
 
-  const payload = (): ShortlistingCriteriaForm => ({
-    ...form,
-    criteriaName: form.criteriaName.trim(),
-    description: form.description?.trim() || null,
-    // Send only what this type's arm of the engine reads, so a leftover value from a type the
-    // user changed away from cannot sit in the row misrepresenting the rule.
-    requiredValue: shape.list || shape.single ? form.requiredValue?.trim() || null : null,
-    minValue: shape.numeric ? form.minValue : null,
-    maxValue: shape.numeric ? form.maxValue : null,
-    requiredSkillId: shape.catalogue === 'skill' ? form.requiredSkillId : null,
-    requiredQualificationId: shape.catalogue === 'qualification' ? form.requiredQualificationId : null,
-    comparisonOperator: shape.operators || shape.numeric ? form.comparisonOperator : null,
-    weight: Number.isFinite(form.weight) && form.weight > 0 ? form.weight : 1,
-  });
+  const addPicked = (value: PickedValue) => {
+    const label = value.label.trim();
+    if (!label && !value.referenceId) return;
+    setPicked((rows) =>
+      rows.some((r) => (value.referenceId ? r.referenceId === value.referenceId : r.label.toLowerCase() === label.toLowerCase()))
+        ? rows
+        : [...rows, { referenceId: value.referenceId, label }],
+    );
+  };
+  const removePicked = (index: number) => setPicked((rows) => rows.filter((_, i) => i !== index));
+
+  const payload = (): ShortlistingCriteriaForm => {
+    const isNumeric = !!shape?.isNumeric;
+    const values: ShortlistingCriteriaValueInput[] = isNumeric
+      ? []
+      : picked.map((v) => ({ referenceId: v.referenceId, label: v.referenceId ? null : v.label }));
+    return {
+      ...form,
+      criteriaName: form.criteriaName.trim(),
+      description: form.description?.trim() || null,
+      // The value rows are the truth; the server mirrors their labels into requiredValue.
+      requiredValue: null,
+      values,
+      minValue: isNumeric ? form.minValue : null,
+      maxValue: isNumeric ? form.maxValue : null,
+      // The legacy single-id columns are superseded by the value rows; never resend them.
+      requiredSkillId: null,
+      requiredQualificationId: null,
+      comparisonOperator: (shape?.operators?.length ?? 0) > 0 ? form.comparisonOperator : null,
+      // A type that may not be mandatory is saved as desirable whatever the box held.
+      isMandatory: shape?.allowsMandatory === false ? false : form.isMandatory,
+      weight: Number.isFinite(form.weight) && form.weight > 0 ? form.weight : 1,
+    };
+  };
 
   const save = useMutation({
     mutationFn: () =>
@@ -229,9 +271,11 @@ export function VacancyCriteriaPanel({
         : jobVacancyService.addCriteria(vacancyId, payload()),
     onSuccess: async () => {
       await refresh();
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'vacancies', vacancyId] });
       setOpen(false);
       setEditing(null);
       setForm(blank());
+      setPicked([]);
       toast({ title: editing ? 'Criterion updated' : 'Criterion added' });
     },
     onError: (e: any) =>
@@ -246,6 +290,7 @@ export function VacancyCriteriaPanel({
     mutationFn: (criteriaId: string) => jobVacancyService.deleteCriteria(criteriaId),
     onSuccess: async () => {
       await refresh();
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'vacancies', vacancyId] });
       toast({ title: 'Criterion removed' });
     },
     onError: (e: any) =>
@@ -254,31 +299,48 @@ export function VacancyCriteriaPanel({
 
   const rows = criteria.data ?? [];
   const untyped = useMemo(() => rows.filter((c) => typeof c.type !== 'string'), [rows]);
+  const protectedRows = useMemo(
+    () => rows.filter((c) => shapeOf(c.type)?.isProtectedCharacteristic),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [rows, shapes.data],
+  );
+  const showProtectedNote = usesProtectedCharacteristic || protectedRows.length > 0;
 
   const startAdd = () => {
     setEditing(null);
     setForm(blank());
+    setPicked([]);
+    setTypedValue('');
+    setPickerChoice('');
     setOpen(true);
   };
 
   const startEdit = (c: ShortlistingCriteria) => {
     setEditing(c);
     setForm(toForm(c));
+    setPicked(initialPicked(c));
+    setTypedValue('');
+    setPickerChoice('');
     setOpen(true);
   };
 
   /** What the criterion measures, in the row — the column the panel never used to have. */
   const measures = (c: ShortlistingCriteria) => {
     if (typeof c.type !== 'string') return 'Not set';
-    const s = SHAPES[c.type];
-    if (s.numeric) {
+    const s = shapeOf(c.type);
+    const label = s?.label ?? TYPE_LABELS[c.type];
+    if (s?.isNumeric) {
       const op = c.comparisonOperatorName ?? 'Between';
-      return `${s.label} · ${op} ${c.minValue ?? '—'}${c.maxValue != null ? `–${c.maxValue}` : ''}`;
+      return `${label} · ${op} ${c.minValue ?? '—'}${c.maxValue != null ? `–${c.maxValue}` : ''}`;
     }
-    if (c.requiredQualificationId || c.requiredSkillId) return `${s.label} · from the catalogue`;
-    if (c.requiredValue) return `${s.label} · ${c.requiredValue}`;
-    return s.label;
+    const labels = c.values?.length ? c.values.map((v) => v.label) : (c.requiredValue ?? '').split(',').map((v) => v.trim()).filter(Boolean);
+    if (labels.length > 0) return `${label} · ${labels.join(', ')}`;
+    if (c.requiredQualificationId || c.requiredSkillId) return `${label} · from the catalogue`;
+    return label;
   };
+
+  const valuesAreCatalogue = valueKind === 'Skill' || valueKind === 'Qualification' || valueKind === 'Certification' || valueKind === 'Language';
+  const mandatoryBlocked = shape?.allowsMandatory === false;
 
   return (
     <Card>
@@ -287,7 +349,8 @@ export function VacancyCriteriaPanel({
           <CardTitle className="text-base">Shortlisting criteria</CardTitle>
           <p className="mt-1 text-sm text-muted-foreground">
             Changing these marks any application already scored as stale, so nothing is judged
-            against a bar that has since moved.
+            against a bar that has since moved. A vacancy with no criteria scores nobody, and
+            nobody is auto-shortlisted from it.
           </p>
         </div>
         {canManage && (
@@ -297,6 +360,19 @@ export function VacancyCriteriaPanel({
         )}
       </CardHeader>
       <CardContent className="p-0">
+        {showProtectedNote && (
+          <div className="px-6 pb-3">
+            {/* Decision D-7: the derived flag the vacancy read carries, said in words. */}
+            <Alert>
+              <ShieldAlert className="h-4 w-4" />
+              <AlertDescription>
+                <strong>This vacancy uses a protected-characteristic criterion</strong> (gender or
+                age). Such a criterion may inform a score; it can never be mandatory and never
+                disqualifies anyone. Keep a lawful, job-related reason on file for it.
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
         {untyped.length > 0 && (
           <div className="px-6 pb-3">
             <Alert variant="destructive">
@@ -304,8 +380,8 @@ export function VacancyCriteriaPanel({
               <AlertDescription>
                 {untyped.length === 1 ? 'One criterion does' : `${untyped.length} criteria do`} not
                 say what {untyped.length === 1 ? 'it measures' : 'they measure'}, so{' '}
-                {untyped.length === 1 ? 'it is' : 'they are'} scored as “not auto-evaluated” and{' '}
-                <strong>every candidate passes</strong>. Open{' '}
+                {untyped.length === 1 ? 'it is' : 'they are'} not auto-evaluated and{' '}
+                <strong>{untyped.length === 1 ? 'it counts' : 'they count'} for nothing</strong>. Open{' '}
                 {untyped.length === 1 ? 'it' : 'each one'} and choose what it measures.
               </AlertDescription>
             </Alert>
@@ -349,13 +425,21 @@ export function VacancyCriteriaPanel({
                   </TableCell>
                   <TableCell className="text-sm">
                     {typeof c.type === 'string' ? (
-                      measures(c)
+                      <span>
+                        {measures(c)}
+                        {shapeOf(c.type)?.isProtectedCharacteristic && (
+                          <Badge variant="outline" className="ml-2">Protected characteristic</Badge>
+                        )}
+                        {shapeOf(c.type)?.isAutoEvaluated === false && (
+                          <Badge variant="outline" className="ml-2">Not auto-evaluated</Badge>
+                        )}
+                      </span>
                     ) : (
-                      <Badge variant="destructive">Not set — passes everyone</Badge>
+                      <Badge variant="destructive">Not set — counts for nothing</Badge>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {typeof c.type === 'string' && SHAPES[c.type].list
+                    {typeof c.type === 'string' && shapeOf(c.type)?.isList && shapeOf(c.type)?.valueKind !== 'Gender'
                       ? `${c.matchMode === 'AllRequired' ? 'All required' : 'Any is enough'} · ${c.matchStrategy}`
                       : '—'}
                   </TableCell>
@@ -413,9 +497,19 @@ export function VacancyCriteriaPanel({
               <Label htmlFor="criteriaType">What it measures</Label>
               <Select
                 value={form.type}
-                onValueChange={(v) =>
-                  setForm({ ...form, type: v as ShortlistingCriteriaType, comparisonOperator: null })
-                }
+                onValueChange={(v) => {
+                  const next = v as ShortlistingCriteriaType;
+                  const nextShape = shapeOf(next);
+                  setForm({
+                    ...form,
+                    type: next,
+                    comparisonOperator: null,
+                    isMandatory: nextShape?.allowsMandatory === false ? false : form.isMandatory,
+                  });
+                  // Values belong to a kind; a new kind starts empty.
+                  if (nextShape?.valueKind !== valueKind) setPicked([]);
+                  setPickerChoice('');
+                }}
               >
                 <SelectTrigger id="criteriaType">
                   <SelectValue />
@@ -423,12 +517,12 @@ export function VacancyCriteriaPanel({
                 <SelectContent>
                   {SHORTLISTING_CRITERIA_TYPES.map((t) => (
                     <SelectItem key={t} value={t}>
-                      {SHAPES[t].label}
+                      {shapeOf(t)?.label ?? TYPE_LABELS[t]}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              <p className="text-xs text-muted-foreground">{shape.hint}</p>
+              {shape?.hint && <p className="text-xs text-muted-foreground">{shape.hint}</p>}
             </div>
 
             <div className="space-y-1.5">
@@ -441,74 +535,113 @@ export function VacancyCriteriaPanel({
               />
             </div>
 
-            {shape.catalogue === 'skill' && (
-              <div className="space-y-1.5">
-                <Label htmlFor="requiredSkillId">Catalogue skill</Label>
-                <Select
-                  value={form.requiredSkillId ?? NONE}
-                  onValueChange={(v) => setForm({ ...form, requiredSkillId: v === NONE ? null : v })}
-                >
-                  <SelectTrigger id="requiredSkillId">
-                    <SelectValue placeholder={skills.isLoading ? 'Loading…' : 'None — match on the names below'} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>None — match on the names below</SelectItem>
-                    {(skills.data ?? []).map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {s.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {shape.catalogue === 'qualification' && (
-              <div className="space-y-1.5">
-                <Label htmlFor="requiredQualificationId">Catalogue qualification</Label>
-                <Select
-                  value={form.requiredQualificationId ?? NONE}
-                  onValueChange={(v) =>
-                    setForm({ ...form, requiredQualificationId: v === NONE ? null : v })
-                  }
-                >
-                  <SelectTrigger id="requiredQualificationId">
-                    <SelectValue
-                      placeholder={qualifications.isLoading ? 'Loading…' : 'None — match on the names below'}
-                    />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NONE}>None — match on the names below</SelectItem>
-                    {(qualifications.data ?? []).map((q) => (
-                      <SelectItem key={q.id} value={q.id}>
-                        {q.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {(shape.list || shape.single) && (
-              <div className="space-y-1.5">
-                <Label htmlFor="requiredValue">
-                  {shape.list ? 'Accepted values' : 'Required value'}
+            {/* ── accepted values (R-8): from the setup for a catalogue kind, the register for
+                   Gender, typed for Location and Other ─────────────────────────────────── */}
+            {shape && !shape.isNumeric && (
+              <div className="space-y-2 rounded-md border p-3">
+                <Label>
+                  Accepted values
+                  {shape.requiresValues && <span className="ml-0.5 text-red-500">*</span>}
                 </Label>
-                <Input
-                  id="requiredValue"
-                  value={form.requiredValue ?? ''}
-                  onChange={(e) => setForm({ ...form, requiredValue: e.target.value })}
-                  placeholder={shape.list ? 'BSc Civil Engineering, HND Building Technology' : ''}
-                />
-                {shape.list && (
-                  // ⚠ SplitValues splits on a COMMA. Any other separator becomes one long value
-                  // that matches nothing.
-                  <p className="text-xs text-muted-foreground">Separate several with commas.</p>
+                {picked.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5">
+                    {picked.map((v, i) => (
+                      <Badge key={`${v.referenceId ?? 'text'}:${v.label}`} variant="secondary" className="gap-1 pr-1">
+                        {v.label}
+                        <button
+                          type="button"
+                          className="rounded-full hover:bg-muted"
+                          aria-label={`Remove ${v.label}`}
+                          onClick={() => removePicked(i)}
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+                {valuesAreCatalogue && (
+                  <Select
+                    value={pickerChoice || NONE}
+                    onValueChange={(v) => {
+                      if (v === NONE) return;
+                      const row = catalogue.find((c) => c.id === v);
+                      if (row) addPicked({ referenceId: row.id, label: row.name });
+                      setPickerChoice('');
+                    }}
+                  >
+                    <SelectTrigger id="criteriaValuePicker">
+                      <SelectValue placeholder={catalogueLoading ? 'Loading the catalogue…' : `Add a ${shape.label.toLowerCase()} from the setup`} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>{catalogueLoading ? 'Loading…' : `Add a ${shape.label.toLowerCase()} from the setup`}</SelectItem>
+                      {catalogue
+                        .filter((c) => !picked.some((p) => p.referenceId === c.id))
+                        .map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {valueKind === 'Gender' && (
+                  <div className="flex flex-wrap gap-4">
+                    {[...GENDERS, 'Any'].map((g) => {
+                      const on = picked.some((p) => p.label.toLowerCase() === g.toLowerCase());
+                      return (
+                        <label key={g} className="flex items-center gap-2 text-sm">
+                          <Checkbox
+                            checked={on}
+                            onCheckedChange={(c) =>
+                              c === true
+                                ? addPicked({ referenceId: null, label: g })
+                                : setPicked((rows) => rows.filter((r) => r.label.toLowerCase() !== g.toLowerCase()))
+                            }
+                          />
+                          {g === 'PreferNotToSay' ? 'Prefer not to say' : g}
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                {valueKind === 'Text' && (
+                  <div className="flex gap-2">
+                    <Input
+                      id="criteriaTypedValue"
+                      value={typedValue}
+                      placeholder={form.type === 'Location' ? 'A city, e.g. Kumasi' : 'A value'}
+                      onChange={(e) => setTypedValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          addPicked({ referenceId: null, label: typedValue });
+                          setTypedValue('');
+                        }
+                      }}
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        addPicked({ referenceId: null, label: typedValue });
+                        setTypedValue('');
+                      }}
+                      disabled={!typedValue.trim()}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                )}
+                {shape.requiresValues && picked.length === 0 && (
+                  <p className="text-xs text-muted-foreground">
+                    At least one value is needed — a blank criterion would pass every candidate.
+                  </p>
                 )}
               </div>
             )}
 
-            {shape.list && (
+            {shape?.isList && valueKind !== 'Gender' && valueKind !== 'Text' && (
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="matchMode">How many must match</Label>
@@ -529,7 +662,7 @@ export function VacancyCriteriaPanel({
                   </Select>
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="matchStrategy">How each is compared</Label>
+                  <Label htmlFor="matchStrategy">How a typed name is compared</Label>
                   <Select
                     value={form.matchStrategy}
                     onValueChange={(v) => setForm({ ...form, matchStrategy: v as ValueMatchStrategy })}
@@ -545,11 +678,12 @@ export function VacancyCriteriaPanel({
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-xs text-muted-foreground">A catalogue link matches by row first; this decides the name fallback.</p>
                 </div>
               </div>
             )}
 
-            {shape.numeric && (
+            {shape?.isNumeric && (
               <div className="grid grid-cols-3 gap-3">
                 <div className="space-y-1.5">
                   <Label htmlFor="minValue">Minimum</Label>
@@ -587,7 +721,7 @@ export function VacancyCriteriaPanel({
               </div>
             )}
 
-            {(shape.numeric || shape.operators) && (
+            {(shape?.operators?.length ?? 0) > 0 && (
               <div className="space-y-1.5">
                 <Label htmlFor="comparisonOperator">Comparison</Label>
                 <Select
@@ -604,9 +738,9 @@ export function VacancyCriteriaPanel({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>
-                      {shape.numeric ? 'Default — between the bounds' : 'Default — contains'}
+                      {shape?.isNumeric ? 'Default — between the bounds' : 'Default — contains'}
                     </SelectItem>
-                    {(shape.operators ?? SHORTLISTING_COMPARISON_OPERATORS).map((op) => (
+                    {(shape?.operators ?? []).map((op) => (
                       <SelectItem key={op} value={op}>
                         {op.replace(/([a-z])([A-Z])/g, '$1 $2')}
                       </SelectItem>
@@ -616,7 +750,7 @@ export function VacancyCriteriaPanel({
               </div>
             )}
 
-            {!shape.numeric && (
+            {!shape?.isNumeric && (
               <div className="space-y-1.5">
                 <Label htmlFor="weightAlt">Weight</Label>
                 <Input
@@ -629,19 +763,32 @@ export function VacancyCriteriaPanel({
                 />
                 <p className="text-xs text-muted-foreground">
                   How much this counts towards the composite score, 1–100.
+                  {shape?.isAutoEvaluated === false && ' Not applied — this type is not auto-evaluated.'}
                 </p>
               </div>
             )}
 
-            <div className="flex items-center gap-2">
-              <Checkbox
-                id="isMandatory"
-                checked={form.isMandatory}
-                onCheckedChange={(c) => setForm({ ...form, isMandatory: c === true })}
-              />
-              <Label htmlFor="isMandatory" className="font-normal">
-                Mandatory — an application that fails this is not shortlistable
-              </Label>
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="isMandatory"
+                  checked={mandatoryBlocked ? false : form.isMandatory}
+                  disabled={mandatoryBlocked}
+                  onCheckedChange={(c) => setForm({ ...form, isMandatory: c === true })}
+                />
+                <Label htmlFor="isMandatory" className="font-normal">
+                  Mandatory — an application that fails this is not shortlistable
+                </Label>
+              </div>
+              {mandatoryBlocked && (
+                <p className="text-xs text-muted-foreground">{shape?.mandatoryRefusal}</p>
+              )}
+              {shape?.isProtectedCharacteristic && (
+                <p className="text-xs text-muted-foreground">
+                  A protected characteristic. It informs the score only, and the vacancy will show
+                  that it uses one.
+                </p>
+              )}
             </div>
           </div>
 
@@ -651,7 +798,12 @@ export function VacancyCriteriaPanel({
             </Button>
             <Button
               onClick={() => save.mutate()}
-              disabled={!form.criteriaName.trim() || save.isPending}
+              disabled={
+                !form.criteriaName.trim() ||
+                save.isPending ||
+                (!!shape?.requiresValues && picked.length === 0) ||
+                (!!shape?.isNumeric && form.minValue == null && form.maxValue == null)
+              }
             >
               {save.isPending ? 'Saving…' : editing ? 'Save' : 'Add'}
             </Button>

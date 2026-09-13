@@ -27,10 +27,13 @@ public sealed class CandidatePortalService : ICandidatePortalService
     private readonly IGenericRepository<JobCandidateSkill> _skillRepo;
     private readonly IGenericRepository<JobCandidateLanguage> _languageRepo;
     private readonly IGenericRepository<Language> _languageMasterRepo;
+    private readonly IGenericRepository<Qualification> _qualificationMasterRepo;
+    private readonly IGenericRepository<Skill> _skillMasterRepo;
     private readonly IGenericRepository<IdentificationType> _identificationTypeRepo;
     private readonly IGenericRepository<JobCandidateInterest> _interestRepo;
     private readonly IGenericRepository<JobCandidateDocument> _documentRepo;
     private readonly IJobApplicationRepository _applicationRepo;
+    private readonly IJobPostingRepository _postingRepo;
     private readonly IJobVacancyRepository _vacancyRepo;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
@@ -48,10 +51,13 @@ public sealed class CandidatePortalService : ICandidatePortalService
         IGenericRepository<JobCandidateSkill> skillRepo,
         IGenericRepository<JobCandidateLanguage> languageRepo,
         IGenericRepository<Language> languageMasterRepo,
+        IGenericRepository<Qualification> qualificationMasterRepo,
+        IGenericRepository<Skill> skillMasterRepo,
         IGenericRepository<IdentificationType> identificationTypeRepo,
         IGenericRepository<JobCandidateInterest> interestRepo,
         IGenericRepository<JobCandidateDocument> documentRepo,
         IJobApplicationRepository applicationRepo,
+        IJobPostingRepository postingRepo,
         IJobVacancyRepository vacancyRepo,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
@@ -68,10 +74,13 @@ public sealed class CandidatePortalService : ICandidatePortalService
         _skillRepo        = skillRepo;
         _languageRepo     = languageRepo;
         _languageMasterRepo = languageMasterRepo;
+        _qualificationMasterRepo = qualificationMasterRepo;
+        _skillMasterRepo = skillMasterRepo;
         _identificationTypeRepo = identificationTypeRepo;
         _interestRepo     = interestRepo;
         _documentRepo     = documentRepo;
         _applicationRepo  = applicationRepo;
+        _postingRepo      = postingRepo;
         _vacancyRepo      = vacancyRepo;
         _unitOfWork       = unitOfWork;
         _currentUserProvider = currentUserProvider;
@@ -265,8 +274,18 @@ public sealed class CandidatePortalService : ICandidatePortalService
             var toDelete = existing.Values.Where(q => !incomingIds.Contains(q.Id)).ToList();
             if (toDelete.Count > 0) await _qualificationRepo.DeleteRangeAsync(toDelete);
 
+            // Round 3, lane C2: the catalogue id the DTO always declared was never stored — every
+            // careers save wrote free text only, so the picker the PDF asked for had nothing to
+            // re-open. Now the same rule as languages: a catalogue row (the tenant's, live) or a
+            // typed name; with a row the name is mirrored so everything that reads only the text
+            // (the shortlisting engine, the HR list) keeps working.
+            var qualificationMaster = (await _qualificationMasterRepo.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted))
+                                      .ToDictionary(x => x.Id);
+
             foreach (var q in dto.Qualifications)
             {
+                var (qualificationId, qualificationName) = ResolveCatalogueOrText(
+                    q.QualificationId, q.QualificationName, qualificationMaster, x => x.Name, "qualification");
                 if (q.Id == Guid.Empty)
                 {
                     await _qualificationRepo.AddAsync(new JobCandidateQualification
@@ -274,7 +293,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
                         TenantId              = tenantId,
                         JobCandidateId        = candidate.Id,
                         QualificationType     = q.QualificationType,
-                        QualificationFreeText = q.QualificationName,
+                        QualificationId       = qualificationId,
+                        QualificationFreeText = qualificationName,
                         Institution           = q.Institution,
                         DateAwarded           = q.DateAwarded,
                         Grade                 = q.Grade,
@@ -283,7 +303,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
                 else if (existing.TryGetValue(q.Id, out var row))
                 {
                     row.QualificationType     = q.QualificationType;
-                    row.QualificationFreeText = q.QualificationName;
+                    row.QualificationId       = qualificationId;
+                    row.QualificationFreeText = qualificationName;
                     row.Institution           = q.Institution;
                     row.DateAwarded           = q.DateAwarded;
                     row.Grade                 = q.Grade;
@@ -341,15 +362,23 @@ public sealed class CandidatePortalService : ICandidatePortalService
             var toDelete = existing.Values.Where(s => !incomingIds.Contains(s.Id)).ToList();
             if (toDelete.Count > 0) await _skillRepo.DeleteRangeAsync(toDelete);
 
+            // Round 3, lane C2: SkillId was declared on the DTO and dropped on every save, exactly
+            // like the qualification id above. Same rule, same mirroring.
+            var skillMaster = (await _skillMasterRepo.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted))
+                              .ToDictionary(x => x.Id);
+
             foreach (var s in dto.Skills)
             {
+                var (skillId, skillName) = ResolveCatalogueOrText(
+                    s.SkillId, s.SkillName, skillMaster, x => x.Name, "skill");
                 if (s.Id == Guid.Empty)
                 {
                     await _skillRepo.AddAsync(new JobCandidateSkill
                     {
                         TenantId          = tenantId,
                         JobCandidateId    = candidate.Id,
-                        SkillName         = s.SkillName,
+                        SkillId           = skillId,
+                        SkillName         = skillName,
                         Proficiency       = s.Proficiency,
                         YearsOfExperience = s.YearsOfExperience,
                         IsCertified       = s.IsCertified,
@@ -361,7 +390,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
                 }
                 else if (existing.TryGetValue(s.Id, out var row))
                 {
-                    row.SkillName         = s.SkillName;
+                    row.SkillId           = skillId;
+                    row.SkillName         = skillName;
                     row.Proficiency       = s.Proficiency;
                     row.YearsOfExperience = s.YearsOfExperience;
                     row.IsCertified       = s.IsCertified;
@@ -473,13 +503,21 @@ public sealed class CandidatePortalService : ICandidatePortalService
             throw new InvalidOperationException(
                 "You have already submitted an application for this vacancy.");
 
+        // Round 3, lane A (register row R-4): the advert the candidate came through, and the
+        // source derived from its channel. With no posting the source is the company website —
+        // this IS the company website — whatever the payload's Source said; every self-service
+        // application used to be recorded as CompanyWebsite regardless of the advert.
+        var posting = await ResolvePostingAsync(dto.JobPostingId, vacancy.Id, tenantId);
+        var source = posting is null ? ApplicationSource.CompanyWebsite : ApplicationSourceMap.FromChannel(posting.Channel);
+
         if (existing != null)
         {
             // Update the existing draft
             existing.CoverLetter      = dto.CoverLetter;
             existing.YearsOfExperience = dto.YearsOfExperience;
             existing.AvailableFrom    = dto.AvailableFrom;
-            existing.Source           = dto.Source;
+            existing.Source           = source;
+            existing.JobPostingId     = posting?.Id;
             await _applicationRepo.UpdateAsync(existing);
             await _unitOfWork.SaveChangesAsync(ct);
             _logger.LogInformation("Draft application {AppNumber} updated by user {UserId}",
@@ -495,7 +533,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
             JobVacancyId          = dto.VacancyId,
             JobCandidateId        = ownCandidate.Id,
             Status                = ApplicationStatus.Draft,
-            Source                = dto.Source,
+            Source                = source,
+            JobPostingId          = posting?.Id,
             CoverLetter           = dto.CoverLetter,
             YearsOfExperience     = dto.YearsOfExperience,
             AvailableFrom         = dto.AvailableFrom,
@@ -772,6 +811,40 @@ public sealed class CandidatePortalService : ICandidatePortalService
         return (null, name);
     }
 
+    /// <summary>
+    /// Round 3, lane C2: the language rule generalised — a catalogue row (the tenant's, live) or a
+    /// typed name, the name mirrored from the row when there is one. Used for qualifications and
+    /// skills, whose ids the careers save had silently dropped.
+    /// </summary>
+    internal static (Guid? Id, string Name) ResolveCatalogueOrText<TRow>(
+        Guid? id, string? typedName, IReadOnlyDictionary<Guid, TRow> master, Func<TRow, string> nameOf, string noun)
+    {
+        if (id is { } key)
+        {
+            if (!master.TryGetValue(key, out var row))
+                throw new InvalidOperationException($"The {noun} chosen is not in the catalogue. Pick one from the list or type the name.");
+            return (key, nameOf(row));
+        }
+        var name = typedName?.Trim();
+        if (string.IsNullOrEmpty(name))
+            throw new InvalidOperationException($"A {noun} needs either a catalogue entry or a name.");
+        return (null, name);
+    }
+
+    /// <summary>
+    /// Round 3, lane A: the advert an application came through must be one of THIS vacancy's live
+    /// adverts. A posting id from another vacancy, a removed advert, or an unknown id is refused in
+    /// words; no posting is fine.
+    /// </summary>
+    private async Task<JobPosting?> ResolvePostingAsync(Guid? postingId, Guid vacancyId, Guid tenantId)
+    {
+        if (postingId is not { } id) return null;
+        var posting = await _postingRepo.FirstOrDefaultAsync(p => p.Id == id && p.TenantId == tenantId && !p.IsDeleted);
+        if (posting is null || posting.JobVacancyId != vacancyId || posting.Status == JobPostingStatus.Removed)
+            throw new InvalidOperationException("That advert does not belong to this vacancy, or is no longer live.");
+        return posting;
+    }
+
     /// <summary>Round 3, lane C1: the identity document type must be one of the tenant's active types.</summary>
     private async Task RequireIdentificationTypeAsync(Guid? typeId, Guid tenantId)
     {
@@ -958,6 +1031,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
         // Documents
         dto.CvFilePath       = c.CvFilePath;
         dto.ProfilePhotoUrl  = c.ProfilePhotoUrl;
+        dto.HasPhoto         = c.ProfilePhotoFileUploadRecordId != null || !string.IsNullOrWhiteSpace(c.ProfilePhotoUrl);
         dto.IsInTalentPool   = c.IsInTalentPool;
 
         dto.WorkHistories = c.WorkHistories.Where(w => !w.IsDeleted).Select(w => new JobCandidateWorkHistoryDto
@@ -977,7 +1051,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
             Id                    = q.Id,
             JobCandidateId        = q.JobCandidateId,
             QualificationType     = q.QualificationType,
-            QualificationName     = q.QualificationFreeText ?? q.Qualification?.Name ?? string.Empty,
+            QualificationId       = q.QualificationId,
+            QualificationName     = q.Qualification?.Name ?? q.QualificationFreeText ?? string.Empty,
             Institution           = q.Institution,
             DateAwarded           = q.DateAwarded,
             Grade                 = q.Grade,
@@ -1000,6 +1075,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         {
             Id                = s.Id,
             JobCandidateId    = s.JobCandidateId,
+            SkillId           = s.SkillId,
+            SkillCatalogueName = s.Skill?.Name,
             SkillName         = s.SkillName,
             Proficiency       = s.Proficiency,
             YearsOfExperience = s.YearsOfExperience,

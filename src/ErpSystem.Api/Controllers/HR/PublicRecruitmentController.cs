@@ -159,7 +159,9 @@ public class PublicRecruitmentController : ControllerBase
             return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
 
         var quals = await _qualificationCatalogueService.GetActiveAsync(tenantId);
-        return Ok(quals.Select(q => new { q.Id, q.Name }));
+        // Round 3, lane C2: the careers form filters the catalogue by the row's kind (Education,
+        // Certification, …), so the kind rides along as its enum name.
+        return Ok(quals.Select(q => new { q.Id, q.Name, Type = q.Type.ToString() }));
     }
 
     // Round 3, lane C1. Three more catalogues the careers profile form picks from. Each is the

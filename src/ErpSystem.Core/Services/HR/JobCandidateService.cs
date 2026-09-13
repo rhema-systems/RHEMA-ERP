@@ -358,6 +358,25 @@ public class JobCandidateService : IJobCandidateService
         return true;
     }
 
+    /// <inheritdoc />
+    public async Task<JobCandidateDto> SetProfilePhotoAsync(Guid candidateId, Guid fileUploadRecordId, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedCandidateAsync(candidateId);
+
+        // Same two writes as the careers door (CandidatePortalService.UpdateProfilePhotoAsync):
+        // the gated record becomes the photograph and the legacy public URL is cleared so the two
+        // never disagree about which image is current.
+        entity.ProfilePhotoFileUploadRecordId = fileUploadRecordId;
+        entity.ProfilePhotoUrl = null;
+        entity.UpdatedBy = updatedByUserId.ToString();
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _candidateRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job candidate photograph set by HR: {CandidateNumber}", entity.CandidateNumber);
+        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
+    }
+
     // ── Talent pool ───────────────────────────────────────────────────────────
 
     // The flat add/remove pair and the rich pair are two doors onto the same state and must

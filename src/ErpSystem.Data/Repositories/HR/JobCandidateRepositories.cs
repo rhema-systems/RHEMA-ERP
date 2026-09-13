@@ -43,10 +43,13 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
         return await _dbSet
             .Include(c => c.Country)
             .Include(c => c.NationalIdTypeRef)
-            .Include(c => c.Qualifications.Where(q => !q.IsDeleted))
+            // Round 3, lane C2: the catalogue rows behind a qualification and a skill ride along —
+            // no lazy loading here, so without these the mappers' `Qualification?.Name` and
+            // `Skill?.Name` were always null on this read.
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.Qualification)
             .Include(c => c.WorkHistories.Where(w => !w.IsDeleted))
             .Include(c => c.Referees.Where(r => !r.IsDeleted))
-            .Include(c => c.Skills.Where(s => !s.IsDeleted))
+            .Include(c => c.Skills.Where(s => !s.IsDeleted)).ThenInclude(s => s.Skill)
             .Include(c => c.Languages.Where(l => !l.IsDeleted)).ThenInclude(l => l.Language)
             .Include(c => c.Interests.Where(i => !i.IsDeleted))
             .Include(c => c.Documents.Where(d => !d.IsDeleted))

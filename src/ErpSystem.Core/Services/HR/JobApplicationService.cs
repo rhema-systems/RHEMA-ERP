@@ -22,6 +22,7 @@ public class JobApplicationService : IJobApplicationService
     private readonly IJobApplicantTestResultRepository _testResultRepository;
     private readonly IJobApplicantCommunicationRepository _communicationRepository;
     private readonly IJobVacancyRepository _vacancyRepository;
+    private readonly IJobPostingRepository _postingRepository;
     private readonly IShortlistReviewRepository _shortlistReviewRepository;
     private readonly IShortlistDecisionLogRepository _decisionLogRepository;
     private readonly IEmployeeRepository _employeeRepository;
@@ -46,6 +47,7 @@ public class JobApplicationService : IJobApplicationService
         IJobApplicantTestResultRepository testResultRepository,
         IJobApplicantCommunicationRepository communicationRepository,
         IJobVacancyRepository vacancyRepository,
+        IJobPostingRepository postingRepository,
         IShortlistReviewRepository shortlistReviewRepository,
         IShortlistDecisionLogRepository decisionLogRepository,
         IEmployeeRepository employeeRepository,
@@ -70,6 +72,7 @@ public class JobApplicationService : IJobApplicationService
         _testResultRepository = testResultRepository;
         _communicationRepository = communicationRepository;
         _vacancyRepository = vacancyRepository;
+        _postingRepository = postingRepository;
         _shortlistReviewRepository = shortlistReviewRepository;
         _decisionLogRepository = decisionLogRepository;
         _employeeRepository = employeeRepository;
@@ -250,6 +253,14 @@ public class JobApplicationService : IJobApplicationService
         if (tenantId != Guid.Empty && tenantId != current)
             throw new UnauthorizedAccessException("The supplied tenant does not match the authenticated tenant.");
 
+        // Round 3, lane A: HR's "Record an application" (a walk-in, an agency submission). The
+        // source is typed by hand; the advert, when named, must be this vacancy's.
+        await GetOwnedVacancyAsync(createDto.JobVacancyId);
+        var candidate = await _candidateRepository.GetByIdAsync(createDto.JobCandidateId);
+        if (candidate is null || candidate.TenantId != current)
+            throw new ArgumentException($"Candidate '{createDto.JobCandidateId}' not found.");
+        await RequirePostingOfVacancyAsync(createDto.JobPostingId, createDto.JobVacancyId, current);
+
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.ApplicationNumber = await _applicationRepository.GetNextApplicationNumberAsync(current);
         entity.Status = ApplicationStatus.New;
@@ -259,7 +270,38 @@ public class JobApplicationService : IJobApplicationService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job application created: {ApplicationNumber}", entity.ApplicationNumber);
-        return entity.ToDto();
+        var created = await _applicationRepository.GetWithFullDetailsAsync(entity.Id);
+        return (created ?? entity).ToDto();
+    }
+
+    /// <inheritdoc />
+    public async Task<JobApplicationDto> UpdateSourceAsync(Guid id, UpdateJobApplicationSourceDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        var entity = await GetOwnedApplicationAsync(id);
+        if (!Enum.IsDefined(typeof(ApplicationSource), dto.Source))
+            throw new InvalidOperationException($"'{(int)dto.Source}' is not an application source.");
+        await RequirePostingOfVacancyAsync(dto.JobPostingId, entity.JobVacancyId, GetTenantId());
+
+        entity.Source = dto.Source;
+        entity.JobPostingId = dto.JobPostingId;
+        entity.UpdatedAt = DateTime.UtcNow;
+        entity.UpdatedBy = updatedByUserId.ToString();
+        await _applicationRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Job application {ApplicationNumber} source corrected to {Source} (posting {PostingId})",
+            entity.ApplicationNumber, dto.Source, dto.JobPostingId);
+        var reread = await _applicationRepository.GetWithFullDetailsAsync(entity.Id);
+        return (reread ?? entity).ToDto();
+    }
+
+    /// <summary>Round 3, lane A: an advert named on an application must be one of that vacancy's, and not removed.</summary>
+    private async Task RequirePostingOfVacancyAsync(Guid? postingId, Guid vacancyId, Guid tenantId)
+    {
+        if (postingId is not { } pid) return;
+        var posting = await _postingRepository.FirstOrDefaultAsync(p => p.Id == pid && p.TenantId == tenantId && !p.IsDeleted);
+        if (posting is null || posting.JobVacancyId != vacancyId || posting.Status == JobPostingStatus.Removed)
+            throw new InvalidOperationException("That advert does not belong to this vacancy, or has been removed.");
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -656,10 +698,13 @@ public class JobApplicationService : IJobApplicationService
             scoringView = ScoringCandidateView.FromEntity(candidate, application);
         }
 
-        if (vacancy?.ShortlistingCriteria == null || !vacancy.ShortlistingCriteria.Any())
+        var liveCriteria = vacancy?.ShortlistingCriteria?.Where(c => !c.IsDeleted).ToList() ?? new List<JobShortlistingCriteria>();
+        if (liveCriteria.Count == 0)
         {
-            // No criteria defined — give a neutral 100 score so the application isn't excluded
-            application.AutoScore = 100m;
+            // Round 3, lane K (R-5 fix 3; § 3 defect 7): nothing was measured, so nothing is scored.
+            // This used to write 100, so "auto-shortlist by score" on a vacancy with no criteria
+            // admitted every applicant. A null score is never auto-shortlisted.
+            application.AutoScore = null;
             application.AutoScoreBreakdown = null;
             application.ScoredAt = DateTime.UtcNow;
             application.ScoreIsStale = false;
@@ -668,7 +713,8 @@ public class JobApplicationService : IJobApplicationService
             return new ApplicationAutoScoreDto
             {
                 ApplicationId = applicationId,
-                AutoScore = 100m,
+                AutoScore = null,
+                HasCriteria = false,
                 ScoredAt = application.ScoredAt.Value,
                 AllMandatoryPassed = true,
                 TotalWeight = 0m,
@@ -684,7 +730,7 @@ public class JobApplicationService : IJobApplicationService
 
         // Evaluate ALL criteria regardless of mandatory failures so the stored breakdown
         // is complete — required for recruiter review and algorithmic-decision audit trails
-        foreach (var criterion in vacancy.ShortlistingCriteria)
+        foreach (var criterion in liveCriteria)
         {
             var result = EvaluateCriterion(criterion, scoringView);
             breakdown.Add(result);
@@ -692,6 +738,9 @@ public class JobApplicationService : IJobApplicationService
             if (criterion.IsMandatory && !result.Passed)
                 allMandatoryPassed = false;
 
+            // A criterion the engine does not score (Other) is left out of the total: it neither
+            // lifts nor lowers anybody. It used to pass everyone with full marks.
+            if (!result.AutoEvaluated) continue;
             totalWeight += criterion.Weight;
             earnedScore += result.WeightedScore;
         }
@@ -820,6 +869,7 @@ public class JobApplicationService : IJobApplicationService
         public HashSet<string> QualificationNames  { get; init; } = new();
         public HashSet<Guid>   QualificationIds    { get; init; } = new();
         public HashSet<string> LanguageNames       { get; init; } = new();
+        public HashSet<Guid>   LanguageIds         { get; init; } = new();
 
         // ── Factory: from live entity ─────────────────────────────────────────
         public static ScoringCandidateView FromEntity(JobCandidate c, JobApplication app) =>
@@ -851,6 +901,10 @@ public class JobApplicationService : IJobApplicationService
                                         .ToHashSet(),
                 LanguageNames       = c.Languages
                                         .Select(l => l.LanguageName.ToLowerInvariant())
+                                        .ToHashSet(),
+                LanguageIds         = c.Languages
+                                        .Where(l => l.LanguageId.HasValue)
+                                        .Select(l => l.LanguageId!.Value)
                                         .ToHashSet(),
             };
 
@@ -884,6 +938,10 @@ public class JobApplicationService : IJobApplicationService
                 LanguageNames       = snap.Languages
                                         .Select(l => l.NormalisedName)
                                         .ToHashSet(),
+                LanguageIds         = snap.Languages
+                                        .Where(l => l.LanguageId.HasValue)
+                                        .Select(l => l.LanguageId!.Value)
+                                        .ToHashSet(),
             };
     }
 
@@ -894,6 +952,7 @@ public class JobApplicationService : IJobApplicationService
         bool passed;
         decimal rawScore;
         string? notes = null;
+        bool autoEvaluated = true;
 
         switch (criterion.Type)
         {
@@ -906,7 +965,7 @@ public class JobApplicationService : IJobApplicationService
             case JobShortlistingCriteriaType.Qualification:
             case JobShortlistingCriteriaType.EducationLevel:
             {
-                // ID-first: if the criterion has a catalogue FK and the candidate has any ID match, pass immediately.
+                // ID-first: the legacy single catalogue FK still passes immediately when the candidate holds it.
                 if (criterion.RequiredQualificationId.HasValue && view.QualificationIds.Contains(criterion.RequiredQualificationId.Value))
                 {
                     passed   = true;
@@ -914,23 +973,13 @@ public class JobApplicationService : IJobApplicationService
                     notes    = $"Qualification matched by catalogue ID ({criterion.RequiredQualificationId.Value}).";
                     break;
                 }
-
-                // Fall back to string-based multi-value matching.
-                var required = SplitValues(criterion.RequiredValue);
-                int matched = required.Count(r => view.QualificationNames.Any(c => MatchesValue(c, r, criterion.MatchStrategy)));
-                passed = criterion.MatchMode == MandatoryMatchMode.AllRequired
-                    ? matched == required.Count
-                    : matched > 0;
-                rawScore = required.Count > 0 ? (decimal)matched / required.Count : 1m;
-                notes = $"{matched}/{required.Count} required qualification(s) matched "
-                      + $"[{(criterion.MatchMode == MandatoryMatchMode.AllRequired ? "all required" : "any sufficient")}, {criterion.MatchStrategy}]. "
-                      + $"Candidate qualifications: {string.Join(", ", view.QualificationNames)}.";
+                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.QualificationIds, view.QualificationNames, "qualification");
+                notes += $" Candidate qualifications: {string.Join(", ", view.QualificationNames)}.";
                 break;
             }
 
             case JobShortlistingCriteriaType.Skill:
             {
-                // ID-first: if the criterion has a catalogue FK and the candidate has any ID match, pass immediately.
                 if (criterion.RequiredSkillId.HasValue && view.SkillIds.Contains(criterion.RequiredSkillId.Value))
                 {
                     passed   = true;
@@ -938,29 +987,16 @@ public class JobApplicationService : IJobApplicationService
                     notes    = $"Skill matched by catalogue ID ({criterion.RequiredSkillId.Value}).";
                     break;
                 }
-
-                // Fall back to string-based multi-value matching.
-                var required = SplitValues(criterion.RequiredValue);
-                int matched = required.Count(r => view.SkillNames.Any(c => MatchesValue(c, r, criterion.MatchStrategy)));
-                passed = criterion.MatchMode == MandatoryMatchMode.AllRequired
-                    ? matched == required.Count
-                    : matched > 0;
-                rawScore = required.Count > 0 ? (decimal)matched / required.Count : 1m;
-                notes = $"{matched}/{required.Count} required skill(s) matched "
-                      + $"[{(criterion.MatchMode == MandatoryMatchMode.AllRequired ? "all required" : "any sufficient")}, {criterion.MatchStrategy}].";
+                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.SkillIds, view.SkillNames, "skill");
                 break;
             }
 
             case JobShortlistingCriteriaType.Certification:
             {
-                var required = SplitValues(criterion.RequiredValue);
-                int matched = required.Count(r => view.CertificationNames.Any(c => MatchesValue(c, r, criterion.MatchStrategy)));
-                passed = criterion.MatchMode == MandatoryMatchMode.AllRequired
-                    ? matched == required.Count
-                    : matched > 0;
-                rawScore = required.Count > 0 ? (decimal)matched / required.Count : 1m;
-                notes = $"{matched}/{required.Count} required certification(s) matched "
-                      + $"[{(criterion.MatchMode == MandatoryMatchMode.AllRequired ? "all required" : "any sufficient")}, {criterion.MatchStrategy}].";
+                // A candidate's certificate carries a name, not a catalogue id (lane C1 added the
+                // number, body and expiry; the id is a follow-on), so a catalogue-picked value
+                // matches on the mirrored catalogue name — which is exactly why the label is mirrored.
+                (passed, rawScore, notes) = EvaluateListCriterion(criterion, new HashSet<Guid>(), view.CertificationNames, "certification");
                 break;
             }
 
@@ -973,40 +1009,36 @@ public class JobApplicationService : IJobApplicationService
 
             case JobShortlistingCriteriaType.Gender:
             {
-                var req = criterion.RequiredValue?.Trim().ToLowerInvariant();
-                passed = string.IsNullOrEmpty(req) || req == "any"
-                      || view.Gender.ToString().ToLowerInvariant() == req;
-                rawScore = passed ? 1m : 0m;
+                // The accepted genders are enum members (or "Any"); the candidate's is compared as a
+                // member name, never through the text strategies (R-5 fix 6).
+                var accepted = RequiredLabels(criterion);
+                var mine = view.Gender.ToString().ToLowerInvariant();
+                if (accepted.Count == 0)
+                {
+                    passed = true;
+                    rawScore = 1m;
+                    notes = "No gender specified; every candidate passes.";
+                }
+                else
+                {
+                    passed = accepted.Contains("any") || accepted.Contains(mine);
+                    rawScore = passed ? 1m : 0m;
+                    notes = $"Accepted: {string.Join(", ", accepted)}; candidate: {mine}. Informs the score only — never mandatory (D-7).";
+                }
                 break;
             }
 
             case JobShortlistingCriteriaType.Language:
             {
-                var required = SplitValues(criterion.RequiredValue);
-                if (!required.Any())
-                {
-                    passed = true;
-                    rawScore = 1m;
-                    notes = "No required language specified; defaulting to pass.";
-                }
-                else
-                {
-                    int matched = required.Count(r => view.LanguageNames.Any(c => MatchesValue(c, r, criterion.MatchStrategy)));
-                    passed = criterion.MatchMode == MandatoryMatchMode.AllRequired
-                        ? matched == required.Count
-                        : matched > 0;
-                    rawScore = required.Count > 0 ? (decimal)matched / required.Count : 1m;
-                    notes = $"{matched}/{required.Count} required language(s) matched "
-                          + $"[{(criterion.MatchMode == MandatoryMatchMode.AllRequired ? "all required" : "any sufficient")}, {criterion.MatchStrategy}]. "
-                          + $"Candidate languages: {string.Join(", ", view.LanguageNames)}.";
-                }
+                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.LanguageIds, view.LanguageNames, "language");
+                notes += $" Candidate languages: {string.Join(", ", view.LanguageNames)}.";
                 break;
             }
 
             case JobShortlistingCriteriaType.Location:
             {
-                var req = criterion.RequiredValue?.Trim().ToLowerInvariant();
-                if (string.IsNullOrEmpty(req))
+                var accepted = RequiredLabels(criterion);
+                if (accepted.Count == 0)
                 {
                     passed = true;
                     rawScore = 1m;
@@ -1016,25 +1048,29 @@ public class JobApplicationService : IJobApplicationService
                 {
                     var op = criterion.ComparisonOperator ?? ShortlistingComparisonOperator.Contains;
                     passed = op == ShortlistingComparisonOperator.Equals
-                        ? view.City == req
-                        : view.City.Contains(req);
+                        ? accepted.Contains(view.City)
+                        : accepted.Any(a => view.City.Contains(a, StringComparison.Ordinal));
                     rawScore = passed ? 1m : 0m;
-                    notes = $"Required location: '{criterion.RequiredValue}'; Candidate city: '{view.City}'.";
+                    notes = $"Required location: '{string.Join(", ", accepted)}'; Candidate city: '{view.City}'.";
                 }
                 break;
             }
 
             default:
             {
-                // Unknown / Other — default pass with neutral score
+                // Other, or a legacy row with no type. Not auto-evaluated: it passes (a person
+                // judges it), contributes NOTHING, and its weight is left out of the total. It used
+                // to pass with full marks — a mandatory Other could disqualify nobody (R-5 fix 1;
+                // § 3 defect 8).
                 passed = true;
-                rawScore = 1m;
-                notes = "Criterion type not auto-evaluated; defaulting to pass.";
+                rawScore = 0m;
+                autoEvaluated = false;
+                notes = "Not auto-evaluated; judged by a person off-system. Contributes nothing to the score.";
                 break;
             }
         }
 
-        decimal weightedScore = rawScore * criterion.Weight;
+        decimal weightedScore = autoEvaluated ? rawScore * criterion.Weight : 0m;
 
         return new CriterionScoreResult
         {
@@ -1047,7 +1083,56 @@ public class JobApplicationService : IJobApplicationService
             RawScore = Math.Round(rawScore, 4),
             WeightedScore = Math.Round(weightedScore, 4),
             Notes = notes,
+            AutoEvaluated = autoEvaluated,
         };
+    }
+
+    /// <summary>
+    /// The accepted items of a list criterion, ids first and labels second (round 3, lane K; register
+    /// row R-8). The value rows are the truth; the legacy comma-separated text is read for rows
+    /// written before the lane. A row with a catalogue id matches the candidate's catalogue link
+    /// exactly, or its mirrored label under the strategy — so a candidate who typed the same name
+    /// still matches. Duplicates collapse.
+    /// </summary>
+    private static (bool passed, decimal rawScore, string notes) EvaluateListCriterion(
+        JobShortlistingCriteria criterion, HashSet<Guid> candidateIds, HashSet<string> candidateNames, string noun)
+    {
+        var items = new List<(Guid? Id, string Label)>();
+        foreach (var v in criterion.Values.Where(v => !v.IsDeleted).OrderBy(v => v.SortOrder))
+        {
+            var label = v.Label.Trim().ToLowerInvariant();
+            if (items.Any(i => (v.ReferenceId.HasValue && i.Id == v.ReferenceId) || (label.Length > 0 && i.Label == label))) continue;
+            items.Add((v.ReferenceId, label));
+        }
+        foreach (var label in SplitValues(criterion.RequiredValue))
+        {
+            if (items.Any(i => i.Label == label)) continue;
+            items.Add((null, label));
+        }
+
+        if (items.Count == 0)
+            return (true, 1m, $"No required {noun} specified; defaulting to pass.");
+
+        int matched = items.Count(i =>
+            (i.Id is Guid id && candidateIds.Contains(id))
+            || (i.Label.Length > 0 && candidateNames.Any(c => MatchesValue(c, i.Label, criterion.MatchStrategy))));
+        bool passed = criterion.MatchMode == MandatoryMatchMode.AllRequired
+            ? matched == items.Count
+            : matched > 0;
+        decimal rawScore = (decimal)matched / items.Count;
+        string notes = $"{matched}/{items.Count} required {noun}(s) matched "
+                     + $"[{(criterion.MatchMode == MandatoryMatchMode.AllRequired ? "all required" : "any sufficient")}, {criterion.MatchStrategy}; ids first, names second].";
+        return (passed, rawScore, notes);
+    }
+
+    /// <summary>The accepted labels of a criterion, lower-cased: value rows first, legacy text second.</summary>
+    private static List<string> RequiredLabels(JobShortlistingCriteria criterion)
+    {
+        var labels = criterion.Values.Where(v => !v.IsDeleted).OrderBy(v => v.SortOrder)
+            .Select(v => v.Label.Trim().ToLowerInvariant()).Where(l => l.Length > 0).ToList();
+        foreach (var label in SplitValues(criterion.RequiredValue))
+            if (!labels.Contains(label)) labels.Add(label);
+        return labels;
     }
 
     private static (bool passed, decimal rawScore, string notes) EvaluateNumericCriterion(
@@ -1069,18 +1154,25 @@ public class JobApplicationService : IJobApplicationService
             _ => candidateValue >= min && (criterion.MaxValue == null || candidateValue <= max),
         };
 
+        // Partial credit for a near miss, on EITHER side (round 3, lane K; R-5 fix 7). It used to be
+        // asymmetric: too little experience scored a fraction, too much scored nothing at all.
         decimal rawScore;
         if (passed)
         {
             rawScore = 1m;
         }
-        else if (op is ShortlistingComparisonOperator.GreaterThan or ShortlistingComparisonOperator.GreaterThanOrEqual or ShortlistingComparisonOperator.Between)
+        else if (op is ShortlistingComparisonOperator.Equals)
+        {
+            rawScore = 0m;
+        }
+        else if (candidateValue < min)
         {
             rawScore = min > 0 ? Math.Min(candidateValue / min, 0.8m) : 0m;
         }
         else
         {
-            rawScore = 0m;
+            // Above the ceiling: the closer to it, the more of the 0.8 cap.
+            rawScore = criterion.MaxValue.HasValue && candidateValue > 0 ? Math.Min(max / candidateValue, 0.8m) : 0m;
         }
 
         string label = op switch
@@ -3030,6 +3122,7 @@ public class JobApplicationService : IJobApplicationService
                 NormalisedName = x.Resolved.LanguageName.ToLowerInvariant(),
                 DisplayName    = x.Resolved.LanguageName,
                 Proficiency    = (int)x.Row.Proficiency,
+                LanguageId     = x.Resolved.LanguageId,
             }).Where(l => l.NormalisedName.Length > 0).ToList();
 
             var snapshotWork = dto.WorkHistories.Select(w => new SnapshotWorkHistory

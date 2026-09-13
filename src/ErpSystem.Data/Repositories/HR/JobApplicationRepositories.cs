@@ -79,7 +79,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
         return await _dbSet
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
             .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
-            .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria).ThenInclude(c => c.Values)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Qualifications).ThenInclude(q => q.Qualification)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Skills)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Languages)
@@ -113,7 +113,7 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
         return await _dbSet
             .Include(a => a.JobVacancy).ThenInclude(v => v.Position)
             .Include(a => a.JobVacancy).ThenInclude(v => v.Requisition).ThenInclude(r => r.JobDescription)
-            .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria)
+            .Include(a => a.JobVacancy).ThenInclude(v => v.ShortlistingCriteria).ThenInclude(c => c.Values)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Qualifications).ThenInclude(q => q.Qualification)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Skills)
             .Include(a => a.JobCandidate).ThenInclude(c => c.Languages)

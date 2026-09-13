@@ -193,6 +193,7 @@ public class JobShortlistingCriteriaRepository : GenericRepository<JobShortlisti
     public async Task<IEnumerable<JobShortlistingCriteria>> GetByVacancyIdAsync(Guid vacancyId)
     {
         return await _dbSet
+            .Include(c => c.Values)
             .Where(c => c.JobVacancyId == vacancyId && !c.IsDeleted)
             .OrderByDescending(c => c.Weight)
             .ToListAsync();
@@ -201,6 +202,7 @@ public class JobShortlistingCriteriaRepository : GenericRepository<JobShortlisti
     public async Task<IEnumerable<JobShortlistingCriteria>> GetMandatoryCriteriaAsync(Guid vacancyId)
     {
         return await _dbSet
+            .Include(c => c.Values)
             .Where(c => c.JobVacancyId == vacancyId && c.IsMandatory && !c.IsDeleted)
             .OrderByDescending(c => c.Weight)
             .ToListAsync();
