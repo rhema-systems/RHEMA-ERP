@@ -182,11 +182,10 @@ requires one of these explicit decisions:
    data disposable and authorized a backup-verified destructive reset and deterministic reseed. This authorization
    is development-only and does not apply to production, shared, remote, or retained accounting data.
 
-Phase D2 final P2 correction completed offline as exact implementation commit
-`5edfcf7303625790ff9e2c6e19fc52707e9a03bf` after review of `ffde483e`. Material backup state remains truthful
-even if phase-03 publication fails, and recovery evidence separately binds the last durable phase and failed
-operation. Execution remains prohibited until the ledger-only descendant receives Sol High approval; no database
-mutation has occurred under this authorization.
+Phase D2 verified-hash correction is active offline after review of exact `7811cfe4`. Phase-04 must preserve the
+original verified backup hash even if current bytes later change; phase-03 must prove completed backup markers,
+positive length and captured hash. Execution remains prohibited until the corrected ledger-only descendant receives
+Sol High approval; no database mutation has occurred under this authorization.
 
 `ResetDisposableDevelopment` is deliberately separate from final-clone cutover. It requires an exact local
 case-sensitive `RhemaERP` connection from `RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION`, explicit
@@ -203,8 +202,9 @@ exact captured source history and fingerprint, and immediately performs the sole
 recreates only `RhemaERP`, applies the exact unique ordered 456/C8 list, seeds twice with byte-identical Finance
 invariants, proves zero-orphan history, and completes DBCC. Terminal success and failure packages use the dedicated
 `DisposableReset` validator, bind every artifact by SHA-256, scan retained text/SQL/Markdown for machine or secret
-material, and atomically write a complete manifest. Catch independently reconciles nonempty backup length/SHA even
-when phase-03 publication failed and never calls it verified without durable VERIFYONLY evidence. Recovery records
+material, and atomically write a complete manifest. Catch independently reconciles nonempty backup length and a
+distinct current-material SHA even when phase-03 publication failed; it preserves the immutable phase-04 verified
+hash and never calls current bytes verified unless both hashes match and VERIFYONLY evidence remains valid. Recovery records
 `Last durable phase` separately from `Failed operation`. Any failure preserves backup/evidence and performs no
 automatic retry, restore, cleanup, or second drop.
 

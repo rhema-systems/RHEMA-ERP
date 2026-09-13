@@ -2416,3 +2416,12 @@ operation mismatch tampering. PowerShell parsing, disposable reset safety/helper
 FinalClone safety/parser regression and final evidence/tamper suites all passed serially from the clean implementation
 commit. No database, process connection variable or preserved evidence was accessed. Sol High re-review is required
 over the ledger-only descendant; reset execution remains prohibited.
+
+Sol High review of exact `7811cfe4af45900be400f4b96486ee110ad23871` found one P1 and one P2 in backup
+evidence semantics. Catch could overwrite the phase-04 verified hash with current material bytes and still derive a
+verified claim after post-VERIFY mutation. Phase-03 also did not independently require completed backup markers,
+positive material length and captured hash, and the obsolete partial phase-03 fixture encoded that weak state. A
+bounded offline correction is active to retain immutable verified hash separately from current material SHA, require
+hash equality plus VERIFY proof for `backupVerified=true`, strengthen phase-03 completion/preservation invariants,
+replace the obsolete fixture, and add an actual post-VERIFY mutation recovery test. No database, connection variable
+or preserved evidence is in scope; reset execution remains prohibited pending clean gates and Sol High re-review.

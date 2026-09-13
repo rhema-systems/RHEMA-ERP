@@ -127,6 +127,7 @@ if ($PackageKind -eq 'DisposableReset') {
 
     $phaseFiles = @(Get-ChildItem -LiteralPath $root -File -Filter 'phase-*.json' | Sort-Object Name)
     $phases = @()
+    $phaseMarkers = @()
     for ($index = 0; $index -lt $phaseFiles.Count; $index++) {
         if ($phaseFiles[$index].Name -cne ("phase-{0:D2}.json" -f ($index + 1))) {
             throw 'Disposable-reset phase markers are not a contiguous monotonic sequence.'
@@ -136,6 +137,7 @@ if ($PackageKind -eq 'DisposableReset') {
             throw 'Disposable-reset phase marker schema or ordinal is invalid.'
         }
         $phases += [string]$marker.phase
+        $phaseMarkers += $marker
     }
     $expectedPhases = @('OFFLINE_GATES_COMPLETE','SOURCE_CAPTURE_COMPLETE','BACKUP_CREATED','BACKUP_VERIFIED',
         'RESET_STARTED','DATABASE_RECREATED','MIGRATIONS_APPLIED','SEED_INVARIANTS_VERIFIED','DBCC_COMPLETE','COMPLETE')
@@ -185,8 +187,8 @@ if ($PackageKind -eq 'DisposableReset') {
     if ([bool]$reset.backupPhaseMarkerPublished -ne $backupPhaseMarkerPublished) {
         throw 'Disposable-reset phase-03 publication status disagrees with the durable marker set.'
     }
-    if (($phases -ccontains 'BACKUP_VERIFIED') -ne [bool]$reset.backupVerified) {
-        throw 'Disposable-reset status and durable BACKUP_VERIFIED marker disagree.'
+    if ($phases -cnotcontains 'BACKUP_VERIFIED' -and $reset.backupVerified -eq $true) {
+        throw 'Disposable-reset cannot claim verification without durable phase-04.'
     }
     if (($phases -ccontains 'RESET_STARTED') -ne [bool]$reset.resetStarted) {
         throw 'Disposable-reset RESET_STARTED marker and terminal status disagree.'
@@ -257,36 +259,55 @@ if ($PackageKind -eq 'DisposableReset') {
 
     if ($reset.backupCreated -eq $true) {
         $createPath = Join-Path $root 'backup-create.txt'
-        $hashPath = Join-Path $root 'backup.sha256'
+        $currentHashPath = Join-Path $root 'backup-current.sha256'
         if (-not (Test-Path -LiteralPath $createPath -PathType Leaf) -or
-            -not (Test-Path -LiteralPath $hashPath -PathType Leaf)) { throw 'Material backup creation/hash evidence is missing.' }
+            -not (Test-Path -LiteralPath $currentHashPath -PathType Leaf)) { throw 'Material backup creation/current-hash evidence is missing.' }
         $create = @(Get-Content -LiteralPath $createPath | ForEach-Object { $_.Trim() })
-        $hashLine = (Get-Content -Raw -LiteralPath $hashPath).Trim()
+        $currentHashLine = (Get-Content -Raw -LiteralPath $currentHashPath).Trim()
         if ([string]$reset.backupMediaId -notmatch '^[0-9a-f]{32}$' -or
             $create -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)" -or
-            $hashLine -notmatch '^(?<hash>[0-9A-F]{64})  RhemaERP_DISPOSABLE_RESET_COPYONLY\.bak$' -or
-            $Matches.hash -cne [string]$reset.backupSha256) {
-            throw 'Disposable-reset backup creation markers or media identity are invalid.'
+            $currentHashLine -notmatch '^(?<hash>[0-9A-F]{64})  RhemaERP_DISPOSABLE_RESET_COPYONLY\.bak$' -or
+            $Matches.hash -cne [string]$reset.currentMaterialSha256 -or [long]$reset.backupByteLength -le 0 -or
+            $reset.backupPreserved -ne $true -or $reset.backupMaterialStateReconciled -ne $true) {
+            throw 'Disposable-reset material backup identity/current-hash/preservation evidence is invalid.'
         }
-        if (($reset.status -eq 'PASS' -or $reset.backupCompleted -eq $true) -and
-            ($create -cnotcontains 'BACKUP_PATH_ATOMICALLY_RESERVED' -or
-             $create -cnotcontains 'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE')) {
-            throw 'Disposable-reset status claims a completed backup without completion markers.'
+        if ($backupPhaseMarkerPublished) {
+            $phaseThree = $phaseMarkers[2]
+            if ($reset.backupCompleted -ne $true -or $phaseThree.backupCompleted -ne $true -or
+                [long]$phaseThree.backupByteLength -le 0 -or
+                [string]$phaseThree.currentMaterialSha256 -notmatch '^[0-9A-F]{64}$' -or
+                $create -cnotcontains 'BACKUP_PATH_ATOMICALLY_RESERVED' -or
+                $create -cnotcontains 'BACKUP_COPY_ONLY_CHECKSUM_COMPLETE') {
+                throw 'Durable BACKUP_CREATED requires completed SQL markers, positive length and hash reconciliation.'
+            }
         }
     }
-    if ($reset.backupVerified -eq $true) {
+    elseif ($reset.backupPreserved -eq $true) {
+        throw 'Disposable-reset cannot claim backup preservation without current material evidence.'
+    }
+    $phaseFourPublished = $phases -ccontains 'BACKUP_VERIFIED'
+    if ($phaseFourPublished) {
         $verifyPath = Join-Path $root 'backup-verify.txt'
         $hashPath = Join-Path $root 'backup.sha256'
         if (-not (Test-Path -LiteralPath $verifyPath -PathType Leaf) -or
             -not (Test-Path -LiteralPath $hashPath -PathType Leaf)) { throw 'BACKUP_VERIFIED proof is incomplete.' }
         $verify = @(Get-Content -LiteralPath $verifyPath | ForEach-Object { $_.Trim() })
         $hashLine = (Get-Content -Raw -LiteralPath $hashPath).Trim()
-        if ($reset.backupCompleted -ne $true -or $verify -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE' -or
+        $phaseFourHash = [string]$phaseMarkers[3].backupSha256
+        $currentMatchesVerified = [string]$reset.currentMaterialSha256 -ceq $phaseFourHash
+        if ($phaseFourHash -notmatch '^[0-9A-F]{64}$' -or
+            [string]$phaseMarkers[2].currentMaterialSha256 -cne $phaseFourHash -or
+            $reset.backupCompleted -ne $true -or $verify -cnotcontains 'RESTORE_VERIFYONLY_CHECKSUM_COMPLETE' -or
             $verify -cnotcontains "BACKUP_MEDIA_ID=$($reset.backupMediaId)" -or
             $hashLine -notmatch '^(?<hash>[0-9A-F]{64})  RhemaERP_DISPOSABLE_RESET_COPYONLY\.bak$' -or
-            $Matches.hash -cne [string]$reset.backupSha256) {
+            $Matches.hash -cne $phaseFourHash -or [string]$reset.backupSha256 -cne $phaseFourHash -or
+            $reset.verifyEvidencePresent -ne $true -or [bool]$reset.backupHashMatchesVerified -ne $currentMatchesVerified -or
+            [bool]$reset.backupVerified -ne $currentMatchesVerified) {
             throw 'Disposable-reset VERIFYONLY, media identity, or backup hash proof is invalid.'
         }
+    }
+    elseif ($reset.backupVerified -eq $true -or -not [string]::IsNullOrWhiteSpace([string]$reset.backupSha256)) {
+        throw 'Disposable-reset terminal status claims a verified hash without durable phase-04.'
     }
     if ($reset.resetStarted -eq $true) {
         $resetLog = Join-Path $root 'reset-database.log'
@@ -306,7 +327,7 @@ if ($PackageKind -eq 'DisposableReset') {
             'ef-no-pending-model.log','migration-discovery.log','repository-migration-history.txt',
             'source-migration-history.txt','source-fingerprint-before.txt','source-database-identity.sha256',
             'source-server-identity.sha256','pre-mutation-reviewed-git-state.json','backup-create.txt',
-            'backup-verify.txt','backup.sha256','reset-database.log','reset-apply-migrations.log','target-migration-history.txt','reset-seed-pass-1.log',
+            'backup-verify.txt','backup.sha256','backup-current.sha256','reset-database.log','reset-apply-migrations.log','target-migration-history.txt','reset-seed-pass-1.log',
             'reset-seed-pass-2.log','reset-invariants-pass-1.txt','reset-invariants-pass-2.txt',
             'reset-invariants.sha256','reset-dbcc.txt')) {
             if (-not (Test-Path -LiteralPath (Join-Path $root $name) -PathType Leaf)) { throw "Disposable-reset PASS is missing: $name" }
