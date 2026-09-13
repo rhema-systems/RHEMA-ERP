@@ -476,3 +476,14 @@ the preserved external package and backup were not modified. Offline reset/Final
 deterministic archived-SQL inspection, Data/API Release builds, exact one-baseline discovery, no-pending-model, and
 zero-to-current generation pass. No further reset is authorized until independent Sol High approval of the final
 clean candidate and a new explicit operational authorization.
+
+Sol High follow-up correction `a7644fdb17d69ec4b225bd45a3d378e31dac5d60` separates a native
+`APPLY_MIGRATIONS` failure from a successful migration command followed by
+`CAPTURE_TARGET_MIGRATION_HISTORY` or phase-07 publication failure. Completed offline, migration, target-history,
+seed/invariant, and DBCC phases now require their exact retained artifacts and SHA-256 status bindings; deleting an
+artifact or its binding cannot be repaired by re-manifesting. Native migration failure requires one signed nonzero
+Int32 failure marker and no target history, while post-command capture failure requires the exact success/zero marker
+and no validated history, and phase-07 publication failure requires success/zero plus the exact validated baseline
+history. Behavioral fixtures cover both truthful outcomes and deletion, binding, operation-downgrade, and marker
+tampering. Reset and FinalClone offline safety/evidence suites and the full generated-SQL grammar gate pass. No
+database, connection environment, preserved runtime evidence, or backup was accessed by this correction.

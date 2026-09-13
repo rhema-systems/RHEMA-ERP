@@ -2685,3 +2685,19 @@ backup remain untouched. Reset/FinalClone safety and evidence suites, determinis
 Data/API Release builds, exact one-baseline no-connect discovery, no-pending-model and corrected zero-to-current
 generation gates pass offline. A new runtime attempt remains prohibited pending independent Sol High approval and
 fresh explicit authorization.
+
+Sol High review of exact `1df1247b85674a3562cae58a67f606be6fcda0da` required phase-aware mandatory
+migration evidence and correction of the parser/runtime error-number claim. Implementation
+`a7644fdb17d69ec4b225bd45a3d378e31dac5d60` (tree
+`b7b19612f92325d777158410ab90d3d5240dd7dd`) publishes
+`CAPTURE_TARGET_MIGRATION_HISTORY` immediately after the successful native apply command, so subsequent capture and
+publication failures cannot be mislabeled as native migration failures. The validator requires exact artifact and
+SHA-256 bindings for every completed offline, migration/target-history, seed/invariant, and DBCC phase. Native apply
+failure requires a signed nonzero Int32 failure marker, durable phase 06, zero final evidence count, and no target
+history. Post-success capture failure requires success/zero and no validated target history; phase-07 publication
+failure requires success/zero and the exact one-row baseline history. Missing logs, deleted bindings, marker changes,
+operation downgrades, and phase/history contradictions refuse after re-manifesting. TSql160Parser regression evidence
+now reports its actual error 46005 near THROW; SQL Server 102 remains only the observed attempt-06 runtime fact.
+Reset and FinalClone safety/evidence suites, baseline static checks, inspector build, and the complete generated-SQL
+grammar gate pass offline. No database, connection environment, preserved evidence, or backup was accessed. Runtime
+remains prohibited pending independent Sol High re-review and fresh authorization.
