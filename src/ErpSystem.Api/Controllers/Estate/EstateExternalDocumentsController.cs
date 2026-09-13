@@ -1624,8 +1624,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
-            .AsNoTracking()
-            .Include(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage)))
+            .AsNoTracking())
             .Where(asset => asset.TenantId == tenantId
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
@@ -1704,13 +1703,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         query = ApplyPublicPriceFilter(query, normalizedListingType, minPrice, maxPrice);
 
-        // Estate external portal: apply all listing/search filters before paging published inventory.
-        var filteredAssets = await query.ToListAsync(cancellationToken);
-
         var demarcationQuery = _db.EstateLandDemarcations
             .AsNoTracking()
-            .Include(item => item.EstateManagedAsset)
-                .ThenInclude(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
             .Where(item => item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.IsPublishedToExternalPortal
@@ -1753,37 +1747,26 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         demarcationQuery = ApplyPublicPriceFilter(demarcationQuery, normalizedListingType, minPrice, maxPrice);
 
-        var filteredDemarcations = await demarcationQuery.ToListAsync(cancellationToken);
-
-        var candidates = filteredAssets
-            .Select(item => (
-                Data: (object)ToExternalListingDto(item),
-                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt))
-            .Concat(filteredDemarcations.Select(item => (
-                Data: (object)ToExternalListingDto(item),
-                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)))
-            .OrderByDescending(item => item.PublishedAt)
-            .ToList();
-
-        var totalCount = candidates.Count;
-        var listings = candidates
-            .Skip((normalizedPage - 1) * normalizedPageSize)
-            .Take(normalizedPageSize)
-            .Select(item => item.Data)
-            .ToList();
+        var listingsPage = await BuildExternalListingsPageAsync(
+            query,
+            demarcationQuery,
+            normalizedPage,
+            normalizedPageSize,
+            usePublicImageRoute: false,
+            cancellationToken);
 
         return Ok(new
         {
             success = true,
-            data = listings,
+            data = listingsPage.Items,
             pagination = new
             {
                 page = normalizedPage,
                 pageSize = normalizedPageSize,
-                totalCount,
-                totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)normalizedPageSize)),
+                totalCount = listingsPage.TotalCount,
+                totalPages = Math.Max(1, (int)Math.Ceiling(listingsPage.TotalCount / (double)normalizedPageSize)),
                 hasPreviousPage = normalizedPage > 1,
-                hasNextPage = normalizedPage * normalizedPageSize < totalCount
+                hasNextPage = (long)normalizedPage * normalizedPageSize < listingsPage.TotalCount
             }
         });
     }
@@ -1819,8 +1802,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalizedPageSize = Math.Clamp(pageSize ?? take ?? 10, 1, 10);
 
         var query = WhereExternallyAvailableListings(_db.EstateManagedAssets
-            .AsNoTracking()
-            .Include(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage)))
+            .AsNoTracking())
             .Where(asset => asset.TenantId == tenantId
                 && (asset.AssetType == EstateManagedAssetType.Land
                     || asset.AssetType == EstateManagedAssetType.Property
@@ -1856,12 +1838,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         query = ApplyPublicPriceFilter(query, normalizedListingType, minPrice, maxPrice);
 
-        var filteredAssets = await query.ToListAsync(cancellationToken);
-
         var demarcationQuery = _db.EstateLandDemarcations
             .AsNoTracking()
-            .Include(item => item.EstateManagedAsset)
-                .ThenInclude(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
             .Where(item => item.TenantId == tenantId
                 && !item.IsDeleted
                 && item.IsPublishedToExternalPortal
@@ -1904,40 +1882,86 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         demarcationQuery = ApplyPublicPriceFilter(demarcationQuery, normalizedListingType, minPrice, maxPrice);
 
-        var filteredDemarcations = await demarcationQuery.ToListAsync(cancellationToken);
-
-        var candidates = filteredAssets
-            .Select(item => (
-                Data: (object)ToExternalListingDto(item, usePublicImageRoute: true),
-                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt))
-            .Concat(filteredDemarcations.Select(item => (
-                Data: (object)ToExternalListingDto(item, usePublicImageRoute: true),
-                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)))
-            .OrderByDescending(item => item.PublishedAt)
-            .ToList();
-
-        var totalCount = candidates.Count;
-        var listings = candidates
-            .Skip((normalizedPage - 1) * normalizedPageSize)
-            .Take(normalizedPageSize)
-            .Select(item => item.Data)
-            .ToList();
+        var listingsPage = await BuildExternalListingsPageAsync(
+            query,
+            demarcationQuery,
+            normalizedPage,
+            normalizedPageSize,
+            usePublicImageRoute: true,
+            cancellationToken);
 
         return Ok(new
         {
             success = true,
-            data = listings,
+            data = listingsPage.Items,
             pagination = new
             {
                 page = normalizedPage,
                 pageSize = normalizedPageSize,
-                totalCount,
-                totalPages = Math.Max(1, (int)Math.Ceiling(totalCount / (double)normalizedPageSize)),
+                totalCount = listingsPage.TotalCount,
+                totalPages = Math.Max(1, (int)Math.Ceiling(listingsPage.TotalCount / (double)normalizedPageSize)),
                 hasPreviousPage = normalizedPage > 1,
-                hasNextPage = normalizedPage * normalizedPageSize < totalCount
+                hasNextPage = (long)normalizedPage * normalizedPageSize < listingsPage.TotalCount
             }
         });
     }
+
+    private async Task<ListingPageResult> BuildExternalListingsPageAsync(
+        IQueryable<EstateManagedAsset> assetQuery,
+        IQueryable<EstateLandDemarcation> demarcationQuery,
+        int normalizedPage,
+        int normalizedPageSize,
+        bool usePublicImageRoute,
+        CancellationToken cancellationToken)
+    {
+        var sourceTake = CalculateListingsToRead(normalizedPage, normalizedPageSize);
+        var pageOffset = sourceTake - normalizedPageSize;
+
+        var assetCount = await assetQuery.CountAsync(cancellationToken);
+        var demarcationCount = await demarcationQuery.CountAsync(cancellationToken);
+
+        var filteredAssets = await assetQuery
+            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .ThenBy(item => item.AssetCode)
+            .ThenBy(item => item.Id)
+            .Take(sourceTake)
+            .Include(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
+        var filteredDemarcations = await demarcationQuery
+            .OrderByDescending(item => item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)
+            .ThenBy(item => item.EstateManagedAsset.AssetCode)
+            .ThenBy(item => item.DemarcationNumber)
+            .ThenBy(item => item.Id)
+            .Take(sourceTake)
+            .Include(item => item.EstateManagedAsset)
+                .ThenInclude(asset => asset.Documents.Where(document => !document.IsDeleted && document.IsListingImage))
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+
+        var listings = filteredAssets
+            .Select(item => (
+                Data: (object)ToExternalListingDto(item, usePublicImageRoute),
+                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt))
+            .Concat(filteredDemarcations.Select(item => (
+                Data: (object)ToExternalListingDto(item, usePublicImageRoute),
+                PublishedAt: item.ExternalPublishedAt ?? item.UpdatedAt ?? item.CreatedAt)))
+            .OrderByDescending(item => item.PublishedAt)
+            .Skip(pageOffset)
+            .Take(normalizedPageSize)
+            .Select(item => item.Data)
+            .ToList();
+
+        return new ListingPageResult(listings, assetCount + demarcationCount);
+    }
+
+    private static int CalculateListingsToRead(int normalizedPage, int normalizedPageSize)
+        => normalizedPage > int.MaxValue / normalizedPageSize
+            ? int.MaxValue
+            : normalizedPage * normalizedPageSize;
+
+    private sealed record ListingPageResult(IReadOnlyList<object> Items, int TotalCount);
 
     [HttpGet("/api/estate/external/listings/{listingId:guid}/images/{documentId:guid}")]
     public async Task<IActionResult> GetListingImage(Guid listingId, Guid documentId, CancellationToken cancellationToken)
