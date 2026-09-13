@@ -97,7 +97,7 @@ describe('Header layout', () => {
     expect(screen.queryByRole('button', { name: 'Theme' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
 
-    expect(screen.getByRole('dialog', { name: 'Demo User' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Demo User' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Profile Settings' })).toHaveAttribute('href', '/profile');
     expect(screen.getByRole('link', { name: 'Account Settings' })).toHaveAttribute('href', '/account');
     expect(screen.getByRole('link', { name: 'All Settings' })).toHaveAttribute('href', '/settings');
@@ -107,7 +107,59 @@ describe('Header layout', () => {
     expect(mocks.setTheme).toHaveBeenCalledWith('dark');
 
     fireEvent.click(screen.getByRole('button', { name: 'Close account sidebar' }));
-    expect(screen.queryByRole('dialog', { name: 'Demo User' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Demo User' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open account sidebar' })).toHaveFocus();
+  });
+
+  it('opens a non-modal account panel without a backdrop or body scroll lock and restores focus on Escape', () => {
+    render(<Header />);
+    const trigger = screen.getByRole('button', { name: 'Open account sidebar' });
+    const previousOverflow = document.body.style.overflow;
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const panel = screen.getByRole('complementary', { name: 'Demo User' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', panel.id);
+    expect(panel).not.toHaveAttribute('aria-modal');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dismiss account sidebar' })).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe(previousOverflow);
+    expect(screen.getByRole('button', { name: 'Close account sidebar' })).toHaveFocus();
+
+    const notifications = screen.getByRole('button', { name: 'Notifications' });
+    notifications.focus();
+    expect(notifications).toHaveFocus();
+    fireEvent.keyDown(notifications, { key: 'Escape' });
+
+    expect(panel).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+    expect(document.body.style.overflow).toBe(previousOverflow);
+  });
+
+  it('keeps focus in the selected control when the header rerenders', () => {
+    const { rerender } = render(<Header />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
+    const nightMode = screen.getByRole('radio', { name: /Night/ });
+    nightMode.focus();
+
+    rerender(<Header className="test-update" />);
+
+    expect(nightMode).toHaveFocus();
+    const profileLink = screen.getByRole('link', { name: 'Profile Settings' });
+    profileLink.addEventListener('click', event => event.preventDefault(), { once: true });
+    fireEvent.click(profileLink);
+    expect(screen.queryByRole('complementary', { name: 'Demo User' })).not.toBeInTheDocument();
+  });
+
+  it('preserves sign out from the account panel', () => {
+    render(<Header />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
+
+    expect(mocks.logout).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('complementary', { name: 'Demo User' })).not.toBeInTheDocument();
   });
 
   it('hides Settings entry points when the user has no authorized settings item', () => {

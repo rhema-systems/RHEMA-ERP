@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertCircle, Building2, Loader2, LogOut } from 'lucide-react';
@@ -29,11 +29,15 @@ export default function TenantSelectPage() {
   const [selectedTenantName, setSelectedTenantName] = useState<string>('');
   const [selectionError, setSelectionError] = useState<string | null>(null);
   const [showLogoutDialog, setShowLogoutDialog] = useState(false);
+  const selectionStartedRef = useRef(false);
+  const autoSelectionAttemptedRef = useRef(false);
 
   // Fetch current user info including accessible tenants
   const { data: userInfo, isLoading, error } = useQuery({
     queryKey: ['currentUser'],
     queryFn: () => apiService.getCurrentUser(),
+    enabled: !isAutoSelecting && !isManuallySelecting,
+    refetchOnWindowFocus: false,
   });
 
   const { data: publicSettingsRaw } = useQuery({
@@ -47,6 +51,12 @@ export default function TenantSelectPage() {
 
   // Extract accessible tenants from user info
   const tenants = userInfo?.accessibleTenants || [];
+  const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
+  const automaticTenant = tenants.length === 1
+    ? tenants[0]
+    : isSupportHost
+      ? tenants.find((tenant) => tenant.tenantCode === publicSettingsRaw?.tenantCode)
+      : undefined;
 
   const selectTenantMutation = useMutation({
     mutationFn: (tenant: UserTenantInfo) => tenantService.selectTenant(tenant.tenantCode, false),
@@ -65,6 +75,7 @@ export default function TenantSelectPage() {
     },
     onError: (error: unknown) => {
       console.error('Error selecting tenant:', error);
+      selectionStartedRef.current = false;
       setIsAutoSelecting(false);
       setIsManuallySelecting(false);
       setSelectedTenantName('');
@@ -88,11 +99,21 @@ export default function TenantSelectPage() {
     },
   });
 
-  const handleTenantSelect = (tenant: UserTenantInfo) => {
+  const { mutate: selectTenant } = selectTenantMutation;
+  const startTenantSelection = useCallback((tenant: UserTenantInfo, automatic: boolean) => {
+    // State updates do not synchronously prevent a second effect/click from
+    // submitting. Keep this lock through cache cleanup and the hard redirect.
+    if (selectionStartedRef.current) return;
+    selectionStartedRef.current = true;
     setSelectionError(null);
-    setIsManuallySelecting(true);
+    setIsAutoSelecting(automatic);
+    setIsManuallySelecting(!automatic);
     setSelectedTenantName(tenant.tenantName);
-    selectTenantMutation.mutate(tenant);
+    selectTenant(tenant);
+  }, [selectTenant]);
+
+  const handleTenantSelect = (tenant: UserTenantInfo) => {
+    startTenantSelection(tenant, false);
   };
 
   const handleLogout = () => {
@@ -103,46 +124,16 @@ export default function TenantSelectPage() {
     logoutMutation.mutate();
   };
 
-  // Auto-select if user has only one tenant (especially for public registration users)
+  // Auto-select once per visit. Failed selections remain available for an
+  // explicit retry instead of resubmitting on a refetch or mutation update.
   useEffect(() => {
-    if (tenants?.length === 1) {
-      setIsAutoSelecting(true);
-      setSelectedTenantName(tenants[0].tenantName);
-      selectTenantMutation.mutate(tenants[0]);
-    }
-  }, [tenants]);
-
-  // Support portal: if host resolves a specific tenant, auto-select that tenant even when the user has multiple mappings.
-  useEffect(() => {
-    if (!tenants?.length) return;
-    if (tenants.length === 1) return; // handled by the single-tenant auto-select effect
-    if (isAutoSelecting || isManuallySelecting || selectTenantMutation.isPending) return;
-
-    const isSupportHost = typeof window !== 'undefined' && window.location.hostname.toLowerCase().startsWith('support.');
-    if (!isSupportHost) return;
-
-    const resolvedTenantCode = publicSettingsRaw?.tenantCode as string | null | undefined;
-    if (!resolvedTenantCode) return;
-
-    const match = tenants.find((t) => t.tenantCode === resolvedTenantCode);
-    if (!match) return;
-
-    setIsAutoSelecting(true);
-    setSelectedTenantName(match.tenantName);
-
-    selectTenantMutation.mutate(match);
-  }, [tenants, publicSettingsRaw?.tenantCode, isAutoSelecting, isManuallySelecting, selectTenantMutation.isPending]);
-
-  if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-      </div>
-    );
-  }
+    if (!automaticTenant || autoSelectionAttemptedRef.current || selectionStartedRef.current) return;
+    autoSelectionAttemptedRef.current = true;
+    startTenantSelection(automaticTenant, true);
+  }, [automaticTenant, startTenantSelection]);
 
   // Show preparing workspace loader when auto-selecting single tenant or manually selecting
-  if (isAutoSelecting || isManuallySelecting) {
+  if (isAutoSelecting || isManuallySelecting || (automaticTenant && !selectionError)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-100 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 p-4">
         {/* Background Pattern */}
@@ -173,6 +164,14 @@ export default function TenantSelectPage() {
             </div>
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
       </div>
     );
   }

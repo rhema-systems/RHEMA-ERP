@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Search, 
@@ -21,9 +21,11 @@ import { hasAnyAccessibleSettings } from '../settings/settings-access';
 
 interface HeaderProps {
   className?: string;
+  accountSidebarContainer?: HTMLElement | null;
 }
 
-export function Header({ className }: HeaderProps) {
+export function Header({ className, accountSidebarContainer }: HeaderProps) {
+  const accountButtonRef = useRef<HTMLButtonElement>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,9 +47,14 @@ export function Header({ className }: HeaderProps) {
     setMounted(true);
   }, []);
 
+  const closeAccountSidebar = useCallback(() => {
+    setIsUserMenuOpen(false);
+    accountButtonRef.current?.focus();
+  }, []);
+
   const handleLogout = () => {
     logout();
-    setIsUserMenuOpen(false);
+    closeAccountSidebar();
   };
 
   const userDisplayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.username || 'User';
@@ -208,12 +215,13 @@ export function Header({ className }: HeaderProps) {
           {/* User Menu */}
           <div className="relative">
             <Button
+              ref={accountButtonRef}
               variant="ghost"
               size="sm"
-              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              onClick={() => isUserMenuOpen ? closeAccountSidebar() : setIsUserMenuOpen(true)}
               aria-label="Open account sidebar"
               aria-expanded={isUserMenuOpen}
-              aria-controls="account-sidebar-title"
+              aria-controls={isUserMenuOpen ? 'account-sidebar' : undefined}
               className="flex h-9 items-center space-x-2 rounded-xl bg-slate-50 px-3 hover:bg-slate-100 dark:bg-neutral-800 dark:hover:bg-neutral-700"
             >
               {/* Avatar */}
@@ -253,11 +261,12 @@ export function Header({ className }: HeaderProps) {
     </header>
     <AccountSidebar
       open={isUserMenuOpen}
+      container={accountSidebarContainer}
       user={user}
       currentTenant={currentTenant}
       isLoggingOut={isLoggingOut}
       showSettingsLink={canOpenSettings}
-      onClose={() => setIsUserMenuOpen(false)}
+      onClose={closeAccountSidebar}
       onLogout={handleLogout}
     />
     </>

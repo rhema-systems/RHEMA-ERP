@@ -1,6 +1,6 @@
 import React from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -77,19 +77,21 @@ const currentUser = {
   permissions: [],
 };
 
-const renderPage = () => {
+const renderPage = (initialUser = currentUser) => {
   const queryClient = new QueryClient({
     defaultOptions: {
-      queries: { retry: false },
+      queries: { retry: false, structuralSharing: false },
       mutations: { retry: false },
     },
   });
+  queryClient.setQueryData(['currentUser'], initialUser);
 
-  return render(
+  const view = render(
     <QueryClientProvider client={queryClient}>
-      <TenantSelectPage />
+      <React.StrictMode><TenantSelectPage /></React.StrictMode>
     </QueryClientProvider>
   );
+  return { ...view, queryClient };
 };
 
 describe('tenant selection transition', () => {
@@ -149,5 +151,50 @@ describe('tenant selection transition', () => {
       screen.getByRole('button', { name: /TDC Development Company/i })
     ).toBeEnabled();
     expect(mocks.completeTransition).not.toHaveBeenCalled();
+  });
+
+  it('selects a single tenant only once across repeated effects and refreshed tenant arrays', async () => {
+    const singleTenantUser = { ...currentUser, accessibleTenants: accessibleTenants.slice(0, 1) };
+    mocks.getCurrentUser.mockResolvedValue(singleTenantUser);
+    let finishSelection!: () => void;
+    mocks.selectTenant.mockReturnValue(new Promise<void>((resolve) => { finishSelection = resolve; }));
+    const { queryClient } = renderPage(singleTenantUser);
+
+    await waitFor(() => expect(mocks.selectTenant).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      queryClient.setQueryData(['currentUser'], {
+        ...singleTenantUser,
+        accessibleTenants: singleTenantUser.accessibleTenants.map((tenant) => ({ ...tenant })),
+      });
+    });
+    expect(mocks.selectTenant).toHaveBeenCalledTimes(1);
+
+    await act(async () => { finishSelection(); });
+    await waitFor(() => expect(mocks.completeTransition).toHaveBeenCalledTimes(1));
+    await act(async () => { queryClient.removeQueries(); });
+    expect(screen.getByText('Preparing your workspace')).toBeInTheDocument();
+    expect(mocks.selectTenant).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not automatically retry a failed single-tenant selection, but allows manual retry', async () => {
+    const singleTenantUser = { ...currentUser, accessibleTenants: accessibleTenants.slice(0, 1) };
+    mocks.getCurrentUser.mockResolvedValue(singleTenantUser);
+    mocks.selectTenant.mockRejectedValueOnce(new Error('Please try selecting again.'));
+    const { queryClient } = renderPage(singleTenantUser);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Please try selecting again.');
+    await act(async () => {
+      queryClient.setQueryData(['currentUser'], { ...singleTenantUser });
+    });
+    expect(mocks.selectTenant).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: /TDC Development Company/i }));
+    await waitFor(() => expect(mocks.selectTenant).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.completeTransition).toHaveBeenCalledTimes(1));
+  });
+
+  it('requires a choice when several organizations are available on a normal host', async () => {
+    renderPage();
+    expect(await screen.findByRole('button', { name: /Second Organization/i })).toBeEnabled();
+    expect(mocks.selectTenant).not.toHaveBeenCalled();
   });
 });
