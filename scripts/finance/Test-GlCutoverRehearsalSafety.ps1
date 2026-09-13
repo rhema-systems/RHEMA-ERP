@@ -85,7 +85,7 @@ exit 0
     $transportArguments = @(Get-Content -LiteralPath $capturePath)
     $widthIndex = [Array]::IndexOf($transportArguments, '-y')
     if ($widthIndex -lt 0 -or $transportArguments[$widthIndex + 1] -ne '8000' -or
-        $transportArguments -contains '-W' -or $transportArguments -contains '-Y') {
+        $transportArguments -ccontains '-W' -or $transportArguments -ccontains '-Y') {
         throw "Actual Invoke-Sql transport did not use conflict-free '-y 8000': $($transportArguments -join ' ')"
     }
     $wideEvidenceLine = (Get-Content -LiteralPath (Join-Path $transportEvidence 'source-readiness.txt') | Select-Object -First 1)
