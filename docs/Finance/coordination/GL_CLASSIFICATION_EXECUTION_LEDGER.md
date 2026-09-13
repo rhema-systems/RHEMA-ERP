@@ -2657,3 +2657,31 @@ summary, artifact maps and manifests bind the schema and content. Behavioral tes
 and phase-02 publication; independent validation refuses missing, empty, marker/count/state, duplicate and ordering
 tampering after re-manifesting. No database, environment connection, backup, or preserved evidence directory was
 accessed during correction. Sol High review is required before any separately authorized attempt 05.
+
+The separately authorized disposable-development attempt 06 executed exact approved commit
+`6bf2e211d05146def54eaa49e4f76175aa4456d8`, tree
+`1e0ebed923749312d71c83548fe7847861953c34`, exactly once and stopped fail-closed at `APPLY_MIGRATIONS`. Durable
+phases 01-06 completed through `DATABASE_RECREATED`; the source fingerprint was `0|EMPTY|0|0|0`, and the migration
+transaction rolled back with zero target-history rows. The attempt-owned COPY_ONLY backup
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_1e2c11f6f5de410e809e54b3b4edff1e.bak` remains preserved outside the repository:
+3,198,976 bytes, media ID `1e2c11f6f5de410e809e54b3b4edff1e`, SHA-256
+`ABED861CA4DC2EAFE5C230B210A7019FF67EF5C9101866081437B76E01ECC7F1`, with independent VERIFYONLY evidence and an
+unchanged current hash. No seed step ran. Read-only post-failure inspection found only `__EFMigrationsHistory`, zero
+history rows, zero triggers/functions/views, and no partially applied baseline. The preserved terminal package is
+truthful but has no manifest because its native dotnet exit `-532462766` was outside the validator's former
+positive-only failure-marker grammar. No retry, restore, drop, cleanup, or feature-flag change occurred.
+
+Offline diagnosis bound SQL Server error 102 to the exact archived C8 trigger
+`TR_ProducerIntentGroupAttempts_C8Immutable` from
+`20260908120000_AddProducerIntentGroupsC8`: its outer `IF EXISTS (` lacked one closing parenthesis before
+`THROW 51000, 'C8_ATTEMPT_AUTHORITY...'`. The compiled disposable baseline helper now adds only that delimiter;
+the governed predicate and trigger semantics are unchanged. Implementation `0915baf8` adds a deterministic
+TSql160Parser gate over the complete generated zero-to-current script. The corrected 5.35 MB script parses all 1,280
+THROW statements with zero errors; removing the exact delimiter reproduces the archived error near THROW. The reset
+validator now accepts canonical signed nonzero Int32 native exits while refusing zero, nonnumeric, overflow,
+duplicate, and success-downgrade evidence, and specifically binds `APPLY_MIGRATIONS` failure to its failed dotnet
+log. A separate copied attempt-06 package validates and manifests under the correction; the preserved package and
+backup remain untouched. Reset/FinalClone safety and evidence suites, deterministic 456-source inspector,
+Data/API Release builds, exact one-baseline no-connect discovery, no-pending-model and corrected zero-to-current
+generation gates pass offline. A new runtime attempt remains prohibited pending independent Sol High approval and
+fresh explicit authorization.

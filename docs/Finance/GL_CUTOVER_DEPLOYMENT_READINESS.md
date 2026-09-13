@@ -449,3 +449,29 @@ recorded source fingerprint and Boolean reconciliation state in addition to its 
 Deletion, null, wrong-type, false-reconciliation, false historical identity and contradictory hash-match tampering are
 refused. All reset and FinalClone offline suites passed serially from the clean implementation commit. No database,
 connection variable, preserved evidence or backup was accessed; runtime remains prohibited pending Sol High review.
+
+### Disposable reset attempt 06 and baseline SQL grammar correction
+
+The separately authorized attempt 06 ran exact reviewed commit
+`6bf2e211d05146def54eaa49e4f76175aa4456d8`, tree
+`1e0ebed923749312d71c83548fe7847861953c34`, once. It completed the verified attempt-unique COPY_ONLY backup and
+database recreate, then stopped fail-closed at `APPLY_MIGRATIONS` with last durable phase `DATABASE_RECREATED`.
+Source fingerprint was `0|EMPTY|0|0|0`; the migration transaction rolled back, leaving zero target-history rows and
+only `__EFMigrationsHistory`. Backup media `1e2c11f6f5de410e809e54b3b4edff1e` remains preserved outside the repository
+as `RhemaERP_DISPOSABLE_RESET_COPYONLY_1e2c11f6f5de410e809e54b3b4edff1e.bak`, 3,198,976 bytes, SHA-256
+`ABED861CA4DC2EAFE5C230B210A7019FF67EF5C9101866081437B76E01ECC7F1`; VERIFYONLY passed and the current hash still
+matches. No seed, retry, restore, cleanup, feature enablement, or additional mutation followed.
+
+Offline parsing identified one exact historical grammar defect in
+`TR_ProducerIntentGroupAttempts_C8Immutable`, sourced from archived migration
+`20260908120000_AddProducerIntentGroupsC8`: the outer `IF EXISTS (` was missing its closing parenthesis immediately
+before the C8 attempt-authority THROW. Correction `0915baf8` adds only that delimiter to the compiled baseline
+helper, without changing the predicate or economics. The complete regenerated zero-to-current script now parses
+under TSql160Parser with all 1,280 THROW statements; a deliberate removal of the same delimiter reproduces error 102
+near THROW. The terminal evidence validator also accepts canonical signed nonzero Int32 process exits such as
+`-532462766`, rejects malformed/zero/overflow/duplicate markers, and binds an `APPLY_MIGRATIONS` failure to the
+matching failed dotnet evidence. A separate copy of attempt-06 evidence validates and manifests with this correction;
+the preserved external package and backup were not modified. Offline reset/FinalClone safety and tamper suites,
+deterministic archived-SQL inspection, Data/API Release builds, exact one-baseline discovery, no-pending-model, and
+zero-to-current generation pass. No further reset is authorized until independent Sol High approval of the final
+clean candidate and a new explicit operational authorization.
