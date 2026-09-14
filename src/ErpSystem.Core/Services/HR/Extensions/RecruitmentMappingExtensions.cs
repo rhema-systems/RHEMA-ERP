@@ -956,7 +956,9 @@ public static class RecruitmentMappingExtensions
             PostalAddress = dto.PostalAddress,
             DigitalAddress = dto.DigitalAddress,
             City = dto.City,
-            CountryId = dto.CountryId,
+            // Guid.Empty is read as "no country", not refused: a client written against the old
+            // [Required] Guid contract sent it, and that used to be an FK 547 / 500.
+            CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId,
             LinkedInProfile = dto.LinkedInProfile,
             PortfolioUrl = dto.PortfolioUrl,
             GitHubUrl = dto.GitHubUrl,
@@ -982,7 +984,7 @@ public static class RecruitmentMappingExtensions
         entity.PostalAddress = dto.PostalAddress;
         entity.DigitalAddress = dto.DigitalAddress;
         entity.City = dto.City;
-        entity.CountryId = dto.CountryId;
+        entity.CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId;
         entity.NationalIdTypeId = dto.NationalIdTypeId;
         entity.NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim();
         entity.NationalIdExpiryDate = dto.NationalIdExpiryDate;

@@ -172,6 +172,9 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
         // Round 3, lane C1: an identity document type must be one the tenant accepts.
         await RequireIdentificationTypeAsync(dto.NationalIdTypeId, tenantId);
+        // 2026-09-14: this door wrote whatever country id it was handed, unchecked — another
+        // tenant's Country row, or a garbage guid, reached the INSERT.
+        await RequireCountryAsync(dto.CountryId, tenantId);
 
         // Loaded without nav props deliberately — EF tracking child collections during the
         // scalar update would cause duplicate inserts when the collections are patched below.
@@ -855,6 +858,16 @@ public sealed class CandidatePortalService : ICandidatePortalService
             throw new InvalidOperationException("The identification type chosen is not one this organisation accepts.");
     }
 
+    /// <summary>The candidate's country must be one of the tenant's live countries — or absent.</summary>
+    private async Task RequireCountryAsync(Guid? countryId, Guid tenantId)
+    {
+        if (countryId is not { } id || id == Guid.Empty) return;
+        var ok = await _unitOfWork.Repository<Country>().GetQueryable()
+            .AnyAsync(x => x.Id == id && x.TenantId == tenantId && x.IsActive && !x.IsDeleted);
+        if (!ok)
+            throw new InvalidOperationException("That country is not one of this organisation's countries.");
+    }
+
     public async Task<JobCandidateDocumentDto> AddDocumentAsync(
         Guid userId, JobCandidateDocumentType documentType, string fileName, string filePath,
         Guid tenantId, CancellationToken ct = default,
@@ -947,7 +960,10 @@ public sealed class CandidatePortalService : ICandidatePortalService
         c.DateOfBirth     = dto.DateOfBirth ?? c.DateOfBirth;
         c.Gender          = dto.Gender ?? c.Gender;
         c.City            = dto.City ?? string.Empty;
-        if (dto.CountryId != Guid.Empty) c.CountryId = dto.CountryId;
+        // The careers page used to send Guid.Empty to mean "no country" and this line read it as
+        // "leave unchanged". The DTO is nullable now, so null and Guid.Empty both mean none, and
+        // a country the candidate clears actually clears.
+        c.CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId;
         c.PostalAddress   = dto.PostalAddress;
         c.DigitalAddress  = dto.DigitalAddress;
         c.LinkedInProfile = dto.LinkedInProfile;

@@ -201,8 +201,8 @@ export interface SaveCandidateProfilePayload {
   dateOfBirth?: string | null;
   gender?: Gender | null;
   city?: string | null;
-  /** Non-nullable on the DTO; send EMPTY_GUID to leave the country unchanged. */
-  countryId: string;
+  /** Optional since 2026-09-14 — send null for "no country". The old EMPTY_GUID sentinel is retired. */
+  countryId?: string | null;
   postalAddress?: string | null;
   digitalAddress?: string | null;
   linkedInProfile?: string | null;

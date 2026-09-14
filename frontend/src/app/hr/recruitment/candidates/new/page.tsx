@@ -35,6 +35,8 @@ export default function NewCandidatePage() {
         alternatePhone: values.alternatePhone || null,
         postalAddress: values.postalAddress || null,
         digitalAddress: values.digitalAddress || null,
+        // '' does not bind to a Guid? — it is a 400 before the service ever runs.
+        countryId: values.countryId || null,
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,

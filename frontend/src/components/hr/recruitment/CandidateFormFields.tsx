@@ -27,7 +27,10 @@ export const candidateSchema = z.object({
   postalAddress: z.string().max(200).optional().nullable(),
   digitalAddress: z.string().max(30).optional().nullable(),
   city: z.string().min(1, 'City is required').max(100),
-  countryId: z.string().min(1, 'Country is required'),
+  // Optional since 2026-09-14, matching the entity. It was `min(1)`, which meant a candidate
+  // with no country — every shadow record minted from a countryless employee by the internal job
+  // board — could not be saved from this form at all, whatever else you were trying to change.
+  countryId: z.string().optional().nullable(),
   linkedInProfile: z.string().max(200).optional().nullable(),
   portfolioUrl: z.string().max(200).optional().nullable(),
   gitHubUrl: z.string().max(200).optional().nullable(),
@@ -156,7 +159,6 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
               form={form}
               name="countryId"
               label="Country"
-              required
               options={(countries.data ?? []).map((c: any) => ({ value: c.id, label: c.name }))}
             />
             <div />

@@ -391,7 +391,8 @@ export interface CreateJobCandidate {
   postalAddress?: string | null;
   digitalAddress?: string | null;
   city: string;
-  countryId: string;
+  /** Optional since 2026-09-14, matching the entity — send null for "no country". */
+  countryId?: string | null;
   linkedInProfile?: string | null;
   portfolioUrl?: string | null;
   gitHubUrl?: string | null;

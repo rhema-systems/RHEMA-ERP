@@ -28,6 +28,7 @@
 | § 2 | The register: every PDF bullet, what exists (file:line), the gap, the lane |
 | § 3 | Defects the survey found that the PDF did not name, each fixed inside a lane |
 | § 4 | The build plan: nineteen slices, sequenced, with migrations and harness locations |
+| § 4.1 | Follow-on fixes: defects a lane's harness found, closed after that lane |
 | § 5 | Design notes for the slices that need more than a form change |
 | § 6 | Asks to other owners (Finance, payroll) |
 | § 7 | Records owed to other documents |
@@ -691,12 +692,9 @@ chart counted memberships whose segment had been soft-deleted**; the candidate r
 now checks `m.Segment?.IsDeleted != true` for the same reason (the pool reads include the navigation,
 so the guard is live rather than inert).
 
-⚠ **Found in passing, NOT fixed — another door's, recorded here only:** a candidate create that omits
-`countryId` answers **500**, not a refusal. `CreateJobCandidateDto.CountryId` is a non-nullable
-`Guid`, so an omitted country posts `Guid.Empty` and the insert dies on
-`FK_JobCandidates_Countries_CountryId`. Pre-existing, older than this round, and outside lane V's
-register row — the harness passes a country the way `run-c1.mjs` does. Worth a line in whatever
-slice next touches the candidate create door.
+⚠ **Found in passing — and CLOSED the same day as its own fix (2026-09-14, below).** A candidate
+create that omitted `countryId` answered **500**, not a refusal. See the *candidate country* entry
+under § 4.1.
 
 Harness 72 ×2 (`run-v.mjs`: the four fields round-tripping on create / detail / list / update, a
 null clearing each, three stranger ids refused on create AND update with the refused update writing
@@ -710,6 +708,59 @@ it came back at 105/105 unchanged. Deviations: none.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.
+
+---
+
+## 4.1 Follow-on fixes — defects found while building a lane, closed after it
+
+These are not PDF bullets and not lanes. Each was surfaced by a lane's own harness, judged out of
+that lane's scope at the time, and closed immediately afterwards on the user's call.
+
+**Candidate country — a nullable FK the DTOs never caught up with (2026-09-14).** No migration:
+`20260827115504_MakeJobCandidateCountryOptional` (area 25 slice 13b) had already made the column
+nullable, on the reasoning that *"a country is a requirement the foreign key invented, not one the
+business asked for"*. Three write DTOs never followed, and **`[Required]` on a non-nullable `Guid`
+validates nothing** — `Guid.Empty` satisfies it — so:
+
+| Door | Before | After |
+|---|---|---|
+| `CreateJobCandidateDto` | omitted country → `Guid.Empty` → `FK_JobCandidates_Countries_CountryId` → **500** | `Guid?`, validated, empty read as "none" |
+| `UpdateJobCandidateDto` | same, on a record that already had a good country | same fix |
+| `UpdateCandidatePortalProfileDto` | escaped the 500 only via a `Guid.Empty` **sentinel** the frontend had codified in `types/hr/careers.ts`, and **never validated the id at all** — another tenant's `Country` row reached the INSERT | `Guid?`, sentinel retired, validated |
+
+`RequireCountryAsync` in `JobCandidateService` and `CandidatePortalService` mirrors the
+`RequireIdentificationTypeAsync` already sitting beside each (tenant + `IsActive` + `!IsDeleted`).
+The correct implementation already existed at `JobApplicationService.SubmitExternalApplicationAsync`
+— the public apply door — and neither of the other two had it. The mapper normalises `Guid.Empty`
+to null rather than refusing it, so a client written against the old contract keeps working. An
+exhaustive sweep of `RecruitmentDTOs.cs` found **no other instance** of this trap.
+
+⚠ **A second defect the harness caught:** `countryName` was **always `""`** on the desk read. The
+plain `GET /api/job-candidates/{id}` (and the create and update responses) go through the generic
+read, which loads no navigations, so the mapper's `entity.Country?.Name ?? string.Empty` had nothing
+to read — the same missing-`Include` shape as lane V's `memberCount`. Lane C1 had built
+`WithIdentityTypeNameAsync` for exactly this reason and resolved only the identity type; it is now
+`WithLookupNamesAsync` and resolves both. Extending that helper rather than adding an `Include` to a
+path the write methods share avoids serving a stale country name after a change.
+
+⚠ **Frontend, beyond the server contract:** the HR candidate form's `countryId: z.string().min(1)`
+meant a candidate **with no country could not be saved from that form at all**, whatever else was
+being edited — which is precisely the population the nullability exists for (the shadow records the
+internal job board mints from countryless employees). The field is optional there now. Both senders
+also had to stop sending `''`: an empty string does not bind to a `Guid?` and is a 400 before the
+service runs.
+
+⚠ **Status convention, worth knowing:** the careers door answers this refusal **400, not 422**.
+`CandidateController` catches `InvalidOperationException` itself and returns `BadRequest` with the
+message (`CandidateController.cs:152`); it does not carry `[RecruitmentBusinessRules]` the way the
+desk controllers do. That is the candidate-facing door's standing convention and was left alone.
+
+Harness 43 ×2 (`hr-recruitment/run-candidate-country.mjs`: create and update each taking omitted /
+null / `Guid.Empty` / real / stranger, a refused write proving it wrote nothing, the careers profile
+across the same shapes, a countryless candidate reading + listing + editable again, and the
+contracts static). Regression, every suite on its recorded count: C1 96, C2 89, V 72, lane5b 34,
+K 81, A 44, G 49, slices B 175/176, C 190, D 99/100, E 105, **F 69** (the careers surface, the one
+most exposed to this change).
 
 ---
 

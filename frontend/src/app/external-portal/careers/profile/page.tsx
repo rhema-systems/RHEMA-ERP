@@ -465,7 +465,7 @@ export default function CandidateProfilePage() {
         dateOfBirth: str(f.dateOfBirth),
         gender: f.gender || null,
         city: str(f.city),
-        countryId: f.countryId || EMPTY_GUID,
+        countryId: f.countryId || null,
         postalAddress: str(f.postalAddress),
         digitalAddress: str(f.digitalAddress),
         linkedInProfile: str(f.linkedInProfile),

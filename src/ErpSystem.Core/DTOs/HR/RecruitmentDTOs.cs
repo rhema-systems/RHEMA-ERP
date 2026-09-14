@@ -1020,8 +1020,15 @@ public class CreateJobCandidateDto : CreateDtoBase
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
 
-    [Required]
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// The candidate's country. <b>Optional</b>, matching the entity: the FK was made nullable on
+    /// 2026-08-27 (<c>MakeJobCandidateCountryOptional</c>) because "a country is a requirement the
+    /// foreign key invented". ⚠ This was <c>[Required] Guid</c> until 2026-09-14 — and
+    /// <c>[Required]</c> on a non-nullable <c>Guid</c> is a NO-OP, so an omitted country posted
+    /// <c>Guid.Empty</c> and the insert died on the foreign key with a 500. A supplied country is
+    /// checked against the tenant's live list; <c>Guid.Empty</c> is read as "none".
+    /// </summary>
+    public Guid? CountryId { get; set; }
 
     [MaxLength(200)]
     public string? LinkedInProfile { get; set; }
@@ -1085,8 +1092,15 @@ public class UpdateJobCandidateDto : UpdateDtoBase
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
 
-    [Required]
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// The candidate's country. <b>Optional</b>, matching the entity: the FK was made nullable on
+    /// 2026-08-27 (<c>MakeJobCandidateCountryOptional</c>) because "a country is a requirement the
+    /// foreign key invented". ⚠ This was <c>[Required] Guid</c> until 2026-09-14 — and
+    /// <c>[Required]</c> on a non-nullable <c>Guid</c> is a NO-OP, so an omitted country posted
+    /// <c>Guid.Empty</c> and the insert died on the foreign key with a 500. A supplied country is
+    /// checked against the tenant's live list; <c>Guid.Empty</c> is read as "none".
+    /// </summary>
+    public Guid? CountryId { get; set; }
 
     [MaxLength(200)]
     public string? LinkedInProfile { get; set; }
@@ -5777,7 +5791,13 @@ public class UpdateCandidatePortalProfileDto
     public ErpSystem.Core.Enums.Gender? Gender { get; set; }
     [MaxLength(100)]
     public string? City { get; set; }
-    public Guid CountryId { get; set; }
+    /// <summary>
+    /// Optional, matching the entity. ⚠ Until 2026-09-14 this was a non-nullable <c>Guid</c> and
+    /// the careers page sent <c>Guid.Empty</c> as a sentinel meaning "no country" — a handshake
+    /// codified in <c>types/hr/careers.ts</c>. The sentinel is retired: send null, or omit it.
+    /// A supplied country is checked against the tenant's live list, which this door never did.
+    /// </summary>
+    public Guid? CountryId { get; set; }
     [MaxLength(200)]
     public string? PostalAddress { get; set; }
     [MaxLength(30)]

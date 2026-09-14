@@ -198,6 +198,29 @@ public class JobCandidateService : IJobCandidateService
             throw new InvalidOperationException("The identification type chosen is not one this organisation accepts.");
     }
 
+    /// <summary>
+    /// The candidate's country must be one of the tenant's live countries — or absent.
+    /// </summary>
+    /// <remarks>
+    /// 2026-09-14. <c>JobCandidate.CountryId</c> has been nullable since
+    /// <c>MakeJobCandidateCountryOptional</c>, but the desk DTOs still declared
+    /// <c>[Required] Guid</c>, which validates nothing: an omitted country arrived as
+    /// <c>Guid.Empty</c>, nothing checked it, and the insert died on
+    /// <c>FK_JobCandidates_Countries_CountryId</c> with a <b>500</b>. On the update it was worse —
+    /// <c>Guid.Empty</c> silently overwrote a country that was already on the record.
+    /// <c>Guid.Empty</c> is normalised to "none" by the mapper rather than refused, so a client
+    /// written against the old contract keeps working.
+    /// </remarks>
+    private async Task RequireCountryAsync(Guid? countryId)
+    {
+        if (countryId is not { } id || id == Guid.Empty) return;
+        var tenantId = GetTenantId();
+        var ok = await _unitOfWork.Repository<Country>().GetQueryable()
+            .AnyAsync(x => x.Id == id && x.TenantId == tenantId && x.IsActive && !x.IsDeleted);
+        if (!ok)
+            throw new InvalidOperationException("That country is not one of this organisation's countries.");
+    }
+
     private async Task<JobCandidateInterest> GetOwnedInterestAsync(Guid id)
     {
         var entity = await _interestRepository.GetByIdAsync(id);
@@ -227,15 +250,20 @@ public class JobCandidateService : IJobCandidateService
     public async Task<JobCandidateDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(id);
-        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
+        return await WithLookupNamesAsync(entity.ToDto(), cancellationToken);
     }
 
     /// <summary>
     /// Round 3, lane C1. The plain candidate read loads no navigations (only the /details read
-    /// does), so the identity type's name is looked up here rather than left blank on the DTO the
-    /// create, update and get-by-id doors return.
+    /// does), so the lookup names are resolved here rather than left blank on the DTO the create,
+    /// update and get-by-id doors return.
     /// </summary>
-    private async Task<JobCandidateDto> WithIdentityTypeNameAsync(JobCandidateDto dto, CancellationToken cancellationToken)
+    /// <remarks>
+    /// 2026-09-14: the country was added. Lane C1 built this for the identity type and left
+    /// <c>CountryName</c> behind, so it came back as an empty string from all three doors — the
+    /// mapper's <c>entity.Country?.Name ?? string.Empty</c> over a navigation nobody had loaded.
+    /// </remarks>
+    private async Task<JobCandidateDto> WithLookupNamesAsync(JobCandidateDto dto, CancellationToken cancellationToken)
     {
         if (dto.NationalIdTypeId is { } typeId && dto.NationalIdTypeName == null)
         {
@@ -243,6 +271,14 @@ public class JobCandidateService : IJobCandidateService
                 .Where(x => x.Id == typeId)
                 .Select(x => x.Name)
                 .FirstOrDefaultAsync(cancellationToken);
+        }
+
+        if (dto.CountryId is { } countryId && string.IsNullOrEmpty(dto.CountryName))
+        {
+            dto.CountryName = await _unitOfWork.Repository<Country>().GetQueryable()
+                .Where(x => x.Id == countryId)
+                .Select(x => x.Name)
+                .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
         }
         return dto;
     }
@@ -326,6 +362,7 @@ public class JobCandidateService : IJobCandidateService
             throw new InvalidOperationException($"A candidate with email '{createDto.Email}' already exists.");
 
         await RequireIdentificationTypeAsync(createDto.NationalIdTypeId);
+        await RequireCountryAsync(createDto.CountryId);
         var entity = createDto.ToEntity(current, createdByUserId);
         entity.CandidateNumber = await _candidateRepository.GetNextCandidateNumberAsync(current);
 
@@ -333,7 +370,7 @@ public class JobCandidateService : IJobCandidateService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job candidate created: {CandidateNumber}", entity.CandidateNumber);
-        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
+        return await WithLookupNamesAsync(entity.ToDto(), cancellationToken);
     }
 
     public async Task<JobCandidateDto> UpdateAsync(UpdateJobCandidateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
@@ -341,12 +378,13 @@ public class JobCandidateService : IJobCandidateService
         var entity = await GetOwnedCandidateAsync(updateDto.Id);
 
         await RequireIdentificationTypeAsync(updateDto.NationalIdTypeId);
+        await RequireCountryAsync(updateDto.CountryId);
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _candidateRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job candidate updated: {CandidateNumber}", entity.CandidateNumber);
-        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
+        return await WithLookupNamesAsync(entity.ToDto(), cancellationToken);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -374,7 +412,7 @@ public class JobCandidateService : IJobCandidateService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job candidate photograph set by HR: {CandidateNumber}", entity.CandidateNumber);
-        return await WithIdentityTypeNameAsync(entity.ToDto(), cancellationToken);
+        return await WithLookupNamesAsync(entity.ToDto(), cancellationToken);
     }
 
     // ── Talent pool ───────────────────────────────────────────────────────────
