@@ -1,4 +1,10 @@
+using ErpSystem.Api.Configuration;
+using ErpSystem.Api.Extensions;
+using ErpSystem.Data;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -38,12 +44,130 @@ public sealed class LegacyPostingPathLockdownTests
         var migrationCommand = program[migrationStart..seedStart];
         migrationCommand.Should().Contain("WebApplication.CreateBuilder(args)");
         migrationCommand.Should().Contain("tempBuilder.Services.AddHttpContextAccessor()")
-            .And.Contain("tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration)");
+            .And.Contain("tempBuilder.Services.AddErpSystemCliDatabase(");
         migrationCommand.IndexOf("AddHttpContextAccessor", StringComparison.Ordinal).Should().BeLessThan(
-            migrationCommand.IndexOf("AddErpSystemDatabase", StringComparison.Ordinal),
+            migrationCommand.IndexOf("AddErpSystemCliDatabase", StringComparison.Ordinal),
             "the audited DbContext dependency must be registered before host validation");
         migrationCommand.Should().NotContain("CreateSeedBuilder(args)");
         migrationCommand.Should().NotContain("Environment.SetEnvironmentVariable");
+    }
+
+    [Fact]
+    [Trait("Category", "Deployment")]
+    public void MigrationOnlyCommand_ShouldApplyBoundedCliTimeoutBeforeMigration()
+    {
+        var parsed = MigrationCommandOptions.Parse(
+            ["apply-migrations", MigrationCommandOptions.TimeoutArgument, "600"]);
+        using var services = BuildDatabaseServices(cli: true, parsed.CommandTimeoutSeconds);
+        using var scope = services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+
+        parsed.ApplyAndAssertTo(context.Database);
+
+        parsed.CommandTimeoutSeconds.Should().Be(600);
+        context.Database.GetCommandTimeout().Should().Be(600);
+        context.Database.CreateExecutionStrategy().RetriesOnFailure.Should().BeFalse();
+
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Program.cs"));
+        var migrationStart = program.IndexOf(
+            "if (args.Length > 0 && args[0] == \"apply-migrations\")",
+            StringComparison.Ordinal);
+        var seedStart = program.IndexOf("// Check for seed command", migrationStart, StringComparison.Ordinal);
+        var migrationCommand = program[migrationStart..seedStart];
+        migrationCommand.IndexOf("migrationCommandOptions.ApplyAndAssertTo(db.Database)", StringComparison.Ordinal)
+            .Should().BeLessThan(migrationCommand.IndexOf("db.Database.MigrateAsync()", StringComparison.Ordinal));
+        migrationCommand.IndexOf("RHEMA_MIGRATION_COMMAND_TIMEOUT_SECONDS", StringComparison.Ordinal)
+            .Should().BeLessThan(migrationCommand.IndexOf("db.Database.MigrateAsync()", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Deployment")]
+    public void MigrationOnlyCommand_ShouldKeepOrdinaryProviderTimeoutAndRefuseUnsafeOverrides()
+    {
+        var defaultOptions = MigrationCommandOptions.Parse(["apply-migrations"]);
+        defaultOptions.CommandTimeoutSeconds.Should().Be(600);
+        MigrationCommandOptions.Parse(
+            ["seed-db", MigrationCommandOptions.TimeoutArgument, "600"]).CommandTimeoutSeconds.Should().Be(600);
+
+        using var services = BuildDatabaseServices(cli: false, commandTimeoutSeconds: 600);
+        using var scope = services.CreateScope();
+        var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        context.Database.GetCommandTimeout().Should().Be(30);
+        context.Database.CreateExecutionStrategy().RetriesOnFailure.Should().BeTrue();
+        var unsafeProfile = () => defaultOptions.ApplyAndAssertTo(context.Database);
+        unsafeProfile.Should().Throw<InvalidOperationException>()
+            .WithMessage("*forbid automatic execution-strategy retries*");
+
+        MigrationCommandOptions.Parse(
+            ["apply-migrations", MigrationCommandOptions.TimeoutArgument, "30"]).CommandTimeoutSeconds.Should().Be(30);
+        MigrationCommandOptions.Parse(
+            ["apply-migrations", MigrationCommandOptions.TimeoutArgument, "900"]).CommandTimeoutSeconds.Should().Be(900);
+
+        var invalidArguments = new[]
+        {
+            new[] { "apply-migrations", MigrationCommandOptions.TimeoutArgument },
+            new[] { "apply-migrations", MigrationCommandOptions.TimeoutArgument, "0" },
+            new[] { "apply-migrations", MigrationCommandOptions.TimeoutArgument, "29" },
+            new[] { "apply-migrations", MigrationCommandOptions.TimeoutArgument, "901" },
+            new[] { "apply-migrations", MigrationCommandOptions.TimeoutArgument, "infinite" },
+            new[] { "apply-migrations", MigrationCommandOptions.TimeoutArgument, "600", MigrationCommandOptions.TimeoutArgument, "600" },
+            new[] { "apply-migrations", "--unknown", "600" },
+            new[] { "seed", MigrationCommandOptions.TimeoutArgument, "600" }
+        };
+
+        foreach (var invalid in invalidArguments)
+        {
+            var action = () => MigrationCommandOptions.Parse(invalid);
+            action.Should().Throw<InvalidOperationException>();
+        }
+
+        var root = FindRepositoryRoot();
+        var program = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Program.cs"));
+        program.Should().Contain("AddErpSystemCliDatabase")
+            .And.Contain("migrationCommandOptions.ApplyAndAssertTo(db.Database)");
+        var seedStart = program.IndexOf("if (args.Length > 0 && args[0] == \"seed-db\")", StringComparison.Ordinal);
+        var seedEnd = program.IndexOf("// Check for HR module seeding command", seedStart, StringComparison.Ordinal);
+        var seedCommand = program[seedStart..seedEnd];
+        seedCommand.IndexOf("migrationCommandOptions.ApplyAndAssertTo(db.Database)", StringComparison.Ordinal)
+            .Should().BeLessThan(seedCommand.IndexOf("db.Database.MigrateAsync()", StringComparison.Ordinal));
+        seedCommand.Should().Contain("AddErpSystemCliDatabase")
+            .And.Contain("RHEMA_MIGRATION_COMMAND_TIMEOUT_SECONDS");
+
+        foreach (var migrationSource in new[]
+        {
+            "20260913162402_DisposableDevelopmentCurrentModelBaseline.cs",
+            "ArchivedGovernanceBaselineSql.cs",
+            "FinanceC1C8BaselineAuthoritySql.cs"
+        })
+        {
+            File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", migrationSource))
+                .Should().NotContain("suppressTransaction: true",
+                    "the sole baseline and all 493-trigger/108-patch helpers must roll back with migration history on failure");
+        }
+    }
+
+    private static ServiceProvider BuildDatabaseServices(bool cli, int commandTimeoutSeconds)
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Database:Provider"] = "SqlServer",
+                ["ConnectionStrings:DefaultConnection"] =
+                    "Server=localhost;Database=TimeoutPolicyOnly;Integrated Security=true;TrustServerCertificate=true",
+                ["Audit:Enabled"] = "false"
+            })
+            .Build();
+        var services = new ServiceCollection();
+        if (cli)
+        {
+            services.AddErpSystemCliDatabase(configuration, commandTimeoutSeconds);
+        }
+        else
+        {
+            services.AddErpSystemDatabase(configuration);
+        }
+        return services.BuildServiceProvider();
     }
 
     [Fact]

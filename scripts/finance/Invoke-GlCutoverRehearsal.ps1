@@ -37,6 +37,7 @@ $supersededMigrations = @(
 $approvedNamePattern = '^RHEMAERP_GL_REHEARSAL_[A-Z0-9_]{1,64}$'
 $authoritativeMigrationCount = 1
 $authoritativeLatestMigration = '20260913162402_DisposableDevelopmentCurrentModelBaseline'
+$disposableMigrationCommandTimeoutSeconds = 600
 $migrationHistoryEvidenceSchema = 'RHEMA_MIGRATION_HISTORY_V1'
 $sqlcmdMaxVariableWidth = 8000
 $sqlcmdScreenWidth = 8000
@@ -1219,7 +1220,8 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
         try {
             Set-ApplicationConnection $connectionString {
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                    '--project', $apiProject, '--', 'apply-migrations') (Join-Path $evidenceDirectory 'reset-apply-migrations.log')
+                    '--project', $apiProject, '--', 'apply-migrations', '--migration-command-timeout-seconds',
+                    ([string]$disposableMigrationCommandTimeoutSeconds)) (Join-Path $evidenceDirectory 'reset-apply-migrations.log')
             }
         }
         finally { Pop-Location }
@@ -1241,13 +1243,15 @@ SELECT N'DISPOSABLE_RESET_EMPTY_DATABASE_RECREATED';
         try {
             Set-ApplicationConnection $connectionString {
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                    '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectory 'reset-seed-pass-1.log')
+                    '--project', $apiProject, '--', 'seed-db', '--migration-command-timeout-seconds',
+                    ([string]$disposableMigrationCommandTimeoutSeconds)) (Join-Path $evidenceDirectory 'reset-seed-pass-1.log')
             }
             Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'RhemaERP' '' `
                 (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') (Join-Path $evidenceDirectory 'reset-invariants-pass-1.txt')
             Set-ApplicationConnection $connectionString {
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                    '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectory 'reset-seed-pass-2.log')
+                    '--project', $apiProject, '--', 'seed-db', '--migration-command-timeout-seconds',
+                    ([string]$disposableMigrationCommandTimeoutSeconds)) (Join-Path $evidenceDirectory 'reset-seed-pass-2.log')
             }
             Invoke-SqlWithSanitizedEvidence $databaseTarget.Builder 'RhemaERP' '' `
                 (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') (Join-Path $evidenceDirectory 'reset-invariants-pass-2.txt')
@@ -1655,7 +1659,8 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
             $applyLog = Join-Path $evidenceDirectoryResolved 'clone-apply-migrations.log'
             Set-ApplicationConnection $targetConnection {
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                    '--project', $apiProject, '--', 'apply-migrations') $applyLog
+                    '--project', $apiProject, '--', 'apply-migrations', '--migration-command-timeout-seconds',
+                    ([string]$disposableMigrationCommandTimeoutSeconds)) $applyLog
             }
         }
         finally { Pop-Location }
@@ -1674,13 +1679,15 @@ SELECT N'DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE';
         try {
             Set-ApplicationConnection $targetConnection {
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                    '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectoryResolved 'seed-pass-1.log')
+                    '--project', $apiProject, '--', 'seed-db', '--migration-command-timeout-seconds',
+                    ([string]$disposableMigrationCommandTimeoutSeconds)) (Join-Path $evidenceDirectoryResolved 'seed-pass-1.log')
             }
             Invoke-SqlWithSanitizedEvidence $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') `
                 (Join-Path $evidenceDirectoryResolved 'invariants-pass-1.txt')
             Set-ApplicationConnection $targetConnection {
                 $null = Invoke-NativeWithEvidence 'dotnet' @('run', '--no-build', '--configuration', 'Debug',
-                    '--project', $apiProject, '--', 'seed-db') (Join-Path $evidenceDirectoryResolved 'seed-pass-2.log')
+                    '--project', $apiProject, '--', 'seed-db', '--migration-command-timeout-seconds',
+                    ([string]$disposableMigrationCommandTimeoutSeconds)) (Join-Path $evidenceDirectoryResolved 'seed-pass-2.log')
             }
             Invoke-SqlWithSanitizedEvidence $target.Builder $target.Database '' (Join-Path $PSScriptRoot 'sql\gl-final-clone-invariants.sql') `
                 (Join-Path $evidenceDirectoryResolved 'invariants-pass-2.txt')

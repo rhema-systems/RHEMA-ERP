@@ -115,6 +115,16 @@ try {
         throw 'Disposable reset does not distinguish successful migration command completion from target-history capture.'
     }
     Write-Host 'PASS: post-success target-history capture has a distinct terminal failed-operation boundary'
+    if (-not $text.Contains("`$disposableMigrationCommandTimeoutSeconds = 600") -or
+        -not $text.Contains("'apply-migrations', '--migration-command-timeout-seconds',") -or
+        [regex]::Matches($text, "'apply-migrations', '--migration-command-timeout-seconds',").Count -ne 2) {
+        throw 'Guarded reset/final-clone paths do not pass one exact bounded 600-second timeout to each migration-only command.'
+    }
+    $resetTimeoutArguments = [regex]::Matches($text, "'--migration-command-timeout-seconds',").Count
+    if ($resetTimeoutArguments -ne 6) {
+        throw 'Guarded reset/final-clone command composition does not bind all migration and seed commands to the bounded timeout.'
+    }
+    Write-Host 'PASS: guarded reset migration and seed commands pass one bounded CLI timeout per invocation'
     $dispatcherOffset = $text.IndexOf("if (`$Mode -eq 'ResetDisposableDevelopment')", [StringComparison]::Ordinal)
     $reservationAst = @($ast.FindAll({ param($node) $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
         $node.Name -eq 'New-AtomicBackupReservation' }, $true))

@@ -68,6 +68,20 @@ namespace ErpSystem.Api.Extensions
             */
         }
 
+        /// <summary>
+        /// Registers the database for the guarded migration/seed CLI only: one bounded command attempt,
+        /// no provider execution-strategy retries, and no change to the normal web runtime profile.
+        /// </summary>
+        internal static IServiceCollection AddErpSystemCliDatabase(
+            this IServiceCollection services,
+            IConfiguration configuration,
+            int commandTimeoutSeconds)
+        {
+            return services.AddConfigurableDatabase(
+                configuration,
+                DatabaseExecutionProfile.MigrationCli(commandTimeoutSeconds));
+        }
+
         public static IServiceCollection AddErpSystemIdentity(this IServiceCollection services)
         {
             services.AddIdentity<ApplicationUser, ApplicationRole>(options =>

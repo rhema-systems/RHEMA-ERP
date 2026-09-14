@@ -1,5 +1,6 @@
 
 using Microsoft.EntityFrameworkCore;
+using ErpSystem.Api.Configuration;
 using ErpSystem.Data;
 using ErpSystem.Data.Extensions;
 using ErpSystem.Core.Interfaces;
@@ -21,6 +22,14 @@ namespace ErpSystem.Api.Extensions
             this IServiceCollection services, 
             IConfiguration configuration)
         {
+            return services.AddConfigurableDatabase(configuration, DatabaseExecutionProfile.WebRuntime);
+        }
+
+        internal static IServiceCollection AddConfigurableDatabase(
+            this IServiceCollection services,
+            IConfiguration configuration,
+            DatabaseExecutionProfile executionProfile)
+        {
             var provider = configuration.GetValue<string>("Database:Provider") ?? "SqlServer";
             var connectionString = configuration.GetConnectionString("DefaultConnection") ??
                 throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
@@ -34,7 +43,7 @@ namespace ErpSystem.Api.Extensions
 
             services.AddDbContext<ApplicationDbContext>((serviceProvider, options) =>
             {
-                ConfigureDatabase(options, provider, connectionString);
+                ConfigureDatabase(options, provider, connectionString, executionProfile);
                 
                 // Add audit interceptor if enabled
                 if (auditEnabled)
@@ -46,7 +55,7 @@ namespace ErpSystem.Api.Extensions
             // Register ReportingDbContext with the same configuration
             services.AddDbContext<ReportingDbContext>((serviceProvider, options) =>
             {
-                ConfigureDatabase(options, provider, connectionString);
+                ConfigureDatabase(options, provider, connectionString, executionProfile);
                 
                 // Add audit interceptor if enabled
                 if (auditEnabled)
@@ -58,12 +67,16 @@ namespace ErpSystem.Api.Extensions
             return services;
         }
 
-        private static void ConfigureDatabase(DbContextOptionsBuilder options, string provider, string connectionString)
+        private static void ConfigureDatabase(
+            DbContextOptionsBuilder options,
+            string provider,
+            string connectionString,
+            DatabaseExecutionProfile executionProfile)
         {
             switch (provider.ToLowerInvariant())
             {
                 case "sqlserver":
-                    ConfigureSqlServer(options, connectionString);
+                    ConfigureSqlServer(options, connectionString, executionProfile);
                     break;
                     
                 case "postgresql":
@@ -118,16 +131,22 @@ namespace ErpSystem.Api.Extensions
         }
 
         #region SQL Server Configuration
-        private static void ConfigureSqlServer(DbContextOptionsBuilder options, string connectionString)
+        private static void ConfigureSqlServer(
+            DbContextOptionsBuilder options,
+            string connectionString,
+            DatabaseExecutionProfile executionProfile)
         {
             options.UseSqlServer(connectionString, sqlOptions =>
             {
                 sqlOptions.MigrationsAssembly("ErpSystem.Data");
-                sqlOptions.EnableRetryOnFailure(
-                    maxRetryCount: 5,
-                    maxRetryDelay: TimeSpan.FromSeconds(30),
-                    errorNumbersToAdd: null);
-                sqlOptions.CommandTimeout(30);
+                if (executionProfile.EnableRetryOnFailure)
+                {
+                    sqlOptions.EnableRetryOnFailure(
+                        maxRetryCount: 5,
+                        maxRetryDelay: TimeSpan.FromSeconds(30),
+                        errorNumbersToAdd: null);
+                }
+                sqlOptions.CommandTimeout(executionProfile.CommandTimeoutSeconds);
             });
         }
         #endregion
@@ -343,5 +362,23 @@ namespace ErpSystem.Api.Extensions
         public string Provider { get; set; } = string.Empty;
         public bool IsConnectionStringConfigured { get; set; }
         public string[] SupportedProviders { get; set; } = Array.Empty<string>();
+    }
+
+    internal readonly record struct DatabaseExecutionProfile(
+        int CommandTimeoutSeconds,
+        bool EnableRetryOnFailure)
+    {
+        internal static DatabaseExecutionProfile WebRuntime => new(30, true);
+
+        internal static DatabaseExecutionProfile MigrationCli(int commandTimeoutSeconds)
+        {
+            if (commandTimeoutSeconds < MigrationCommandOptions.MinimumTimeoutSeconds ||
+                commandTimeoutSeconds > MigrationCommandOptions.MaximumTimeoutSeconds)
+            {
+                throw new ArgumentOutOfRangeException(nameof(commandTimeoutSeconds));
+            }
+
+            return new DatabaseExecutionProfile(commandTimeoutSeconds, false);
+        }
     }
 }

@@ -23,19 +23,25 @@ using Syncfusion.Licensing;
 // This is the controlled test/deployment database update entry point.
 if (args.Length > 0 && args[0] == "apply-migrations")
 {
+    var migrationCommandOptions = MigrationCommandOptions.Parse(args);
+
     // Migration-only deployments must keep ASP.NET Core's Production default
     // when ASPNETCORE_ENVIRONMENT is absent. Development is a convenience for
     // explicit seed commands only and could select the wrong database here.
     var tempBuilder = WebApplication.CreateBuilder(args);
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddHttpContextAccessor(); // Required by AuditInterceptor on the audited DbContext.
-    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemCliDatabase(
+        tempBuilder.Configuration,
+        migrationCommandOptions.CommandTimeoutSeconds);
     var tempApp = tempBuilder.Build();
 
     using (var scope = tempApp.Services.CreateScope())
     {
         var db = scope.ServiceProvider
             .GetRequiredService<ApplicationDbContext>();
+        migrationCommandOptions.ApplyAndAssertTo(db.Database);
+        Console.WriteLine($"RHEMA_MIGRATION_COMMAND_TIMEOUT_SECONDS={migrationCommandOptions.CommandTimeoutSeconds}");
         await db.Database.MigrateAsync();
     }
 
@@ -187,11 +193,14 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 // Check for full database seeding command (roles, workflows, modules, etc.)
 if (args.Length > 0 && args[0] == "seed-db")
 {
+    var migrationCommandOptions = MigrationCommandOptions.Parse(args);
     var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
-    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemCliDatabase(
+        tempBuilder.Configuration,
+        migrationCommandOptions.CommandTimeoutSeconds);
     tempBuilder.Services.AddErpSystemIdentity();
     tempBuilder.Services.AddDatabaseSeeding();
 
@@ -201,6 +210,8 @@ if (args.Length > 0 && args[0] == "seed-db")
     {
         // Apply migrations first so seeding is safe in all environments.
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        migrationCommandOptions.ApplyAndAssertTo(db.Database);
+        Console.WriteLine($"RHEMA_MIGRATION_COMMAND_TIMEOUT_SECONDS={migrationCommandOptions.CommandTimeoutSeconds}");
         await db.Database.MigrateAsync();
 
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();

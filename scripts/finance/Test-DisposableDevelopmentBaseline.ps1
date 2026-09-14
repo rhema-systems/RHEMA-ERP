@@ -80,6 +80,12 @@ if ($compiledMigrationIds.Count -ne 1 -or $compiledMigrationIds[0] -cne $baselin
 }
 
 $baselineText = Get-Content -Raw -LiteralPath $baselinePath
+$transactionalSources = @($baselinePath,$authorityPath,$governancePath)
+foreach ($transactionalSource in $transactionalSources) {
+    if ((Get-Content -Raw -LiteralPath $transactionalSource) -match 'suppressTransaction\s*:\s*true') {
+        throw "Disposable-development baseline authority escapes the sole migration transaction: $transactionalSource"
+    }
+}
 $upEnd = $baselineText.IndexOf('protected override void Down', [StringComparison]::Ordinal)
 if ($upEnd -lt 0) { throw 'The disposable-development baseline has no Down boundary.' }
 $upText = $baselineText.Substring(0, $upEnd)
