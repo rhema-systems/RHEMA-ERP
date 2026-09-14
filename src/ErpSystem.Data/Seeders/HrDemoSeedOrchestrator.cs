@@ -162,10 +162,12 @@ public class HrDemoSeedOrchestrator
     /// </summary>
     private void DiscardPendingChanges()
     {
-        foreach (var entry in _context.ChangeTracker.Entries().ToList())
-        {
-            entry.State = EntityState.Detached;
-        }
+        // ⚠ Detaching entry by entry SEVERS relationships as it goes: the moment a principal is
+        // detached while its dependents are still tracked, EF nulls their required foreign keys and
+        // the NEXT SaveChanges throws "The association between entity types 'X' and 'Y' has been
+        // severed" — an unhandled exception that killed the whole seed run on 2026-09-14 rather than
+        // just failing one step. ChangeTracker.Clear() detaches the lot in one go without fixup.
+        _context.ChangeTracker.Clear();
     }
 
     /// <summary>
@@ -191,6 +193,19 @@ public class HrDemoSeedOrchestrator
             ct => _context.Employees.IgnoreQueryFilters()
                           .AnyAsync(e => e.TenantId == tenantId && e.EmployeeNumber.StartsWith("TDC/"), ct),
             ct => new TdcDemoWorkforceSeeder(_context, Log<TdcDemoWorkforceSeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
+            // Round 2b R4a only opens a position vacancy on a post whose headcount was AUTHORISED
+            // (IsEstablished = EstablishmentApprovedOn != null), and nothing ever sets that column —
+            // so a fresh demo database had 142 positions, none established, and an EMPTY
+            // establishment register, which is the first screen the recruitment walkthrough opens.
+            // This approves the TDC establishment; the gaps themselves are then opened by the
+            // product's own reconcile from scenario 050 §14.
+            "TDC establishment approved (without it no position vacancy can be opened)",
+            ct => _context.Set<EmployeePosition>().IgnoreQueryFilters()
+                          .AnyAsync(p => p.TenantId == tenantId && !p.IsDeleted
+                                      && p.EstablishmentApprovedOn != null, ct),
+            ct => new TdcDemoEstablishmentApprovalSeeder(_context, Log<TdcDemoEstablishmentApprovalSeeder>()).SeedAsync(ct)),
 
         new SeedStep(
             // Three lookup tables that have no API door at all (DbSet, table and migration only):
@@ -339,6 +354,42 @@ public class HrDemoSeedOrchestrator
             ct => _context.Set<StaffMovementApprovalLevel>().IgnoreQueryFilters()
                           .AnyAsync(l => l.TenantId == tenantId && !l.IsDeleted, ct),
             ct => new TdcDemoMovementApprovalLevelSeeder(_context, Log<TdcDemoMovementApprovalLevelSeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
+            // The closed recruitment year — twelve cycles from requisition to hire, dated across
+            // January to July. It runs in the second pass for two reasons: the live records the
+            // runbook quotes by number (REQ-2026-00001…4, VAC-000001/2) must be minted by the
+            // scenario first, and this step also assigns a recruiter to the live vacancies the
+            // scenario leaves unassigned — which is what the ageing and recruiter-load charts group by.
+            // Probed on a FILLED vacancy: the scenario never fills one.
+            "Recruitment history — the closed 2026 cycles behind the analytics charts",
+            ct => _context.Set<JobVacancy>().IgnoreQueryFilters()
+                          .AnyAsync(v => v.TenantId == tenantId && !v.IsDeleted
+                                      && v.VacancyStatus == ErpSystem.Core.Enums.JobVacancyStatus.Filled, ct),
+            ct => new TdcDemoRecruitmentHistorySeeder(_context, Log<TdcDemoRecruitmentHistorySeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
+            // Which supplier performs which pre-employment check. The providers themselves are
+            // registered through the real doors by scenario 050 §21 (POST /Suppliers, then
+            // POST /pre-employment-checks/providers) — this only stamps the link onto the check items
+            // and the template, which cannot happen until both the checks and the providers exist.
+            // Probed on the link rather than on the provider rows, so it can run on a later pass over
+            // a database whose history seeder has already closed its own guard.
+            "Pre-employment check providers (needs the recruitment scenario first)",
+            ct => _context.Set<PreEmploymentCheckItem>().IgnoreQueryFilters()
+                          .AnyAsync(i => i.TenantId == tenantId && !i.IsDeleted
+                                      && i.ServiceProviderSupplierId != null, ct),
+            ct => new TdcDemoCheckProviderLinkSeeder(_context, Log<TdcDemoCheckProviderLinkSeeder>()).SeedAsync(ct)),
+
+        new SeedStep(
+            // The live pipeline's extra vacancies and applicants exist to show every status, so the
+            // scenario does not build them out — no shortlisting criteria, no correspondence. Invisible
+            // on a list, obvious the moment one is opened. Always runs: the work is defined by absence,
+            // and each query already filters to records that lack the rows, so a second pass writes
+            // nothing.
+            "Recruitment: finish off the records the live pipeline leaves bare",
+            ct => Task.FromResult(false),
+            ct => new TdcDemoLivePipelineBackfillSeeder(_context, Log<TdcDemoLivePipelineBackfillSeeder>()).SeedAsync(ct)),
 
         new SeedStep(
             "Probation extension (needs the probation scenario first)",

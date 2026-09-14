@@ -80,6 +80,33 @@ registered. There is no assembly scanning — every repository is registered by 
 `SuppliersController` is the **only** consumer of both interfaces, so the blast radius is that one
 controller and adding the registrations cannot disturb anything currently working.
 
+### Cause, found 2026-09-14 — the original diagnosis below was wrong
+
+It is **not** the paging path. `SuppliersController` takes three repositories in its constructor and
+**only one of them was registered**:
+
+```
+System.InvalidOperationException: Unable to resolve service for type
+'ErpSystem.Core.Interfaces.Procurement.ISupplierContactRepository'
+while attempting to activate 'ErpSystem.Api.Controllers.Procurement.SuppliersController'.
+   at Microsoft.AspNetCore.Mvc.Controllers.ControllerFactoryProvider...CreateController
+```
+
+The exception is thrown during **controller activation**, before any action method runs — which is
+why every endpoint fails identically and why the list query's shape made no difference.
+`ServiceCollectionExtensions` registered `ISupplierRepository` but neither
+`ISupplierContactRepository` nor `ISupplierItemCatalogRepository`, although both interfaces and both
+implementations (`SupplierContactRepository`, `SupplierItemCatalogRepository` in
+`SupplierRepositories.cs`) already existed.
+
+**Both registrations were added** beside the existing one, with a comment pointing here. That is a
+two-line change in Procurement's registration block and nothing else in the module was touched —
+noted openly rather than left as a surprise diff, because a dead controller blocked HR's
+pre-employment check providers (round 3 lane G) from being registered through the real door.
+
+⚠ Once the controller constructs, the ORIGINAL suspicion below is still worth checking: the list
+path may *also* have a paging/ordering fault that was simply never reachable.
+
 ### What was proven
 
 The two registrations were added temporarily, the solution rebuilt, and the controller exercised.
@@ -1490,10 +1517,11 @@ either register. Item 6 is a status-code mapping. Item 7 is a warm-up on startup
 queries for the heaviest list shapes.
 
 
-## 26. Procurement's supplier list answers 400 to every caller (2026-09-10)
+## 26. Procurement's supplier controller answers 400 to every caller — it cannot be constructed (2026-09-10, cause found 2026-09-14)
 
-**Owner:** Procurement. **Severity:** blocks any picker fed from it; HR is not blocked (it built
-its own read door). **Status:** open.
+**Owner:** Procurement. **Severity:** the ENTIRE `/api/Suppliers` surface is dead — reads and
+writes alike. **Status:** ⚠ the two missing registrations were added on 2026-09-14 (see "Cause,
+found 2026-09-14"); the owning team should confirm that is the whole fix.
 
 ### What is broken
 
@@ -1563,6 +1591,52 @@ them back is impossible until the soft-deleted row is purged by hand. HR's card 
 (b) Either filter the unique index on `[IsDeleted] = 0` (the relationship-type lesson) or have the
 save reactivate the soft-deleted row instead of inserting. (a) Gate the payroll write routes on a
 payroll permission policy, as HR's compensation routes are. HR's card needs no change for either.
+
+## 28. Procurement's supplier CREATE is a silent no-op — 2xx, empty body, no row (2026-09-14)
+
+**Owner:** Procurement. **Severity:** high — a caller cannot tell the write failed. **Status:** open.
+
+### What is broken
+
+`POST /api/Suppliers` with a complete, valid `CreateSupplierDto` returns **2xx with an empty
+response body** and **writes nothing**. No error, no validation message, no id. A client that
+follows the HTTP contract concludes the supplier was created and carries on against a row that does
+not exist.
+
+This is distinct from item 26 (the controller could not be constructed at all). Item 26 is fixed;
+reads work now. **The write still does not.**
+
+### What was proven
+
+Reproduced 2026-09-14 against the current `hrdev` build, API in Staging on `ErpSystemDB_UAT`, as the
+SuperAdmin `admin` login:
+
+```
+POST /api/Suppliers   { supplierCode: 'SUP-MED-001', name: '...', supplierType: 'Service Provider', ... }
+  -> 2xx, body: ""
+SELECT COUNT(*) FROM Suppliers   -> unchanged (3, the finance seeder's)
+GET  /api/hr/suppliers           -> unchanged (the same 3)
+```
+
+`GET /api/Suppliers?page=1&pageSize=5` returns the three existing suppliers correctly, so the
+controller, the repository read path and the tenant filter are all sound. Only the create is silent.
+
+### What it blocks
+
+HR's pre-employment check providers (round 3 lane G): `PreEmploymentCheckProviderServices` maps a
+Procurement supplier to the checks it performs, and the demo needs three providers that do not exist
+in the seeded supplier list. Because the door cannot create them,
+`TdcDemoCheckProviderLinkSeeder.EnsureProvidersAsync` writes the three `Supplier` rows and their
+mappings directly — flagged in that method, and to be **deleted in favour of the doors** once this
+is fixed. Scenario 050 §21 already carries the restoration note.
+
+### What a fix needs
+
+Look at `SuppliersController.CreateSupplier` after the `GuardDirectMutationAsync` call: a missing
+`SaveChanges`/`CommitAsync` on the unit of work, or an early return that skips the add, would both
+produce exactly this. The empty body suggests the action is returning a result whose payload was
+never populated. The mapping endpoint it blocks,
+`POST /api/pre-employment-checks/providers`, is HR's and works.
 
 ## How to use this file
 

@@ -240,6 +240,16 @@ namespace ErpSystem.Api.Extensions
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderLandedCostPlanItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderLandedCostPlanItemRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierRepository, ErpSystem.Data.Repositories.Procurement.SupplierRepository>();
+            // ⚠ These two were never registered, and SuppliersController takes all three in its
+            // constructor — so EVERY endpoint under /api/Suppliers answered 400 INVALID_OPERATION
+            // ("Unable to resolve service for type 'ISupplierContactRepository' while attempting to
+            // activate 'SuppliersController'") before a line of controller code ran. The whole
+            // controller was dead. Both interfaces and both implementations already existed; only
+            // the registration was missing. Found 2026-09-14 because HR's pre-employment check
+            // providers cannot be registered without a supplier. Recorded in
+            // docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md.
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierContactRepository, ErpSystem.Data.Repositories.Procurement.SupplierContactRepository>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierItemCatalogRepository, ErpSystem.Data.Repositories.Procurement.SupplierItemCatalogRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionItemRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionItemRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseOrderReceiptRepository, ErpSystem.Data.Repositories.Procurement.PurchaseOrderReceiptRepository>();
