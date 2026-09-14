@@ -23792,7 +23792,7 @@ internal static class ArchivedGovernanceBaselineSql
                     THROW 51957, 'INV_WORK_ORDER_PART_LINEAGE_INVALID: the work-order part and exact-bin reservation lineage do not match.', 1;
             END
             """);
-        // POST-DEFINITION PATCH TR_ProcurementTenderControls_Lifecycle from 20260723214709_AddProcurementEvaluationCommitteeControls:13
+        // POST-DEFINITION PATCH TR_ProcurementTenderControls_Lifecycle from 20260723214709_AddProcurementEvaluationCommitteeControls:13; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=B79362627E6BDB1FED1BC59416CE88D2F8F434DA4E610A7691A86A4F895294CF; fragment=0:5488:B79362627E6BDB1FED1BC59416CE88D2F8F434DA4E610A7691A86A4F895294CF
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_ProcurementTenderControls_Lifecycle]'));
@@ -23892,7 +23892,7 @@ internal static class ArchivedGovernanceBaselineSql
                     N'CREATE OR ALTER');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260730030000_TDC0403RfqAwardSupplierHardStop:0
+        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260730030000_TDC0403RfqAwardSupplierHardStop:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=43FC72339E43182FADCBA596C1497707D77BF01BADF412EE63865FF09B47EC5C; fragment=0:1439:43FC72339E43182FADCBA596C1497707D77BF01BADF412EE63865FF09B47EC5C
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[TR_PurchaseOrders_ApprovedSourceProtected]'));
@@ -23932,7 +23932,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END
             """);
-        // POST-DEFINITION PATCH TR_ProcurementFrameworkCallOffs_PurchaseOrderSource from 20260730031000_TDC0403ExceptionalFrameworkLineage:0
+        // POST-DEFINITION PATCH TR_ProcurementFrameworkCallOffs_PurchaseOrderSource from 20260730031000_TDC0403ExceptionalFrameworkLineage:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=B267265E912F90846D778FDE510954267435B27472250CAED75231D12FEB8596; fragment=0:2148:B267265E912F90846D778FDE510954267435B27472250CAED75231D12FEB8596
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(
@@ -23998,7 +23998,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260730032601_TDC0406PurchaseOrderAmendments:0
+        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260730032601_TDC0406PurchaseOrderAmendments:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=1457C1CD0ABF272BA076355DA46321E6E595D670669E7272266EB252E30778D5; fragment=0:6099:1457C1CD0ABF272BA076355DA46321E6E595D670669E7272266EB252E30778D5
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_PurchaseOrders_ApprovedSourceProtected]'));
@@ -24125,7 +24125,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260730150000_TDC0403OrdinarySourceTriggerCorrections:0
+        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260730150000_TDC0403OrdinarySourceTriggerCorrections:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=4ED8C89D258063DF3AA7EC8B3B36513AD97A8891B206704DFBCE4BF038037DF1; fragment=0:1941:4ED8C89D258063DF3AA7EC8B3B36513AD97A8891B206704DFBCE4BF038037DF1
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(
@@ -24185,7 +24185,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END
             """);
-        // POST-DEFINITION PATCH TR_ProcurementFrameworkCallOffs_Lifecycle from 20260730183000_TDC0402ExtensionSafeCallOffLineage:0
+        // POST-DEFINITION PATCH TR_ProcurementFrameworkCallOffs_Lifecycle from 20260730183000_TDC0402ExtensionSafeCallOffLineage:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=7F620D92A91AA3AA51C31250F3D9F6269AF3777AAAF5C1630E0A96239F6A11F0; fragment=0:1699:7F620D92A91AA3AA51C31250F3D9F6269AF3777AAAF5C1630E0A96239F6A11F0
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(
@@ -24236,7 +24236,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END
             """);
-        // POST-DEFINITION PATCH TR_ProcurementFrameworkAgreementExtensions_Lifecycle,TR_ProcurementFrameworkCallOffs_Lifecycle from 20260730192500_TDC0402TerminalReviewPaths:0
+        // POST-DEFINITION PATCH TR_ProcurementFrameworkAgreementExtensions_Lifecycle,TR_ProcurementFrameworkCallOffs_Lifecycle from 20260730192500_TDC0402TerminalReviewPaths:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=8929CB4C5B02625A0D043BCF7F0F95FA640308766ABFB01B1BCA47FDC403CA93; fragment=0:2931:8929CB4C5B02625A0D043BCF7F0F95FA640308766ABFB01B1BCA47FDC403CA93
         migrationBuilder.Sql("""
             DECLARE @callOffDefinition nvarchar(max) =
                 OBJECT_DEFINITION(
@@ -24315,7 +24315,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @extensionDefinition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_GoodsReceiptNoteItems_GovernedCapacity,TR_PurchaseOrderReceiptItems_GovernedCapacity from 20260731140000_TDC0502ReceiptInspectionClosure:9
+        // POST-DEFINITION PATCH TR_GoodsReceiptNoteItems_GovernedCapacity,TR_PurchaseOrderReceiptItems_GovernedCapacity from 20260731140000_TDC0502ReceiptInspectionClosure:9; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=65D9F9869D6474504BE9437E37CE848173D26E522C685C863AB4FE2625044B76; fragment=0:1893:65D9F9869D6474504BE9437E37CE848173D26E522C685C863AB4FE2625044B76
         migrationBuilder.Sql("""
             DECLARE @purchase nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_PurchaseOrderReceiptItems_GovernedCapacity]'));
             IF @purchase IS NULL THROW 51561, 'RCV_TDC0501_TRIGGER_MISSING: purchase receipt capacity trigger is required.', 1;
@@ -24337,7 +24337,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @grn = N'ALTER ' + SUBSTRING(@grn, @grnTrigger, LEN(@grn));
             EXEC sys.sp_executesql @grn;
             """);
-        // POST-DEFINITION PATCH TR_PaymentBatchInvoice_TDC0505PaymentReadiness,TR_VendorPaymentAllocation_TDC0505PaymentReadiness from 20260801060000_TDC0505TerminalReceiptEligibility:0
+        // POST-DEFINITION PATCH TR_PaymentBatchInvoice_TDC0505PaymentReadiness,TR_VendorPaymentAllocation_TDC0505PaymentReadiness from 20260801060000_TDC0505TerminalReceiptEligibility:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=5D873CA419E1CEA566D784164D1CFAA4EB69A4EED038759E10284F7FD1946F07; fragment=0:2974:5D873CA419E1CEA566D784164D1CFAA4EB69A4EED038759E10284F7FD1946F07
         migrationBuilder.Sql("""
             DECLARE @triggerName sysname;
             DECLARE @definition nvarchar(max);
@@ -24407,7 +24407,7 @@ internal static class ArchivedGovernanceBaselineSql
             CLOSE payment_readiness_trigger_cursor;
             DEALLOCATE payment_readiness_trigger_cursor;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrderReceipts_GovernedSource from 20260801073000_TDC0501LegacyReceiptCompatibility:0
+        // POST-DEFINITION PATCH TR_PurchaseOrderReceipts_GovernedSource from 20260801073000_TDC0501LegacyReceiptCompatibility:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=326BE1F56447F0685C2DAB3DF4DAD88F2DEB4143E784D6CA4C5705E1E96D585D; fragment=0:2034:326BE1F56447F0685C2DAB3DF4DAD88F2DEB4143E784D6CA4C5705E1E96D585D
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrderReceipts_GovernedSource'));
@@ -24457,7 +24457,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_GoodsReceiptNotes_GovernedSource from 20260801073000_TDC0501LegacyReceiptCompatibility:1
+        // POST-DEFINITION PATCH TR_GoodsReceiptNotes_GovernedSource from 20260801073000_TDC0501LegacyReceiptCompatibility:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=95A9F63C60F776E605634E02AB32F5D6C7510F72B857CF8C9C491FCE03CCDDAA; fragment=0:2030:95A9F63C60F776E605634E02AB32F5D6C7510F72B857CF8C9C491FCE03CCDDAA
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_GoodsReceiptNotes_GovernedSource'));
@@ -24507,7 +24507,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrderReceiptItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:2
+        // POST-DEFINITION PATCH TR_PurchaseOrderReceiptItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=9E61DF9EDE18C2726E5B6D5D7249D2799D5636DDA4CC0D294D9FBE1E025A8AEC; fragment=0:1976:9E61DF9EDE18C2726E5B6D5D7249D2799D5636DDA4CC0D294D9FBE1E025A8AEC
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrderReceiptItems_GovernedCapacity'));
@@ -24558,7 +24558,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrderReceiptItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:3
+        // POST-DEFINITION PATCH TR_PurchaseOrderReceiptItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=89774594B7A2353374BFEF1927C252CE2AEE3996E1734C0BE4876116EFA0C29B; fragment=0:2062:89774594B7A2353374BFEF1927C252CE2AEE3996E1734C0BE4876116EFA0C29B
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrderReceiptItems_GovernedCapacity'));
@@ -24608,7 +24608,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_GoodsReceiptNoteItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:4
+        // POST-DEFINITION PATCH TR_GoodsReceiptNoteItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:4; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=08A9510105E2C5FC7DA3065AB7BBAF663CFA09DFB55576DD453FEA9D227A6A73; fragment=0:1972:08A9510105E2C5FC7DA3065AB7BBAF663CFA09DFB55576DD453FEA9D227A6A73
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_GoodsReceiptNoteItems_GovernedCapacity'));
@@ -24659,7 +24659,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_GoodsReceiptNoteItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:5
+        // POST-DEFINITION PATCH TR_GoodsReceiptNoteItems_GovernedCapacity from 20260801073000_TDC0501LegacyReceiptCompatibility:5; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=3DC3853CD4DA97CC85AADE7E8A6C549B520E44C4CD3E814500344D9DA5BDC84B; fragment=0:2064:3DC3853CD4DA97CC85AADE7E8A6C549B520E44C4CD3E814500344D9DA5BDC84B
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_GoodsReceiptNoteItems_GovernedCapacity'));
@@ -24709,7 +24709,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementTenderControls_Lifecycle from 20260812170000_ExtendControlledSourcingMethods:1
+        // POST-DEFINITION PATCH TR_ProcurementTenderControls_Lifecycle from 20260812170000_ExtendControlledSourcingMethods:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=DE18C6CAE5B3B8360B2C4EEA9AE824FBD4135A1A0AC06D3565A088D5619F29B2; fragment=0:760:DE18C6CAE5B3B8360B2C4EEA9AE824FBD4135A1A0AC06D3565A088D5619F29B2
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_ProcurementTenderControls_Lifecycle]'));
             IF @definition IS NULL OR CHARINDEX(N'sc.[SelectedMethod] NOT IN (1, 2)', @definition) = 0
@@ -24723,7 +24723,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'CREATE OR ALTER ' + SUBSTRING(@definition, @triggerOffset, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260813150000_INVREQFU003AllowPostedFullReturnReversal:0
+        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260813150000_INVREQFU003AllowPostedFullReturnReversal:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=43B9054C255C58A14B8E058332F377A23BB5EA2751463B4361C4567ED4D7F140; fragment=0:1091:43B9054C255C58A14B8E058332F377A23BB5EA2751463B4361C4567ED4D7F140
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(
                 OBJECT_ID(N'[dbo].[TR_InventoryReturnVouchers_ControlledLifecycle]', N'TR'));
@@ -24744,7 +24744,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransferDiscrepancyEvidence_AppendOnly from 20260813171000_INVREQFU004RequireCleanTransferEvidence:0
+        // POST-DEFINITION PATCH TR_InventoryTransferDiscrepancyEvidence_AppendOnly from 20260813171000_INVREQFU004RequireCleanTransferEvidence:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=7BB812D05CD370F2D7096AF92902350BFA6B88EB98E8DE29916E83BE8020D4C8; fragment=0:1391:7BB812D05CD370F2D7096AF92902350BFA6B88EB98E8DE29916E83BE8020D4C8
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(
                 OBJECT_ID(N'[dbo].[TR_InventoryTransferDiscrepancyEvidence_AppendOnly]', N'TR'));
@@ -24765,7 +24765,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementSupplierDueDiligenceReviews_Lifecycle from 20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse:0
+        // POST-DEFINITION PATCH TR_ProcurementSupplierDueDiligenceReviews_Lifecycle from 20260814123000_INVREQFU004PolicySupersessionAndGhanepsMappingReuse:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=D2066F411DCC97D176E25E784422B653992BD03CF63E64469E49F0E2324C36E5; fragment=0:1071:D2066F411DCC97D176E25E784422B653992BD03CF63E64469E49F0E2324C36E5
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(
                 OBJECT_ID(N'[dbo].[TR_ProcurementSupplierDueDiligenceReviews_Lifecycle]', N'TR'));
@@ -24790,7 +24790,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind:0
+        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=CF86BB9D99071E6A3EB1B393CCD3C4253B4B8B11489EA2683C44BDFB693089E8; fragment=0:2534:CF86BB9D99071E6A3EB1B393CCD3C4253B4B8B11489EA2683C44BDFB693089E8
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_ProcurementReceiptInspectionCases_TDC0502Protected]'));
@@ -24841,7 +24841,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes:0
+        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedSourceProtected from 20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=F503FE21483AFDADF702EBA66D9DFAB22629C9B067E3CDFB42CEDBBAFE270F10; fragment=0:5431:F503FE21483AFDADF702EBA66D9DFAB22629C9B067E3CDFB42CEDBBAFE270F10
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_PurchaseOrders_ApprovedSourceProtected]'));
@@ -24962,7 +24962,7 @@ internal static class ArchivedGovernanceBaselineSql
                     LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedCommercialCapacity from 20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster:1
+        // POST-DEFINITION PATCH TR_PurchaseOrders_ApprovedCommercialCapacity from 20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=00F5A1DE8421069AE425C1D5C4FAC13B726D63BD0E3A93758663F6C0AFC8B8F5; fragment=0:1439:00F5A1DE8421069AE425C1D5C4FAC13B726D63BD0E3A93758663F6C0AFC8B8F5
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_PurchaseOrders_ApprovedCommercialCapacity]', N'TR'));
@@ -24995,7 +24995,7 @@ internal static class ArchivedGovernanceBaselineSql
                     LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrderItems_ApprovedCommercialCapacity from 20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster:2
+        // POST-DEFINITION PATCH TR_PurchaseOrderItems_ApprovedCommercialCapacity from 20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=7F014663802EE86FF86614BC3D70079935ACAECA2535862430C8C13EAFD0F738; fragment=0:1443:7F014663802EE86FF86614BC3D70079935ACAECA2535862430C8C13EAFD0F738
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_PurchaseOrderItems_ApprovedCommercialCapacity]', N'TR'));
@@ -25028,7 +25028,7 @@ internal static class ArchivedGovernanceBaselineSql
                     LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptDocuments_TDC0509Protected from 20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage:0
+        // POST-DEFINITION PATCH TR_ProcurementReceiptDocuments_TDC0509Protected from 20260827230500_AllowReceiptDocumentDefaultsWithAuditLineage:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=A6739C40C86F98041D11C2C66220BA93A815F2D5722D4639E3B18747BCF71E01; fragment=0:1178:A6739C40C86F98041D11C2C66220BA93A815F2D5722D4639E3B18747BCF71E01
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) =
                 OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_ProcurementReceiptDocuments_TDC0509Protected]', N'TR'));
@@ -25053,7 +25053,7 @@ internal static class ArchivedGovernanceBaselineSql
                 LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementEvaluationCommitteeControls_Lifecycle from 20260904123000_AddEvaluationCommitteeDraftRetirement:1
+        // POST-DEFINITION PATCH TR_ProcurementEvaluationCommitteeControls_Lifecycle from 20260904123000_AddEvaluationCommitteeDraftRetirement:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=23E05CFB9242613193BAB0E144F0C43B864F3B5F488B32465588B14D71EFD142; fragment=0:1312:23E05CFB9242613193BAB0E144F0C43B864F3B5F488B32465588B14D71EFD142
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(
                 OBJECT_ID(N'[dbo].[TR_ProcurementEvaluationCommitteeControls_Lifecycle]'));
@@ -25080,7 +25080,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @updated;
             END;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementTenderDocumentTemplateVersions_Lifecycle from 20260904203000_AllowTenderDocumentWorkflowContentBinding:0
+        // POST-DEFINITION PATCH TR_ProcurementTenderDocumentTemplateVersions_Lifecycle from 20260904203000_AllowTenderDocumentWorkflowContentBinding:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=DA4A4BE1B1664ADE0B9814ECC87538B434CEB0E52E235420C124FA67AB9752F8; fragment=0:8911:DA4A4BE1B1664ADE0B9814ECC87538B434CEB0E52E235420C124FA67AB9752F8
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_ProcurementTenderDocumentTemplateVersions_Lifecycle]'));
             IF @definition IS NULL
@@ -25223,7 +25223,7 @@ internal static class ArchivedGovernanceBaselineSql
                  OR CHARINDEX(N'contentstep.workflowinstanceid = i.workflowinstanceid', @normalized) = 0
                 THROW 51200, 'Tender-document lifecycle trigger content-binding markers are incomplete.', 1;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementTenderDocumentChanges_Lifecycle,TR_ProcurementTenderDocumentIssuances_Immutable from 20260905193000_AllowUnpublishedTenderScheduleReschedule:0
+        // POST-DEFINITION PATCH TR_ProcurementTenderDocumentChanges_Lifecycle,TR_ProcurementTenderDocumentIssuances_Immutable from 20260905193000_AllowUnpublishedTenderScheduleReschedule:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=B5F587E60A4E48EC88CDEE8017087827DBBB9FE52CD852AA97114967C1E52DA4; fragment=0:6751:B5F587E60A4E48EC88CDEE8017087827DBBB9FE52CD852AA97114967C1E52DA4
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_ProcurementTenderDocumentChanges_Lifecycle]'));
             IF @definition IS NULL
@@ -25301,7 +25301,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @triggerPosition, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260906030000_AlignLegacyAwardReadinessWithLockedCurrentEvaluations:0
+        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260906030000_AlignLegacyAwardReadinessWithLockedCurrentEvaluations:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=EFBD87AA298C0998DE55056B8C5ECF5077F1A0B6045D057624710717149CF669; fragment=0:15374:EFBD87AA298C0998DE55056B8C5ECF5077F1A0B6045D057624710717149CF669
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(
                 OBJECT_ID(N'[dbo].[TR_ProcurementAwardReadinessDecisions_Immutable]', N'TR'));
@@ -25537,7 +25537,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @triggerPosition, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementExceptionalSourcingControls_Lifecycle from 20260907033000_AlignPettyPurchaseQuotationLifecycle:0
+        // POST-DEFINITION PATCH TR_ProcurementExceptionalSourcingControls_Lifecycle from 20260907033000_AlignPettyPurchaseQuotationLifecycle:0; transform=EXACT_SUFFIX_FROM_UNIQUE_MARKER_V1; marker=DECLARE @trigger; source=E3566BFDC587FE9C1F8F8C6504F7D66707A4DF6D56CC9409720AE54EB625E42F; fragment=3003:1349:3E79189D5A51A276A25DFA8C68F4C97A0E8FEA11BE47B9BD03FF665F19AED346
         migrationBuilder.Sql("""
             DECLARE @trigger nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementExceptionalSourcingControls_Lifecycle'));
             IF @trigger IS NULL OR CHARINDEX(N'OR a.[Id] IS NULL', @trigger) = 0
@@ -25552,7 +25552,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @trigger = REPLACE(@trigger, N'(d.[Status] = 2 AND i.[Status] = 3)', N'(d.[Status] = 2 AND (i.[Status] = 3 OR (i.[Method] = 5 AND i.[Status] = 4)))');
             EXEC sys.sp_executesql @trigger;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260907042000_AlignPettyPurchaseAwardReadinessAuthority:0
+        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260907042000_AlignPettyPurchaseAwardReadinessAuthority:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=82BE925D38D0B627BF531D18C4EF939528603C3511B45D59BCA2F967BE101772; fragment=0:1676:82BE925D38D0B627BF531D18C4EF939528603C3511B45D59BCA2F967BE101772
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementAwardReadinessDecisions_Immutable'));
             DECLARE @anchor nvarchar(100) = N'OR (i.SourceType = 2 AND NOT EXISTS (';
@@ -25579,7 +25579,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = STUFF(@definition, 1, CHARINDEX(N'TRIGGER', UPPER(@definition)) - 1, N'ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementTenderDocumentRegisters_Immutable from 20260907161000_AllowUnpublishedFirstBindingScheduleApproval:0
+        // POST-DEFINITION PATCH TR_ProcurementTenderDocumentRegisters_Immutable from 20260907161000_AllowUnpublishedFirstBindingScheduleApproval:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=58A10267A2A8237ABDC552A2877EEAC1EA65C4248F9ABA2017DA169582D04ED7; fragment=0:1787:58A10267A2A8237ABDC552A2877EEAC1EA65C4248F9ABA2017DA169582D04ED7
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'[dbo].[TR_ProcurementTenderDocumentRegisters_Immutable]'));
             DECLARE @old nvarchar(max) = N'OR i.OriginalSubmissionDeadlineUtc <= i.BoundAtUtc';
@@ -25604,7 +25604,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @triggerPosition, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrderItems_ApprovedCommercialCapacity,TR_PurchaseOrders_ApprovedCommercialCapacity from 20260908153000_AlignContractPurchaseOrderCommercialIdentity:0
+        // POST-DEFINITION PATCH TR_PurchaseOrderItems_ApprovedCommercialCapacity,TR_PurchaseOrders_ApprovedCommercialCapacity from 20260908153000_AlignContractPurchaseOrderCommercialIdentity:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=7EF985F2F8604EDC6AF3CCCA36C873987E56A53672C317304AE3CA525932888E; fragment=0:4436:7EF985F2F8604EDC6AF3CCCA36C873987E56A53672C317304AE3CA525932888E
         migrationBuilder.Sql("""
             DECLARE @targets TABLE (Name sysname);
             INSERT @targets VALUES (N'TR_PurchaseOrders_ApprovedCommercialCapacity'),
@@ -25671,7 +25671,7 @@ internal static class ArchivedGovernanceBaselineSql
                 DELETE @targets WHERE Name = @name;
             END;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCountItems_ControlledMutation from 20260911170000_AllowDraftPhysicalCountLineRemoval:0
+        // POST-DEFINITION PATCH TR_PhysicalCountItems_ControlledMutation from 20260911170000_AllowDraftPhysicalCountLineRemoval:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=B5ECDBD12E7792AAAEAFB431F201F437C830C2C54ABB2028168E1BB136C0A59A; fragment=0:1429:B5ECDBD12E7792AAAEAFB431F201F437C830C2C54ABB2028168E1BB136C0A59A
         migrationBuilder.Sql("""
             DECLARE @triggerId int = OBJECT_ID(N'dbo.TR_PhysicalCountItems_ControlledMutation', N'TR');
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(@triggerId), NCHAR(13), N'');
@@ -25694,7 +25694,7 @@ internal static class ArchivedGovernanceBaselineSql
                 EXEC sys.sp_executesql @definition;
             END;
             """);
-        // POST-DEFINITION PATCH TR_InventoryItems_PhysicalCountFreeze,TR_PhysicalCountActions_AppendOnly,TR_PhysicalCountItems_ControlledMutation,TR_PhysicalCounts_ControlledLifecycle,TR_StockMovements_PhysicalCountFreeze,TR_WarehouseQuantities_PhysicalCountFreeze from 20260911210000_PhysicalCountReviewDecisions:0
+        // POST-DEFINITION PATCH TR_InventoryItems_PhysicalCountFreeze,TR_PhysicalCountActions_AppendOnly,TR_PhysicalCountItems_ControlledMutation,TR_PhysicalCounts_ControlledLifecycle,TR_StockMovements_PhysicalCountFreeze,TR_WarehouseQuantities_PhysicalCountFreeze from 20260911210000_PhysicalCountReviewDecisions:0; transform=EXACT_SUFFIX_FROM_UNIQUE_MARKER_V1; marker=DECLARE @line; source=D3872BB4125FB2F23A873A5D127DCA9F39C3DDAB6529D402BE9866D641ADA727; fragment=298:4778:ECBED5B5798EE82F6BBD51A98DFE31D07C10B9F53A523B65AF4470DBD87CDE58
         migrationBuilder.Sql("""
             DECLARE @line nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCountItems_ControlledMutation'));
             DECLARE @life nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle'));
@@ -25761,7 +25761,7 @@ internal static class ArchivedGovernanceBaselineSql
             CLOSE freezeGuards;
             DEALLOCATE freezeGuards;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCountActions_AppendOnly from 20260912003000_WarehouseDefaultLocations:0
+        // POST-DEFINITION PATCH TR_PhysicalCountActions_AppendOnly from 20260912003000_WarehouseDefaultLocations:0; transform=EXACT_SUFFIX_FROM_UNIQUE_MARKER_V1; marker=DECLARE @actions; source=9FF54D977BCE5AB2F3F7847E60294EF4FCDC88606998F61BAFEC5F6DF655019B; fragment=2102:587:47E23548754DC01AB059BBE27E8E42E5D61A8A9210F97546C91E04CDB5E29BC2
         migrationBuilder.Sql("""
             DECLARE @actions nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCountActions_AppendOnly'));
             IF @actions IS NULL OR CHARINDEX(N'i.ActionType NOT BETWEEN 1 AND 14',@actions)=0
@@ -25770,7 +25770,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @actions=STUFF(@actions,1,CHARINDEX(N'TRIGGER',UPPER(@actions))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @actions;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912013000_AlignStockAdjustmentLocationValuation:0
+        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912013000_AlignStockAdjustmentLocationValuation:0; transform=EXACT_SUFFIX_FROM_UNIQUE_MARKER_V1; marker=DECLARE @definition; source=A51CD64C67710435EC1845947800DA9E6FEEF34A1855FBCFA6FE7E353CD9D6DA; fragment=2266:1419:A6ADE64C138594661F86F8A4D7E681C1D66758238ED4CD9245E07CA9EAE29D8B
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustmentItems_ControlledMutation'));
             DECLARE @start int=CHARINDEX(N'i.UnitCost <> CASE WHEN item.AverageCost > 0 THEN item.AverageCost',@definition);
@@ -25789,7 +25789,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementRequisitionSourcingReleases_TenantGuard from 20260912113000_AllowOptionalProcurementApproval:5
+        // POST-DEFINITION PATCH TR_ProcurementRequisitionSourcingReleases_TenantGuard from 20260912113000_AllowOptionalProcurementApproval:5; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=F439D3DFB26035E484F98B567361535A3C8BFED167720058728472B85E5A1AF3; fragment=0:843:F439D3DFB26035E484F98B567361535A3C8BFED167720058728472B85E5A1AF3
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementRequisitionSourcingReleases_TenantGuard'));
             IF @definition IS NULL OR CHARINDEX(N'OR pr.[ApprovedAt] IS NULL OR pr.[ApprovedById] IS NULL', @definition) = 0
@@ -25800,7 +25800,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrders_GovernedCommitment from 20260912113000_AllowOptionalProcurementApproval:6
+        // POST-DEFINITION PATCH TR_PurchaseOrders_GovernedCommitment from 20260912113000_AllowOptionalProcurementApproval:6; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=3779BB1D00B1EB4E7D3A48F50A7B05E7C1771205A292A59DD81E9854F26F738E; fragment=0:811:3779BB1D00B1EB4E7D3A48F50A7B05E7C1771205A292A59DD81E9854F26F738E
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrders_GovernedCommitment'));
             IF @definition IS NULL OR CHARINDEX(N'OR b.ApprovedById IS NULL OR b.ApprovedDate IS NULL', @definition) = 0
@@ -25811,7 +25811,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrders_SodHardStop from 20260912113000_AllowOptionalProcurementApproval:7
+        // POST-DEFINITION PATCH TR_PurchaseOrders_SodHardStop from 20260912113000_AllowOptionalProcurementApproval:7; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=29A5BCB9526B43D111329CE57EE16104DD4264913AF707AD9A9F86A26AC9F721; fragment=0:758:29A5BCB9526B43D111329CE57EE16104DD4264913AF707AD9A9F86A26AC9F721
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PurchaseOrders_SodHardStop'));
             IF @definition IS NULL OR CHARINDEX(N'WHERE purchaseOrder.IsDeleted = 0', @definition) = 0
@@ -25822,7 +25822,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:0
+        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=AF12163E5FF9F58594787F7165F194F33D85B9631FD5BCD78E068D42C125FF7B; fragment=0:1581:AF12163E5FF9F58594787F7165F194F33D85B9631FD5BCD78E068D42C125FF7B
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustments_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'SET NOCOUNT ON;',@definition)=0
@@ -25842,7 +25842,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:1
+        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=62D33F3804890774639E02EAB95B25D5AE91D67A460767A37FC0D236BE8BD4A0; fragment=0:828:62D33F3804890774639E02EAB95B25D5AE91D67A460767A37FC0D236BE8BD4A0
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustments_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'(d.Status = N''Draft'' AND i.Status = N''PendingApproval''',@definition)=0
@@ -25853,7 +25853,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:2
+        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=7907A5A510EEDBCDB909CEFF74D5A1C025188C18944D4A6E9585CF382849490A; fragment=0:740:7907A5A510EEDBCDB909CEFF74D5A1C025188C18944D4A6E9585CF382849490A
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustments_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'(d.Status = N''Approved'' AND i.Status = N''Posted''',@definition)=0
@@ -25862,7 +25862,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:3
+        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=E36D9ECB6232DF01E476BD1D4B00B2EC17585E44B622DAD76797EE73638A6B2D; fragment=0:634:E36D9ECB6232DF01E476BD1D4B00B2EC17585E44B622DAD76797EE73638A6B2D
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustments_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'AND i.PostedById <> i.RequestedById',@definition)=0
@@ -25871,7 +25871,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:4
+        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:4; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=747F4824E76886A2A5630BCED8015663D02A0C56C138E8BF1C6BA341C631D685; fragment=0:839:747F4824E76886A2A5630BCED8015663D02A0C56C138E8BF1C6BA341C631D685
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustments_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'N''Draft'', N''PendingApproval'', N''Approved'', N''Rejected'', N''Posted'', N''Reversed'', N''Cancelled''',@definition)=0
@@ -25880,7 +25880,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustmentActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:5
+        // POST-DEFINITION PATCH TR_StockAdjustmentActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:5; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=87D280BA7BEDCBEB63313636657BB922C9DDAD8E123C81CBB76BC37889D2AF9A; fragment=0:811:87D280BA7BEDCBEB63313636657BB922C9DDAD8E123C81CBB76BC37889D2AF9A
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustmentActions_AppendOnly',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'i.ActionType = N''Submitted'' AND a.Status <> N''PendingApproval''',@definition)=0
@@ -25889,7 +25889,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustmentActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:6
+        // POST-DEFINITION PATCH TR_StockAdjustmentActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:6; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=4BC60BC09DCD2358C53B81A8E13796E6904AA0FFDEE32E83DCE9FF6623D19EB0; fragment=0:766:4BC60BC09DCD2358C53B81A8E13796E6904AA0FFDEE32E83DCE9FF6623D19EB0
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustmentActions_AppendOnly',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'OR i.ActionType NOT IN (N''Created''',@definition)=0
@@ -25899,7 +25899,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:8
+        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:8; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=6BADC6BC7B3D709467F45EFA67156B24A28A51023497C5327FC7280CBD4F8FE2; fragment=0:1510:6BADC6BC7B3D709467F45EFA67156B24A28A51023497C5327FC7280CBD4F8FE2
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryReturnVouchers_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'SET NOCOUNT ON;',@definition)=0
@@ -25919,7 +25919,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:9
+        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:9; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=7B6EEBB327EB08548331FAE3CEB1235198D3A91EBF298E06B18F0DDBE9B00A6A; fragment=0:663:7B6EEBB327EB08548331FAE3CEB1235198D3A91EBF298E06B18F0DDBE9B00A6A
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryReturnVouchers_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'(d.Status = 1 AND i.Status = 1',@definition)=0
@@ -25928,7 +25928,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:10
+        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:10; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=6A187916E3E3027C84EC328C6E5E6DFAC811F5F1FAEB5F7DF1C6CD2BF59B0089; fragment=0:671:6A187916E3E3027C84EC328C6E5E6DFAC811F5F1FAEB5F7DF1C6CD2BF59B0089
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryReturnVouchers_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'(d.Status = 2 AND i.Status = 4',@definition)=0
@@ -25937,7 +25937,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:11
+        // POST-DEFINITION PATCH TR_InventoryReturnVouchers_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:11; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=FC74F0247421368A6289A6519D5AB820BE8D149E9CE41805521CE48C905DD0B2; fragment=0:648:FC74F0247421368A6289A6519D5AB820BE8D149E9CE41805521CE48C905DD0B2
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryReturnVouchers_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'AND i.PostedById <> i.RequestedById',@definition)=0
@@ -25946,7 +25946,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryReturnVoucherActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:12
+        // POST-DEFINITION PATCH TR_InventoryReturnVoucherActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:12; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=B1DB08FC859AB5407B562D23E153240304F766829B218D60AD9A8C705B7EBCC6; fragment=0:713:B1DB08FC859AB5407B562D23E153240304F766829B218D60AD9A8C705B7EBCC6
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryReturnVoucherActions_AppendOnly',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'OR i.ActionType NOT BETWEEN 1 AND 5',@definition)=0
@@ -25956,7 +25956,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryReturnVoucherLines_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:13
+        // POST-DEFINITION PATCH TR_InventoryReturnVoucherLines_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:13; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=8822D31FECF566903D5F90F5B45E17D78048DC7FF4DFBAE4BAD862A585380EAD; fragment=0:599:8822D31FECF566903D5F90F5B45E17D78048DC7FF4DFBAE4BAD862A585380EAD
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryReturnVoucherLines_AppendOnly',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'existingVoucher.Status IN (1,2',@definition)=0
@@ -25965,7 +25965,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCountActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:15
+        // POST-DEFINITION PATCH TR_PhysicalCountActions_AppendOnly from 20260912120000_InventoryOptionalApprovalSnapshots:15; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=C2F7BDFF936760E29B84936C4F4B4DA4838175D3F658C4B926964111F2BB15C0; fragment=0:592:C2F7BDFF936760E29B84936C4F4B4DA4838175D3F658C4B926964111F2BB15C0
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCountActions_AppendOnly',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'i.ActionType NOT BETWEEN 1 AND 15',@definition)=0
@@ -25974,7 +25974,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:16
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:16; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=8ADFB92489409B3B8433FBAFC7995056125AC039FCAC2689C8D71B8D913CF28D; fragment=0:1934:8ADFB92489409B3B8433FBAFC7995056125AC039FCAC2689C8D71B8D913CF28D
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'SET NOCOUNT ON;',@definition)=0
@@ -25997,7 +25997,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:17
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:17; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=BE41A3C8F537935C2F8745125D950D5FD1A005EB811865CC1202DAB1047AA2BE; fragment=0:697:BE41A3C8F537935C2F8745125D950D5FD1A005EB811865CC1202DAB1047AA2BE
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'WHERE i.Status <> d.Status AND NOT (',@definition)=0
@@ -26007,7 +26007,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:18
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:18; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=3EF21B8FB688800719E827114FDC24D2854D38203014AC6094CE352100FD2C6F; fragment=0:668:3EF21B8FB688800719E827114FDC24D2854D38203014AC6094CE352100FD2C6F
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'AND i.PostedById=i.FinanceApprovedById',@definition)=0
@@ -26016,7 +26016,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:19
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:19; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=743AEBD175B2196BE59F3C86A065CC8886EAD35BA1CAE59FF206ECB591DAAF7B; fragment=0:665:743AEBD175B2196BE59F3C86A065CC8886EAD35BA1CAE59FF206ECB591DAAF7B
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'WHERE (i.Status IN (N''PendingFinanceApproval''',@definition)=0
@@ -26025,7 +26025,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:20
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:20; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=8F580B74C535BDB8A2A22386C692681B7758639AB02D8EC8B7576F92DC5B6D03; fragment=0:659:8F580B74C535BDB8A2A22386C692681B7758639AB02D8EC8B7576F92DC5B6D03
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'OR (i.Status IN (N''PendingAuditAttestation''',@definition)=0
@@ -26034,7 +26034,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:21
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:21; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=0FCDBE0476444C9DCDEE707CF6AED1BC861BF85A98889F40C5C5867FA0ADE65E; fragment=0:662:0FCDBE0476444C9DCDEE707CF6AED1BC861BF85A98889F40C5C5867FA0ADE65E
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'OR (i.Status IN (N''ReadyToPost'',N''Posted'')',@definition)=0
@@ -26043,7 +26043,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:22
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:22; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=97AE4D443F85B50B5B7A6105D187F3D06CCC8897FBA77AE819CC8BDBD6ACDE37; fragment=0:574:97AE4D443F85B50B5B7A6105D187F3D06CCC8897FBA77AE819CC8BDBD6ACDE37
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'i.TotalVarianceQuantity <> 0',@definition)=0
@@ -26052,7 +26052,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:23
+        // POST-DEFINITION PATCH TR_PhysicalCounts_ControlledLifecycle from 20260912120000_InventoryOptionalApprovalSnapshots:23; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=EB03CA0DBB230A74399169FE2DF430A7495C0FA4CB75DA86A13BA121A998496F; fragment=0:753:EB03CA0DBB230A74399169FE2DF430A7495C0FA4CB75DA86A13BA121A998496F
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'a.TenantId=i.TenantId AND a.Status=N''Approved''',@definition)=0
@@ -26061,7 +26061,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockMovements_PhysicalCountFreeze from 20260912120000_InventoryOptionalApprovalSnapshots:24
+        // POST-DEFINITION PATCH TR_StockMovements_PhysicalCountFreeze from 20260912120000_InventoryOptionalApprovalSnapshots:24; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=92E8DE72E5C26BD22A214655DCE3D39B53CEECD6C8224C556893E8F06519D8F8; fragment=0:735:92E8DE72E5C26BD22A214655DCE3D39B53CEECD6C8224C556893E8F06519D8F8
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockMovements_PhysicalCountFreeze',N'TR'));
             IF @definition IS NULL OR CHARINDEX(N'AND i.ProcessedById=p.FinanceApprovedById',@definition)=0
@@ -26070,7 +26070,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:0
+        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=1E70E03BF19D006D97CE0FB3CBF0612E9E8DE1B427119962F627393F50EA63EB; fragment=0:806:1E70E03BF19D006D97CE0FB3CBF0612E9E8DE1B427119962F627393F50EA63EB
         migrationBuilder.Sql("""
             DECLARE @body nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.[TR_ProcurementReceiptInspectionCases_TDC0502Protected]')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=REPLACE(N'(r.Id IS NULL OR w.Id IS NULL)',CHAR(13),N'');
@@ -26082,7 +26082,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @body=N'ALTER '+SUBSTRING(@body,@keyword,LEN(@body));
             EXEC sys.sp_executesql @body;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:1
+        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=082D82D94651EAD6F413AA22200AC1352D944FDCDF5335BE08ADFAA69C091F80; fragment=0:3888:082D82D94651EAD6F413AA22200AC1352D944FDCDF5335BE08ADFAA69C091F80
         migrationBuilder.Sql("""
             DECLARE @body nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.[TR_ProcurementReceiptInspectionCases_TDC0502Protected]')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=REPLACE(N'OR (
@@ -26145,7 +26145,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @body=N'ALTER '+SUBSTRING(@body,@keyword,LEN(@body));
             EXEC sys.sp_executesql @body;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:2
+        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=B1C0D70F3FD79BFB72A8B8A34D30A7F08E7D2C7DE5AB313A591208DE69C6D7C3; fragment=0:1687:B1C0D70F3FD79BFB72A8B8A34D30A7F08E7D2C7DE5AB313A591208DE69C6D7C3
         migrationBuilder.Sql("""
             DECLARE @body nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.[TR_ProcurementReceiptInspectionCases_TDC0502Protected]')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=REPLACE(N'(TRY_CONVERT(uniqueidentifier, SESSION_CONTEXT(N''TDC0502_RECEIPT_INSPECTION_CASE_ID'')) <> i.Id
@@ -26170,7 +26170,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @body=N'ALTER '+SUBSTRING(@body,@keyword,LEN(@body));
             EXEC sys.sp_executesql @body;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:3
+        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionCases_TDC0502Protected from 20260912130000_ReceiptInspectionOptionalWorkflow:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=EEE2B46734A6DEA3F2796DFF94702195A12BD63ACC901EFD04EC50B8EC4ADF12; fragment=0:1655:EEE2B46734A6DEA3F2796DFF94702195A12BD63ACC901EFD04EC50B8EC4ADF12
         migrationBuilder.Sql("""
             DECLARE @body nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.[TR_ProcurementReceiptInspectionCases_TDC0502Protected]')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=REPLACE(N'SET NOCOUNT ON;',CHAR(13),N'');
@@ -26195,7 +26195,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @body=N'ALTER '+SUBSTRING(@body,@keyword,LEN(@body));
             EXEC sys.sp_executesql @body;
             """);
-        // POST-DEFINITION PATCH TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected from 20260912130000_ReceiptInspectionOptionalWorkflow:4
+        // POST-DEFINITION PATCH TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected from 20260912130000_ReceiptInspectionOptionalWorkflow:4; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=DB05B7F5F3FACAEB043A434F392420EA70EFB791BA8788BF77EC86609AA5149B; fragment=0:1506:DB05B7F5F3FACAEB043A434F392420EA70EFB791BA8788BF77EC86609AA5149B
         migrationBuilder.Sql("""
             DECLARE @body nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.[TR_PurchaseOrderReceiptItems_TDC0502AcceptanceProtected]')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=REPLACE(N'(c.Id IS NULL OR l.Id IS NULL OR wi.Id IS NULL OR wi.Status <> 2
@@ -26216,7 +26216,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @body=N'ALTER '+SUBSTRING(@body,@keyword,LEN(@body));
             EXEC sys.sp_executesql @body;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop from 20260912130000_ReceiptInspectionOptionalWorkflow:5
+        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop from 20260912130000_ReceiptInspectionOptionalWorkflow:5; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=3C583E44803934B21B42BFFFAA301E751391A809FAF8176F8D7B4917CD733D60; fragment=0:726:3C583E44803934B21B42BFFFAA301E751391A809FAF8176F8D7B4917CD733D60
         migrationBuilder.Sql("""
             DECLARE @body nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.[TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop]')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=REPLACE(N'action.ActionType IN (3, 11, 12)',CHAR(13),N'');
@@ -26228,7 +26228,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @body=N'ALTER '+SUBSTRING(@body,@keyword,LEN(@body));
             EXEC sys.sp_executesql @body;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop from 20260912130000_ReceiptInspectionOptionalWorkflow:6
+        // POST-DEFINITION PATCH TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop from 20260912130000_ReceiptInspectionOptionalWorkflow:6; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=955FF0D780AFD1335DE70DD7BDDF8FDC91EBB53C1560A255E689C4F8E02950C5; fragment=0:1431:955FF0D780AFD1335DE70DD7BDDF8FDC91EBB53C1560A255E689C4F8E02950C5
         migrationBuilder.Sql("""
             DECLARE @body nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.[TR_ProcurementReceiptInspectionActions_TDC0503SodHardStop]')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=REPLACE(N'SET NOCOUNT ON;',CHAR(13),N'');
@@ -26250,7 +26250,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @body=N'ALTER '+SUBSTRING(@body,@keyword,LEN(@body));
             EXEC sys.sp_executesql @body;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:1
+        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=0C09BEBBE5D7FCA85886C075E0DC482E13533AC424AFA6DF81A56B5D8A5B57FC; fragment=0:1048:0C09BEBBE5D7FCA85886C075E0DC482E13533AC424AFA6DF81A56B5D8A5B57FC
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementRfqEvaluations_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26265,7 +26265,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:2
+        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=23A0C0DDF5CD7FB04EB92B47D35326C31281042770655B3ED3025F0674FF13B8; fragment=0:1100:23A0C0DDF5CD7FB04EB92B47D35326C31281042770655B3ED3025F0674FF13B8
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementRfqEvaluations_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26282,7 +26282,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:3
+        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=E2DD50FB3EC981A48F0066D04499EC4F9C22AB3A50CC35A0028C59454BFAD572; fragment=0:1281:E2DD50FB3EC981A48F0066D04499EC4F9C22AB3A50CC35A0028C59454BFAD572
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementRfqEvaluations_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26297,7 +26297,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:4
+        // POST-DEFINITION PATCH TR_ProcurementRfqEvaluations_Lifecycle from 20260912153000_OptionalRfqEvaluationApproval:4; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=F0B440C3E9CE3C4DB52B707013B045274E9391E084AF5A0A80BF92F89591BBC1; fragment=0:1269:F0B440C3E9CE3C4DB52B707013B045274E9391E084AF5A0A80BF92F89591BBC1
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementRfqEvaluations_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26312,7 +26312,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912153000_OptionalRfqEvaluationApproval:5
+        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912153000_OptionalRfqEvaluationApproval:5; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=2E05F43813FCD6DC686E7D574DF730B172323A99FCD31BF93FBEDCB3A456C7FF; fragment=0:1253:2E05F43813FCD6DC686E7D574DF730B172323A99FCD31BF93FBEDCB3A456C7FF
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementAwardReadinessDecisions_Immutable')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26331,7 +26331,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementTenderControls_Lifecycle from 20260912155000_OptionalControlledTenderApproval:1
+        // POST-DEFINITION PATCH TR_ProcurementTenderControls_Lifecycle from 20260912155000_OptionalControlledTenderApproval:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=728DE90D405BBEDC641C0C4A8C3E44745FD5652535529531B64D1B54E2186146; fragment=0:1048:728DE90D405BBEDC641C0C4A8C3E44745FD5652535529531B64D1B54E2186146
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementTenderControls_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26346,7 +26346,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912155000_OptionalControlledTenderApproval:2
+        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912155000_OptionalControlledTenderApproval:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=33B2AC0881A5412FFEA46328D9D519EF2C290BBD0F0DA4FC52E72E09295E72B6; fragment=0:1704:33B2AC0881A5412FFEA46328D9D519EF2C290BBD0F0DA4FC52E72E09295E72B6
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementAwardReadinessDecisions_Immutable')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26369,7 +26369,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912155000_OptionalControlledTenderApproval:3
+        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912155000_OptionalControlledTenderApproval:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=8FD2227AD1A00082D421E740D41B72DC3F91806477B4C64FBF560061B67B2C8B; fragment=0:1502:8FD2227AD1A00082D421E740D41B72DC3F91806477B4C64FBF560061B67B2C8B
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementAwardReadinessDecisions_Immutable')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26395,7 +26395,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_VendorPayment_TDC0506InvoiceProcessorSod from 20260912190000_VendorPaymentOptionalApproval:0
+        // POST-DEFINITION PATCH TR_VendorPayment_TDC0506InvoiceProcessorSod from 20260912190000_VendorPaymentOptionalApproval:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=713A8F8203FA0E6E186D098E150291E0E3AFB18B7DF4284DBC380D959FBDD002; fragment=0:764:713A8F8203FA0E6E186D098E150291E0E3AFB18B7DF4284DBC380D959FBDD002
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_VendorPayment_TDC0506InvoiceProcessorSod'));
             DECLARE @before nvarchar(max)=N'WHERE payment.IsDeleted = 0';
@@ -26408,7 +26408,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=N'ALTER '+SUBSTRING(@definition,@trigger,LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PaymentBatch_TDC0506InvoiceProcessorSod from 20260912190000_VendorPaymentOptionalApproval:1
+        // POST-DEFINITION PATCH TR_PaymentBatch_TDC0506InvoiceProcessorSod from 20260912190000_VendorPaymentOptionalApproval:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=19086723F47998726602962AC399022A25BAFAF73372EFB0BC74B563DD22A2A2; fragment=0:757:19086723F47998726602962AC399022A25BAFAF73372EFB0BC74B563DD22A2A2
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PaymentBatch_TDC0506InvoiceProcessorSod'));
             DECLARE @before nvarchar(max)=N'WHERE batch.IsDeleted = 0';
@@ -26421,7 +26421,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=N'ALTER '+SUBSTRING(@definition,@trigger,LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PaymentBatch_TDC0505Readiness from 20260912190000_VendorPaymentOptionalApproval:2
+        // POST-DEFINITION PATCH TR_PaymentBatch_TDC0505Readiness from 20260912190000_VendorPaymentOptionalApproval:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=241E5A4ED1E4ECFA201FFABE0AB02E3FF8B5402B84621F40869CA931E92FFAA7; fragment=0:771:241E5A4ED1E4ECFA201FFABE0AB02E3FF8B5402B84621F40869CA931E92FFAA7
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PaymentBatch_TDC0505Readiness'));
             DECLARE @before nvarchar(max)=N'OR (batch.Status = 3 AND NOT EXISTS (';
@@ -26434,7 +26434,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=N'ALTER '+SUBSTRING(@definition,@trigger,LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_PaymentBatch_TDC0505Readiness from 20260912190000_VendorPaymentOptionalApproval:3
+        // POST-DEFINITION PATCH TR_PaymentBatch_TDC0505Readiness from 20260912190000_VendorPaymentOptionalApproval:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=C3433813743FA69FF289B7A335A1D52C68CA0408AF87E2B1562CC87C98E63C41; fragment=0:966:C3433813743FA69FF289B7A335A1D52C68CA0408AF87E2B1562CC87C98E63C41
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PaymentBatch_TDC0505Readiness'));
             DECLARE @before nvarchar(max)=N'CASE WHEN batch.Status = 3 THEN ''PaymentBatchInvoiceApproved'' ELSE ''PaymentBatchInvoiceProcessed'' END';
@@ -26447,7 +26447,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=N'ALTER '+SUBSTRING(@definition,@trigger,LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementExceptionalSourcingControls_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:2
+        // POST-DEFINITION PATCH TR_ProcurementExceptionalSourcingControls_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=3BB5290D17CA4220E8ED16E72AD4F8109A8763DEBA46812CBCBB82F3D79FA795; fragment=0:1061:3BB5290D17CA4220E8ED16E72AD4F8109A8763DEBA46812CBCBB82F3D79FA795
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementExceptionalSourcingControls_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26462,7 +26462,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementExceptionalSourcingControls_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:3
+        // POST-DEFINITION PATCH TR_ProcurementExceptionalSourcingControls_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=6ED01F392C4CD82FEE1D7CD5AEF7398F04B10E58ABB2164DDB5FA0E53AFC3AD1; fragment=0:1116:6ED01F392C4CD82FEE1D7CD5AEF7398F04B10E58ABB2164DDB5FA0E53AFC3AD1
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementExceptionalSourcingControls_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26477,7 +26477,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:4
+        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:4; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=2F216B12A61EA264DC47F1DA18A42BB6DA327CA4F86DE1778894B8A2EB49B7F7; fragment=0:1114:2F216B12A61EA264DC47F1DA18A42BB6DA327CA4F86DE1778894B8A2EB49B7F7
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementPrequalificationExercises_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26492,7 +26492,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:5
+        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:5; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=307710AB98B29CCD421D091A516BF4C130B2B0139A76CE53B68FAB64FE8A728A; fragment=0:1143:307710AB98B29CCD421D091A516BF4C130B2B0139A76CE53B68FAB64FE8A728A
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementPrequalificationExercises_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26507,7 +26507,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:6
+        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:6; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=AEBADC92947167980F3427665648FA7D326AC8CAE4E88BB73DFDC063E39AA9B8; fragment=0:1059:AEBADC92947167980F3427665648FA7D326AC8CAE4E88BB73DFDC063E39AA9B8
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementPrequalificationExercises_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26522,7 +26522,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:7
+        // POST-DEFINITION PATCH TR_ProcurementPrequalificationExercises_Lifecycle from 20260912210000_OptionalExceptionalAndPrequalificationApproval:7; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=6BECD598E0CD2365F69CBDA8D033AC648849724963245522202589CE72AFE6CA; fragment=0:1067:6BECD598E0CD2365F69CBDA8D033AC648849724963245522202589CE72AFE6CA
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementPrequalificationExercises_Lifecycle')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26537,7 +26537,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912210000_OptionalExceptionalAndPrequalificationApproval:11
+        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912210000_OptionalExceptionalAndPrequalificationApproval:11; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=4E70EEC23F7AB570A483B52057E82E3AB09EC42ECD227C499E45041C5FA74D80; fragment=0:1562:4E70EEC23F7AB570A483B52057E82E3AB09EC42ECD227C499E45041C5FA74D80
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementAwardReadinessDecisions_Immutable')),CHAR(13),N'');
             DECLARE @readyScope int=CHARINDEX(N'THROW 51406,',@definition);
@@ -26557,7 +26557,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912210000_OptionalExceptionalAndPrequalificationApproval:12
+        // POST-DEFINITION PATCH TR_ProcurementAwardReadinessDecisions_Immutable from 20260912210000_OptionalExceptionalAndPrequalificationApproval:12; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=2B9BB910409B736597FC3AD376C12C2A52AC6E5F1B2A16CE1809D2739937AEFF; fragment=0:1268:2B9BB910409B736597FC3AD376C12C2A52AC6E5F1B2A16CE1809D2739937AEFF
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max) = REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementAwardReadinessDecisions_Immutable')), CHAR(13), '');
             -- SQL script generation on Windows may reintroduce CRLF after the C# normalization.
@@ -26572,7 +26572,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition = N'ALTER ' + SUBSTRING(@definition, @start, LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_VendorPayment_DirectEvidence,TR_VendorPayment_OptionalApproval from 20260912220000_VendorPaymentDirectEvidence:1
+        // POST-DEFINITION PATCH TR_VendorPayment_DirectEvidence,TR_VendorPayment_OptionalApproval from 20260912220000_VendorPaymentDirectEvidence:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=43997BBD7B1371E1734A3907E42B4B5513084C39ED54C95D3667B34D9EDB97C0; fragment=0:1222:43997BBD7B1371E1734A3907E42B4B5513084C39ED54C95D3667B34D9EDB97C0
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=REPLACE(OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_VendorPayment_OptionalApproval')),CHAR(13),N'');
             DECLARE @before nvarchar(max)=N'OR EXISTS (SELECT 1 FROM OPENJSON(i.ApprovalControlSnapshotJson,''$.evidenceRequirements'') e
@@ -26590,7 +26590,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=N'ALTER '+SUBSTRING(@definition,@trigger,LEN(@definition));
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:0
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=A627DCC557399ECA568648C374C722ECA5BFE4973F9B318317033383EEE63580; fragment=0:1301:A627DCC557399ECA568648C374C722ECA5BFE4973F9B318317033383EEE63580
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'SET NOCOUNT ON;';
@@ -26609,7 +26609,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:1
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=D514F2ABBC4663ED37141688C2356329371F8508ED7F9EB94AF6640B1EC01E5C; fragment=0:968:D514F2ABBC4663ED37141688C2356329371F8508ED7F9EB94AF6640B1EC01E5C
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'WHERE i.Status <> d.Status AND NOT (';
@@ -26624,7 +26624,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:2
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=1A8820BA9F7EF14F56124ED66F10863190EF5D58CF7F3146DFE25449376C7BEF; fragment=0:794:1A8820BA9F7EF14F56124ED66F10863190EF5D58CF7F3146DFE25449376C7BEF
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'WHERE (i.Status >= 3 AND i.Status NOT IN (8,9) AND (i.ApprovedById IS NULL OR i.ApprovedById = i.RequestedById))';
@@ -26634,7 +26634,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:3
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=3BB65F41F9EF6113FA7409D6B773EB4176AD689AD232F7581337D10B75216167; fragment=0:695:3BB65F41F9EF6113FA7409D6B773EB4176AD689AD232F7581337D10B75216167
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'i.ShippedById NOT IN (i.RequestedById, i.ApprovedById)';
@@ -26644,7 +26644,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:4
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:4; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=34B9C6FE96BBD5B12BD333199B0C0AC0BB214B29EB31A2A7792AB96C6F82D496; fragment=0:749:34B9C6FE96BBD5B12BD333199B0C0AC0BB214B29EB31A2A7792AB96C6F82D496
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'i.ReceivedById NOT IN (i.RequestedById, i.ApprovedById, i.ShippedById)';
@@ -26654,7 +26654,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:5
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:5; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=1439A38E43EA66532414392D2FDCEF11ED40827E6452732F9C8266A61718E767; fragment=0:792:1439A38E43EA66532414392D2FDCEF11ED40827E6452732F9C8266A61718E767
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'i.ClosedById NOT IN (i.RequestedById, i.ApprovedById, i.ShippedById, i.ReceivedById)';
@@ -26664,7 +26664,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:6
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:6; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=63F15429996A96738D613A94035184FEAB8F8D06A6E6ED323BEE589A3B26C0DF; fragment=0:672:63F15429996A96738D613A94035184FEAB8F8D06A6E6ED323BEE589A3B26C0DF
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'i.ShippedById IN (i.RequestedById, i.ApprovedById)';
@@ -26674,7 +26674,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:7
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:7; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=F1E28932B646860D089E485F333285D2100A4B69EB9333EE0A3080AF14648D67; fragment=0:704:F1E28932B646860D089E485F333285D2100A4B69EB9333EE0A3080AF14648D67
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'i.ReceivedById IN (i.RequestedById, i.ApprovedById, i.ShippedById)';
@@ -26684,7 +26684,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:8
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:8; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=879A555521C272E34E72AC60D4DF1C384AC4E0E022B683748D4A730AD9D01D76; fragment=0:732:879A555521C272E34E72AC60D4DF1C384AC4E0E022B683748D4A730AD9D01D76
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'i.ClosedById IN (i.RequestedById, i.ApprovedById, i.ShippedById, i.ReceivedById)';
@@ -26694,7 +26694,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransferDiscrepancies_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:9
+        // POST-DEFINITION PATCH TR_InventoryTransferDiscrepancies_ControlledLifecycle from 20260912230000_InventoryTransferOptionalApproval:9; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=2FE9B0D17A635A99DFCA058E9EF0628EFBE2AF31F2D01A9CFBFEA173A9A88E44; fragment=0:748:2FE9B0D17A635A99DFCA058E9EF0628EFBE2AF31F2D01A9CFBFEA173A9A88E44
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransferDiscrepancies_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'i.ResolvedById IN (t.RequestedById, t.ApprovedById, t.ShippedById, t.ReceivedById)';
@@ -26704,7 +26704,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912232000_InventoryTransferAutomaticCompletion:0
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912232000_InventoryTransferAutomaticCompletion:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=F851E1EC82457DFAAC7F76C62584AC8C2C70FC9B311D08D3CF4D24848160946E; fragment=0:2147:F851E1EC82457DFAAC7F76C62584AC8C2C70FC9B311D08D3CF4D24848160946E
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'(i.ApprovalRequired=0 OR (i.ClosedById <> i.RequestedById AND i.ClosedById <> i.ShippedById AND i.ClosedById <> i.ReceivedById AND i.ClosedById <> i.ApprovedById))';
@@ -26726,7 +26726,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912232000_InventoryTransferAutomaticCompletion:1
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912232000_InventoryTransferAutomaticCompletion:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=134EB8F216EF207793132275E67D20208CC0E4D176A83FB462817B6543832BA1; fragment=0:2040:134EB8F216EF207793132275E67D20208CC0E4D176A83FB462817B6543832BA1
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'(i.ApprovalRequired=1 AND i.ClosedById IN (i.RequestedById, i.ApprovedById, i.ShippedById, i.ReceivedById))';
@@ -26748,7 +26748,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912233000_InventoryTransferDraftLineCompletionGuard:0
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912233000_InventoryTransferDraftLineCompletionGuard:0; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=9D3A28A1A156E6EC686BFD1393515B050DD4EBB4FE35C9A508E0D2D6EBF8D561; fragment=0:685:9D3A28A1A156E6EC686BFD1393515B050DD4EBB4FE35C9A508E0D2D6EBF8D561
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'AND (line.IsDeleted=1 OR line.RequestedQuantity<=0';
@@ -26759,7 +26759,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912233000_InventoryTransferDraftLineCompletionGuard:1
+        // POST-DEFINITION PATCH TR_InventoryTransfers_ControlledLifecycle from 20260912233000_InventoryTransferDraftLineCompletionGuard:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=6B21186AAFB986FB649FE495DB116271885AA75404693A0E5162A941115D4F62; fragment=0:763:6B21186AAFB986FB649FE495DB116271885AA75404693A0E5162A941115D4F62
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_InventoryTransfers_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'line.TenantId = i.TenantId AND (line.ShippedQuantity <> line.RequestedQuantity';
@@ -26770,7 +26770,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912234000_InventoryDisposalOptionalApprovalAndDrafts:2
+        // POST-DEFINITION PATCH TR_StockAdjustments_ControlledLifecycle from 20260912234000_InventoryDisposalOptionalApprovalAndDrafts:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=BD8419B548062889762DD664EEA87E9D85994C86D5A8C4011ED294812D94DFFA; fragment=0:3659:BD8419B548062889762DD664EEA87E9D85994C86D5A8C4011ED294812D94DFFA
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustments_ControlledLifecycle',N'TR'));
             DECLARE @before nvarchar(max)=N'dbo.WorkflowApprovalRequiredAtSubmission(i.TenantId,N''StockAdjustment'',i.Id)=0';
@@ -26822,7 +26822,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912235000_StockAdjustmentSequentialFifoValuation:1
+        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912235000_StockAdjustmentSequentialFifoValuation:1; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=AEA43A6128E270C5A30A6F6B005001D0B32418EB5684E20EC58EA8B9AC24B428; fragment=0:1731:AEA43A6128E270C5A30A6F6B005001D0B32418EB5684E20EC58EA8B9AC24B428
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustmentItems_ControlledMutation',N'TR'));
             DECLARE @before nvarchar(max)=N'SET NOCOUNT ON;',@after nvarchar(max)=N'SET NOCOUNT ON;
@@ -26845,7 +26845,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912235000_StockAdjustmentSequentialFifoValuation:2
+        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912235000_StockAdjustmentSequentialFifoValuation:2; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=235ECEFE654E16FCA71BF06FAEDF2DED6074FF840F1DA413FFE8D206B24F685E; fragment=0:1255:235ECEFE654E16FCA71BF06FAEDF2DED6074FF840F1DA413FFE8D206B24F685E
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustmentItems_ControlledMutation',N'TR'));
             DECLARE @before nvarchar(max)=N'i.UnitCost <> ISNULL(dbo.InventoryAdjustmentExpectedUnitCost(i.TenantId,i.InventoryItemId,a.WarehouseId,i.LocationId,i.AdjustmentQuantity),0)',@after nvarchar(max)=N'i.UnitCost <> CASE WHEN i.IsDeleted=1 THEN i.UnitCost WHEN item.ValuationMethod=2 AND i.AdjustmentQuantity<0 THEN ISNULL(CONVERT(decimal(18,4),ROUND(ABS(dbo.InventoryAdjustmentExpectedLineValue(i.TenantId,i.AdjustmentId,i.Id)/NULLIF(i.AdjustmentQuantity,0)),4)),0) ELSE ISNULL(dbo.InventoryAdjustmentExpectedUnitCost(i.TenantId,i.InventoryItemId,a.WarehouseId,i.LocationId,i.AdjustmentQuantity),0) END';
@@ -26857,7 +26857,7 @@ internal static class ArchivedGovernanceBaselineSql
             SET @definition=STUFF(@definition,1,CHARINDEX(N'TRIGGER',UPPER(@definition))-1,N'CREATE OR ALTER ');
             EXEC sys.sp_executesql @definition;
             """);
-        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912235000_StockAdjustmentSequentialFifoValuation:3
+        // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912235000_StockAdjustmentSequentialFifoValuation:3; transform=IDENTITY_FULL_SQL_OPERATION; marker=FULL_OPERATION; source=5EE59912E9EB897B8D071ACC743F3383AD1C6FE8AC7BD1A9BA51769B9B310D25; fragment=0:1077:5EE59912E9EB897B8D071ACC743F3383AD1C6FE8AC7BD1A9BA51769B9B310D25
         migrationBuilder.Sql("""
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustmentItems_ControlledMutation',N'TR'));
             DECLARE @before nvarchar(max)=N'i.AdjustmentValue <> ROUND(i.AdjustmentQuantity * i.UnitCost, 2)',@after nvarchar(max)=N'i.AdjustmentValue <> CASE WHEN i.IsDeleted=1 THEN i.AdjustmentValue WHEN a.ReasonCode<>N''INITIAL_STOCK'' AND item.ValuationMethod=2 AND i.AdjustmentQuantity<0 THEN ISNULL(dbo.InventoryAdjustmentExpectedLineValue(i.TenantId,i.AdjustmentId,i.Id),0) ELSE ROUND(i.AdjustmentQuantity * i.UnitCost, 2) END';

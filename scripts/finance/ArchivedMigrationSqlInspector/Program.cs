@@ -68,6 +68,12 @@ var sqlOperations = migrationOperations.SelectMany(migration =>
         .Select((operation, index) => new ArchivedSql(migration.Id!, index, operation.Sql));
 }).ToArray();
 
+if (args.Length == 1 && args[0] == "--self-test-lifecycle")
+{
+    RunLifecycleMutationTests(migrationOperations, sqlOperations);
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--check-sql-operations")
 {
     foreach (var operation in sqlOperations.Where(item =>
@@ -146,7 +152,8 @@ var patches = SelectPostDefinitionPatches(sqlOperations, selectedTriggers);
 var programmableDefinitions = SelectProgrammableDefinitions(sqlOperations);
 var programmableDisposition = AuditProgrammableLifecycle(sqlOperations);
 var audit = AuditGovernanceObjects(sqlOperations, triggerCandidates);
-var archivedCheckConstraints = AuditArchivedCheckConstraintLifecycle(migrationOperations);
+var archivedCheckAudit = AuditArchivedCheckConstraintLifecycle(migrationOperations);
+var archivedCheckConstraints = archivedCheckAudit.Active;
 var baselineCheckConstraints = AuditCurrentBaselineCheckConstraints();
 var archivedChecksMissingFromBaseline = archivedCheckConstraints.Values
     .Where(item => !baselineCheckConstraints.ContainsKey(CheckConstraintKey(item.Table, item.Name)))
@@ -155,6 +162,7 @@ var archivedCheckDefinitionMismatches = archivedCheckConstraints.Values
     .Where(item => baselineCheckConstraints.TryGetValue(CheckConstraintKey(item.Table, item.Name), out var baseline) &&
                    CanonicalSql(item.Sql) != CanonicalSql(baseline.Sql))
     .OrderBy(item => item.Name, StringComparer.Ordinal).ToArray();
+RequireExpectedLifecycleEventCount(archivedCheckAudit.Events, 870);
 if (archivedCheckConstraints.Count != 675 || baselineCheckConstraints.Count != 835 ||
     archivedChecksMissingFromBaseline.Length != 0 || archivedCheckDefinitionMismatches.Length != 0)
 {
@@ -192,6 +200,13 @@ var manifest = new
         patch.MigrationId,
         patch.OperationIndex,
         patch.TargetNames,
+        transformation = patch.Transformation,
+        sourceMarker = patch.SourceMarker,
+        sourceOperationSha256 = Sha256(patch.SourceSql),
+        sourceNormalizedLength = patch.SourceSql.Length,
+        retainedFragmentStart = patch.FragmentStart,
+        retainedFragmentLength = patch.Sql.Length,
+        retainedFragmentSha256 = Sha256(patch.Sql),
         sqlSha256 = Sha256(patch.Sql)
     }),
     programmableObjects = programmableDefinitions.Select(item => new
@@ -214,6 +229,19 @@ var manifest = new
             item.Derivation,
             sqlSha256 = Sha256(CanonicalSql(item.Sql))
         }),
+    checkConstraintLifecycle = archivedCheckAudit.Events.Select(item => new
+    {
+        item.Sequence,
+        item.Action,
+        item.Table,
+        item.Name,
+        item.MigrationId,
+        item.OperationIndex,
+        item.Derivation,
+        item.OperationSha256,
+        sqlSha256 = item.Sql is null ? null : Sha256(CanonicalSql(item.Sql))
+    }),
+    archivedCheckConstraintLifecycleEventCount = archivedCheckAudit.Events.Count,
     baselineCheckConstraintCount = baselineCheckConstraints.Count,
     archivedCheckConstraintCount = archivedCheckConstraints.Count,
     audit
@@ -236,6 +264,7 @@ if (args.Length == 0 || args[0] == "--summary")
     Console.WriteLine($"staticallyValidatedInsertedDeletedColumnReferences={staticallyValidatedColumnReferenceCount}");
     Console.WriteLine($"programmableObjects={programmableDefinitions.Length}");
     Console.WriteLine($"archivedActiveCheckConstraints={archivedCheckConstraints.Count}");
+    Console.WriteLine($"archivedCheckConstraintLifecycleEvents={archivedCheckAudit.Events.Count}");
     Console.WriteLine($"baselineCheckConstraints={baselineCheckConstraints.Count}");
     Console.WriteLine($"archivedChecksMissingFromBaseline={archivedChecksMissingFromBaseline.Length}");
     Console.WriteLine($"archivedCheckDefinitionMismatches={archivedCheckDefinitionMismatches.Length}");
@@ -258,7 +287,7 @@ if (args.Length == 0 || args[0] == "--summary")
 
 if (args.Length != 3 || args[0] is not ("--generate" or "--verify"))
 {
-    throw new InvalidOperationException("Usage: --summary, --migration-ids, --check-sql-operations, --generate <helper.cs> <manifest.json>, --verify <helper.cs> <manifest.json>, or --verify-generated-sql <script.sql>.");
+    throw new InvalidOperationException("Usage: --summary, --migration-ids, --check-sql-operations, --self-test-lifecycle, --generate <helper.cs> <manifest.json>, --verify <helper.cs> <manifest.json>, or --verify-generated-sql <script.sql>.");
 }
 
 var helperContent = RenderHelper(programmableDefinitions, selectedTriggers.Values, patches);
@@ -522,8 +551,17 @@ static ArchivedSql[] SelectPostDefinitionPatches(IReadOnlyCollection<ArchivedSql
         if (requiresPatch)
         {
             var normalized = NormalizePostDefinitionPatch(operation);
-            RefusePredecessorDependentPatchSql(normalized);
-            result.Add(operation with { Sql = normalized, TargetNames = names });
+            RefusePredecessorDependentPatchSql(normalized.Sql);
+            VerifyPatchTransformation(operation, normalized);
+            result.Add(operation with
+            {
+                Sql = normalized.Sql,
+                SourceSql = normalized.SourceSql,
+                FragmentStart = normalized.FragmentStart,
+                SourceMarker = normalized.SourceMarker,
+                Transformation = normalized.Transformation,
+                TargetNames = names
+            });
         }
     }
     return result.OrderBy(item => item.MigrationId, StringComparer.Ordinal).ThenBy(item => item.OperationIndex).ToArray();
@@ -538,10 +576,11 @@ static SqlDefinition[] SelectProgrammableDefinitions(IReadOnlyCollection<Archive
         .OrderBy(item => item.Derivation == "FUNCTION" ? 0 : 1).ThenBy(item => item.Name, StringComparer.Ordinal).ToArray();
 }
 
-static Dictionary<string, CheckConstraintDefinition> AuditArchivedCheckConstraintLifecycle(
+static CheckConstraintLifecycleAudit AuditArchivedCheckConstraintLifecycle(
     IReadOnlyCollection<ArchivedMigrationOperations> migrations)
 {
     var active = new Dictionary<string, CheckConstraintDefinition>(StringComparer.Ordinal);
+    var events = new List<CheckConstraintLifecycleEvent>();
     foreach (var migration in migrations.OrderBy(item => item.Id, StringComparer.Ordinal))
     {
         for (var operationIndex = 0; operationIndex < migration.Operations.Count; operationIndex++)
@@ -554,21 +593,34 @@ static Dictionary<string, CheckConstraintDefinition> AuditArchivedCheckConstrain
                     {
                         var definition = new CheckConstraintDefinition(
                             create.Name, check.Name, check.Sql, migration.Id, operationIndex, "CREATE_TABLE");
-                        active[CheckConstraintKey(definition.Table, definition.Name)] = definition;
+                        ApplyCheckConstraintAdd(active, events, definition,
+                            StableOperationHash("CREATE_TABLE", definition.Table, definition.Name, definition.Sql,
+                                migration.Id, operationIndex));
                     }
                     break;
                 case AddCheckConstraintOperation add:
                     var added = new CheckConstraintDefinition(
                         add.Table, add.Name, add.Sql, migration.Id, operationIndex, "ADD_CHECK_CONSTRAINT");
-                    active[CheckConstraintKey(added.Table, added.Name)] = added;
+                    ApplyCheckConstraintAdd(active, events, added,
+                        StableOperationHash("ADD_CHECK_CONSTRAINT", added.Table, added.Name, added.Sql,
+                            migration.Id, operationIndex));
                     break;
                 case DropCheckConstraintOperation drop:
-                    active.Remove(CheckConstraintKey(drop.Table, drop.Name));
+                    ApplyCheckConstraintDrop(active, events, drop.Table, drop.Name, migration.Id, operationIndex,
+                        "DROP_CHECK_CONSTRAINT",
+                        StableOperationHash("DROP_CHECK_CONSTRAINT", drop.Table, drop.Name, null,
+                            migration.Id, operationIndex));
                     break;
                 case DropTableOperation dropTable:
                     foreach (var key in active.Values.Where(item => item.Table == dropTable.Name)
-                                 .Select(item => CheckConstraintKey(item.Table, item.Name)).ToArray())
-                        active.Remove(key);
+                                  .Select(item => CheckConstraintKey(item.Table, item.Name)).ToArray())
+                    {
+                        var item = active[key];
+                        ApplyCheckConstraintDrop(active, events, item.Table, item.Name, migration.Id, operationIndex,
+                            "DROP_TABLE_CASCADE",
+                            StableOperationHash("DROP_TABLE_CASCADE", item.Table, item.Name, null,
+                                migration.Id, operationIndex));
+                    }
                     break;
                 case RenameTableOperation rename:
                     var newTableName = rename.NewName ??
@@ -576,81 +628,386 @@ static Dictionary<string, CheckConstraintDefinition> AuditArchivedCheckConstrain
                     var renamed = active.Values.Where(item => item.Table == rename.Name).ToArray();
                     foreach (var item in renamed)
                     {
-                        active.Remove(CheckConstraintKey(item.Table, item.Name));
+                        ApplyCheckConstraintDrop(active, events, item.Table, item.Name, migration.Id, operationIndex,
+                            "RENAME_TABLE_SOURCE",
+                            StableOperationHash("RENAME_TABLE_SOURCE", item.Table, item.Name, null,
+                                migration.Id, operationIndex));
                         var replacement = item with { Table = newTableName };
-                        active[CheckConstraintKey(replacement.Table, replacement.Name)] = replacement;
+                        ApplyCheckConstraintAdd(active, events, replacement,
+                            StableOperationHash("RENAME_TABLE_TARGET", replacement.Table, replacement.Name,
+                                replacement.Sql, migration.Id, operationIndex));
                     }
                     break;
                 case SqlOperation sql:
-                    ApplyRawCheckConstraintLifecycle(active, sql.Sql, migration.Id, operationIndex);
+                    ApplyRawCheckConstraintLifecycle(active, events, sql.Sql, migration.Id, operationIndex);
                     break;
             }
         }
     }
-    return active;
+    var retained = active.Values
+        .Where(item => item.Derivation != "RAW_SQL_CREATE_TABLE")
+        .ToDictionary(item => CheckConstraintKey(item.Table, item.Name), StringComparer.Ordinal);
+    return new CheckConstraintLifecycleAudit(retained, events);
 }
 
 static void ApplyRawCheckConstraintLifecycle(IDictionary<string, CheckConstraintDefinition> active,
-    string sql, string migrationId, int operationIndex)
+    ICollection<CheckConstraintLifecycleEvent> events, string sql, string migrationId, int operationIndex)
 {
-    var normalized = NormalizeNewlines(sql);
+    var normalized = NormalizeNewlines(sql).Trim();
+    var operationSha256 = Sha256(normalized);
+    var hasPotentialLifecycleAuthority = HasPotentialCheckConstraintLifecycleAuthority(normalized);
     var fragment = ParseSql(normalized, out var errors);
+    var parsedEvents = new List<RawCheckConstraintEvent>();
+    if (errors.Count != 0 && hasPotentialLifecycleAuthority &&
+        !TryParseExactAllowlistedDynamicCheckPatch(normalized, migrationId, operationIndex, out _))
+    {
+        var first = errors[0];
+        throw new InvalidOperationException(
+            $"Potential archived check lifecycle SQL did not parse: {migrationId}:{operationIndex}:" +
+            $"{first.Number}:{first.Line}:{first.Column}.");
+    }
     if (errors.Count == 0)
     {
         var visitor = new CheckConstraintLifecycleVisitor(normalized);
         fragment.Accept(visitor);
-        foreach (var item in visitor.Events)
+        parsedEvents.AddRange(visitor.Events);
+
+        foreach (var executable in ExpandExecutableSql(normalized)
+                     .Where(item => !string.Equals(item, normalized, StringComparison.Ordinal)))
         {
-            var eventKey = CheckConstraintKey(item.Table, item.Name);
-            if (item.Sql is null) active.Remove(eventKey);
-            else active[eventKey] = new CheckConstraintDefinition(item.Table, item.Name, item.Sql,
-                migrationId, operationIndex, "RAW_SQL_FINAL_STATE");
+            var executableFragment = ParseSql(executable, out var executableErrors);
+            if (executableErrors.Count != 0)
+                throw new InvalidOperationException($"Executable archived check lifecycle SQL did not parse: {migrationId}:{operationIndex}.");
+            var executableVisitor = new CheckConstraintLifecycleVisitor(executable);
+            executableFragment.Accept(executableVisitor);
+            parsedEvents.AddRange(executableVisitor.Events);
         }
     }
 
-    var patch = Regex.Match(normalized,
-        @"SELECT\s+definition\s+FROM\s+sys\.check_constraints\s+WHERE\s+name=N'(?<name>(?:''|[^'])+)'\s+AND\s+parent_object_id=OBJECT_ID\(N'dbo\.(?<table>(?:''|[^'])+)'\).*?DECLARE\s+@before\s+nvarchar\(max\)=REPLACE\(N'(?<before>(?:''|[^'])*)'.*?DECLARE\s+@after\s+nvarchar\(max\)=REPLACE\(N'(?<after>(?:''|[^'])*)'",
-        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
-    if (!patch.Success) return;
-    if (Regex.Matches(normalized, @"SELECT\s+definition\s+FROM\s+sys\.check_constraints",
-            RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count != 1)
-        throw new InvalidOperationException($"Ambiguous archived check patch: {migrationId}:{operationIndex}.");
-    var table = UnescapeSqlLiteral(patch.Groups["table"].Value);
-    var name = UnescapeSqlLiteral(patch.Groups["name"].Value);
-    var before = UnescapeSqlLiteral(patch.Groups["before"].Value);
-    var after = UnescapeSqlLiteral(patch.Groups["after"].Value);
-    var key = CheckConstraintKey(table, name);
-    if (!active.TryGetValue(key, out var current) || CountOrdinal(current.Sql, before) != 1)
+    var hasExactDynamicPatch = TryParseExactAllowlistedDynamicCheckPatch(normalized, migrationId, operationIndex,
+        out var patch);
+    if (hasPotentialLifecycleAuthority && parsedEvents.Count == 0 && !hasExactDynamicPatch)
+        throw new InvalidOperationException(
+            $"Potential archived check lifecycle SQL produced no classified event: {migrationId}:{operationIndex}.");
+
+    foreach (var item in parsedEvents)
+    {
+        if (item.Sql is null)
+            ApplyCheckConstraintDrop(active, events, item.Table, item.Name, migrationId, operationIndex,
+                item.Derivation, operationSha256);
+        else
+            ApplyCheckConstraintAdd(active, events,
+                new CheckConstraintDefinition(item.Table, item.Name, item.Sql, migrationId, operationIndex,
+                    item.Derivation), operationSha256);
+    }
+
+    if (!hasExactDynamicPatch) return;
+    var key = CheckConstraintKey(patch.Table, patch.Name);
+    if (!active.TryGetValue(key, out var current) || CountOrdinal(current.Sql, patch.Before) != 1 ||
+        patch.Before == patch.After)
         throw new InvalidOperationException($"Archived check patch does not match exactly once: {migrationId}:{operationIndex}:{key}.");
+    var replaced = current.Sql.Replace(patch.Before, patch.After, StringComparison.Ordinal);
     active[key] = current with
     {
-        Sql = current.Sql.Replace(before, after, StringComparison.Ordinal),
+        Sql = replaced,
         MigrationId = migrationId,
         OperationIndex = operationIndex,
         Derivation = "RAW_SQL_EXACT_PATCH"
     };
+    events.Add(new CheckConstraintLifecycleEvent(events.Count, "PATCH", patch.Table, patch.Name, replaced,
+        migrationId, operationIndex, "RAW_SQL_EXACT_PATCH", operationSha256));
 }
 
 static string UnescapeSqlLiteral(string value) => value.Replace("''", "'", StringComparison.Ordinal);
 
-static string NormalizePostDefinitionPatch(ArchivedSql operation)
+static bool HasPotentialCheckConstraintLifecycleAuthority(string sql)
 {
-    var sql = NormalizeNewlines(operation.Sql).Trim();
-    return operation.MigrationId switch
-    {
-        "20260907033000_AlignPettyPurchaseQuotationLifecycle" => SliceFromUniqueMarker(sql, "DECLARE @trigger"),
-        "20260911210000_PhysicalCountReviewDecisions" => SliceFromUniqueMarker(sql, "DECLARE @line"),
-        "20260912003000_WarehouseDefaultLocations" => SliceFromUniqueMarker(sql, "DECLARE @actions"),
-        "20260912013000_AlignStockAdjustmentLocationValuation" => SliceFromUniqueMarker(sql, "DECLARE @definition"),
-        _ => sql
-    };
+    var alterTable = Regex.IsMatch(sql, @"\bALTER\s+TABLE\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    var constraintMutation = Regex.IsMatch(sql, @"\b(?:ADD|DROP)\s+CONSTRAINT\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    var addTableElement = Regex.IsMatch(sql, @"\bADD\b",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    var checkIdentityOrDefinition = Regex.IsMatch(sql, @"\bCK_[A-Za-z0-9_]+\b|\bCHECK\s*\(",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    return alterTable && (constraintMutation || addTableElement) && checkIdentityOrDefinition ||
+           sql.Contains("sys.check_constraints", StringComparison.OrdinalIgnoreCase) &&
+           (sql.Contains("@before", StringComparison.OrdinalIgnoreCase) ||
+            sql.Contains("DROP CONSTRAINT", StringComparison.OrdinalIgnoreCase) ||
+            sql.Contains("ADD CONSTRAINT", StringComparison.OrdinalIgnoreCase));
 }
 
-static string SliceFromUniqueMarker(string sql, string marker)
+static bool TryParseExactAllowlistedDynamicCheckPatch(string sql, string migrationId, int operationIndex,
+    out DynamicCheckPatch patch)
 {
-    if (CountOrdinal(sql, marker) != 1)
+    patch = default!;
+    var coordinate = $"{migrationId}:{operationIndex}";
+    if (coordinate is not ("20260912210000_OptionalExceptionalAndPrequalificationApproval:12" or
+                           "20260912210000_OptionalExceptionalAndPrequalificationApproval:13" or
+                           "20260912210000_OptionalExceptionalAndPrequalificationApproval:14"))
+    {
+        if (sql.Contains("sys.check_constraints", StringComparison.OrdinalIgnoreCase) &&
+            sql.Contains("@before", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException($"Unallowlisted archived dynamic check patch: {coordinate}.");
+        return false;
+    }
+    var expectedSourceSha256 = coordinate switch
+    {
+        "20260912210000_OptionalExceptionalAndPrequalificationApproval:12" =>
+            "3B3847DF9BB9887E7F100814213DD215375CCCF8BFDCEB286ED761441E27DBCD",
+        "20260912210000_OptionalExceptionalAndPrequalificationApproval:13" =>
+            "422375B334C50DAFA1A30AA2700AD7318CB197F80B2B93311D2A08DC6ABAC751",
+        "20260912210000_OptionalExceptionalAndPrequalificationApproval:14" =>
+            "87EC78AFDAF9B1E9E95DE54D6F1BC77641DCFD23F5C062DEAAD00C60754E1D24",
+        _ => throw new InvalidOperationException($"Unknown allowlisted archived check patch: {coordinate}.")
+    };
+    if (!string.Equals(Sha256(sql), expectedSourceSha256, StringComparison.Ordinal))
+        throw new InvalidOperationException($"Allowlisted archived check patch source changed: {coordinate}.");
+
+    var match = Regex.Match(sql,
+        @"SELECT\s+definition\s+FROM\s+sys\.check_constraints\s+WHERE\s+name=N'(?<name>(?:''|[^'])+)'\s+AND\s+parent_object_id=OBJECT_ID\(N'dbo\.(?<table>(?:''|[^'])+)'\).*?DECLARE\s+@before\s+nvarchar\(max\)=REPLACE\(N'(?<before>(?:''|[^'])*)'.*?DECLARE\s+@after\s+nvarchar\(max\)=REPLACE\(N'(?<after>(?:''|[^'])*)'",
+        RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.CultureInvariant);
+    var definitions = Regex.Matches(sql, @"SELECT\s+definition\s+FROM\s+sys\.check_constraints",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count;
+    var beforeDeclarations = Regex.Matches(sql, @"DECLARE\s+@before\s+nvarchar\(max\)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count;
+    var afterDeclarations = Regex.Matches(sql, @"DECLARE\s+@after\s+nvarchar\(max\)",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count;
+    if (!match.Success || definitions != 1 || beforeDeclarations != 1 || afterDeclarations != 1 ||
+        Regex.Matches(sql, @"\bsp_executesql\b", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant).Count != 1)
+        throw new InvalidOperationException($"Malformed or ambiguous allowlisted archived check patch: {coordinate}.");
+
+    patch = new DynamicCheckPatch(
+        UnescapeSqlLiteral(match.Groups["table"].Value),
+        UnescapeSqlLiteral(match.Groups["name"].Value),
+        UnescapeSqlLiteral(match.Groups["before"].Value),
+        UnescapeSqlLiteral(match.Groups["after"].Value));
+    if (!patch.Name.StartsWith("CK_", StringComparison.Ordinal) || string.IsNullOrWhiteSpace(patch.Table) ||
+        string.IsNullOrEmpty(patch.Before) || string.IsNullOrEmpty(patch.After))
+        throw new InvalidOperationException($"Invalid allowlisted archived check patch identity: {coordinate}.");
+    return true;
+}
+
+static void ApplyCheckConstraintAdd(IDictionary<string, CheckConstraintDefinition> active,
+    ICollection<CheckConstraintLifecycleEvent> events, CheckConstraintDefinition definition, string operationSha256)
+{
+    var key = CheckConstraintKey(definition.Table, definition.Name);
+    if (active.ContainsKey(key))
+        throw new InvalidOperationException(
+            $"Duplicate or out-of-order archived check add: {definition.MigrationId}:{definition.OperationIndex}:{key}.");
+    active.Add(key, definition);
+    events.Add(new CheckConstraintLifecycleEvent(events.Count, "ADD", definition.Table, definition.Name,
+        definition.Sql, definition.MigrationId, definition.OperationIndex, definition.Derivation, operationSha256));
+}
+
+static void ApplyCheckConstraintDrop(IDictionary<string, CheckConstraintDefinition> active,
+    ICollection<CheckConstraintLifecycleEvent> events, string table, string name, string migrationId,
+    int operationIndex, string derivation, string operationSha256)
+{
+    var key = CheckConstraintKey(table, name);
+    if (!active.Remove(key))
+        throw new InvalidOperationException(
+            $"Missing or out-of-order archived check drop: {migrationId}:{operationIndex}:{key}.");
+    events.Add(new CheckConstraintLifecycleEvent(events.Count, "DROP", table, name, null,
+        migrationId, operationIndex, derivation, operationSha256));
+}
+
+static string StableOperationHash(string action, string table, string name, string? sql,
+    string migrationId, int operationIndex) =>
+    Sha256(string.Join("|", action, table, name, sql is null ? string.Empty : CanonicalSql(sql), migrationId,
+        operationIndex.ToString(System.Globalization.CultureInfo.InvariantCulture)));
+
+static void RequireExpectedLifecycleEventCount(IReadOnlyCollection<CheckConstraintLifecycleEvent> events,
+    int expected)
+{
+    if (events.Count != expected)
+        throw new InvalidOperationException(
+            $"Archived check lifecycle event inventory changed: expected {expected}, found {events.Count}.");
+}
+
+static void RunLifecycleMutationTests(IReadOnlyCollection<ArchivedMigrationOperations> migrationOperations,
+    IReadOnlyCollection<ArchivedSql> operations)
+{
+    static (Dictionary<string, CheckConstraintDefinition> Active, List<CheckConstraintLifecycleEvent> Events) State() =>
+        (new Dictionary<string, CheckConstraintDefinition>(StringComparer.Ordinal),
+            new List<CheckConstraintLifecycleEvent>());
+
+    var malformed = State();
+    AssertThrows(() => ApplyRawCheckConstraintLifecycle(malformed.Active, malformed.Events,
+        "ALTER TABLE dbo.LifecycleProbe ADD CONSTRAINT CK_LifecycleProbe_State CHECK (", "TEST", 0),
+        "malformed lifecycle SQL");
+
+    const string add =
+        "ALTER TABLE dbo.LifecycleProbe ADD CONSTRAINT CK_LifecycleProbe_State CHECK ([State] IN (1,2));";
+    const string drop =
+        "ALTER TABLE dbo.LifecycleProbe DROP CONSTRAINT CK_LifecycleProbe_State;";
+    var ordered = State();
+    ApplyRawCheckConstraintLifecycle(ordered.Active, ordered.Events, add, "TEST", 1);
+    RequireExpectedLifecycleEventCount(ordered.Events, 1);
+    AssertThrows(() => ApplyRawCheckConstraintLifecycle(ordered.Active, ordered.Events, add, "TEST", 2),
+        "duplicate lifecycle add");
+    ApplyRawCheckConstraintLifecycle(ordered.Active, ordered.Events, drop, "TEST", 3);
+    if (ordered.Active.Count != 0 || ordered.Events.Count != 2)
+        throw new InvalidOperationException("Ordered lifecycle self-test did not retain exact event state.");
+    var reordered = State();
+    AssertThrows(() => ApplyRawCheckConstraintLifecycle(reordered.Active, reordered.Events, drop, "TEST", 3),
+        "reordered lifecycle drop");
+    AssertThrows(() => RequireExpectedLifecycleEventCount(Array.Empty<CheckConstraintLifecycleEvent>(), 1),
+        "removed lifecycle event");
+
+    const string lifecycleMigration = "20260907180000_RecordTenderBidValidityTerms";
+    static bool LifecycleOperation(MigrationOperation operation) => operation is SqlOperation sql &&
+        sql.Sql.Contains("CK_Tenders_BidValidityPeriodDays", StringComparison.Ordinal);
+    var removedActual = MutateArchivedOperations(migrationOperations, lifecycleMigration, LifecycleOperation,
+        _ => Array.Empty<MigrationOperation>());
+    var removedActualAudit = AuditArchivedCheckConstraintLifecycle(removedActual);
+    AssertThrows(() => RequireExpectedLifecycleEventCount(removedActualAudit.Events, 870),
+        "removed actual archived lifecycle statement");
+
+    var duplicatedActual = MutateArchivedOperations(migrationOperations, lifecycleMigration, LifecycleOperation,
+        operation => new[] { operation, operation });
+    AssertThrows(() => AuditArchivedCheckConstraintLifecycle(duplicatedActual),
+        "duplicated actual archived lifecycle statement");
+
+    var malformedActual = MutateArchivedOperations(migrationOperations, lifecycleMigration, LifecycleOperation,
+        operation => new MigrationOperation[]
+        {
+            new SqlOperation { Sql = ((SqlOperation)operation).Sql.Replace("> 0);", "> 0;", StringComparison.Ordinal) }
+        });
+    AssertThrows(() => AuditArchivedCheckConstraintLifecycle(malformedActual),
+        "malformed actual archived lifecycle statement");
+
+    var dynamicPatch = operations.Single(item =>
+        item.MigrationId == "20260912210000_OptionalExceptionalAndPrequalificationApproval" &&
+        item.OperationIndex == 8);
+    const int dynamicMigrationOperationIndex = 12;
+    if (!TryParseExactAllowlistedDynamicCheckPatch(NormalizeNewlines(dynamicPatch.Sql).Trim(),
+            dynamicPatch.MigrationId, dynamicMigrationOperationIndex, out _))
+        throw new InvalidOperationException("Closed dynamic check patch self-test could not parse the approved source.");
+    var malformedDynamic = dynamicPatch.Sql.Replace("DECLARE @after", "DECLARE @after_tampered",
+        StringComparison.Ordinal);
+    AssertThrows(() => TryParseExactAllowlistedDynamicCheckPatch(NormalizeNewlines(malformedDynamic).Trim(),
+        dynamicPatch.MigrationId, dynamicMigrationOperationIndex, out _), "malformed dynamic patch");
+
+    var mixed = operations.Single(item =>
+        item.MigrationId == "20260907033000_AlignPettyPurchaseQuotationLifecycle" &&
+        item.Sql.Contains("DECLARE @trigger", StringComparison.Ordinal));
+    var original = NormalizePostDefinitionPatch(mixed);
+    VerifyPatchTransformation(mixed, original);
+    var originalFingerprint = PatchProvenanceFingerprint(original);
+
+    var prefixMutation = mixed with { Sql = "SET NOCOUNT ON;\n" + mixed.Sql };
+    var changedPrefix = NormalizePostDefinitionPatch(prefixMutation);
+    VerifyPatchTransformation(prefixMutation, changedPrefix);
+    if (PatchProvenanceFingerprint(changedPrefix) == originalFingerprint)
+        throw new InvalidOperationException("Mixed patch source-prefix mutation did not change provenance.");
+
+    var boundaryMutation = mixed with { Sql = mixed.Sql.Replace("DECLARE @trigger", " \nDECLARE @trigger",
+        StringComparison.Ordinal) };
+    var changedBoundary = NormalizePostDefinitionPatch(boundaryMutation);
+    VerifyPatchTransformation(boundaryMutation, changedBoundary);
+    if (PatchProvenanceFingerprint(changedBoundary) == originalFingerprint)
+        throw new InvalidOperationException("Mixed patch boundary mutation did not change provenance.");
+
+    var markerMutation = mixed with { Sql = mixed.Sql.Replace("DECLARE @trigger", "DECLARE @trigger_tampered",
+        StringComparison.Ordinal) };
+    AssertThrows(() => NormalizePostDefinitionPatch(markerMutation), "mixed patch marker mutation");
+
+    var fragmentMutation = mixed with { Sql = mixed.Sql.Replace("OBJECT_DEFINITION", "OBJECT_DEFINITION ",
+        StringComparison.Ordinal) };
+    var changedFragment = NormalizePostDefinitionPatch(fragmentMutation);
+    VerifyPatchTransformation(fragmentMutation, changedFragment);
+    if (PatchProvenanceFingerprint(changedFragment) == originalFingerprint)
+        throw new InvalidOperationException("Mixed patch retained-fragment mutation did not change provenance.");
+
+    Console.WriteLine("PASS: malformed, removed, duplicate and reordered check lifecycle mutations fail closed");
+    Console.WriteLine("PASS: dynamic check patch allowlist refuses malformed structure");
+    Console.WriteLine("PASS: mixed patch source, marker, boundary and retained-fragment tampering invalidates provenance");
+}
+
+static ArchivedMigrationOperations[] MutateArchivedOperations(
+    IReadOnlyCollection<ArchivedMigrationOperations> migrations, string migrationId,
+    Func<MigrationOperation, bool> predicate, Func<MigrationOperation, IReadOnlyCollection<MigrationOperation>> mutate)
+{
+    var matchCount = 0;
+    var result = migrations.Select(migration =>
+    {
+        if (migration.Id != migrationId) return migration;
+        var operations = new List<MigrationOperation>();
+        foreach (var operation in migration.Operations)
+        {
+            if (!predicate(operation))
+            {
+                operations.Add(operation);
+                continue;
+            }
+            matchCount++;
+            operations.AddRange(mutate(operation));
+        }
+        return new ArchivedMigrationOperations(migration.Id, operations);
+    }).ToArray();
+    if (matchCount != 1)
+        throw new InvalidOperationException($"Lifecycle mutation fixture was not unique: {migrationId}:{matchCount}.");
+    return result;
+}
+
+static string PatchProvenanceFingerprint(NormalizedPatch patch) => Sha256(string.Join("|",
+    patch.Transformation, patch.SourceMarker, Sha256(patch.SourceSql),
+    patch.SourceSql.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
+    patch.FragmentStart.ToString(System.Globalization.CultureInfo.InvariantCulture),
+    patch.Sql.Length.ToString(System.Globalization.CultureInfo.InvariantCulture), Sha256(patch.Sql)));
+
+static void AssertThrows(Action action, string description)
+{
+    try
+    {
+        action();
+    }
+    catch (InvalidOperationException)
+    {
+        return;
+    }
+    throw new InvalidOperationException($"Self-test expected refusal: {description}.");
+}
+
+static NormalizedPatch NormalizePostDefinitionPatch(ArchivedSql operation)
+{
+    var sql = NormalizeNewlines(operation.Sql).Trim();
+    var marker = operation.MigrationId switch
+    {
+        "20260907033000_AlignPettyPurchaseQuotationLifecycle" => "DECLARE @trigger",
+        "20260911210000_PhysicalCountReviewDecisions" => "DECLARE @line",
+        "20260912003000_WarehouseDefaultLocations" => "DECLARE @actions",
+        "20260912013000_AlignStockAdjustmentLocationValuation" => "DECLARE @definition",
+        _ => string.Empty
+    };
+    if (marker.Length == 0)
+        return new NormalizedPatch(sql, sql, 0, "FULL_OPERATION", "IDENTITY_FULL_SQL_OPERATION");
+    var markerMatches = Regex.Matches(sql,
+        @"(?<![A-Za-z0-9_])" + Regex.Escape(marker) + @"(?![A-Za-z0-9_])",
+        RegexOptions.CultureInvariant);
+    if (markerMatches.Count != 1)
         throw new InvalidOperationException($"Mixed archived patch marker is missing or ambiguous: {marker}.");
-    return sql[sql.IndexOf(marker, StringComparison.Ordinal)..].Trim();
+    var start = markerMatches[0].Index;
+    return new NormalizedPatch(sql, sql[start..], start, marker, "EXACT_SUFFIX_FROM_UNIQUE_MARKER_V1");
+}
+
+static void VerifyPatchTransformation(ArchivedSql operation, NormalizedPatch transformed)
+{
+    var normalizedSource = NormalizeNewlines(operation.Sql).Trim();
+    if (!string.Equals(normalizedSource, transformed.SourceSql, StringComparison.Ordinal) ||
+        transformed.FragmentStart < 0 || transformed.FragmentStart > transformed.SourceSql.Length ||
+        transformed.FragmentStart + transformed.Sql.Length != transformed.SourceSql.Length ||
+        !string.Equals(transformed.SourceSql[transformed.FragmentStart..], transformed.Sql, StringComparison.Ordinal))
+        throw new InvalidOperationException(
+            $"Archived patch transformation boundary is invalid: {operation.MigrationId}:{operation.OperationIndex}.");
+    if (transformed.Transformation == "EXACT_SUFFIX_FROM_UNIQUE_MARKER_V1" &&
+        (Regex.Matches(transformed.SourceSql,
+             @"(?<![A-Za-z0-9_])" + Regex.Escape(transformed.SourceMarker) + @"(?![A-Za-z0-9_])",
+             RegexOptions.CultureInvariant).Count != 1 ||
+         !transformed.Sql.StartsWith(transformed.SourceMarker, StringComparison.Ordinal)))
+        throw new InvalidOperationException(
+            $"Archived patch transformation marker is invalid: {operation.MigrationId}:{operation.OperationIndex}.");
 }
 
 static void RefusePredecessorDependentPatchSql(string sql)
@@ -763,7 +1120,10 @@ static string RenderHelper(IReadOnlyCollection<SqlDefinition> programmable, IEnu
     foreach (var trigger in triggers.OrderBy(item => item.Name, StringComparer.Ordinal))
         AppendSql(builder, trigger.Sql, $"TRIGGER {trigger.Name} from {trigger.MigrationId}:{trigger.OperationIndex} ({trigger.Derivation})");
     foreach (var patch in patches)
-        AppendSql(builder, patch.Sql, $"POST-DEFINITION PATCH {string.Join(',', patch.TargetNames)} from {patch.MigrationId}:{patch.OperationIndex}");
+        AppendSql(builder, patch.Sql,
+            $"POST-DEFINITION PATCH {string.Join(',', patch.TargetNames)} from {patch.MigrationId}:{patch.OperationIndex}; " +
+            $"transform={patch.Transformation}; marker={patch.SourceMarker}; source={Sha256(patch.SourceSql)}; " +
+            $"fragment={patch.FragmentStart}:{patch.Sql.Length}:{Sha256(patch.Sql)}");
     foreach (var definition in programmable.Where(item => item.Derivation != "FUNCTION"))
         AppendSql(builder, definition.Sql, $"{definition.Derivation} {definition.Name} from {definition.MigrationId}:{definition.OperationIndex}");
     builder.AppendLine("    }"); builder.AppendLine("}");
@@ -843,6 +1203,10 @@ internal sealed record MigrationType(Type Type, string? Id);
 internal sealed record ArchivedMigrationOperations(string Id, IReadOnlyList<MigrationOperation> Operations);
 internal sealed record ArchivedSql(string MigrationId, int OperationIndex, string Sql)
 {
+    public string SourceSql { get; init; } = Sql;
+    public int FragmentStart { get; init; }
+    public string SourceMarker { get; init; } = "FULL_OPERATION";
+    public string Transformation { get; init; } = "IDENTITY_FULL_SQL_OPERATION";
     public string[] TargetNames { get; init; } = Array.Empty<string>();
 }
 internal sealed record SqlDefinition(string Name, string MigrationId, int OperationIndex, string Sql, string Derivation)
@@ -854,7 +1218,16 @@ internal sealed record ProgrammableObjectDisposition(
     string Name, string Kind, string MigrationId, int OperationIndex, string Disposition);
 internal sealed record CheckConstraintDefinition(
     string Table, string Name, string Sql, string MigrationId, int OperationIndex, string Derivation);
-internal sealed record RawCheckConstraintEvent(string Table, string Name, string? Sql);
+internal sealed record RawCheckConstraintEvent(string Table, string Name, string? Sql, string Derivation);
+internal sealed record DynamicCheckPatch(string Table, string Name, string Before, string After);
+internal sealed record NormalizedPatch(
+    string SourceSql, string Sql, int FragmentStart, string SourceMarker, string Transformation);
+internal sealed record CheckConstraintLifecycleEvent(
+    int Sequence, string Action, string Table, string Name, string? Sql, string MigrationId, int OperationIndex,
+    string Derivation, string OperationSha256);
+internal sealed record CheckConstraintLifecycleAudit(
+    IReadOnlyDictionary<string, CheckConstraintDefinition> Active,
+    IReadOnlyList<CheckConstraintLifecycleEvent> Events);
 
 internal sealed class CheckConstraintLifecycleVisitor : TSqlFragmentVisitor
 {
@@ -862,16 +1235,28 @@ internal sealed class CheckConstraintLifecycleVisitor : TSqlFragmentVisitor
     public CheckConstraintLifecycleVisitor(string source) => _source = source;
     public List<RawCheckConstraintEvent> Events { get; } = new();
 
+    public override void ExplicitVisit(CreateTableStatement node)
+    {
+        var table = node.SchemaObjectName.BaseIdentifier?.Value;
+        if (string.IsNullOrEmpty(table)) return;
+        AddChecks(table, node.Definition.TableConstraints, "RAW_SQL_CREATE_TABLE");
+    }
+
     public override void ExplicitVisit(AlterTableAddTableElementStatement node)
     {
         var table = node.SchemaObjectName.BaseIdentifier?.Value;
         if (string.IsNullOrEmpty(table)) return;
-        foreach (var check in node.Definition.TableConstraints.OfType<Microsoft.SqlServer.TransactSql.ScriptDom.CheckConstraintDefinition>())
+        AddChecks(table, node.Definition.TableConstraints, "RAW_SQL_FINAL_STATE");
+    }
+
+    private void AddChecks(string table, IEnumerable<ConstraintDefinition> constraints, string derivation)
+    {
+        foreach (var check in constraints.OfType<Microsoft.SqlServer.TransactSql.ScriptDom.CheckConstraintDefinition>())
         {
             var name = check.ConstraintIdentifier?.Value;
             if (string.IsNullOrEmpty(name) || !name.StartsWith("CK_", StringComparison.Ordinal)) continue;
             var condition = _source.Substring(check.CheckCondition.StartOffset, check.CheckCondition.FragmentLength);
-            Events.Add(new RawCheckConstraintEvent(table, name, condition.Trim()));
+            Events.Add(new RawCheckConstraintEvent(table, name, condition.Trim(), derivation));
         }
     }
 
@@ -883,7 +1268,7 @@ internal sealed class CheckConstraintLifecycleVisitor : TSqlFragmentVisitor
         {
             var name = element.Name?.Value;
             if (!string.IsNullOrEmpty(name) && name.StartsWith("CK_", StringComparison.Ordinal))
-                Events.Add(new RawCheckConstraintEvent(table, name, null));
+                Events.Add(new RawCheckConstraintEvent(table, name, null, "RAW_SQL_DROP"));
         }
     }
 }

@@ -53,6 +53,11 @@ if ($archiveIds.Count -ne 596 -or @($archiveIds | Sort-Object -Unique).Count -ne
     $inspectorIds.Count -ne 596 -or ($archiveIds -join "`n") -cne ($inspectorIds -join "`n")) {
     throw 'The archived source filenames and executable inspector identities are not the exact same 596-ID set.'
 }
+$lifecycleMutationOutput = @(& dotnet run --project $inspectorProject --no-build -- --self-test-lifecycle 2>&1)
+if ($LASTEXITCODE -ne 0 -or
+    @($lifecycleMutationOutput | Where-Object { $_ -cmatch '^PASS: ' }).Count -ne 3) {
+    throw "Archived lifecycle/provenance mutation tests failed:`n$($lifecycleMutationOutput -join "`n")"
+}
 $d3ArchiveDirectory = Join-Path $archiveDirectory 'D3BaselineArchive'
 $expectedD3Hashes = [ordered]@{
     '20260913162402_DisposableDevelopmentCurrentModelBaseline.cs'='58CB4CD0EE9E140041CFDC4CD231BD65CD89F0F15B7316B907F01420C15067D6'
@@ -142,6 +147,8 @@ if ($governanceManifest.schema -cne 'RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V2' -o
     [int]$governanceManifest.baselineTableCount -ne 1629 -or
     [int]$governanceManifest.archivedCheckConstraintCount -ne 675 -or
     [int]$governanceManifest.baselineCheckConstraintCount -ne 835 -or
+    [int]$governanceManifest.archivedCheckConstraintLifecycleEventCount -ne 870 -or
+    @($governanceManifest.checkConstraintLifecycle).Count -ne 870 -or
     @($governanceManifest.finalArchivedCheckConstraints).Count -ne 675 -or
     @($governanceManifest.finalArchivedCheckConstraints | ForEach-Object { "$($_.Table)|$($_.Name)" } | Sort-Object -Unique).Count -ne 675 -or
     [int]$governanceManifest.staticallyValidatedColumnReferenceCount -ne 16212) {
@@ -164,6 +171,16 @@ if ([regex]::Matches($archivedPettyText,
     [regex]::Matches($governanceText,
         'CREATE OR ALTER FUNCTION dbo\.InventoryAdjustmentExpectedUnitCost').Count -ne 1) {
     throw 'The empty-schema governance helper retained mixed predecessor DDL/backfill or duplicated its final valuation function.'
+}
+$lifecycleEvents = @($governanceManifest.checkConstraintLifecycle)
+if ((@($lifecycleEvents | ForEach-Object { [int]$_.Sequence }) -join ',') -cne ((0..869) -join ',') -or
+    @($lifecycleEvents | Where-Object {
+        $_.Action -cnotin @('ADD','DROP','PATCH') -or
+        [string]$_.Table -cnotmatch '^[A-Za-z0-9_]+$' -or
+        [string]$_.Name -cnotmatch '^CK_[A-Za-z0-9_]+$' -or
+        [string]$_.OperationSha256 -cnotmatch '^[0-9A-F]{64}$'
+    }).Count -ne 0) {
+    throw 'Archived check lifecycle event order, identity, action, or source-operation binding changed.'
 }
 if ([regex]::Matches($archivedCheckModelText,'(?m)^\s*Apply\(modelBuilder, "').Count -ne 675 -or
     $archivedCheckModelText -cnotmatch 'CK_ProcurementExceptionalSourcingControls_Lifecycle' -or
@@ -188,6 +205,37 @@ if ([regex]::Matches($governanceText,'(?im)^\s*CREATE OR ALTER FUNCTION\s+').Cou
     @($governanceManifest.programmableObjects).Count -ne 6 -or
     @($governanceManifest.postDefinitionPatches).Count -ne 108) {
     throw 'Archived raw-SQL governance audit did not retain the five functions, one view, and 108 final trigger patches.'
+}
+$patchProvenance = @($governanceManifest.postDefinitionPatches)
+$mixedPatchProvenance = @($patchProvenance | Where-Object transformation -ceq 'EXACT_SUFFIX_FROM_UNIQUE_MARKER_V1')
+$identityPatchProvenance = @($patchProvenance | Where-Object transformation -ceq 'IDENTITY_FULL_SQL_OPERATION')
+if ($mixedPatchProvenance.Count -ne 4 -or $identityPatchProvenance.Count -ne 104 -or
+    @($patchProvenance | Where-Object {
+        [string]$_.sourceOperationSha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        [string]$_.retainedFragmentSha256 -cnotmatch '^[0-9A-F]{64}$' -or
+        $_.retainedFragmentSha256 -cne $_.sqlSha256 -or
+        [int]$_.sourceNormalizedLength -le 0 -or [int]$_.retainedFragmentLength -le 0 -or
+        [int]$_.retainedFragmentStart -lt 0 -or
+        [int]$_.retainedFragmentStart + [int]$_.retainedFragmentLength -ne [int]$_.sourceNormalizedLength
+    }).Count -ne 0 -or
+    @($identityPatchProvenance | Where-Object {
+        [int]$_.retainedFragmentStart -ne 0 -or $_.sourceMarker -cne 'FULL_OPERATION' -or
+        $_.sourceOperationSha256 -cne $_.retainedFragmentSha256
+    }).Count -ne 0) {
+    throw 'Post-definition patch full-source/fragment provenance is incomplete or ambiguous.'
+}
+$expectedMixedPatchSources = [ordered]@{
+    '20260907033000_AlignPettyPurchaseQuotationLifecycle'='E3566BFDC587FE9C1F8F8C6504F7D66707A4DF6D56CC9409720AE54EB625E42F'
+    '20260911210000_PhysicalCountReviewDecisions'='D3872BB4125FB2F23A873A5D127DCA9F39C3DDAB6529D402BE9866D641ADA727'
+    '20260912003000_WarehouseDefaultLocations'='9FF54D977BCE5AB2F3F7847E60294EF4FCDC88606998F61BAFEC5F6DF655019B'
+    '20260912013000_AlignStockAdjustmentLocationValuation'='A51CD64C67710435EC1845947800DA9E6FEEF34A1855FBCFA6FE7E353CD9D6DA'
+}
+foreach ($entry in $expectedMixedPatchSources.GetEnumerator()) {
+    $match = @($mixedPatchProvenance | Where-Object MigrationId -ceq $entry.Key)
+    if ($match.Count -ne 1 -or $match[0].sourceOperationSha256 -cne $entry.Value -or
+        $match[0].sourceMarker -cnotmatch '^DECLARE @[A-Za-z]+$') {
+        throw "Mixed patch full-source provenance changed: $($entry.Key)."
+    }
 }
 $expectedProgrammableNames = @(
     'InventoryAdjustmentExpectedLineValue','InventoryAdjustmentExpectedUnitCost',
@@ -316,8 +364,9 @@ Write-Host "PASS: exactly one compiled EF migration ($baselineId)"
 Write-Host 'PASS: complete 596-migration source chain retained as an uncompiled recoverable archive'
 Write-Host 'PASS: exact reviewed D3 migration/designer/snapshot hashes are preserved separately from the merged baseline'
 Write-Host 'PASS: zero-to-current Up has no predecessor-dependent drops/updates'
+Write-Host 'PASS: 870 ordered check lifecycle events fail closed on malformed, removed, duplicate, or reordered authority'
 Write-Host 'PASS: 675 archived-final checks are declarative in the 835-check current model with zero missing/drifted definitions'
-Write-Host 'PASS: mixed trigger patches exclude predecessor constraint, backfill, and column DDL while retaining exact patch order'
+Write-Host 'PASS: mixed trigger patches bind full source, retained fragment, exact marker and transformation boundary provenance'
 Write-Host 'PASS: 386 current-model, 92 active non-model, and 15 distinct C5-C8 triggers are preserved'
 Write-Host 'PASS: archived governance audit retains the final five functions, one view, and chronological trigger patches'
 Write-Host 'PASS: trigger targets and 16,212 unambiguous inserted/deleted column references match the baseline schema'
