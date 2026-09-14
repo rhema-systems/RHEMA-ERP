@@ -2819,3 +2819,18 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
 - Operator disposition: future capture must create the log before starting the child and use a parent-owned
   `ProcessStartInfo` wrapper with argument-list binding and concurrent redirected output drains. A pipeline or
   `Tee-Object` must not wrap the one authorized invocation. No operational retry is authorized.
+
+### Attempt 09 Sol High isolated-context identity correction
+
+- Implementation `95fcbbf628e02b55b16913335553499f6f268d7b`, tree
+  `e4ab0258e2c63c43755581df20fcd8861c35b9a6`, replaces mutable live connection-string equality with identities
+  derived only from immutable EF relational options. Parent and child contexts and connections must be distinct.
+- SQL Server matching removes password material and binds provider, normalized server, exact catalog,
+  integrated/SQL/connection-string token auth mode and user/principal, encryption/trust, application intent,
+  failover/multisubnet and remaining non-secret builder material. Unbound raw tokens and mutable configured
+  `DbConnection` identities fail closed. No secret or raw connection string is included in errors or logs.
+- Offline regression simulates an opened parent's SqlClient password redaction and proves the same fresh child still
+  passes. Server, catalog, auth/user/principal, encryption, trust, read-intent, multisubnet, failover and SQLite target
+  drift all refuse. Provisioning passes 19/19, production seed order passes 1/1, and DI/Payroll passes 7/7.
+- No database, configured connection environment, external evidence, or backup was accessed. A reset remains
+  unauthorized pending clean-tree gates and independent Sol High approval.

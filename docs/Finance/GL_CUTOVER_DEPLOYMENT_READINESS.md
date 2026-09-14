@@ -638,3 +638,20 @@ atomically creates the absent log before `Process.Start`, supplies arguments via
 uses `UseShellExecute=false`, redirects and concurrently drains both output streams, and awaits the exact child exit.
 Do not put `Tee-Object` or another fallible pipeline stage around the one authorized harness invocation. No database,
 process connection variable, preserved evidence package, or backup was accessed by this correction.
+
+Sol High identity-boundary correction `95fcbbf628e02b55b16913335553499f6f268d7b` (tree
+`e4ab0258e2c63c43755581df20fcd8861c35b9a6`) removes comparison of mutable live connection strings. The child-scope
+boundary now derives both identities only from immutable EF relational options, requires distinct contexts and
+connections, and compares exact provider plus canonical non-secret connection material. SQL Server identity binds
+normalized data source, exact database, integrated/SQL/connection-string token authentication mode and principal,
+encryption, trust, application intent, failover, multisubnet and every other supported non-secret builder option;
+password material is removed before identity construction and is never logged. A raw token or configured mutable
+`DbConnection` without an immutable, non-secret principal identity refuses isolation. SQLite retains exact configured
+target/options matching for relational offline tests.
+
+The provider-realistic offline regression simulates SqlClient's post-open password redaction by changing only the
+parent live connection while retaining its immutable configured options; the fresh child still matches. Different
+server, database, integrated/SQL user, Azure managed-identity principal, encryption, trust, read intent, multisubnet,
+or failover settings refuse. Provisioning tests pass 19/19; the full production seed-order test passes 1/1 and the
+seed-DI/Payroll slice passes 7/7. No database, configured environment, preserved evidence, or backup was accessed.
+Runtime remains prohibited pending independent Sol High approval and separate authorization.
