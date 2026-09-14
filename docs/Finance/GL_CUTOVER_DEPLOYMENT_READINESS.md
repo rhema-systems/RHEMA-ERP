@@ -590,3 +590,51 @@ pretracked added/scalar-modified/navigation/FK state. Ten tests pass. A genuine 
 race gate is also present; it was skipped because the explicit `RHEMA_TEST_SQLSERVER` opt-in was absent, so no
 connection string was read and no database was accessed. Independent Sol High approval and new operational
 authorization remain required before another reset.
+
+### Disposable reset attempt 09 and seed-order tracker isolation
+
+The separately authorized attempt 09 executed exact approved commit
+`4a6795bfe2bd22f4ba708a6cf3c8497923077aed`, tree
+`4f5e257af8c5fb67ae2bc70b806464f78fa09606`, exactly once. The operator's `Tee-Object` wrapper failed after
+starting its child process; the already-running harness was monitored to its terminal state and was not reinvoked.
+It completed through durable phase `MIGRATIONS_APPLIED`, with the exact single baseline history row
+`20260913162402_DisposableDevelopmentCurrentModelBaseline`, then stopped fail-closed during seed pass 1 at
+`SEED_AND_INVARIANTS` with `FINANCE_ACCOUNT_PROVISIONING_TRACKER_NOT_RETRY_SAFE`. Source fingerprint was
+`1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`; final migration count was one, latest was the
+exact baseline, and orphan count was zero. C6/C7/C8 remained false. The terminal DisposableReset package validator
+passed and wrote its manifest. No automatic retry, restore, drop, cleanup, or feature transition followed.
+
+Attempt-owned recovery media remains preserved outside the repository as
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_0482dc7537504e69ab772fc98feedb83.bak`: 90,038,272 bytes, media ID
+`0482dc7537504e69ab772fc98feedb83`, verified/current SHA-256
+`34E436FFDEBB3296844ADF18C63F95A14B8DC939010221E9DFCED83DD2C05D64`, and bound path SHA-256
+`5A5B53F4EFFDAC5DC2ECD4B56816B97D93896080DDB024C0957E42752B757499`. The current disposable database remains
+one-baseline and partially seeded; it is eligible only for a fresh separately reviewed and authorized reset that
+repeats every fingerprint, clean-tree, identity, and attempt-owned-backup control.
+
+The root cause was the real `DatabaseSeedingService` pass order: `FinanceDataSeeder` leaves a large, entirely
+unchanged materialized graph in its scoped `ApplicationDbContext` before Procurement supplier onboarding invokes
+Finance provisioning. That graph is legitimate read state, not caller-pending work, but the prior service-owned retry
+guard correctly refused it because retry restoration could not safely reconstruct navigation fixup.
+
+Correction `c76945b830477262a2bfd6a0d5b6002c510295dd` (tree
+`52213fdbd45689e4e156ecd9c84ffa0579b1b86d`) isolates service-owned provisioning in a child DI scope with a distinct
+`ApplicationDbContext` bound to the exact same provider and connection identity. The parent scoped current-user
+service is retained, so tenant/user authority cannot drift. Parent pending entity, temporary-key, scalar, FK, or
+relationship state is rejected before database work, while an arbitrary unchanged/materialized parent graph remains
+untouched. The isolated retry unit may clear only its own tracker after a failed transaction. Existing EF or ambient
+caller transactions still use the original context, acquire the same Finance locks, and remain caller-committed.
+Procurement defers its independent tenant mutation until the three Finance provisioning calls finish, without adding
+an independent save/commit boundary.
+
+The actual Finance-then-Procurement seed order passes twice in one long-lived relational context while preserving
+more than 50 unchanged tracked entries and materialized relationships; it converges to exactly three provisioned
+accounts, two structures, six dimensions, six account segment values, and nine book mappings. Provisioning retry and
+transaction tests pass 14/14, including a post-write transient retry and pending-relationship refusal; seed dependency
+and Payroll provisioning tests pass 7/7. Data and API Release builds pass with zero errors.
+
+For the next separately authorized run, operator output must be captured by a parent-owned process wrapper that
+atomically creates the absent log before `Process.Start`, supplies arguments via `ProcessStartInfo.ArgumentList`,
+uses `UseShellExecute=false`, redirects and concurrently drains both output streams, and awaits the exact child exit.
+Do not put `Tee-Object` or another fallible pipeline stage around the one authorized harness invocation. No database,
+process connection variable, preserved evidence package, or backup was accessed by this correction.

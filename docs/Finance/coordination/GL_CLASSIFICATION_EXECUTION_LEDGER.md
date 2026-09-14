@@ -2787,3 +2787,35 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   skipped because its explicit `RHEMA_TEST_SQLSERVER` opt-in is absent; no connection was opened.
 - Disposition remains review-only: no reset retry is authorized until clean-tree gates and independent Sol High
   approval complete, followed by a new explicit operational authorization.
+
+### Disposable reset attempt 09 / seed-order tracker-isolation handoff
+
+- Operational base: exact approved `4a6795bfe2bd22f4ba708a6cf3c8497923077aed`, tree
+  `4f5e257af8c5fb67ae2bc70b806464f78fa09606`; executed exactly once. An operator `Tee-Object` wrapper failed only
+  after spawning the harness child; the original child was monitored and never reinvoked.
+- Terminal outcome: `FAILED_NO_AUTOMATIC_RETRY`; durable phase `MIGRATIONS_APPLIED`; failed operation
+  `SEED_AND_INVARIANTS`. Source fingerprint
+  `1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`; final history is the exact one-row baseline
+  with zero orphans. C6/C7/C8 remained false. Package validation passed and the manifest was written; seed,
+  invariant, and DBCC completion were not claimed.
+- Preserved recovery media: `RhemaERP_DISPOSABLE_RESET_COPYONLY_0482dc7537504e69ab772fc98feedb83.bak`, media
+  `0482dc7537504e69ab772fc98feedb83`, 90,038,272 bytes, verified/current SHA-256
+  `34E436FFDEBB3296844ADF18C63F95A14B8DC939010221E9DFCED83DD2C05D64`, path SHA-256
+  `5A5B53F4EFFDAC5DC2ECD4B56816B97D93896080DDB024C0957E42752B757499`. No retry, restore, cleanup, drop, or flag
+  change followed.
+- Root cause: the real seed order leaves a substantial unchanged/materialized Finance graph in the long-lived parent
+  context. The prior direct retry guard refused that graph because it could not safely snapshot navigation/fixup
+  metadata, even though the caller had no pending work.
+- Candidate correction: `c76945b830477262a2bfd6a0d5b6002c510295dd`, tree
+  `52213fdbd45689e4e156ecd9c84ffa0579b1b86d`. Service-owned work runs in an exact-provider/connection child DI
+  scope, preserving the parent `ICurrentUserService`; only the isolated retry tracker may be cleared. Any parent
+  Added/Modified/Deleted, temporary-key, FK, or relationship state refuses before I/O. Unchanged materialized parent
+  graphs are preserved. Existing EF/ambient caller transactions retain original-context transaction ownership and
+  Finance locking. Procurement defers its independent tenant mutation until Finance provisioning completes.
+- Offline results: actual FinanceDataSeeder then Procurement supplier onboarding twice passes 1/1 with the unchanged
+  graph preserved and exact account/manifest convergence; transaction/retry tests pass 14/14; seed-DI plus Payroll
+  pass 7/7; Data/API Release builds pass with zero errors. Reset/FinalClone clean-tree gates remain required after the
+  docs commit.
+- Operator disposition: future capture must create the log before starting the child and use a parent-owned
+  `ProcessStartInfo` wrapper with argument-list binding and concurrent redirected output drains. A pipeline or
+  `Tee-Object` must not wrap the one authorized invocation. No operational retry is authorized.
