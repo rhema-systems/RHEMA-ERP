@@ -1,14 +1,29 @@
 # Finance multi-book GL cutover deployment readiness
 
-Status: **latest-master semantic integration candidate — independent review required; deployment and feature
-activation are not authorized**
+Status: **attempt-13 zero-to-current lifecycle correction — independent review required; reset retry, deployment,
+and feature activation are not authorized**
 
-Current repository candidate: the reviewed cutover head `eeaf2c71abc801a5bf661ff7e817e847c624d2c4`
-has been semantically reconciled with exact latest-master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`.
-The merged model retains one true zero-to-current baseline, 596 archived migration identities, 493 active trigger
-definitions, five active functions, and one active view. C6/C7/C8 remain false. This repository-only integration
-did not access a database or any preserved evidence/backup. Independent Sol High review of the resulting merge
-commit is required before it can replace the reviewed attempt-11 execution commit or authorize any new operation.
+Current correction implementation: `6995b944aa27e68094b4e35f92afa52d8242d2cc`, tree
+`b66d0dfe4dc2e95ab576b4e725e4e6ca7b3891e7`, atop the exact attempt-13 operational base
+`22789f39e550f24bd1ed6197821de4ebc0541bdd`. The merged model retains one true zero-to-current baseline, 596
+archived migration identities, 493 active trigger definitions, five active functions, one active view, and 675
+exact archived-final check constraints within 835 current-model checks. C6/C7/C8 remain false. This correction did
+not access a database or alter preserved evidence/backups. Independent Sol High review is required before any new
+operation.
+
+Attempt 13 executed its separately authorized exact operational base once. The bounded 600-second/no-retry CLI
+profile worked, but zero-to-current migration stopped fail-closed on SQL Server error 3728 while a mixed historical
+trigger-patch operation attempted to drop absent predecessor constraint
+`CK_ProcurementExceptionalSourcingControls_Lifecycle`. Durable phase is `DATABASE_RECREATED`, failed operation is
+`APPLY_MIGRATIONS`, terminal history is empty, and C6/C7/C8 remained false. No retry, restore, cleanup, or activation
+followed. Attempt-owned backup/evidence remain preserved externally.
+
+The correction materializes the exhaustive archived final check-constraint lifecycle declaratively in the current
+EF model and emits only the exact trigger-definition fragment from each selected mixed historical operation. The
+675/675 archived-final check name/definition set is present with zero missing and zero drift; generated SQL contains
+no predecessor-dependent top-level constraint drop, warehouse backfill, redundant Stock Adjustment column alter,
+or Physical Count constraint downgrade. Offline zero-to-current SQL passes TSql160 grammar and retains exactly 493
+triggers, five functions, one view, and 108 ordered patches.
 
 D3 historical status: authorized attempt 11 executed exact Sol-High-approved commit
 `008e29ee0427620f62a21d89b24a98d2af43ddc4`, tree

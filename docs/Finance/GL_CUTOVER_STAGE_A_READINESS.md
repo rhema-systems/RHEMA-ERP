@@ -1,6 +1,6 @@
 # GL cutover Stage A readiness and producer inventory
 
-Status: Stage A.1 and attempt-11 runtime results remain historical. The reviewed cutover is semantically integrated
+Status: Stage A.1 and prior runtime results remain historical. The reviewed cutover is semantically integrated
 with exact latest-master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`; merge commit
 `93a1e5a4335f6a1782c3f40de26a7ac434ab42d7` has exact parents latest master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`
 and reviewed cutover `eeaf2c71abc801a5bf661ff7e817e847c624d2c4`. Independent GPT-5.6 Sol High review APPROVED the final clean
@@ -16,10 +16,21 @@ Offline correction `917ddedb419077b3fb9ef585d2d621c1932cdc69`, tree
 `6be5bc97482f9c2b122d320503bd8d09cd0d20dd`, gives only `apply-migrations` and `seed-db` a bounded 600-second SQL
 command profile with provider execution-strategy retries disabled. Each CLI path explicitly applies and reads back
 that finite timeout immediately before `MigrateAsync`; the normal web profile remains 30 seconds with five retries.
-The 5,736,330-byte generated zero-to-current SQL still parses, contains one migration transaction, and preserves the
-exact 493-trigger/five-function/one-view authority. This correction awaits independent Sol High review. Activation
-and any operational retry remain `NO-GO`; another reset requires fresh explicit authorization after review, followed
-by independent merged-model and smoke verification before any separately gated sequential feature activation.
+The separately authorized attempt 13 executed exact approved timeout-correction base
+`22789f39e550f24bd1ed6197821de4ebc0541bdd` once. It stopped fail-closed at durable `DATABASE_RECREATED` /
+`APPLY_MIGRATIONS` when mixed historical patch SQL attempted to drop nonexistent predecessor constraint
+`CK_ProcurementExceptionalSourcingControls_Lifecycle` (SQL Server 3728). Target migration history remained empty;
+C6/C7/C8 remained false; no retry, restore, cleanup, or activation followed.
+
+Offline lifecycle correction `6995b944aa27e68094b4e35f92afa52d8242d2cc`, tree
+`b66d0dfe4dc2e95ab576b4e725e4e6ca7b3891e7`, derives the exact 675 active final archived check constraints and
+declares them in the current model. All 675 are present within 835 current-model checks with zero definition drift.
+Only isolated final trigger-patch fragments are emitted from mixed operations, eliminating predecessor constraint
+drops, warehouse backfill, redundant Stock Adjustment column changes, and Physical Count constraint downgrade.
+Generated zero-to-current SQL passes TSql160 grammar and preserves the exact 493-trigger/five-function/one-view/108-
+patch authority. This correction awaits independent Sol High review. Activation and any operational retry remain
+`NO-GO`; another reset requires fresh explicit authorization after review, followed by independent merged-model and
+smoke verification before any separately gated sequential feature activation.
 
 The merged baseline/governance audit is exact: one compiled baseline
 `20260913162402_DisposableDevelopmentCurrentModelBaseline`, 596 byte-preserved archived migration identities,

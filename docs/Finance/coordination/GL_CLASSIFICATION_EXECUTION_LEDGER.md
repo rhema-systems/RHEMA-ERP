@@ -12,8 +12,8 @@ operator authorization gates.
 
 | Field | Value |
 |---|---|
-| Phase | Attempt-12 migration-timeout correction review |
-| Status | Attempt 12 stopped fail-closed at `APPLY_MIGRATIONS`; correction candidate `917ddedb419077b3fb9ef585d2d621c1932cdc69`, tree `6be5bc97482f9c2b122d320503bd8d09cd0d20dd`, awaits Sol High review; reset retry, deployment, and feature activation remain `NO-GO` |
+| Phase | Attempt-13 zero-to-current lifecycle correction review |
+| Status | Attempt 13 stopped fail-closed at `APPLY_MIGRATIONS`; correction implementation `6995b944aa27e68094b4e35f92afa52d8242d2cc`, tree `b66d0dfe4dc2e95ab576b4e725e4e6ca7b3891e7`, awaits Sol High review; reset retry, deployment, and feature activation remain `NO-GO` |
 | Implementing task | `rehearsal_harness` |
 | Integration parents | latest master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`; reviewed cutover `eeaf2c71abc801a5bf661ff7e817e847c624d2c4` |
 | Branch | `codex/finance-gl-cutover-master-integration` |
@@ -23,14 +23,15 @@ operator authorization gates.
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — deleted after code-cutover completion |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Sol High approved the exact attempt-12 operational base `ed1321180177fd4f3530fa8e682eddcd3db07aab` / `4a9df246bc9028c856490de61c304d6c23453407`; the bounded CLI timeout/no-retry correction now requires independent Sol High review. Frontend production build, deployment, reset retry, and C6/C7/C8 activation remain gated |
-| Connectivity state | Attempt 12 performed only its explicitly authorized guarded backup/recreate/migration attempt. The subsequent correction used code and preserved logs read-only; it did not query a database, inspect connection environment, mutate evidence/backups, change flags, restore, retry, clean up, access a remote, or touch the primary worktree |
-| Applied-baseline state | Attempt-12 terminal evidence reports the exact local database recreated with zero target migration-history rows after the timed-out merged-baseline transaction; the merged 1,629-table / 493-trigger baseline is not yet operationally proven |
+| Review status | Sol High approved exact attempt-13 operational base `22789f39e550f24bd1ed6197821de4ebc0541bdd` / `939466a58866654ecfc359a45234a0b09ee2b5e8`; the exhaustive lifecycle correction now requires independent Sol High review. Frontend production build, deployment, reset retry, and C6/C7/C8 activation remain gated |
+| Connectivity state | Attempt 13 performed only its explicitly authorized guarded backup/recreate/migration attempt. The subsequent correction used source and preserved logs read-only; it did not query a database, inspect connection environment, mutate evidence/backups, change flags, restore, retry, clean up, access a remote, or touch the primary worktree |
+| Applied-baseline state | Attempt-13 terminal evidence reports exact local `RhemaERP` recreated with zero target migration-history rows after the failed merged-baseline transaction; the merged 1,629-table / 493-trigger / 835-check baseline is not yet operationally proven |
 
 The merged baseline now represents the latest-master model while retaining 596 exact archived migration identities,
 386 current-model plus 92 active non-model triggers, the separate 15-trigger C5-C8 set (493 unique total), 108
-chronological patches, five functions, and one view. The exact reviewed D3 snapshot blob remains in the archive and
-only the regenerated merged snapshot is compiled. C6/C7/C8 remain false.
+chronological patches, five functions, one view, and all 675 archived-final check constraints within 835
+current-model checks. The exact reviewed D3 snapshot blob remains in the archive and only the regenerated merged
+snapshot is compiled. C6/C7/C8 remain false.
 
 The semantic integration is independently approved. Merge commit
 `93a1e5a4335f6a1782c3f40de26a7ac434ab42d7` has the verified exact parents latest master
@@ -116,7 +117,7 @@ The user authorized the coordinator to:
 
 The implementing task should not be left idle between these approved phases. User intervention is reserved for the escalation gates below or an unrecoverable blocker.
 
-On 2026-09-04 the user explicitly authorized proceeding with the gated database migration/reset/reseed track and the bounded Procurement, Inventory, Sales and HR/Payroll AccountingBookCode V2 producer cutover. Disposable rehearsal databases and owner-scoped cross-module conversions are therefore in scope. Attempt-specific authorizations continued through attempt 12, which stopped fail-closed during merged-baseline migration; that authority is exhausted. The current local `RhemaERP` and every preserved recovery/evidence asset require new explicit authority for any further access or mutation. Destructive repository cleanup, risky conflict resolution, pushes and PR operations remain escalation gates.
+On 2026-09-04 the user explicitly authorized proceeding with the gated database migration/reset/reseed track and the bounded Procurement, Inventory, Sales and HR/Payroll AccountingBookCode V2 producer cutover. Disposable rehearsal databases and owner-scoped cross-module conversions are therefore in scope. Attempt-specific authorizations continued through attempt 13, which stopped fail-closed during merged-baseline migration; that authority is exhausted. The current local `RhemaERP` and every preserved recovery/evidence asset require new explicit authority for any further access or mutation. Destructive repository cleanup, risky conflict resolution, pushes and PR operations remain escalation gates.
 
 ## Phase 1A review checklist
 
@@ -3010,3 +3011,36 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   reset safety and evidence, rehearsal safety, and FinalClone evidence suites PASS. No operational retry occurred.
 - Disposition: activation and reset retry remain `NO-GO`. The candidate requires independent Sol High review, then
   any new guarded reset requires separate explicit authorization and a new evidence package.
+
+### Disposable reset attempt 13 / zero-to-current lifecycle correction handoff
+
+- Operational base: exact Sol-High-approved `22789f39e550f24bd1ed6197821de4ebc0541bdd`, tree
+  `939466a58866654ecfc359a45234a0b09ee2b5e8`; the harness was invoked exactly once with C6/C7/C8 false and the
+  reviewed finite 600-second/no-retry CLI profile.
+- Terminal outcome: `FAILED_NO_AUTOMATIC_RETRY`; durable phase `DATABASE_RECREATED`; failed operation
+  `APPLY_MIGRATIONS`. SQL Server returned error 3728 because a selected mixed historical trigger-patch operation
+  replayed `DROP CONSTRAINT CK_ProcurementExceptionalSourcingControls_Lifecycle` against the fresh current-model
+  schema where that predecessor did not exist. Terminal target migration history remained empty. Source fingerprint
+  was `0|EMPTY|0|0|0`; no retry, restore, drop, cleanup, evidence mutation, or feature activation followed.
+- Preserved recovery media: media `799da70ec78b4d0b954f76c3b41f902c`, 28,106,752 bytes; COPY_ONLY/CHECKSUM,
+  VERIFYONLY, current-material SHA-256, and bound-path SHA-256 evidence completed before the database recreate. The
+  28-entry evidence manifest and separate operator log remain external and untouched; their exact hashes remain
+  bound in the preserved operational package rather than being reconstructed from abbreviated coordinator output.
+- Root cause is systemic rather than one constraint name: the inspector retained an entire `SqlOperation` whenever
+  it contained a selected trigger definition. Four mixed operations therefore also carried predecessor-dependent
+  constraint drops/re-adds, warehouse backfill, redundant Stock Adjustment column DDL, duplicate function DDL, and
+  a Physical Count constraint sequence ending at 15 despite the current model's final range ending at 16.
+- Offline correction implementation: `6995b944aa27e68094b4e35f92afa52d8242d2cc`, tree
+  `b66d0dfe4dc2e95ab576b4e725e4e6ca7b3891e7`. The inspector now derives all 596 migrations' exact chronological
+  CreateTable/Add/Drop/raw-SQL check-constraint lifecycle and generates 675 exact active final archived constraints
+  into the current EF model. The regenerated baseline has 835 checks, contains all 675 with zero missing and zero
+  definition drift, and preserves its sole exact migration identity
+  `20260913162402_DisposableDevelopmentCurrentModelBaseline`.
+- Mixed operations emit only their isolated exact final trigger-patch fragments. The generated zero-to-current SQL
+  has no predecessor-dependent top-level constraint drop, warehouse mutation/backfill, redundant Stock Adjustment
+  column alter, duplicate final function, or Physical Count downgrade. TSql160 grammar passes with 1,502 THROW
+  statements; exact authority remains 493 triggers, five functions, one view, and 108 ordered patches. EF reports
+  one compiled baseline and no pending model changes; Data and API Release builds have zero errors. Reset evidence
+  and FinalClone evidence suites pass offline.
+- Disposition: the correction requires independent Sol High review. Reset retry, deployment, and C6/C7/C8 activation
+  remain `NO-GO`; any future operation requires a new exact authorization and fresh external evidence package.
