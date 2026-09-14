@@ -53,20 +53,24 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         var hasCallerTransaction = _db.Database.IsRelational()
             && (_db.Database.CurrentTransaction != null || System.Transactions.Transaction.Current != null);
         if (!_db.Database.IsRelational() || hasCallerTransaction)
+        {
+            await AcquireProvisioningLocksAsync(tenantId, accountCode, cancellationToken);
             return await ProvisionCoreAsync(
                 request, tenantId, accountCode, accountName, currencyCode, classificationCode,
                 provisionedAt, cancellationToken);
+        }
 
         // SQL Server's retrying execution strategy must own the complete transaction unit.
         // A caller-owned transaction takes the branch above, so this boundary never nests or
         // independently commits work that belongs to its caller.
         var strategy = _db.Database.CreateExecutionStrategy();
-        var initialTrackedState = CaptureTrackedState();
-        return await strategy.ExecuteAsync(async () =>
+        var initialTrackedState = CaptureRetryableTrackedState();
+        var provisioned = await strategy.ExecuteAsync(async () =>
         {
             try
             {
                 await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+                await AcquireProvisioningLocksAsync(tenantId, accountCode, cancellationToken);
                 var result = await ProvisionCoreAsync(
                     request, tenantId, accountCode, accountName, currencyCode, classificationCode,
                     provisionedAt, cancellationToken);
@@ -83,10 +87,28 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                 throw;
             }
         });
+        DetachAttemptTrackedEntities(initialTrackedState);
+        return provisioned;
     }
 
-    private IReadOnlyList<TrackedEntrySnapshot> CaptureTrackedState() =>
-        _db.ChangeTracker.Entries()
+    private IReadOnlyList<TrackedEntrySnapshot> CaptureRetryableTrackedState()
+    {
+        _db.ChangeTracker.DetectChanges();
+        var unsafeEntry = _db.ChangeTracker.Entries().FirstOrDefault(entry =>
+            entry.State is EntityState.Added or EntityState.Deleted
+            || entry.Properties.Any(property => property.IsTemporary
+                || (property.IsModified && property.Metadata.GetContainingForeignKeys().Any()))
+            || entry.Navigations.Any(navigation => navigation.IsLoaded || navigation.IsModified
+                || HasMaterializedRelationship(navigation.CurrentValue)));
+        if (unsafeEntry is not null)
+        {
+            throw new InvalidOperationException(
+                "FINANCE_ACCOUNT_PROVISIONING_TRACKER_NOT_RETRY_SAFE: service-owned retry requires no added, deleted, " +
+                "temporary-key, relationship-modified, or loaded-navigation state. Start a caller-owned transaction " +
+                "inside its execution strategy when provisioning must share that state.");
+        }
+
+        return _db.ChangeTracker.Entries()
             .Select(entry => new TrackedEntrySnapshot(
                 entry.Entity,
                 entry.State,
@@ -96,15 +118,56 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                     .Select(property => property.Metadata.Name)
                     .ToHashSet(StringComparer.Ordinal)))
             .ToList();
+    }
+
+    private static bool HasMaterializedRelationship(object? value) => value switch
+    {
+        null => false,
+        System.Collections.IEnumerable collection => collection.Cast<object>().Any(),
+        _ => true
+    };
+
+    private async Task AcquireProvisioningLocksAsync(
+        Guid tenantId,
+        string accountCode,
+        CancellationToken cancellationToken)
+    {
+        if (!_db.Database.IsSqlServer())
+            return;
+
+        // The tenant lock protects deterministic segment, dimension, classification and book
+        // manifests even when different account codes are provisioned concurrently. The second
+        // canonical account lock documents and protects the exact read/insert convergence key.
+        // Every caller takes them in this fixed order and both are transaction-owned.
+        var resources = BuildProvisioningLockResources(tenantId, accountCode);
+        await _db.Database.ExecuteSqlInterpolatedAsync($@"
+DECLARE @tenantResult int, @accountResult int;
+EXEC @tenantResult = sys.sp_getapplock
+    @Resource = {resources.Manifest}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000;
+IF @tenantResult < 0
+    THROW 51000, 'FINANCE_ACCOUNT_PROVISIONING_MANIFEST_LOCK_FAILED: tenant Finance manifest could not be serialized.', 1;
+EXEC @accountResult = sys.sp_getapplock
+    @Resource = {resources.Account}, @LockMode = 'Exclusive', @LockOwner = 'Transaction', @LockTimeout = 30000;
+IF @accountResult < 0
+    THROW 51000, 'FINANCE_ACCOUNT_PROVISIONING_ACCOUNT_LOCK_FAILED: canonical account identity could not be serialized.', 1;",
+            cancellationToken);
+    }
+
+    internal static (string Manifest, string Account) BuildProvisioningLockResources(
+        Guid tenantId,
+        string accountCode)
+    {
+        if (tenantId == Guid.Empty)
+            throw new ArgumentException("A tenant ID is required for Finance provisioning serialization.", nameof(tenantId));
+        var canonicalAccountCode = NormalizeRequired(accountCode, "Account code", 50).ToUpperInvariant();
+        return (
+            $"RHEMA:FIN:PROVISION:MANIFEST:{tenantId:N}",
+            $"RHEMA:FIN:PROVISION:ACCOUNT:{tenantId:N}:{canonicalAccountCode}");
+    }
 
     private void RestoreTrackedState(IReadOnlyList<TrackedEntrySnapshot> snapshots)
     {
-        var originalEntities = snapshots.Select(snapshot => snapshot.Entity)
-            .ToHashSet(ReferenceEqualityComparer.Instance);
-        foreach (var entry in _db.ChangeTracker.Entries()
-                     .Where(entry => !originalEntities.Contains(entry.Entity)).ToList())
-            entry.State = EntityState.Detached;
-
+        DetachAttemptTrackedEntities(snapshots);
         foreach (var snapshot in snapshots)
         {
             var entry = _db.Entry(snapshot.Entity);
@@ -117,6 +180,15 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                     property.IsModified = snapshot.ModifiedProperties.Contains(property.Metadata.Name);
             }
         }
+    }
+
+    private void DetachAttemptTrackedEntities(IReadOnlyList<TrackedEntrySnapshot> snapshots)
+    {
+        var originalEntities = snapshots.Select(snapshot => snapshot.Entity)
+            .ToHashSet(ReferenceEqualityComparer.Instance);
+        foreach (var entry in _db.ChangeTracker.Entries()
+                     .Where(entry => !originalEntities.Contains(entry.Entity)).ToList())
+            entry.State = EntityState.Detached;
     }
 
     private sealed record TrackedEntrySnapshot(
