@@ -340,8 +340,12 @@ public sealed class AccountingBookClassificationAuthorityTests
             .Should().Be("COST_OF_SALES");
     }
 
-    [Fact]
-    public async Task ManifestSeeder_RejectsInvalidAdministratorEnabledMappingWithoutAutoApprovalOrRewrite()
+    [Theory]
+    [InlineData("finance.admin", null)]
+    [InlineData("System (FIN-CLASSIFICATION-1.0)", "finance.admin")]
+    public async Task ManifestSeeder_RejectsInvalidAdministratorEnabledMappingWithoutAutoApprovalOrRewrite(
+        string createdBy,
+        string? updatedBy)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -349,14 +353,19 @@ public sealed class AccountingBookClassificationAuthorityTests
         {
             Id = tenantId, Code = "TDC", Name = "TDC", BaseCurrency = "GHS", Status = TenantStatus.Active
         });
-        SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        SeedAccount(db, tenantId, "7110", AccountType.Expense);
         await db.SaveChangesAsync();
         var seeder = new FinanceClassificationManifestSeeder(db, NullLogger.Instance);
         await seeder.SeedAsync(tenantId, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
         var mapping = await db.AccountAccountingBooks.Include(item => item.AccountingBook)
-            .SingleAsync(item => item.Account!.AccountCode == "1000" && item.AccountingBook!.Code == "IFRS");
+            .SingleAsync(item => item.Account!.AccountCode == "7110" && item.AccountingBook!.Code == "IFRS");
+        var broadClassification = await db.AccountClassifications.SingleAsync(item =>
+            item.AccountingBookId == mapping.AccountingBookId && item.Code == "EXPENSE");
+        broadClassification.CreatedBy = "System (FIN-CLASSIFICATION-1.0)";
+        mapping.AccountClassificationId = broadClassification.Id;
         mapping.IsEnabled = true;
-        mapping.UpdatedBy = "finance.admin";
+        mapping.CreatedBy = createdBy;
+        mapping.UpdatedBy = updatedBy;
         await db.SaveChangesAsync();
 
         var action = () => seeder.SeedAsync(tenantId, DateTime.UtcNow);
@@ -364,6 +373,10 @@ public sealed class AccountingBookClassificationAuthorityTests
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("FINANCE_CLASSIFICATION_ENABLED_MAPPING_LINEAGE_INVALID:*");
         mapping.IsEnabled.Should().BeTrue("the manifest must not silently reverse an administrator decision");
+        mapping.AccountClassificationId.Should().Be(broadClassification.Id,
+            "classification ownership must never launder an administrator-owned mapping into a system rewrite");
+        mapping.CreatedBy.Should().Be(createdBy);
+        mapping.UpdatedBy.Should().Be(updatedBy);
         mapping.AccountingBook!.IsActive.Should().BeFalse();
         mapping.AccountingBook.AllowsPosting.Should().BeFalse();
     }
@@ -423,10 +436,10 @@ public sealed class AccountingBookClassificationAuthorityTests
             var admin = SeedAccount(db, tenantId, "7110", AccountType.Expense);
             var disabled = SeedAccount(db, tenantId, "7210", AccountType.Expense);
             db.AccountAccountingBooks.AddRange(
-                new AccountAccountingBook { TenantId = tenantId, AccountId = deduction.Id, AccountingBookId = book.Id, AccountClassificationId = revenue.Id, IsEnabled = true },
-                new AccountAccountingBook { TenantId = tenantId, AccountId = cost.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = true },
-                new AccountAccountingBook { TenantId = tenantId, AccountId = admin.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = true, UpdatedBy = "finance.admin" },
-                new AccountAccountingBook { TenantId = tenantId, AccountId = disabled.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = false });
+                new AccountAccountingBook { TenantId = tenantId, AccountId = deduction.Id, AccountingBookId = book.Id, AccountClassificationId = revenue.Id, IsEnabled = true, CreatedBy = "System (FIN-CLASSIFICATION-1.0)" },
+                new AccountAccountingBook { TenantId = tenantId, AccountId = cost.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = true, CreatedBy = "System (FIN-CLASSIFICATION-1.0)" },
+                new AccountAccountingBook { TenantId = tenantId, AccountId = admin.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = true, CreatedBy = "finance.admin" },
+                new AccountAccountingBook { TenantId = tenantId, AccountId = disabled.Id, AccountingBookId = book.Id, AccountClassificationId = expense.Id, IsEnabled = false, CreatedBy = "System (FIN-CLASSIFICATION-1.0)" });
         }
         await db.SaveChangesAsync();
         var seeder = new FinanceClassificationManifestSeeder(db, NullLogger.Instance);

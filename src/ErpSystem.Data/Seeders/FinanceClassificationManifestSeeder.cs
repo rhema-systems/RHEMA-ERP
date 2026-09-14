@@ -186,10 +186,9 @@ public sealed class FinanceClassificationManifestSeeder
                 }
 
                 if (mapping.IsEnabled && !IsBookPostingReady(book)
-                    && string.Equals(mapping.CreatedBy, $"System ({ManifestVersion})", StringComparison.Ordinal)
-                    && mapping.UpdatedBy == null)
+                    && IsUntouchedManifestOwnedMapping(mapping))
                 {
-                    // Repair only this manifest's untouched row. Administrator-owned applicability
+                    // Repair only an exact recognized manifest-owned, untouched row. Administrator-owned applicability
                     // is never silently rewritten; the lineage audit below will fail closed instead.
                     mapping.IsEnabled = false;
                 }
@@ -202,6 +201,12 @@ public sealed class FinanceClassificationManifestSeeder
 
     private static bool IsBookPostingReady(AccountingBook book) =>
         !book.IsDeleted && book.IsActive && book.AllowsPosting;
+
+    private static bool IsUntouchedManifestOwnedMapping(AccountAccountingBook mapping) =>
+        mapping.UpdatedBy is null
+        && mapping.CreatedBy is "System (FIN-CLASSIFICATION-1.0)"
+            or "System (FIN-CLASSIFICATION-2.0)"
+            or "System (FIN-CLASSIFICATION-3.0)";
 
     private static void AssertEnabledMappingLineage(
         Guid tenantId,
@@ -276,7 +281,7 @@ public sealed class FinanceClassificationManifestSeeder
         IReadOnlyCollection<AccountClassification> classifications,
         string desiredCode)
     {
-        if (!mapping.IsEnabled || mapping.UpdatedBy != null) return false;
+        if (!mapping.IsEnabled || !IsUntouchedManifestOwnedMapping(mapping)) return false;
         if (mapping.AccountClassificationId == null) return true;
 
         var current = classifications.SingleOrDefault(item => item.Id == mapping.AccountClassificationId);
