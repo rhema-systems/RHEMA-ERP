@@ -1935,6 +1935,30 @@ public class EmployeesController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// Every active payroll allowance/deduction component with THIS employee's exception beside it
+    /// (round 3, lane X; decision D-3). Read-only here; a change is saved one person's row at a time
+    /// through payroll's own <c>component-exceptions/bulk</c>, which the lane's probe proved touches
+    /// only the lines it is sent. Answers 200 with the defaults and <c>hasPayrollProfile: false</c>
+    /// for someone payroll has not set up — nothing can be saved for them until it has.
+    /// </summary>
+    [HttpGet("{employeeId:guid}/payroll-component-exceptions")]
+    [Authorize(Policy = HrPermissions.CompensationReadPolicy)]
+    [ProducesResponseType(typeof(EmployeePayrollComponentsDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<EmployeePayrollComponentsDto>> GetPayrollComponentExceptions(Guid employeeId, CancellationToken cancellationToken)
+    {
+        if (employeeId == Guid.Empty) return BadRequest("Invalid employee id.");
+        try
+        {
+            return Ok(await _payrollMembership.GetPayrollComponentsAsync(employeeId, cancellationToken));
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            return ToClientError(ex);
+        }
+    }
+
     /// <summary>Scale or negotiated, and why. Negotiated closes any open grade placement.</summary>
     [HttpPut("{employeeId:guid}/pay-basis")]
     [Authorize(Policy = HrPermissions.CompensationWritePolicy)]

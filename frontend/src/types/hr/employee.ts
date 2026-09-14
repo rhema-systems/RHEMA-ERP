@@ -471,3 +471,39 @@ export interface PayrollReconciliation {
   basicPayMismatch: number;
   rows: PayrollReconciliationRow[];
 }
+
+/**
+ * One payroll component beside this employee's exception on it (round 3, lane X; D-3). Mirrors
+ * EmployeePayrollComponentRowDto. Defaults are payroll's; the exception is the per-person override.
+ */
+export interface EmployeePayrollComponentRow {
+  payrollComponentId: string;
+  code: string;
+  name: string;
+  componentType: string;
+  componentTypeName?: string;
+  defaultCalculationType: 'FixedAmount' | 'PercentageOfBasic';
+  defaultAmount: number;
+  defaultRate: number;
+  defaultTaxable: boolean;
+  currencyCode: string;
+  appliesByDefault: boolean;
+  hasException: boolean;
+  exceptionId?: string | null;
+  calculationType?: 'FixedAmount' | 'PercentageOfBasic' | null;
+  amount?: number | null;
+  rate?: number | null;
+  taxable?: boolean | null;
+  applicable?: boolean | null;
+  effectiveFrom?: string | null;
+  effectiveTo?: string | null;
+}
+
+/** Mirrors EmployeePayrollComponentsDto — HR's employee-first read over payroll's tables. */
+export interface EmployeePayrollComponents {
+  employeeId: string;
+  employeeNumber: string;
+  hasPayrollProfile: boolean;
+  payrollProfileId?: string | null;
+  rows: EmployeePayrollComponentRow[];
+}

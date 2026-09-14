@@ -42,6 +42,8 @@ public interface IPayrollMembershipService
     /// missing. It is HR's door onto payroll's window and adds nothing to payroll's controller.
     /// </remarks>
     Task<PayrollEmployeeProfileDto?> GetPayrollProfileAsync(Guid employeeId, CancellationToken cancellationToken = default);
+    /// <summary>Every active payroll component with this employee's exception beside it (round 3, lane X; D-3). HR's read door over payroll's tables.</summary>
+    Task<EmployeePayrollComponentsDto> GetPayrollComponentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// The monthly basic pay HR would quote for this person today, and where the figure came from.

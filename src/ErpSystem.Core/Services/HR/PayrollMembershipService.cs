@@ -131,6 +131,70 @@ public class PayrollMembershipService : IPayrollMembershipService
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// Round 3, lane X. Payroll's own read is component-first (one component, every employee) and
+    /// answers an EMPTY list when no component is named — which is why the Salary tab's "component
+    /// exceptions" table had never shown a row. This is the employee-first read: every ACTIVE
+    /// component, with the person's exception beside it where one exists. Payroll's tables, read
+    /// directly like the grade projection; nothing here writes.
+    /// </remarks>
+    public async Task<EmployeePayrollComponentsDto> GetPayrollComponentsAsync(Guid employeeId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var employee = await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == tenantId && !e.IsDeleted, cancellationToken)
+            ?? throw new ArgumentException($"Employee with ID '{employeeId}' not found.");
+
+        var profile = await Profiles(tenantId)
+            .FirstOrDefaultAsync(p => p.EmployeeId == employeeId, cancellationToken);
+
+        var components = await _unitOfWork.Repository<PayrollComponent>().GetQueryable().AsNoTracking()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.IsActive)
+            .OrderBy(c => c.ComponentType).ThenBy(c => c.Code)
+            .ToListAsync(cancellationToken);
+
+        var exceptions = profile == null
+            ? new List<PayrollEmployeeComponent>()
+            : await _unitOfWork.Repository<PayrollEmployeeComponent>().GetQueryable().AsNoTracking()
+                .Where(x => x.TenantId == tenantId && !x.IsDeleted && x.EmployeeProfileId == profile.Id)
+                .ToListAsync(cancellationToken);
+        var byComponent = exceptions.GroupBy(x => x.PayrollComponentId).ToDictionary(g => g.Key, g => g.First());
+
+        return new EmployeePayrollComponentsDto
+        {
+            EmployeeId = employee.Id,
+            EmployeeNumber = employee.EmployeeNumber,
+            HasPayrollProfile = profile != null,
+            PayrollProfileId = profile?.Id,
+            Rows = components.Select(c =>
+            {
+                byComponent.TryGetValue(c.Id, out var x);
+                return new EmployeePayrollComponentRowDto
+                {
+                    PayrollComponentId = c.Id,
+                    Code = c.Code,
+                    Name = c.Name,
+                    ComponentType = c.ComponentType,
+                    DefaultCalculationType = c.CalculationType,
+                    DefaultAmount = c.Amount,
+                    DefaultRate = c.Rate,
+                    DefaultTaxable = c.Taxable,
+                    CurrencyCode = c.CurrencyCode,
+                    AppliesByDefault = c.AppliesByDefault,
+                    ExceptionId = x?.Id,
+                    CalculationType = x?.CalculationTypeOverride,
+                    Amount = x?.AmountOverride,
+                    Rate = x?.RateOverride,
+                    Taxable = x?.TaxableOverride,
+                    Applicable = x?.Applicable,
+                    EffectiveFrom = x?.EffectiveFrom,
+                    EffectiveTo = x?.EffectiveTo,
+                };
+            }).ToList(),
+        };
+    }
+
+    /// <inheritdoc />
     public async Task<PayrollBasicWriteResult> UpdateMonthlyBasicAsync(
         Guid employeeId, decimal monthlyBasic, string? currencyCode, DateTime effectiveFrom, CancellationToken cancellationToken = default)
     {

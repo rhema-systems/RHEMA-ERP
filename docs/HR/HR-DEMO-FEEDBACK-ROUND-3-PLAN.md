@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) P2 (72 ×2, `hr-employee-docs/run-p2.mjs`; lane 3a 47, D2 121, round-2 lane A 88, P1 17 after) and P3 (19 ×2, `hr-probation/run-p3.mjs`; D1 79, lane 3d 35 after) BUILT 2026-09-13. Two slices remain; X next (probe first).** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) P2 (72 ×2, `hr-employee-docs/run-p2.mjs`; lane 3a 47, D2 121, round-2 lane A 88, P1 17 after) P3 (19 ×2, `hr-probation/run-p3.mjs`; D1 79, lane 3d 35 after) BUILT 2026-09-13, and X (42 ×2 + probe 11, `hr-payroll-membership/run-x.mjs`; E1 73, membership 86, S 65 after) BUILT 2026-09-14. One slice remains; V next.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -170,7 +170,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 15 | **J2** — derived intrinsic value, proposed grade, the matcher · ✅ **DONE 2026-09-13 · 67 ×2** | `20260913214947_AddJobDescriptionProposedGrade` | `hr-jobarch/run-j2.mjs` | |
 | 16 | **P2** — the disability catalogue · ✅ **DONE 2026-09-13 · 72 ×2** | `20260913224857_AddDisabilityTypes` | `hr-employee-docs/run-p2.mjs` | |
 | 17 | **P3** — drop the contract leave columns · ✅ **DONE 2026-09-13 · 19 ×2** | `20260913234443_DropContractLeaveColumns` | `hr-probation/run-p3.mjs` | |
-| 18 | **X** — allowances and deductions (probe → editor or read-only) | none | `hr-payroll-membership/run-x.mjs` | the probe decides; can move earlier |
+| 18 | **X** — allowances/deductions on the Salary tab (probe first) · ✅ **DONE 2026-09-14 · 42 ×2 + probe 11** · editable branch | none | `hr-payroll-membership/probe-component-exceptions.mjs`, `run-x.mjs` | |
 | 19 | **V** — talent segment ownership | `AddTalentSegmentOwnership` | `hr-recruitment/run-v.mjs` | |
 
 **Lane Q log (2026-09-11).** `WithSummaryNavigations()` now includes all ten navigations the DTO
@@ -621,6 +621,36 @@ authority on this tenant" — lane 3b's policy, older than this round; the slice
 directly) and slice 2's three misses are master #38's 403-text masking — none touch contracts.
 Payload-only fixtures elsewhere (hr-awards, hr-separation, hr-portal, demo-smoke 005/065) still
 send the keys; harmless and left alone. Deviations: none.
+
+**Lane X log (2026-09-14).** No migration. **The probe decided the shape:**
+`probe-component-exceptions.mjs` (11/11) — save A and B on one component, save A alone, B survives;
+the reverse; an explicit deselect removes only that row → payroll's bulk save is **PER-EMPLOYEE-SAFE**
+(it upserts the lines it is sent and removes only `isSelected:false`), so D-3's editable branch was
+built. Two things the probe surfaced: the dev tenant has **no payroll components at all** (the probe
+and harness seed one through `POST setup/components`, an upsert keyed on type + code, and retire it —
+there is no delete), and payroll's `GET component-exceptions` with no component filter answers an
+**empty list**, which is why the Salary tab's old "component exceptions" table had never shown a row
+(latent since round 2, lane E1). *Built:* HR's employee-first door
+`GET api/hr/Employees/{id}/payroll-component-exceptions` (`HR.Compensation.Read`;
+`PayrollMembershipService.GetPayrollComponentsAsync` reads `PayrollComponent` /
+`PayrollEmployeeProfile` / `PayrollEmployeeComponent` directly, the grade-projection precedent):
+every ACTIVE component with the person's exception beside it, ordered type then code;
+`hasPayrollProfile:false` still lists the defaults and the card refuses to save until payroll has a
+profile; retired components are not offered. `PayrollComponentExceptionsCard` on the Salary tab:
+default vs this employee's figure, applies, dates; the edit dialog saves ONE entry through
+`payrollService.saveEmployeeComponentExceptions` (calculation type, amount or rate, taxable,
+applicable, effective dates, `isSelected:true`); "Open in Payroll" for the component-first view; the
+tab's dead client-side filter removed. Harness 42 ×2 (`run-x.mjs`: the door, a one-row save that
+appears on A and not on B, a percentage row, an off row, a deselect that removes only A; static).
+Regression E1 73, membership 86, S 65.
+
+⚠ **Found while building — payroll's, recorded as cross-module defect #27:** (a) payroll's bulk write
+is `[Authorize]` only — a plain-Employee login writes exceptions and gets 200; (b) a deselected row
+is SOFT-deleted under a unique index that is not filtered on `IsDeleted`, so re-adding the same
+person + component answers a duplicate-key **500**. HR's card therefore never deselects: its "remove"
+is **switch off** (`applicable:false`, the row kept), which is what the user meant and avoids the
+trap. Deviation from § 5.2: none of substance; the ask in § 6 is not needed (the editable branch
+stood), but § 7.1's "by-employee read payroll owes" for component exceptions is now HR's door.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

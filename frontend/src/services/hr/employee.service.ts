@@ -11,6 +11,7 @@ import type {
   EmployeePayrollStatus,
   PayrollReconciliation,
   SetPayBasisRequest,
+  EmployeePayrollComponents,
 } from '@/types/hr/employee';
 // Payroll's own profile shape — read through HR's door, saved through payroll's.
 import type { PayrollEmployeeProfile } from '@/services/payrollService';
@@ -132,6 +133,14 @@ class EmployeeService {
    * server filtering that search to the exact person. Null when payroll has no profile yet, which
    * is the normal state for somebody just created: the tab then offers to make one.
    */
+  /**
+   * Every active payroll component with this employee's exception beside it (round 3, lane X).
+   * Read here; saved one row at a time through payroll's `component-exceptions/bulk`.
+   */
+  getPayrollComponentExceptions(id: string): Promise<EmployeePayrollComponents> {
+    return apiService.get<EmployeePayrollComponents>(`${this.baseUrl}/${id}/payroll-component-exceptions`);
+  }
+
   async getPayrollProfile(id: string): Promise<PayrollEmployeeProfile | null> {
     try {
       return await apiService.get<PayrollEmployeeProfile>(`${this.baseUrl}/${id}/payroll-profile`);

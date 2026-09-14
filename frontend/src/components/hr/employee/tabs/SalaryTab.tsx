@@ -50,6 +50,7 @@ import {
 import { PayrollEmployeeProfileEditor, money } from '@/components/hr/payroll/PayrollEmployeeProfileEditor';
 import { SalaryAssignmentsTab } from './SalaryAssignmentsTab';
 import { SalaryChangesCard } from './SalaryChangesCard';
+import { PayrollComponentExceptionsCard } from './PayrollComponentExceptionsCard';
 import { policySettingsService } from '@/services/hr/policy-settings.service';
 
 const COMPENSATION_WRITE = 'HR.Compensation.Write';
@@ -169,6 +170,10 @@ export function SalaryTab({ employee }: { employee: EmployeeDetail }) {
           )}
         </CardContent>
       </Card>
+
+      {/* Round 3, lane X (D-3): allowances and deductions, employee-first, saved one row at a time
+          through payroll's own bulk endpoint — the probe proved it touches only the lines it is sent. */}
+      <PayrollComponentExceptionsCard employee={employee} canWrite={canWrite} />
 
       <PayrollItems employeeNumber={employeeNumber} />
     </div>
@@ -343,9 +348,11 @@ function PayBasisCard({
 // ── 4. Payroll items (read-only) ─────────────────────────────────────────────
 
 function PayrollItems({ employeeNumber }: { employeeNumber: string }) {
-  // Loans and advances filter by staff number on payroll's side. Tax reliefs and component
-  // exceptions have no employee filter on payroll's routes, so those two are the tenant's whole
-  // list narrowed here — recorded in the plan's § 7.1 as the by-employee reads payroll still owes.
+  // Loans and advances filter by staff number on payroll's side. Tax reliefs have no employee
+  // filter on payroll's routes, so that one is the tenant's whole list narrowed here — recorded in
+  // the round-2 plan's § 7.1 as a by-employee read payroll still owes. ⚠ Component exceptions
+  // USED to be read the same way and never showed a row: payroll's read answers an EMPTY list when
+  // no component is named. Round 3, lane X replaced it with HR's employee-first door (the card above).
   const loans = useQuery({
     queryKey: ['payroll', 'loans', employeeNumber],
     queryFn: () => payrollService.getLoans({ employeeNumber, includeInactive: false }),
@@ -358,35 +365,26 @@ function PayrollItems({ employeeNumber }: { employeeNumber: string }) {
     queryKey: ['payroll', 'employee-tax-reliefs'],
     queryFn: () => payrollService.getEmployeeTaxReliefs(),
   });
-  const exceptions = useQuery({
-    queryKey: ['payroll', 'component-exceptions'],
-    queryFn: () => payrollService.getEmployeeComponentExceptions(),
-  });
 
   const myReliefs = useMemo(
     () => (reliefs.data ?? []).filter((r) => r.employeeNumber === employeeNumber),
     [reliefs.data, employeeNumber],
   );
-  const myExceptions = useMemo(
-    () => (exceptions.data ?? []).filter((x) => x.employeeNumber === employeeNumber),
-    [exceptions.data, employeeNumber],
-  );
 
-  const loading = loans.isLoading || advances.isLoading || reliefs.isLoading || exceptions.isLoading;
+  const loading = loans.isLoading || advances.isLoading || reliefs.isLoading;
   const empty =
     !loading &&
     (loans.data?.length ?? 0) === 0 &&
     (advances.data?.length ?? 0) === 0 &&
-    myReliefs.length === 0 &&
-    myExceptions.length === 0;
+    myReliefs.length === 0;
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Payroll items</CardTitle>
         <CardDescription>
-          Loans, advances, tax reliefs and component exceptions payroll holds for this staff number.
-          Maintained in Payroll; shown here so the whole picture is on one screen.
+          Loans, advances and tax reliefs payroll holds for this staff number. Maintained in
+          Payroll; shown here so the whole picture is on one screen.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -432,19 +430,6 @@ function PayrollItems({ employeeNumber }: { employeeNumber: string }) {
               String(r.factor),
               money(r.totalRelief),
               r.isActive ? 'Yes' : 'No',
-            ])}
-          />
-        )}
-        {myExceptions.length > 0 && (
-          <ItemTable
-            title="Component exceptions"
-            headers={['Component', 'Type', 'Amount', 'Rate', 'Applies']}
-            rows={myExceptions.map((x) => [
-              `${x.componentCode} — ${x.componentName}`,
-              String(x.componentType),
-              money(x.amount, x.currencyCode),
-              String(x.rate),
-              x.applicable ? 'Yes' : 'No',
             ])}
           />
         )}

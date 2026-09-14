@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.DTOs.Maintenance;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -2032,6 +2033,50 @@ public class UpdateEmployeePositionHistoryDto
 /// are different facts from different owners: HR says whether the person SHOULD be paid through
 /// the run; payroll's profile says whether they ARE. This read puts both on one screen.
 /// </summary>
+/// <summary>
+/// One payroll allowance/deduction component beside THIS employee's exception on it, if any
+/// (round 3, lane X; decision D-3). The component's defaults are payroll's; the exception is the
+/// per-person override payroll stores in <c>PayrollEmployeeComponents</c>. Read through HR's door;
+/// written only through payroll's own bulk endpoint, one person's row at a time — the probe proved
+/// that save touches only the lines it is sent.
+/// </summary>
+public class EmployeePayrollComponentRowDto
+{
+    public Guid PayrollComponentId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public PayrollComponentType ComponentType { get; set; }
+    public string ComponentTypeName => ComponentType.ToString();
+    public PayrollCalculationType DefaultCalculationType { get; set; }
+    public decimal DefaultAmount { get; set; }
+    public decimal DefaultRate { get; set; }
+    public bool DefaultTaxable { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    /// <summary>Payroll applies the component to everyone unless an exception says otherwise.</summary>
+    public bool AppliesByDefault { get; set; }
+
+    public bool HasException => ExceptionId.HasValue;
+    public Guid? ExceptionId { get; set; }
+    public PayrollCalculationType? CalculationType { get; set; }
+    public decimal? Amount { get; set; }
+    public decimal? Rate { get; set; }
+    public bool? Taxable { get; set; }
+    public bool? Applicable { get; set; }
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+}
+
+/// <summary>Every active payroll component with this employee's exception beside it (round 3, lane X).</summary>
+public class EmployeePayrollComponentsDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    /// <summary>False when payroll has no profile yet — the rows still list the defaults, but nothing can be saved until it exists.</summary>
+    public bool HasPayrollProfile { get; set; }
+    public Guid? PayrollProfileId { get; set; }
+    public List<EmployeePayrollComponentRowDto> Rows { get; set; } = new();
+}
+
 public class EmployeePayrollStatusDto
 {
     public Guid EmployeeId { get; set; }

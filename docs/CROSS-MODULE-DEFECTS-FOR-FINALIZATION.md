@@ -1525,6 +1525,45 @@ Look at `SupplierRepository.GetSuppliersAsync`'s paging/ordering path for the in
 throw (a `Skip`/`Take` without an `OrderBy`, or a `Single` over several rows, are the usual
 shapes). Nothing on the HR side needs to change when it is fixed.
 
+## 27. Payroll — component exceptions: a removed row can never be re-added, and the bulk write has no role gate (2026-09-14)
+
+**Owner:** Payroll. **Severity:** (b) blocks re-adding an allowance/deduction to a person once it
+was removed — a 500 with no message the user can act on; (a) is an authorisation gap. HR is not
+blocked: its Salary-tab card switches a row OFF instead of removing it, and reads through its own
+door. **Status:** open. Found by round 3, lane X (`dev-harness/hr-payroll-membership/run-x.mjs`
+B5/B6 diagnostics and `probe-component-exceptions.mjs`).
+
+### What is broken
+
+(a) `POST /api/hr/payroll/component-exceptions/bulk` (`PayrollController`, class-level `[Authorize]`
+only) accepts any authenticated user: a plain-Employee login writes payroll exceptions and gets 200.
+Every other payroll write on the controller shares the gate.
+
+(b) `PayrollService.SaveEmployeeComponentExceptionsAsync` handles `isSelected:false` with
+`_context.PayrollEmployeeComponents.Remove(entry)`, which the context's soft-delete turns into
+`IsDeleted = 1`. The table's unique index
+`IX_PayrollEmployeeComponents_TenantId_EmployeeProfileId_PayrollComponentId` is **not filtered on
+`IsDeleted`**, so the next save that re-adds the same person + component inserts a second row and
+SQL Server refuses it: `DbUpdateException → 500`.
+
+### What was proven
+
+Probe + harness on the dev tenant, 2026-09-14: save A and B on one component → save A alone → B
+survives (per-employee-safe: the endpoint upserts only the lines it is sent) → deselect A → A's row
+is soft-deleted (`IsDeleted = 1` rows visible in the table, index `has_filter = 0`) → re-add A →
+**500** duplicate key. A plain-Employee token's bulk POST → **200**.
+
+### What it blocks
+
+Payroll's own allowances/deductions screen: removing a person from a component and later adding
+them back is impossible until the soft-deleted row is purged by hand. HR's card avoids the path.
+
+### What a fix needs
+
+(b) Either filter the unique index on `[IsDeleted] = 0` (the relationship-type lesson) or have the
+save reactivate the soft-deleted row instead of inserting. (a) Gate the payroll write routes on a
+payroll permission policy, as HR's compensation routes are. HR's card needs no change for either.
+
 ## How to use this file
 
 Add an entry whenever HR work uncovers a defect in a module HR does not own. Keep the same shape:
