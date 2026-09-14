@@ -693,3 +693,12 @@ canonical Finance authority state is byte-identical, then proves an exact manife
 authority writes. Focused classification/provisioning/DI/Payroll tests pass 64/64, and Data, API, and ordinary API-test
 builds pass with zero errors. All four clean-tree rehearsal safety/evidence suites pass. No operational retry is
 authorized; independent Sol High review and a new explicit attempt authorization remain required.
+
+Sol High provenance correction `21be805158fba806a39487eb701875486d8ffa15` (tree
+`5dcab656cd00ce931331fcb7c3a0699c7de5efdd`) removes classification-ownership laundering from the legacy broad-leaf
+upgrade. Automatic classification repair and inactive-book disablement now require the mapping row itself to be an
+exact untouched `System (FIN-CLASSIFICATION-1.0)`, `2.0`, or `3.0` row. An administrator-created row with no
+`UpdatedBy`, and a system-created row later updated by an administrator, are both preserved; invalid enabled lineage
+then fails closed instead of being rewritten. Exact V1 system-owned repair remains supported. Classification tests
+pass 39/39, production-order seed coverage passes 1/1, and provisioning/DI/Payroll tests pass 26/26. No database,
+connection environment, preserved evidence, or reset operation was accessed.

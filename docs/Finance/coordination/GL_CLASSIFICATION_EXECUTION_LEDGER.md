@@ -2865,3 +2865,18 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   tests pass 64/64; Data, API, and ordinary API-test builds have zero errors. FinalClone safety, DisposableReset
   safety, DisposableReset evidence, and FinalClone evidence suites all pass from the clean committed candidate. No
   operational retry is authorized.
+
+### Attempt 10 Sol High mapping-provenance correction
+
+- Implementation `21be805158fba806a39487eb701875486d8ffa15`, tree
+  `5dcab656cd00ce931331fcb7c3a0699c7de5efdd`, makes the mapping row—not its linked classification—the authority for
+  automatic manifest repair.
+- Accepted automatic-repair provenance is exact and closed: `System (FIN-CLASSIFICATION-1.0)`, `2.0`, or `3.0`
+  `CreatedBy`, with `UpdatedBy` null. This same predicate governs both broad-leaf classification upgrades and
+  inactive-book disablement.
+- Administrator-created/null-updater and system-created/administrator-updated mappings remain byte-for-byte
+  preserved; if enabled lineage is invalid, the final audit fails closed. Exact untouched V1 system repair still
+  converges.
+- Offline results: classification authority 39/39, production-order full seed 1/1, provisioning/DI/Payroll 26/26,
+  and ordinary API-test build with zero errors. No database, environment connection, preserved evidence, or reset
+  was accessed; runtime remains unauthorized pending Sol High approval and a new explicit attempt.
