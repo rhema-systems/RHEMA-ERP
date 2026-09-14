@@ -2770,3 +2770,20 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   was accessed during correction.
 - Operational disposition: no retry is authorized. The baseline/partially seeded source remains eligible only for a
   separately approved disposable reset that repeats the full fingerprint, backup, identity, and clean-tree controls.
+
+### Attempt 08 Sol High concurrency correction
+
+- Implementation `0b36d069a58012c3d4d7295d217e954f693ebcfd`, tree
+  `55c76944f42aef87129bc3173f11e5af4bf95f8f`, adds no migration or schema surface.
+- SQL Server authority: fixed-order exclusive transaction-owned `sp_getapplock` resources first serialize the entire
+  tenant Finance manifest, then the tenant plus canonical account identity. Both service-owned and caller-owned
+  transaction paths acquire the same locks before reads; caller commit ownership is unchanged.
+- Retry-state authority: service-owned retries fail before I/O for Added/Deleted, temporary-key, loaded/materialized
+  navigation, or relationship-modified tracking. Scalar modifications are snapshotted/restored; attempt-only entries
+  are detached after rollback or commit, preserving sequential exact retries without navigation/temp-key corruption.
+- Focused result: 10/10 provider-independent/SQLite tests pass. They prove deterministic bounded resources, exact
+  repeat with zero writes, post-write transient convergence, caller rollback, logical rollback, and unchanged
+  pretracked Added/Modified/navigation/FK intent. The two-independent-context SQL Server race test was discovered but
+  skipped because its explicit `RHEMA_TEST_SQLSERVER` opt-in is absent; no connection was opened.
+- Disposition remains review-only: no reset retry is authorized until clean-tree gates and independent Sol High
+  approval complete, followed by a new explicit operational authorization.

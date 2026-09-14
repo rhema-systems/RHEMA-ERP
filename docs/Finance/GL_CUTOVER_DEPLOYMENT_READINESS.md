@@ -572,3 +572,21 @@ feature flag, database, connection environment, or preserved evidence was change
 A future reset can safely treat the one-baseline partially seeded database as a disposable source only through a
 new, independently approved harness run that re-captures and rechecks its exact history/fingerprint, verifies a new
 attempt-owned backup, and performs the normal drop/recreate flow. No further runtime attempt is presently authorized.
+
+Sol High concurrency follow-up `0b36d069a58012c3d4d7295d217e954f693ebcfd` (tree
+`55c76944f42aef87129bc3173f11e5af4bf95f8f`) closes the remaining read/insert race without a schema change.
+Every SQL Server call acquires two exclusive transaction-scoped application locks in a fixed order before any
+manifest or account read: a tenant manifest lock protects deterministic segment, dimension, classification and book
+materialization, then a tenant/canonical-account lock protects account-code/number convergence. Concurrent callers
+therefore converge on one durable account ID and one manifest/mapping set; an exact later call is read-only.
+Caller-owned EF or ambient transactions retain both locks and remain caller-committed.
+
+The service-owned retry path now refuses added/deleted entities, temporary keys, loaded or materialized navigation
+graphs, and modified relationships before its first database operation. Scalar modified state remains supported and
+is restored exactly after a failed attempt; operation-created tracked entities are detached after rollback or
+successful commit so sequential provisioning remains retry-safe. Offline relational tests cover canonical lock
+identity, no-write exact retry, post-write transient restoration, caller transaction rollback, logical rollback, and
+pretracked added/scalar-modified/navigation/FK state. Ten tests pass. A genuine two-independent-DbContext SQL Server
+race gate is also present; it was skipped because the explicit `RHEMA_TEST_SQLSERVER` opt-in was absent, so no
+connection string was read and no database was accessed. Independent Sol High approval and new operational
+authorization remain required before another reset.
