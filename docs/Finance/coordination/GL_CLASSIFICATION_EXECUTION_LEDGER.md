@@ -2834,3 +2834,33 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   drift all refuse. Provisioning passes 19/19, production seed order passes 1/1, and DI/Payroll passes 7/7.
 - No database, configured connection environment, external evidence, or backup was accessed. A reset remains
   unauthorized pending clean-tree gates and independent Sol High approval.
+
+### Disposable reset attempt 10 / GLF003 handoff
+
+- Operational base: exact approved `65bd3c311be8af9427c93418ec831916a81181b2`, tree
+  `f2d77951afd6e12819694293890686bf3144705f`; executed exactly once.
+- Terminal outcome: `FAILED_NO_AUTOMATIC_RETRY`; durable phase `MIGRATIONS_APPLIED`; failed operation
+  `SEED_AND_INVARIANTS`. Seed pass 1 completed, then invariant GLF003 refused 144 enabled mappings. Seed pass 2,
+  invariant pass 2, and DBCC did not run. Source fingerprint was
+  `1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`; final history is the exact one-row baseline
+  with zero orphans. C6/C7/C8 remained false. Package validation passed and its manifest-file SHA-256 is
+  `EDC43CC9DDDD2EBC7243674B052515D000725006505B5EA093DA2FA6600F1DD5`.
+- Preserved recovery media: media `3e2b84116d7641d8be554d5f7ee86fa1`, file
+  `RhemaERP_DISPOSABLE_RESET_COPYONLY_3e2b84116d7641d8be554d5f7ee86fa1.bak`, 90,103,808 bytes,
+  verified/current SHA-256 `0DC9330B0F5E54EDE4193582F38F83B452C9289AB169425EB9FE70E019E96A9A`, path SHA-256
+  `80475AF48214C8F3253F14E6B6801CEE259C52CA48A1F8B99303E038BC2FF51D`. No retry, restore, drop, cleanup, or
+  feature transition followed.
+- Authorized read-only diagnosis: 144 rows = 48 exact reviewed accounts x `IFRS`, `LOCAL_STATUTORY`, and
+  `MANAGEMENT`; sanitized ordered identity-set SHA-256
+  `90AF39B3830AFFE58EDB66D7626FF0841173C8CDF9EE72DB6D2C3D87EE4D18C9`. All tenant, account, classification,
+  book, status, posting-leaf, and core-type lineage was valid. Only `AccountingBook.IsActive=false` and
+  `AllowsPosting=false` violated GLF003. Root cause was the manifest's unconditional `IsEnabled=true` on mappings
+  for freshly created Configuring books.
+- Candidate correction: `86cf81044b9d7e48ea69807b2d6b33f24c1f1a2b`, tree
+  `3947a87af6d87b2b4eec08b172b2718cc8ada917`. New applicability is enabled only for active posting-ready books;
+  untouched manifest-owned invalid rows are disabled, administrator-owned rows are never auto-rewritten, and a
+  complete enabled-lineage audit fails closed. Active/posting-book compatibility is retained.
+- Offline result: production Finance-to-Procurement order passes twice with GLF003 zero and byte-identical authority
+  state; an exact manifest/provisioning retry writes no Finance authority row. Classification/provisioning/DI/Payroll
+  tests pass 64/64; Data, API, and ordinary API-test builds have zero errors. Clean-tree reset/FinalClone gates remain
+  to be recorded after this docs commit. No operational retry is authorized.

@@ -655,3 +655,41 @@ server, database, integrated/SQL user, Azure managed-identity principal, encrypt
 or failover settings refuse. Provisioning tests pass 19/19; the full production seed-order test passes 1/1 and the
 seed-DI/Payroll slice passes 7/7. No database, configured environment, preserved evidence, or backup was accessed.
 Runtime remains prohibited pending independent Sol High approval and separate authorization.
+
+### Disposable reset attempt 10 and GLF003 lineage correction
+
+The separately authorized attempt 10 executed exact approved commit
+`65bd3c311be8af9427c93418ec831916a81181b2`, tree
+`f2d77951afd6e12819694293890686bf3144705f`, exactly once. It completed the exact one-row baseline migration and
+seed pass 1, then stopped fail-closed at `SEED_AND_INVARIANTS` when the first invariant reported
+`GLF003: enabled account/book mapping has invalid lineage`. Last durable phase is `MIGRATIONS_APPLIED`; seed pass 2,
+the second invariant snapshot, and DBCC were not run or claimed. Source fingerprint was
+`1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`; final history contains only that exact baseline
+with zero orphans. C6/C7/C8 remained false, and no automatic retry, restore, drop, cleanup, or feature transition
+followed.
+
+Attempt-owned recovery media remains preserved outside the repository: media
+`3e2b84116d7641d8be554d5f7ee86fa1`, file
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_3e2b84116d7641d8be554d5f7ee86fa1.bak`, 90,103,808 bytes, verified/current
+SHA-256 `0DC9330B0F5E54EDE4193582F38F83B452C9289AB169425EB9FE70E019E96A9A`, and bound path SHA-256
+`80475AF48214C8F3253F14E6B6801CEE259C52CA48A1F8B99303E038BC2FF51D`. The terminal DisposableReset package
+validated and its manifest-file SHA-256 is
+`EDC43CC9DDDD2EBC7243674B052515D000725006505B5EA093DA2FA6600F1DD5`.
+
+Authorized read-only diagnosis found exactly 144 GLF003 rows: 48 Finance-reviewed accounts across the three
+`IFRS`, `LOCAL_STATUTORY`, and `MANAGEMENT` books. The sanitized ordered identity-set SHA-256 is
+`90AF39B3830AFFE58EDB66D7626FF0841173C8CDF9EE72DB6D2C3D87EE4D18C9`. Every account, classification, tenant,
+book, and core-account-type relationship was exact; all classifications were active posting leaves. The sole defect
+on every row was that the manifest had enabled applicability while each freshly created book was still
+`Configuring`, inactive, and disallowed posting.
+
+Correction `86cf81044b9d7e48ea69807b2d6b33f24c1f1a2b` (tree
+`3947a87af6d87b2b4eec08b172b2718cc8ada917`) preserves those exact prepared mappings but enables them only when
+the governed book is active and allows posting. It repairs only untouched `FIN-CLASSIFICATION-3.0` rows; an
+administrator-owned invalid enabled row is never rewritten and instead fails the seed's complete enabled-lineage
+audit. Existing active/posting books retain enabled provisioning behavior. Production-order relational coverage runs
+Finance then Procurement supplier onboarding twice in separate scopes, proves GLF003 is zero after each pass and
+canonical Finance authority state is byte-identical, then proves an exact manifest/provisioning retry performs zero
+authority writes. Focused classification/provisioning/DI/Payroll tests pass 64/64, and Data, API, and ordinary API-test
+builds pass with zero errors. No operational retry is authorized; independent Sol High review and a new explicit
+attempt authorization remain required.
