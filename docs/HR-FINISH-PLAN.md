@@ -43,6 +43,13 @@ D-13 (47 of 49 fields). The coverage queue reads **0 BUILD**.
 § 5 — six lanes A–F. **Lane A DONE 2026-09-09** (88 assertions ×2; lane 3a and 3c re-run green).
 Next in that plan: B1 (the cascading unit/location picker and unit history dates).
 
+▶ **Demo feedback round 3 (2026-09-11) has its own plan:** `docs/HR/HR-DEMO-FEEDBACK-ROUND-3-PLAN.md`
+— nineteen slices, **ALL BUILT 2026-09-11 → 2026-09-14** (Q P1 H S J1 C1 C2 K A G U T1 T2 T3 J2 P2 P3
+X V), each with its harness green twice and its regression set on count. What that plan still owes is
+**not code**: the screen-walk list in its § 8 (T1–T3, C2's careers pages, P1's modals, J1's dialog,
+U's forms — a harness cannot drive React) and **R8**, the recruitment cost → Finance AP hand-off,
+which waits on the Finance owner's answer in `../HANDOFF-FINANCE-HR-RECRUITMENT-COST-AP.md`.
+
 ▶ **Lane 9 — demo dataset — BUILT 2026-09-04.** Every one of the 551 required HR/SHE tables holds data in
 `ErpSystemDB_UAT`, the six runbooks are checked against the database on every rebuild, and the
 rebuild is one command. **One decision is owed** (admin tier vs employee link — § Lane 9 and the

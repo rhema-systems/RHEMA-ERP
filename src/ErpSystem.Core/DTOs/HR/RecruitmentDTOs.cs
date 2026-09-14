@@ -5921,7 +5921,21 @@ public class CandidateTalentSegmentDto : BaseDto
     public string? Description { get; set; }
     public string? Color       { get; set; }
     public bool   IsActive    { get; set; }
+    /// <summary>
+    /// Live memberships. ⚠ Only correct when the segment was read with its <c>Memberships</c>
+    /// included — every read path before round 3 lane V answered 0 here for that reason.
+    /// </summary>
     public int    MemberCount { get; set; }
+
+    // ── Ownership and intent (round 3, lane V; D-6) ──────────────────────────
+    public Guid?   OwnerEmployeeId      { get; set; }
+    /// <summary>Resolved from the navigation; null when no owner is named.</summary>
+    public string? OwnerEmployeeName    { get; set; }
+    public string? Purpose              { get; set; }
+    public Guid?   TargetPositionId     { get; set; }
+    public string? TargetPositionTitle  { get; set; }
+    public Guid?   JobFamilyId          { get; set; }
+    public string? JobFamilyName        { get; set; }
 }
 
 public class CreateCandidateTalentSegmentDto
@@ -5932,6 +5946,13 @@ public class CreateCandidateTalentSegmentDto
     public string? Description { get; set; }
     [MaxLength(30)]
     public string? Color       { get; set; }
+
+    // Lane V (D-6). All optional; each is refused unless it is this tenant's live row.
+    public Guid?   OwnerEmployeeId  { get; set; }
+    [MaxLength(1000)]
+    public string? Purpose          { get; set; }
+    public Guid?   TargetPositionId { get; set; }
+    public Guid?   JobFamilyId      { get; set; }
 }
 
 public class UpdateCandidateTalentSegmentDto
@@ -5945,6 +5966,13 @@ public class UpdateCandidateTalentSegmentDto
     [MaxLength(30)]
     public string? Color       { get; set; }
     public bool   IsActive    { get; set; }
+
+    // Lane V (D-6). Sent every time: a null clears the owner / target, it does not mean "leave it".
+    public Guid?   OwnerEmployeeId  { get; set; }
+    [MaxLength(1000)]
+    public string? Purpose          { get; set; }
+    public Guid?   TargetPositionId { get; set; }
+    public Guid?   JobFamilyId      { get; set; }
 }
 
 public class CandidateSegmentMembershipDto : BaseDto

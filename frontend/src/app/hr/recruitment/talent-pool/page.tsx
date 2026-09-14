@@ -29,6 +29,7 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
+import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { PageHeader } from '@/components/hr/common/PageHeader';
@@ -36,6 +37,8 @@ import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
+import { employeePositionService } from '@/services/hr/employee-position.service';
+import { jobArchitectureService } from '@/services/hr/job-architecture.service';
 import { talentPoolService } from '@/services/hr/talent-pool.service';
 import {
   BULK_POOL_OPERATIONS,
@@ -50,6 +53,8 @@ import {
 
 const PAGE_SIZE = 25;
 const ANY = '__any__';
+// Radix refuses an empty SelectItem value, so "nobody / nothing" needs a sentinel of its own.
+const NONE = '__none__';
 
 interface SegmentDraft {
   id?: string;
@@ -57,7 +62,25 @@ interface SegmentDraft {
   description: string;
   color: string;
   isActive: boolean;
+  // Lane V (D-6): who works the segment, why it exists, and the role it feeds.
+  ownerEmployeeId: string | null;
+  ownerEmployeeName: string | null;
+  purpose: string;
+  targetPositionId: string | null;
+  jobFamilyId: string | null;
 }
+
+const emptyDraft = (): SegmentDraft => ({
+  name: '',
+  description: '',
+  color: '',
+  isActive: true,
+  ownerEmployeeId: null,
+  ownerEmployeeName: null,
+  purpose: '',
+  targetPositionId: null,
+  jobFamilyId: null,
+});
 
 /**
  * Recruitment's candidate CRM: who is in the talent pool, how warm they are, and the segments
@@ -93,6 +116,19 @@ export default function TalentPoolPage() {
   const analytics = useQuery({
     queryKey: ['hr', 'talent-pool', 'analytics'],
     queryFn: () => talentPoolService.getAnalytics(),
+  });
+
+  // Option sources for the segment form. Only fetched while the dialog is open: the pool page
+  // is the recruiter's landing screen and neither list is cheap.
+  const positions = useQuery({
+    queryKey: ['hr', 'positions', 'active'],
+    queryFn: () => employeePositionService.getActive(),
+    enabled: !!segmentDraft,
+  });
+  const jobFamilies = useQuery({
+    queryKey: ['hr', 'job-families', 'active'],
+    queryFn: () => jobArchitectureService.getActiveJobFamilies(),
+    enabled: !!segmentDraft,
   });
 
   const segments = useQuery({
@@ -151,6 +187,12 @@ export default function TalentPoolPage() {
         description: d.description.trim() || null,
         color: d.color.trim() || null,
         isActive: d.isActive,
+        // Lane V: all four go on every save. A cleared picker sends null, which CLEARS the column
+        // server-side — the update replaces these fields, it does not merge them.
+        ownerEmployeeId: d.ownerEmployeeId,
+        purpose: d.purpose.trim() || null,
+        targetPositionId: d.targetPositionId,
+        jobFamilyId: d.jobFamilyId,
       };
       return d.id
         ? talentPoolService.updateSegment(d.id, payload)
@@ -541,9 +583,7 @@ export default function TalentPoolPage() {
               {canManage && (
                 <Button
                   size="sm"
-                  onClick={() =>
-                    setSegmentDraft({ name: '', description: '', color: '', isActive: true })
-                  }
+                  onClick={() => setSegmentDraft(emptyDraft())}
                 >
                   <Plus className="mr-1.5 h-4 w-4" />
                   New segment
@@ -567,7 +607,9 @@ export default function TalentPoolPage() {
                   <TableHeader>
                     <TableRow>
                       <TableHead>Name</TableHead>
-                      <TableHead>Description</TableHead>
+                      <TableHead>Purpose</TableHead>
+                      <TableHead>Owner</TableHead>
+                      <TableHead>Feeds</TableHead>
                       <TableHead className="w-24 text-right">Members</TableHead>
                       <TableHead className="w-24">Active</TableHead>
                       {canManage && <TableHead className="w-24" />}
@@ -583,8 +625,15 @@ export default function TalentPoolPage() {
                           />
                           <span className="font-medium">{s.name}</span>
                         </TableCell>
-                        <TableCell className="text-sm text-muted-foreground">
-                          {s.description ?? '—'}
+                        <TableCell className="max-w-[22rem] text-sm text-muted-foreground">
+                          {s.purpose ?? s.description ?? '—'}
+                        </TableCell>
+                        <TableCell className="text-sm">{s.ownerEmployeeName ?? '—'}</TableCell>
+                        <TableCell className="text-sm">
+                          {s.targetPositionTitle ?? s.jobFamilyName ?? '—'}
+                          {s.targetPositionTitle && s.jobFamilyName && (
+                            <span className="text-muted-foreground"> · {s.jobFamilyName}</span>
+                          )}
                         </TableCell>
                         <TableCell className="text-right tabular-nums">{s.memberCount}</TableCell>
                         <TableCell>
@@ -604,6 +653,11 @@ export default function TalentPoolPage() {
                                     description: s.description ?? '',
                                     color: s.color ?? '',
                                     isActive: s.isActive,
+                                    ownerEmployeeId: s.ownerEmployeeId ?? null,
+                                    ownerEmployeeName: s.ownerEmployeeName ?? null,
+                                    purpose: s.purpose ?? '',
+                                    targetPositionId: s.targetPositionId ?? null,
+                                    jobFamilyId: s.jobFamilyId ?? null,
                                   })
                                 }
                               >
@@ -634,10 +688,13 @@ export default function TalentPoolPage() {
 
       {/* segment create / edit */}
       <Dialog open={!!segmentDraft} onOpenChange={(o) => !o && setSegmentDraft(null)}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{segmentDraft?.id ? 'Edit segment' : 'New segment'}</DialogTitle>
-            <DialogDescription>A named grouping candidates can be assigned to.</DialogDescription>
+            <DialogDescription>
+              A named grouping candidates can be assigned to — who works it, what it is for, and the
+              role it feeds.
+            </DialogDescription>
           </DialogHeader>
           {segmentDraft && (
             <div className="space-y-4">
@@ -662,6 +719,77 @@ export default function TalentPoolPage() {
                     setSegmentDraft((d) => (d ? { ...d, description: e.target.value } : d))
                   }
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="segment-purpose">Purpose</Label>
+                <Textarea
+                  id="segment-purpose"
+                  value={segmentDraft.purpose}
+                  maxLength={1000}
+                  placeholder="What this group is being kept warm for."
+                  onChange={(e) =>
+                    setSegmentDraft((d) => (d ? { ...d, purpose: e.target.value } : d))
+                  }
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Owner</Label>
+                <EmployeePicker
+                  value={segmentDraft.ownerEmployeeId}
+                  initialLabel={segmentDraft.ownerEmployeeName}
+                  placeholder="The recruiter who works this segment…"
+                  onChange={(id, label) =>
+                    setSegmentDraft((d) =>
+                      d ? { ...d, ownerEmployeeId: id, ownerEmployeeName: label } : d,
+                    )
+                  }
+                />
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Target position</Label>
+                  <Select
+                    value={segmentDraft.targetPositionId ?? NONE}
+                    onValueChange={(v) =>
+                      setSegmentDraft((d) =>
+                        d ? { ...d, targetPositionId: v === NONE ? null : v } : d,
+                      )
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>None</SelectItem>
+                      {(positions.data ?? []).map((pos) => (
+                        <SelectItem key={pos.id} value={pos.id}>
+                          {pos.title}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Job family</Label>
+                  <Select
+                    value={segmentDraft.jobFamilyId ?? NONE}
+                    onValueChange={(v) =>
+                      setSegmentDraft((d) => (d ? { ...d, jobFamilyId: v === NONE ? null : v } : d))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="None" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE}>None</SelectItem>
+                      {(jobFamilies.data ?? []).map((f) => (
+                        <SelectItem key={f.id} value={f.id}>
+                          {f.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="segment-color">Badge colour (hex or CSS token)</Label>

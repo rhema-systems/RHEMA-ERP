@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -218,12 +218,36 @@ public class CandidateTalentSegmentRepository
 {
     public CandidateTalentSegmentRepository(ApplicationDbContext context) : base(context) { }
 
+    // Round 3, lane V. Every segment read goes through this graph: without the Memberships
+    // include the mapper's MemberCount is 0 on every row (it shipped that way), and without the
+    // other three the owner, target position and job family come back as bare ids.
+    private IQueryable<CandidateTalentSegment> WithSegmentGraph() => _dbSet
+        .Include(s => s.Memberships.Where(m => !m.IsDeleted))
+        .Include(s => s.OwnerEmployee)
+        .Include(s => s.TargetPosition)
+        .Include(s => s.JobFamily);
+
+    public async Task<IEnumerable<CandidateTalentSegment>> GetForTenantAsync(Guid tenantId, bool activeOnly)
+    {
+        var query = WithSegmentGraph().Where(s => s.TenantId == tenantId && !s.IsDeleted);
+        if (activeOnly) query = query.Where(s => s.IsActive);
+        return await query.OrderBy(s => s.Name).ToListAsync();
+    }
+
+    public async Task<CandidateTalentSegment?> GetDetailAsync(Guid segmentId)
+    {
+        return await WithSegmentGraph().FirstOrDefaultAsync(s => s.Id == segmentId && !s.IsDeleted);
+    }
+
+    public async Task<int> CountLiveMembersAsync(Guid segmentId)
+    {
+        return await _context.Set<CandidateSegmentMembership>()
+            .CountAsync(m => m.SegmentId == segmentId && !m.IsDeleted);
+    }
+
     public async Task<IEnumerable<CandidateTalentSegment>> GetActiveByTenantAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Where(s => s.TenantId == tenantId && s.IsActive && !s.IsDeleted)
-            .OrderBy(s => s.Name)
-            .ToListAsync();
+        return await GetForTenantAsync(tenantId, activeOnly: true);
     }
 
     public async Task<CandidateTalentSegment?> GetWithMembersAsync(Guid segmentId)

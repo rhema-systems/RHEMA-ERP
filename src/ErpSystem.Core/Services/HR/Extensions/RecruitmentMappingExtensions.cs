@@ -1447,8 +1447,10 @@ public static class RecruitmentMappingExtensions
             LastEngagedDate = entity.LastEngagedDate,
             DaysInPool = daysInPool,
             EngagementCount = entity.EngagementEvents?.Count(e => !e.IsDeleted) ?? 0,
+            // ⚠ The segment's own deletion is checked too: a soft-deleted segment left its
+            // membership rows live, so a retired grouping kept showing on the candidate (lane V).
             Segments = entity.SegmentMemberships?
-                .Where(m => !m.IsDeleted)
+                .Where(m => !m.IsDeleted && m.Segment?.IsDeleted != true)
                 .Select(m => m.ToDto())
                 .ToList() ?? new()
         };
@@ -1468,7 +1470,16 @@ public static class RecruitmentMappingExtensions
             Description = entity.Description,
             Color = entity.Color,
             IsActive = entity.IsActive,
-            MemberCount = entity.Memberships?.Count(m => !m.IsDeleted) ?? 0
+            // ⚠ 0 unless the caller included Memberships — the segment repository's reads do
+            // since lane V; a bare GetByIdAsync still would not.
+            MemberCount = entity.Memberships?.Count(m => !m.IsDeleted) ?? 0,
+            OwnerEmployeeId = entity.OwnerEmployeeId,
+            OwnerEmployeeName = entity.OwnerEmployee?.FullName,
+            Purpose = entity.Purpose,
+            TargetPositionId = entity.TargetPositionId,
+            TargetPositionTitle = entity.TargetPosition?.Title,
+            JobFamilyId = entity.JobFamilyId,
+            JobFamilyName = entity.JobFamily?.Name
         };
     }
 
@@ -1525,6 +1536,10 @@ public static class RecruitmentMappingExtensions
             Description = dto.Description,
             Color = dto.Color,
             IsActive = true,
+            OwnerEmployeeId = dto.OwnerEmployeeId,
+            Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim(),
+            TargetPositionId = dto.TargetPositionId,
+            JobFamilyId = dto.JobFamilyId,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = userId.ToString()
         };
@@ -1536,6 +1551,11 @@ public static class RecruitmentMappingExtensions
         entity.Description = dto.Description;
         entity.Color = dto.Color;
         entity.IsActive = dto.IsActive;
+        // Lane V: the four are replaced, not merged — a cleared owner on the form clears the column.
+        entity.OwnerEmployeeId = dto.OwnerEmployeeId;
+        entity.Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim();
+        entity.TargetPositionId = dto.TargetPositionId;
+        entity.JobFamilyId = dto.JobFamilyId;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
     }

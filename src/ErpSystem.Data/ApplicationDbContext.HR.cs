@@ -8141,6 +8141,27 @@ private void ConfigureHREntities(ModelBuilder builder)
         {
             entity.HasIndex(x => new { x.TenantId, x.Name }).HasDatabaseName("IX_CandidateTalentSegment_Tenant_Name");
             entity.HasIndex(x => x.IsActive).HasDatabaseName("IX_CandidateTalentSegment_IsActive");
+
+            // Round 3, lane V (D-6). Three optional owners/targets, each Restrict: retiring a
+            // recruiter, a position or a job family must not take the segment — and its members —
+            // with it. The navigations have no inverse collection, so the explicit HasOne/WithMany
+            // pairs them with the declared FK rather than letting EF mint a shadow key.
+            entity.HasOne(x => x.OwnerEmployee)
+                .WithMany()
+                .HasForeignKey(x => x.OwnerEmployeeId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.TargetPosition)
+                .WithMany()
+                .HasForeignKey(x => x.TargetPositionId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.JobFamily)
+                .WithMany()
+                .HasForeignKey(x => x.JobFamilyId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.OwnerEmployeeId).HasDatabaseName("IX_CandidateTalentSegment_OwnerEmployeeId");
+            entity.HasIndex(x => x.TargetPositionId).HasDatabaseName("IX_CandidateTalentSegment_TargetPositionId");
+            entity.HasIndex(x => x.JobFamilyId).HasDatabaseName("IX_CandidateTalentSegment_JobFamilyId");
         });
 
         // ---- CandidateSegmentMembership ----

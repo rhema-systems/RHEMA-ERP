@@ -1,6 +1,6 @@
 # HR demo feedback, round 3 — findings, decisions and build plan
 
-> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) P2 (72 ×2, `hr-employee-docs/run-p2.mjs`; lane 3a 47, D2 121, round-2 lane A 88, P1 17 after) P3 (19 ×2, `hr-probation/run-p3.mjs`; D1 79, lane 3d 35 after) BUILT 2026-09-13, and X (42 ×2 + probe 11, `hr-payroll-membership/run-x.mjs`; E1 73, membership 86, S 65 after) BUILT 2026-09-14. One slice remains; V next.** Source: the feedback document *HR Demo
+> **Status: LANES Q (32 ×2), P1 (17 ×2), H (33 ×2), S (65 ×2) J1 (42 ×2, `hr-jobarch/run-j1.mjs`; C1 36, C2 143, C3 74, R1 36 after) and C1 (96 ×2, `hr-recruitment/run-c1.mjs`; lane5b 34, slice-F 69, slice-B 175/176, slice-D 99/100 after — the two misses are stale admin-gate assertions older than this round) BUILT 2026-09-11; C2 (89 ×2, `hr-recruitment/run-c2.mjs`; C1 96, lane5b 34, slice-B 175/176, slice-C 190, slice-D 99/100, slice-E 102, slice-F 69 after — the same two stale misses) and K (81 ×2, `hr-recruitment/run-k.mjs`; lane5b 34, C1 96, C2 89, slices B 175/176, C 190, D 99/100, E 102, F 69 after) BUILT 2026-09-12, and A (44 ×2, `hr-recruitment/run-a.mjs`; lane5b 34, C1 96, C2 89, K 81, slices B 175/176, C 190, D 99/100, E 102, F 69 after) and G (49 ×2, `hr-recruitment/run-g.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-13, and U (137 ×2, `hr-unions/run-u.mjs`; tier-B tail slice 11 67, slice 6 78, employee-relations slice 4 86, lane5b 34 after) T1 (24 static, `hr-employee-docs/run-t1.mjs`; screen walk owed) T2 (54, `hr-employee-docs/run-t2.mjs`, static + the seven live reads; T1 24 after; screen walk owed) T3 (70, `hr-employee-docs/run-t3.mjs`, static + nine live reads + four side reads; T2 54, T1 24 after; screen walk owed) J2 (67 ×2, `hr-jobarch/run-j2.mjs`; J1 42, C1 36, C2 143, C3 74, C3b 33, R1 36, slice 13 229, slice 14 114 after) P2 (72 ×2, `hr-employee-docs/run-p2.mjs`; lane 3a 47, D2 121, round-2 lane A 88, P1 17 after) P3 (19 ×2, `hr-probation/run-p3.mjs`; D1 79, lane 3d 35 after) BUILT 2026-09-13, and X (42 ×2 + probe 11, `hr-payroll-membership/run-x.mjs`; E1 73, membership 86, S 65 after) BUILT 2026-09-14, and V (72 ×2, `hr-recruitment/run-v.mjs`; lane5b 34, C1 96, C2 89, K 81, A 44, G 49, slices B 175/176, C 190, D 99/100, E 105, F 69 after) BUILT 2026-09-14. **ALL NINETEEN SLICES BUILT.** What is still owed is the screen-walk list in § 8 (T1–T3, C2's careers pages, P1's modals, J1's dialog, U's forms) and R8, which waits on the Finance owner.** Source: the feedback document *HR Demo
 > Changes – 101026* (4 pages; sections Employee Details, Job Description, Staff Unions, Staff
 > Requisition, Recruitment), brought by the user on 2026-09-11 after the third HR module demo.
 > Every bullet of that document is accounted for below — as a bug, a build item, a decision, a
@@ -171,7 +171,7 @@ with the JWT key; every new column a user can fill is in `demo-coverage-manifest
 | 16 | **P2** — the disability catalogue · ✅ **DONE 2026-09-13 · 72 ×2** | `20260913224857_AddDisabilityTypes` | `hr-employee-docs/run-p2.mjs` | |
 | 17 | **P3** — drop the contract leave columns · ✅ **DONE 2026-09-13 · 19 ×2** | `20260913234443_DropContractLeaveColumns` | `hr-probation/run-p3.mjs` | |
 | 18 | **X** — allowances/deductions on the Salary tab (probe first) · ✅ **DONE 2026-09-14 · 42 ×2 + probe 11** · editable branch | none | `hr-payroll-membership/probe-component-exceptions.mjs`, `run-x.mjs` | |
-| 19 | **V** — talent segment ownership | `AddTalentSegmentOwnership` | `hr-recruitment/run-v.mjs` | |
+| 19 | **V** — talent segment ownership · ✅ **DONE 2026-09-14 · 72 ×2** | `20260914063456_AddTalentSegmentOwnership` | `hr-recruitment/run-v.mjs` | |
 
 **Lane Q log (2026-09-11).** `WithSummaryNavigations()` now includes all ten navigations the DTO
 projects (the list is in the DTO's order with a comment saying to keep them together).
@@ -651,6 +651,62 @@ person + component answers a duplicate-key **500**. HR's card therefore never de
 is **switch off** (`applicable:false`, the row kept), which is what the user meant and avoids the
 trap. Deviation from § 5.2: none of substance; the ask in § 6 is not needed (the editable branch
 stood), but § 7.1's "by-employee read payroll owes" for component exceptions is now HR's door.
+
+**Lane V log (2026-09-14).** Migration `20260914063456_AddTalentSegmentOwnership` (guarded SQL;
+four nullable columns on `CandidateTalentSegments`, three indexes, three `NO ACTION` FKs to
+`Employees` / `EmployeePositions` / `JobFamilies`; the scaffold defaulted nothing, so there was no
+enum `defaultValue: 0` to reconcile, and the snapshot gained 43 additive lines with **no `Id1`
+shadow key** — the three navigations are paired explicitly in `ApplicationDbContext.HR.cs`).
+Scratch proof: stub `CandidateTalentSegments` / `Employees` / `EmployeePositions` / `JobFamilies`
+with a row on the segment table, then the migration's own statements Up / Up / Down / Down / Up —
+4 columns, 3 indexes and 3 FKs at every Up, none at either Down, the second of each a no-op, zero
+orphan default constraints at every step, and the pre-existing row untouched throughout.
+*Built (D-6):* `OwnerEmployeeId`, `Purpose`, `TargetPositionId` and `JobFamilyId` on
+`CandidateTalentSegment`. All four optional — every segment that predates the lane keeps working
+with none of them — but a named one must be this tenant's live row, refused 422 in words by
+`RequireOwnershipTargetsAsync` (the `PreEmploymentCheckService.ResolveProviderNameAsync` precedent).
+The read mirrors `OwnerEmployeeName`, `TargetPositionTitle` and `JobFamilyName` so a list row is
+readable without three more calls; create and update re-read through `GetDetailAsync` so the
+response carries the names the form just set. The update **replaces** the four — a cleared picker
+sends null and the column clears — which is stated on both DTOs and on the client type, because the
+merge reading would make a cleared owner unclearable. Screens: the Segments tab gains Purpose /
+Owner / Feeds columns, and the form an `EmployeePicker`, a purpose field and two clearable pickers
+(`NONE` sentinel — Radix refuses an empty `SelectItem` value); the position and family option
+queries are `enabled: !!segmentDraft`, so the pool's landing screen does not fetch them.
+**D-6's sidebar entry point already existed** (`sidebar.tsx`, Recruitment → Talent Pool,
+`HR.Recruitment.Read`) — nothing was owed there, and the harness asserts it rather than adding it.
+
+⚠ **Four defects the lane found, all fixed inside it:** (1) **`memberCount` has been 0 on every
+segment read since the feature shipped** — no read path included `Memberships`, so the mapper counted
+an empty collection and the Members column was always zero; every read now goes through one
+`WithSegmentGraph()` in `JobCandidateRepositories.cs`. (2) **Deleting a segment left its members
+behind** — the delete is soft and swept nothing, so a retired grouping kept showing on the candidates
+who were in it; the delete now refuses while members remain, naming the count and pointing at
+deactivation, which is what the screen's own copy already told the user. (3) **A deactivated segment
+still accepted new members, on THREE doors** — `CandidateTalentSegmentService.AddCandidateAsync`,
+`JobCandidateService.AddToTalentPoolRichAsync` and the bulk `AssignSegment` each write a membership
+row themselves, so the rule had to be stated in all three or it held in none; removing *from* a
+retired segment stays allowed, since that is how it gets emptied. (4) **The pool dashboard's segment
+chart counted memberships whose segment had been soft-deleted**; the candidate read's `Segments` list
+now checks `m.Segment?.IsDeleted != true` for the same reason (the pool reads include the navigation,
+so the guard is live rather than inert).
+
+⚠ **Found in passing, NOT fixed — another door's, recorded here only:** a candidate create that omits
+`countryId` answers **500**, not a refusal. `CreateJobCandidateDto.CountryId` is a non-nullable
+`Guid`, so an omitted country posts `Guid.Empty` and the insert dies on
+`FK_JobCandidates_Countries_CountryId`. Pre-existing, older than this round, and outside lane V's
+register row — the harness passes a country the way `run-c1.mjs` does. Worth a line in whatever
+slice next touches the candidate create door.
+
+Harness 72 ×2 (`run-v.mjs`: the four fields round-tripping on create / detail / list / update, a
+null clearing each, three stranger ids refused on create AND update with the refused update writing
+nothing, memberCount on all three list shapes and after a removal, the delete refusal naming the
+count, deactivation, the retired-segment refusal on all three doors, the removal that still works,
+and the delete going through once empty; static on the page, the types, the sidebar, the mapper and
+the repository). Regression, every suite on its recorded count: lane5b 34, C1 96, C2 89, K 81, A 44,
+G 49, slices B 175/176, C 190, D 99/100, E 105, F 69 — the two misses are the same stale admin-gate
+assertions older than this round. Slice E is the one that mattered: it is the talent-pool suite, and
+it came back at 105/105 unchanged. Deviations: none.
 
 Each slice gets a log block under its row when built: assertion count, harness, migration name,
 deviations from this document, and what it found beyond it — the round-2 convention.

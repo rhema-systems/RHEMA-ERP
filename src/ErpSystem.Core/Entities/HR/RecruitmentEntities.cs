@@ -1246,6 +1246,33 @@ public class CandidateTalentSegment : TenantEntity
 
     public bool IsActive { get; set; } = true;
 
+    // ── Ownership and intent (round 3, lane V; decision D-6) ──────────────────
+    // The pool is flat and the segment is the working unit, so the segment is where a recruiter's
+    // name, the reason the group exists, and the role it feeds have to live. All four are optional:
+    // the segments that shipped before this lane keep working with none of them.
+
+    /// <summary>The recruiter who works this segment. Optional; no inverse collection on Employee.</summary>
+    public Guid? OwnerEmployeeId { get; set; }
+
+    [ForeignKey(nameof(OwnerEmployeeId))]
+    public virtual Employee? OwnerEmployee { get; set; }
+
+    /// <summary>Why the segment exists — what it is being kept warm for.</summary>
+    [MaxLength(1000)]
+    public string? Purpose { get; set; }
+
+    /// <summary>The position this segment feeds, when it feeds exactly one.</summary>
+    public Guid? TargetPositionId { get; set; }
+
+    [ForeignKey(nameof(TargetPositionId))]
+    public virtual EmployeePosition? TargetPosition { get; set; }
+
+    /// <summary>The job family this segment feeds, when it is broader than a single position.</summary>
+    public Guid? JobFamilyId { get; set; }
+
+    [ForeignKey(nameof(JobFamilyId))]
+    public virtual JobFamily? JobFamily { get; set; }
+
     public virtual ICollection<CandidateSegmentMembership> Memberships { get; set; } = new List<CandidateSegmentMembership>();
 }
 

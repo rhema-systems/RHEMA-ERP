@@ -419,6 +419,10 @@ public class JobCandidateService : IJobCandidateService
             var segment = await _segmentRepository.GetByIdAsync(segmentId);
             if (segment == null || segment.TenantId != tenantId || segment.IsDeleted)
                 throw new ArgumentException($"Talent segment '{segmentId}' not found.");
+            // Lane V: the third door that writes a membership row of its own (with the bulk assign
+            // and the segment service). The retired-segment rule holds on all three or on none.
+            if (!segment.IsActive)
+                throw new InvalidOperationException($"'{segment.Name}' has been deactivated, so candidates cannot be added to it.");
 
             var existing = await _segmentMembershipRepository.GetByCandidateAndSegmentAsync(candidateId, segmentId);
             if (existing != null) continue;
@@ -550,7 +554,7 @@ public class JobCandidateService : IJobCandidateService
         // chart rendered empty for as long as this endpoint has existed.
         analytics.BySegment = candidates
             .SelectMany(c => c.SegmentMemberships ?? Enumerable.Empty<CandidateSegmentMembership>())
-            .Where(m => !m.IsDeleted && m.Segment != null)
+            .Where(m => !m.IsDeleted && m.Segment != null && !m.Segment.IsDeleted)
             .GroupBy(m => m.SegmentId)
             .Select(g => new TalentPoolSegmentBreakdownDto
             {
@@ -586,6 +590,13 @@ public class JobCandidateService : IJobCandidateService
             var segment = await _segmentRepository.GetByIdAsync(dto.SegmentId!.Value);
             if (segment == null || segment.TenantId != current || segment.IsDeleted)
                 throw new ArgumentException($"Talent segment '{dto.SegmentId}' not found.");
+
+            // Lane V. This path writes membership rows itself rather than going through
+            // CandidateTalentSegmentService, so the retired-segment rule has to be stated twice
+            // or the bulk door keeps filling a segment the recruiter deactivated. Removing FROM a
+            // retired segment stays allowed — that is how it gets emptied.
+            if (!segment.IsActive && dto.Operation == ErpSystem.Core.Enums.BulkTalentPoolOperation.AssignSegment)
+                throw new InvalidOperationException($"'{segment.Name}' has been deactivated, so candidates cannot be added to it.");
         }
 
         var result = new RecruitmentBulkOperationResultDto();
