@@ -1,14 +1,19 @@
 # Finance multi-book GL cutover deployment readiness
 
-Status: **code candidate only — deployment is not authorized**
+Status: **disposable-development baseline reset/reseed verified — final evidence review checkpoint; deployment and
+feature activation are not authorized**
 
-D3 status: the disposable-development reset is paused after runtime attempt 07 applied the exact one-migration
-current-model baseline and then stopped fail-closed before completing application seeding. `RhemaERP` is therefore
-baseline-migrated but not accepted as seeded or rehearsal-ready. Verified attempt-specific recovery backups and
-external evidence from attempts 01-07 remain preserved and must not be changed. The attempt-07 seed-DI correction
-is a code candidate for independent Sol High review; no reset retry is authorized by this document.
+D3 status: authorized attempt 11 executed exact Sol-High-approved commit
+`008e29ee0427620f62a21d89b24a98d2af43ddc4`, tree
+`4fa31991cadb4a55ea143f036b45410279d52cc2`, and completed `PASS` / `COMPLETE`. The current local disposable
+`RhemaERP` has the exact one-row current-model baseline, two successful seed passes, byte-identical canonical
+Finance invariants, DBCC PASS, GLF003 zero, and the complete 459-trigger plus function/view governance surface.
+Its C6/C7/C8 process flags remain false. External attempt evidence and verified recovery backups from attempts
+01-11 remain preserved and must not be changed. The next checkpoint is independent Sol High review of the final
+attempt-11 evidence/readiness record; enabling any Finance feature flag or performing another database mutation
+requires separate explicit authorization.
 
-Frozen integrated candidate: `cbc0d3c91142c63c4ea40f08f11d633752268367`
+Historical Stage B5 frozen integrated candidate: `cbc0d3c91142c63c4ea40f08f11d633752268367`
 
 Candidate provenance: exact Stage B5 commit `cc132ac329b6a4e7187e57bd8108cbc8492822d6` was
 independently approved by GPT-5.6 Sol High, integrated locally as

@@ -1,8 +1,10 @@
 # GL cutover Stage A readiness and producer inventory
 
 Status: Stage A.1 historical rehearsal approved and integrated; the former 456/C8 executable chain is superseded
-by the D3 disposable-development current-model baseline. Production/final cutover remains blocked and requires a
-separate forward-compatible migration decision recorded in `GL_CUTOVER_DEPLOYMENT_READINESS.md`.
+by the D3 disposable-development current-model baseline. Authorized attempt 11 has now proved that local
+development baseline reset, two-pass seed convergence, canonical invariants, DBCC, and the 459-trigger governance
+surface at `PASS / COMPLETE`. This does not authorize production/final cutover or C6/C7/C8 activation; those remain
+behind the separate final evidence review and operator gates recorded in `GL_CUTOVER_DEPLOYMENT_READINESS.md`.
 
 Stage A.1 exact base: `7bc24b22c0624aec9acae580ba8049d5f5a83425`
 

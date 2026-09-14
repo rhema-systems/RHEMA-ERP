@@ -1,20 +1,21 @@
 # GL Classification and Revaluation Refactor — Execution Ledger
 
-Last reconciled: 2026-09-11 (Africa/Accra)
+Last reconciled: 2026-09-14 (Africa/Accra)
 
 ## Objective
 
-Complete the approved GL classification/revaluation and V2 producer cutover, then prepare its fail-closed
-operational rehearsal boundary without authorizing deployment or configured-database mutation.
+Complete the approved GL classification/revaluation and V2 producer cutover, prove the disposable-development
+baseline reset/reseed boundary, and hold deployment plus feature activation behind their separate final review and
+operator authorization gates.
 
 ## Current package
 
 | Field | Value |
 |---|---|
-| Phase | Stage D1 — final operational clone-rehearsal harness |
-| Status | `REVIEW_REQUIRED` — database access remains prohibited until independent approval and operator authorization |
+| Phase | Stage D3 — disposable-development baseline reset/reseed final evidence |
+| Status | `PASS / COMPLETE` — attempt 11 verified; final evidence awaits narrow Sol High review; feature activation remains gated |
 | Implementing task | `rehearsal_harness` |
-| Exact base | `cbc0d3c91142c63c4ea40f08f11d633752268367` |
+| Exact approved execution commit/tree | `008e29ee0427620f62a21d89b24a98d2af43ddc4` / `4fa31991cadb4a55ea143f036b45410279d52cc2` |
 | Branch | `codex/finance-gl-cutover-rehearsal-d1` |
 | Worktree | `C:\Users\Akwas\Documents\DEV WORK\RHEMA ERP\RHEMA-ERP-finance-gl-cutover-rehearsal-d1` |
 | Primary branch | `codex/finance-budget-posting-evidence` |
@@ -22,8 +23,8 @@ operational rehearsal boundary without authorizing deployment or configured-data
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — deleted after code-cutover completion |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Code cutover approved/integrated; Stage D1 harness requires independent Sol High review; deployment remains operational `NO-GO` |
-| Connectivity state | Available; configured `RHEMAERP` remains protected and read-only |
+| Review status | Code/harness approved; attempt 11 `PASS / COMPLETE`; final evidence/readiness record is the current Sol High checkpoint; deployment and C6/C7/C8 activation remain `NO-GO` without separate authorization |
+| Connectivity state | Current local disposable `RhemaERP` is exact one-baseline, twice-seeded, invariant-equal and DBCC-verified; no further access or mutation is authorized by this ledger |
 
 ## Authoritative inputs
 
@@ -43,7 +44,7 @@ The user authorized the coordinator to:
 
 The implementing task should not be left idle between these approved phases. User intervention is reserved for the escalation gates below or an unrecoverable blocker.
 
-On 2026-09-04 the user explicitly authorized proceeding with the gated database migration/reset/reseed track and the bounded Procurement, Inventory, Sales and HR/Payroll AccountingBookCode V2 producer cutover. Disposable rehearsal databases and owner-scoped cross-module conversions are therefore in scope. The configured `RHEMAERP` database remains protected until rehearsal, preflight, backup/restore and independent-review gates pass. Destructive repository cleanup, risky conflict resolution, pushes and PR operations remain escalation gates.
+On 2026-09-04 the user explicitly authorized proceeding with the gated database migration/reset/reseed track and the bounded Procurement, Inventory, Sales and HR/Payroll AccountingBookCode V2 producer cutover. Disposable rehearsal databases and owner-scoped cross-module conversions are therefore in scope. Subsequent attempt-specific authorizations culminated in attempt 11 `PASS / COMPLETE`; that authority is exhausted. The current local `RhemaERP` and every preserved recovery/evidence asset require new explicit authority for any further access or mutation. Destructive repository cleanup, risky conflict resolution, pushes and PR operations remain escalation gates.
 
 ## Phase 1A review checklist
 
