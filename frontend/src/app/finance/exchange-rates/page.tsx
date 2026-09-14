@@ -19,7 +19,7 @@ import Link from 'next/link';
 const MOCK_CURRENCIES = ['GHS', 'USD', 'EUR', 'GBP'];
 const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string }> = [
     { value: 'Daily', label: 'Daily' },
-    { value: 'Average', label: 'Average' },
+    { value: 'Average', label: 'Average — reporting/valuation only' },
     { value: 'MonthEnd', label: 'Month End' },
     { value: 'QuarterEnd', label: 'Quarter End' },
     { value: 'YearEnd', label: 'Year End' },
@@ -27,6 +27,9 @@ const EXCHANGE_RATE_TYPE_OPTIONS: Array<{ value: ExchangeRateType; label: string
     { value: 'Fixed', label: 'Fixed' },
     { value: 'Spot', label: 'Spot' },
 ];
+const ENTRY_RATE_TYPE_OPTIONS = EXCHANGE_RATE_TYPE_OPTIONS.filter(
+    option => option.value !== 'Budget' && option.value !== 'Spot'
+);
 const QUOTE_SIDE_OPTIONS: Array<{ value: ExchangeRateQuoteSide; label: string }> = [
     { value: 'Mid', label: 'Mid / Reference' },
     { value: 'Buying', label: 'Buying (bank buys foreign currency)' },
@@ -66,6 +69,7 @@ export default function ExchangeRatesPage() {
         quoteSide: 'Mid' as ExchangeRateQuoteSide,
         effectiveDate: new Date().toISOString().split('T')[0],
         rateSource: '',
+        sourceReference: '',
     });
 
     useEffect(() => {
@@ -112,6 +116,7 @@ export default function ExchangeRatesPage() {
             rateType: formData.rateType,
             quoteSide: formData.quoteSide,
             rateSource: formData.rateSource,
+            sourceReference: formData.sourceReference || undefined,
             isActive: true,
             });
             setRates(current => [newRate, ...current]);
@@ -133,6 +138,7 @@ export default function ExchangeRatesPage() {
                 rateType: formData.rateType,
                 quoteSide: formData.quoteSide,
                 rateSource: formData.rateSource || editingRate.rateSource,
+                sourceReference: formData.sourceReference || undefined,
                 isActive: editingRate.isActive,
             });
             setRates(current => current.map(rate => rate.id === updated.id ? updated : rate));
@@ -152,6 +158,7 @@ export default function ExchangeRatesPage() {
             rateType: 'Daily',
             quoteSide: 'Mid',
             rateSource: '',
+            sourceReference: '',
         });
     };
 
@@ -165,6 +172,7 @@ export default function ExchangeRatesPage() {
             rateType: rate.rateType,
             quoteSide: rate.quoteSide || 'Mid',
             rateSource: rate.rateSource || '',
+            sourceReference: rate.sourceReference || '',
         });
     };
 
@@ -395,7 +403,7 @@ export default function ExchangeRatesPage() {
                                         <li>targetCurrencyCode (e.g., USD)</li>
                                         <li>rate (e.g., 12.5000)</li>
                                         <li>effectiveDate (YYYY-MM-DD)</li>
-                                        <li>rateType (Daily/Average/MonthEnd/QuarterEnd/YearEnd/Budget/Fixed/Spot)</li>
+                                        <li>rateType (Daily/Average/MonthEnd/QuarterEnd/YearEnd/Fixed)</li>
                                         <li>rateSource (e.g., Manual, BankFeed, Bank of Ghana)</li>
                                     </ul>
                                 </div>
@@ -445,7 +453,7 @@ export default function ExchangeRatesPage() {
                             <DialogHeader>
                                 <DialogTitle>Add Exchange Rate</DialogTitle>
                                 <DialogDescription>
-                                    Create a new exchange rate entry
+                                    Submit a new exchange rate for approval. The approved schedule remains unchanged until approval completes.
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4 py-4">
@@ -513,13 +521,16 @@ export default function ExchangeRatesPage() {
                                             <SelectValue />
                                         </SelectTrigger>
                                         <SelectContent>
-                                            {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                            {ENTRY_RATE_TYPE_OPTIONS.map((option) => (
                                                 <SelectItem key={option.value} value={option.value}>
                                                     {option.label}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
                                     </Select>
+                                    <p className="text-xs text-muted-foreground">
+                                        Month End must use the calendar month-end date. Quarter End and Year End must match the configured fiscal calendar. Budget and Spot remain hidden until supported workflows exist.
+                                    </p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="quoteSide">Quote Side</Label>
@@ -544,6 +555,16 @@ export default function ExchangeRatesPage() {
                                         value={formData.rateSource}
                                         onChange={(e) => setFormData({ ...formData, rateSource: e.target.value })}
                                     />
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="sourceReference">Source reference</Label>
+                                    <Input
+                                        id="sourceReference"
+                                        value={formData.sourceReference}
+                                        onChange={(e) => setFormData({ ...formData, sourceReference: e.target.value })}
+                                        placeholder="Bulletin, provider quote, or contract reference"
+                                    />
+                                    <p className="text-xs text-muted-foreground">Retained as approval and audit evidence.</p>
                                 </div>
                             </div>
                             <DialogFooter>
@@ -694,9 +715,11 @@ export default function ExchangeRatesPage() {
                                 <tr className="border-b bg-muted/50">
                                     <th className="p-4 text-left font-medium">Currency Pair</th>
                                     <th className="p-4 text-right font-medium">Rate</th>
-                                    <th className="p-4 text-left font-medium">Effective Date</th>
+                                    <th className="p-4 text-left font-medium">Effective From</th>
+                                    <th className="p-4 text-left font-medium">Effective To</th>
                                     <th className="p-4 text-left font-medium">Type</th>
                                     <th className="p-4 text-left font-medium">Quote Side</th>
+                                    <th className="p-4 text-left font-medium">Status</th>
                                     <th className="p-4 text-left font-medium">Source</th>
                                     <th className="p-4 text-right font-medium">Actions</th>
                                 </tr>
@@ -704,7 +727,7 @@ export default function ExchangeRatesPage() {
                             <tbody>
                                 {isLoadingRates && (
                                     <tr>
-                                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                                        <td colSpan={9} className="p-8 text-center text-muted-foreground">
                                             <Loader2 className="mr-2 inline h-4 w-4 animate-spin" />
                                             Loading retained exchange rates…
                                         </td>
@@ -712,7 +735,7 @@ export default function ExchangeRatesPage() {
                                 )}
                                 {!isLoadingRates && !rateLoadError && filteredRates.length === 0 && (
                                     <tr>
-                                        <td colSpan={7} className="p-8 text-center text-muted-foreground">
+                                        <td colSpan={9} className="p-8 text-center text-muted-foreground">
                                             No exchange rates match the selected filters.
                                         </td>
                                     </tr>
@@ -722,6 +745,7 @@ export default function ExchangeRatesPage() {
                                         <td className="p-4 font-mono font-semibold">{rate.baseCurrencyCode}/{rate.targetCurrencyCode}</td>
                                         <td className="p-4 text-right font-mono">{rate.rate.toFixed(4)}</td>
                                         <td className="p-4">{formatDate(rate.effectiveDate)}</td>
+                                        <td className="p-4">{rate.expiryDate ? formatDate(rate.expiryDate) : 'Open-ended'}</td>
                                         <td className="p-4">
                                             <Badge variant={rate.rateType === 'Daily' ? 'default' : 'secondary'}>
                                                 {formatRateType(rate.rateType)}
@@ -730,7 +754,15 @@ export default function ExchangeRatesPage() {
                                         <td className="p-4">
                                             <Badge variant="outline">{rate.quoteSide || 'Mid'}</Badge>
                                         </td>
-                                        <td className="p-4 text-sm text-muted-foreground">{rate.rateSource}</td>
+                                        <td className="p-4">
+                                            <Badge variant={rate.approvalStatus === 'Approved' || rate.approvalStatus === 'AutoApproved' ? 'default' : rate.approvalStatus === 'Rejected' ? 'destructive' : 'secondary'}>
+                                                {rate.approvalStatus || 'Approved'}
+                                            </Badge>
+                                        </td>
+                                        <td className="p-4 text-sm text-muted-foreground">
+                                            <div>{rate.rateSource}</div>
+                                            {rate.sourceReference && <div className="text-xs">Ref: {rate.sourceReference}</div>}
+                                        </td>
                                         <td className="p-4 text-right">
                                             <Dialog>
                                                 <DialogTrigger asChild>
@@ -738,6 +770,9 @@ export default function ExchangeRatesPage() {
                                                         variant="ghost"
                                                         size="sm"
                                                         onClick={() => openEditDialog(rate)}
+                                                        disabled={rate.usageLocked || (rate.approvalStatus !== 'Pending' && rate.approvalStatus !== 'Rejected')}
+                                                        title={rate.approvalStatus === 'Approved' || rate.approvalStatus === 'AutoApproved' ? 'Approved accounting evidence is immutable' : 'Edit submission'}
+                                                        aria-label={`Edit ${rate.baseCurrencyCode}/${rate.targetCurrencyCode} exchange rate`}
                                                     >
                                                         <Edit className="h-4 w-4" />
                                                     </Button>
@@ -776,8 +811,9 @@ export default function ExchangeRatesPage() {
                                                                 id="edit-effectiveDate"
                                                                 type="date"
                                                                 value={formData.effectiveDate}
-                                                                onChange={(e) => setFormData({ ...formData, effectiveDate: e.target.value })}
+                                                                disabled
                                                             />
+                                                            <p className="text-xs text-muted-foreground">The effective date is immutable; create a new rate when the evidence date changes.</p>
                                                         </div>
                                                         <div className="space-y-2">
                                                             <Label htmlFor="edit-rateType">Rate Type</Label>
@@ -789,13 +825,19 @@ export default function ExchangeRatesPage() {
                                                                     <SelectValue />
                                                                 </SelectTrigger>
                                                                 <SelectContent>
-                                                                    {EXCHANGE_RATE_TYPE_OPTIONS.map((option) => (
+                                                                    {!ENTRY_RATE_TYPE_OPTIONS.some(option => option.value === formData.rateType) && (
+                                                                        <SelectItem value={formData.rateType} disabled>
+                                                                            {formatRateType(formData.rateType)} (legacy)
+                                                                        </SelectItem>
+                                                                    )}
+                                                                    {ENTRY_RATE_TYPE_OPTIONS.map((option) => (
                                                                         <SelectItem key={option.value} value={option.value}>
                                                                             {option.label}
                                                                         </SelectItem>
                                                                     ))}
                                                                 </SelectContent>
                                                             </Select>
+                                                            <p className="text-xs text-muted-foreground">Closing types are accepted only when this immutable date matches their calendar boundary.</p>
                                                         </div>
                                                         <div className="space-y-2">
                                                             <Label htmlFor="edit-quoteSide">Quote Side</Label>
@@ -817,6 +859,14 @@ export default function ExchangeRatesPage() {
                                                                 id="edit-source"
                                                                 value={formData.rateSource}
                                                                 onChange={(e) => setFormData({ ...formData, rateSource: e.target.value })}
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-2">
+                                                            <Label htmlFor="edit-sourceReference">Source reference</Label>
+                                                            <Input
+                                                                id="edit-sourceReference"
+                                                                value={formData.sourceReference}
+                                                                onChange={(e) => setFormData({ ...formData, sourceReference: e.target.value })}
                                                             />
                                                         </div>
                                                     </div>

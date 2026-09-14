@@ -41,6 +41,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime? UpdatedAt { get; set; }
         public string? UpdatedBy { get; set; }
         public List<LeaseScheduleLineDto> ScheduleLines { get; set; } = new();
+        public FinanceSourceDocumentDimensionDto? RecognitionFinanceDimensions { get; set; }
     }
 
     public class LeaseScheduleLineDto
@@ -53,5 +54,16 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal PrincipalReduction { get; set; }
         public decimal RemainingLiability { get; set; }
         public bool IsPosted { get; set; }
+        public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
+    }
+
+    public sealed class ActivateLeaseDto
+    {
+        public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
+    }
+
+    public sealed class PostLeasePeriodDto
+    {
+        public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
     }
 }

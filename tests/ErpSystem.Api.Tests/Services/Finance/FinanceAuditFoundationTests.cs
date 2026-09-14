@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -161,6 +162,97 @@ public sealed class FinanceAuditFoundationTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Finance audit event tenant does not match the current tenant context.");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceAuditFoundation")]
+    [Trait("Category", "AuditTrail")]
+    public async Task FinanceAuditRecord_WithIdempotencyKey_ShouldReturnTheDurableOriginal()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        await db.SaveChangesAsync();
+        var auditService = CreateFinanceAuditService(db, tenantId);
+        var idempotencyKey = $"FXR:{Guid.NewGuid():N}:{Guid.NewGuid():N}:POSTED";
+        var first = new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.UnrealizedRevaluationPosted,
+            TenantId = tenantId,
+            Resource = "FxRevaluationBatch",
+            ResourceId = Guid.NewGuid().ToString(),
+            IdempotencyKey = idempotencyKey,
+            AfterValues = new { attempt = 1 }
+        };
+
+        var original = await auditService.RecordAsync(first);
+        var retried = await auditService.RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = first.EventType,
+            TenantId = tenantId,
+            Resource = first.Resource,
+            ResourceId = first.ResourceId,
+            IdempotencyKey = idempotencyKey,
+            AfterValues = new { attempt = 2 }
+        });
+
+        retried.Id.Should().Be(original.Id);
+        (await db.AuditLogs.CountAsync(item => item.IdempotencyKey == idempotencyKey)).Should().Be(1);
+        (await db.AuditLogs.SingleAsync(item => item.IdempotencyKey == idempotencyKey))
+            .NewValues.Should().Contain("\"attempt\":1");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceAuditFoundation")]
+    [Trait("Category", "AuditTrail")]
+    public async Task FinanceAuditRecord_ConcurrentRetriesShouldResolveToOneDurableAudit()
+    {
+        var tenantId = Guid.NewGuid();
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"finance-audit-concurrent-retry-{Guid.NewGuid()}", databaseRoot)
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .Options;
+        var idempotencyKey = $"FXR:{Guid.NewGuid():N}:{Guid.NewGuid():N}:RATE";
+        var resourceId = Guid.NewGuid().ToString();
+
+        await using (var initialDb = new ApplicationDbContext(options))
+        {
+            SeedTenant(initialDb, tenantId);
+            await initialDb.SaveChangesAsync();
+            await CreateFinanceAuditService(initialDb, tenantId).RecordAsync(new FinanceAuditEventDto
+            {
+                EventType = FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+                TenantId = tenantId,
+                Resource = "FxRevaluationBatch",
+                ResourceId = resourceId,
+                IdempotencyKey = idempotencyKey
+            });
+        }
+
+        await using var firstDb = new ApplicationDbContext(options);
+        await using var secondDb = new ApplicationDbContext(options);
+        var firstRetry = CreateFinanceAuditService(firstDb, tenantId).RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+            TenantId = tenantId,
+            Resource = "FxRevaluationBatch",
+            ResourceId = resourceId,
+            IdempotencyKey = idempotencyKey
+        });
+        var secondRetry = CreateFinanceAuditService(secondDb, tenantId).RecordAsync(new FinanceAuditEventDto
+        {
+            EventType = FinanceAuditEvents.ExchangeRateUsedForRevaluation,
+            TenantId = tenantId,
+            Resource = "FxRevaluationBatch",
+            ResourceId = resourceId,
+            IdempotencyKey = idempotencyKey
+        });
+
+        var results = await Task.WhenAll(firstRetry, secondRetry);
+        results[0].Id.Should().Be(results[1].Id);
+        await using var verifier = new ApplicationDbContext(options);
+        (await verifier.AuditLogs.CountAsync(item => item.IdempotencyKey == idempotencyKey)).Should().Be(1);
     }
 
     [Fact]
@@ -368,6 +460,11 @@ public sealed class FinanceAuditFoundationTests
                 It.IsAny<string?>()))
             .Returns(Task.CompletedTask);
 
+        var budgetControl = new Mock<IFinanceBudgetControlService>();
+        budgetControl
+            .Setup(x => x.ValidateManualJournalForPostingAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<Guid>());
+
         return new JournalEntryService(
             db,
             currentUser.Object,
@@ -376,7 +473,8 @@ public sealed class FinanceAuditFoundationTests
             Mock.Of<INotificationService>(),
             Mock.Of<IAccountingBookService>(),
             engine,
-            auditService);
+            auditService,
+            budgetControl: budgetControl.Object);
     }
 
     private static AuditLogController CreateAuditLogController(ApplicationDbContext db, Guid tenantId)
@@ -437,15 +535,34 @@ public sealed class FinanceAuditFoundationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.FinanceSettings.Add(new FinanceSettings
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrency = "GHS",
+            ReferenceNumber = $"FIN-{code}", Status = "Active"
+        });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedPeriod(ApplicationDbContext db, Guid tenantId)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = "FY2026", Year = 2026, FiscalYearType = "Calendar",
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            Status = "Open", IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -459,7 +576,9 @@ public sealed class FinanceAuditFoundationTests
             IsLocked = false
         };
 
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -483,6 +602,8 @@ public sealed class FinanceAuditFoundationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 

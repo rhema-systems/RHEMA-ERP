@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AR;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
@@ -67,6 +68,126 @@ public sealed class ArInvoicePostingMigrationTests
         // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
         fixture.ArAccount.Balance.Should().Be(100m);
         fixture.RevenueAccount.Balance.Should().Be(100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task InvoiceTradeDiscounts_ShouldReduceRevenueWithoutDiscountAllowedAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            var line = invoice.LineItems.Single();
+            line.DiscountPercentage = 10m;
+            line.DiscountAmount = 10m;
+            invoice.SubTotal = 90m;
+            invoice.DiscountAmount = 5m;
+            invoice.TotalAmount = 85m;
+            invoice.BaseCurrencyAmount = 85m;
+        });
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.DiscountAllowedAccountId = null;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(item => item.AccountId == fixture.ArAccount.Id)
+            .DebitAmount.Should().Be(85m);
+        journal.Transactions.Single(item => item.AccountId == fixture.RevenueAccount.Id)
+            .CreditAmount.Should().Be(85m);
+        journal.Transactions.Should().NotContain(item => item.AccountId == fixture.DiscountAccount.Id);
+    }
+
+    [Fact]
+    public async Task CreateInvoice_ShouldApplyLineAndDocumentTradeDiscountBeforeTax()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        TaxCalculationRequestDto? capturedTaxRequest = null;
+        var taxEngine = new Mock<ITaxCalculationEngine>();
+        taxEngine.Setup(engine => engine.CalculateTaxesAsync(
+                It.IsAny<TaxCalculationRequestDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<TaxCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
+            .ReturnsAsync((TaxCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
+            {
+                TotalTaxAmount = decimal.Round(request.BaseAmount * 0.15m, 2, MidpointRounding.AwayFromZero)
+            });
+        var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
+
+        var created = await service.CreateAsync(new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            DiscountAmount = 10m,
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Discounted service",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    DiscountPercentage = 10m,
+                    TaxGroupId = Guid.NewGuid(),
+                    TaxTreatment = TaxTreatment.Standard
+                }
+            }
+        });
+
+        capturedTaxRequest.Should().NotBeNull();
+        capturedTaxRequest!.BaseAmount.Should().Be(80m);
+        created.SubTotal.Should().Be(90m);
+        created.DiscountAmount.Should().Be(10m);
+        created.TaxAmount.Should().Be(12m);
+        created.TotalAmount.Should().Be(92m);
+    }
+
+    [Theory]
+    [InlineData(101, 0)]
+    [InlineData(0, 101)]
+    public async Task CreateInvoice_ShouldRejectInvalidTradeDiscounts(decimal linePercentage, decimal documentDiscount)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+
+        var action = () => service.CreateAsync(new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            DiscountAmount = documentDiscount,
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Invalid discount",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    DiscountPercentage = linePercentage,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*trade discount*");
+        (await db.Invoices.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -182,10 +303,12 @@ public sealed class ArInvoicePostingMigrationTests
         (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
     [Trait("Category", "AccountsReceivable")]
-    public async Task ForeignOpeningBalanceArInvoice_ShouldRejectCreateWithoutRateEvidence()
+    public async Task ForeignArInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -199,7 +322,7 @@ public sealed class ArInvoicePostingMigrationTests
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
             ExchangeRate = 15m,
-            IsOpeningBalance = true,
+            IsOpeningBalance = isOpeningBalance,
             LineItems = new List<InvoiceLineItemCreateDto>
             {
                 new()
@@ -217,6 +340,85 @@ public sealed class ArInvoicePostingMigrationTests
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*require an approved exchange-rate record*");
         (await db.Invoices.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task RepeatedArInvoiceCreateWithSameLineIdentity_ShouldReturnCommittedInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var lineId = Guid.NewGuid();
+        var request = new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = lineId,
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Retry-safe consulting invoice",
+                    Quantity = 1m,
+                    UnitPrice = 15000m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        };
+
+        var first = await service.CreateAsync(request);
+        var replay = await service.CreateAsync(request);
+
+        replay.Id.Should().Be(first.Id);
+        replay.LineItems.Should().ContainSingle(line => line.Id == lineId);
+        (await db.Invoices.CountAsync()).Should().Be(2);
+        (await db.Set<InvoiceLineItem>().CountAsync(line => line.Id == lineId)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ReusedArInvoiceLineIdentityWithChangedPayload_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var request = new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Original request",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        };
+        await service.CreateAsync(request);
+        request.LineItems[0].UnitPrice = 200m;
+
+        var action = () => service.CreateAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already bound to a different request*");
+        (await db.Invoices.CountAsync()).Should().Be(2);
     }
 
     [Fact]
@@ -546,7 +748,8 @@ public sealed class ArInvoicePostingMigrationTests
     private static (InvoiceService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateService(
         ApplicationDbContext db,
         Guid tenantId,
-        Mock<IWorkflowIntegrationService>? workflow = null)
+        Mock<IWorkflowIntegrationService>? workflow = null,
+        ITaxCalculationEngine? taxEngine = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -562,14 +765,24 @@ public sealed class ArInvoicePostingMigrationTests
             Mock.Of<ILogger<FinancePostingEngine>>(),
             auditService);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(service => service.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.ARInvoice,
+                tenantId,
+                It.IsAny<DateTime?>(),
+                nameof(Invoice),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"INV-TEST-{Guid.NewGuid():N}");
 
         var service = new InvoiceService(
             new UnitOfWork(db),
             currentUser.Object,
-            Mock.Of<ITaxCalculationEngine>(),
+            taxEngine ?? Mock.Of<ITaxCalculationEngine>(),
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<InvoiceService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            numbering.Object,
             postingEngine,
             auditService,
             workflowIntegration: (workflow ?? DirectWorkflow()).Object);
@@ -883,6 +1096,13 @@ public sealed class ArInvoicePostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -910,6 +1130,7 @@ public sealed class ArInvoicePostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -937,6 +1158,8 @@ public sealed class ArInvoicePostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 

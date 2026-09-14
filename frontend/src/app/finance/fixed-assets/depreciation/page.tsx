@@ -14,11 +14,16 @@ import { useToast } from '@/components/ui/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { FixedAssetDepreciationReversalPanel } from '@/components/finance/FixedAssetDepreciationReversalPanel';
+import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import { useAuth } from '@/hooks/use-auth';
 import type { FiscalPeriod } from '@/types/finance';
-import type { AssetDepreciationSchedule, FixedAsset } from '@/types/fixed-assets';
+import type { AssetDepreciationSchedule, FixedAsset, FixedAssetDepreciationRun } from '@/types/fixed-assets';
 
 export default function DepreciationPage() {
   const { toast } = useToast();
+  const { hasPermission } = useAuth();
+  const canPost = hasPermission('Finance.JournalEntries.Post');
   const [periods, setPeriods] = useState<FiscalPeriod[]>([]);
   const [assets, setAssets] = useState<FixedAsset[]>([]);
   const [selectedPeriod, setSelectedPeriod] = useState<string>('');
@@ -26,9 +31,12 @@ export default function DepreciationPage() {
   const [postToGl, setPostToGl] = useState(true);
   const [isRunning, setIsRunning] = useState(false);
   const [results, setResults] = useState<AssetDepreciationSchedule[]>([]);
+  const [runs, setRuns] = useState<FixedAssetDepreciationRun[]>([]);
+  const [postingRunId, setPostingRunId] = useState<string | null>(null);
   const [productionUnits, setProductionUnits] = useState('');
   const [productionEvidenceReference, setProductionEvidenceReference] = useState('');
   const [productionEvidenceNotes, setProductionEvidenceNotes] = useState('');
+  const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
 
   const selectedAssetData = useMemo(
     () => assets.find((asset) => asset.id === selectedAsset),
@@ -55,11 +63,17 @@ export default function DepreciationPage() {
   const loadPeriodResults = useCallback(async () => {
     if (!selectedPeriod) {
       setResults([]);
+      setRuns([]);
       return;
     }
 
     try {
-      setResults(await fixedAssetsDataService.getPeriodSchedule(selectedPeriod));
+      const [schedule, periodRuns] = await Promise.all([
+        fixedAssetsDataService.getPeriodSchedule(selectedPeriod),
+        fixedAssetsDataService.getDepreciationRuns(selectedPeriod),
+      ]);
+      setResults(schedule);
+      setRuns(periodRuns);
     } catch (error) {
       console.error('Failed to load period depreciation schedules:', error);
       toast({
@@ -71,6 +85,23 @@ export default function DepreciationPage() {
   }, [selectedPeriod, toast]);
 
   useEffect(() => { void loadPeriodResults(); }, [loadPeriodResults]);
+
+  const handlePostApproved = async (runId: string) => {
+    try {
+      setPostingRunId(runId);
+      await fixedAssetsDataService.postApprovedDepreciationRun(runId);
+      await loadPeriodResults();
+      toast({ title: 'Depreciation posted', description: 'The approved run was posted once through the Finance posting engine.' });
+    } catch (error) {
+      toast({
+        title: 'Posting failed',
+        description: error instanceof Error ? error.message : 'The approved depreciation run could not be posted.',
+        variant: 'destructive',
+      });
+    } finally {
+      setPostingRunId(null);
+    }
+  };
 
   const reversalRuns = useMemo(() => {
     const groups = new Map<string, AssetDepreciationSchedule[]>();
@@ -135,6 +166,11 @@ export default function DepreciationPage() {
         fiscalPeriodId: selectedPeriod,
         fixedAssetId: selectedAsset === 'all' ? undefined : selectedAsset,
         postToGl,
+        financeDimensions: {
+          defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+          lines: [],
+          applyDefaultToEligibleLines: true,
+        },
         productionUsageEntries: selectedAssetData?.depreciationMethod === 'UnitsOfProduction'
           ? [{
               fixedAssetId: selectedAssetData.id,
@@ -169,7 +205,7 @@ export default function DepreciationPage() {
             <Calculator className="h-8 w-8" />
             Run Depreciation
           </h1>
-          <p className="text-muted-foreground">Generate depreciation schedules and post to GL.</p>
+          <p className="text-muted-foreground">Generate convention-aware schedules and post them through the governed Finance engine.</p>
         </div>
         <Link href="/finance/fixed-assets/register">
           <Button variant="outline">Back to Register</Button>
@@ -271,10 +307,47 @@ export default function DepreciationPage() {
           )}
         </CardContent>
         <CardContent>
+          <SourceDocumentDimensionDefaultsPanel
+            effectiveDate={periods.find(period => period.id === selectedPeriod)?.endDate?.slice(0, 10) || new Date().toISOString().slice(0, 10)}
+            values={defaultDimensionValues}
+            onChange={setDefaultDimensionValues}
+            disabled={isRunning}
+          />
+        </CardContent>
+        <CardContent>
           <Button onClick={handleRun} disabled={isRunning}>
             {isRunning ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <PlayCircle className="mr-2 h-4 w-4" />}
             Run Depreciation
           </Button>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader><CardTitle className="text-base">Depreciation Runs</CardTitle></CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader><TableRow>
+              <TableHead>Posting date</TableHead><TableHead>Book</TableHead><TableHead>Assets</TableHead>
+              <TableHead className="text-right">Total</TableHead><TableHead>Prepared by</TableHead>
+              <TableHead>Status</TableHead><TableHead>Journal</TableHead><TableHead />
+            </TableRow></TableHeader>
+            <TableBody>
+              {runs.length === 0 ? <TableRow><TableCell colSpan={8} className="text-center py-8 text-muted-foreground">No runs for the selected period.</TableCell></TableRow> : runs.map(run => (
+                <TableRow key={run.id}>
+                  <TableCell>{new Date(run.postingDate).toLocaleDateString()}</TableCell>
+                  <TableCell>{run.bookClassification}</TableCell><TableCell>{run.assetCount}</TableCell>
+                  <TableCell className="text-right">{run.totalDepreciationAmount.toFixed(2)}</TableCell>
+                  <TableCell>{run.preparedBy || '—'}</TableCell><TableCell>{run.status}</TableCell>
+                  <TableCell>{run.journalEntryId ? <Link className="text-blue-600 hover:underline" href={`/finance/journal-entries/${run.journalEntryId}`}>View journal</Link> : '—'}</TableCell>
+                  <TableCell>{canPost && run.status === 'Approved' && !run.journalEntryId && (
+                    <Button size="sm" onClick={() => handlePostApproved(run.id)} disabled={postingRunId !== null}>
+                      {postingRunId === run.id && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Post approved
+                    </Button>
+                  )}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 
@@ -288,6 +361,7 @@ export default function DepreciationPage() {
               <TableRow>
                 <TableHead>Asset</TableHead>
                 <TableHead>Method</TableHead>
+                <TableHead>Convention evidence</TableHead>
                 <TableHead className="text-right">Usage</TableHead>
                 <TableHead className="text-right">Depreciation</TableHead>
                 <TableHead className="text-right">Accumulated</TableHead>
@@ -298,7 +372,7 @@ export default function DepreciationPage() {
             <TableBody>
               {results.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                  <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
                     No depreciation results yet.
                   </TableCell>
                 </TableRow>
@@ -307,6 +381,12 @@ export default function DepreciationPage() {
                   <TableRow key={row.id}>
                     <TableCell className="font-mono">{row.fixedAssetId}</TableCell>
                     <TableCell>{row.depreciationMethodSnapshot}</TableCell>
+                    <TableCell>
+                      <div>{row.depreciationMethodSnapshot === 'UnitsOfProduction' ? 'Usage-based' : row.depreciationConventionSnapshot}</div>
+                      <div className="text-xs text-muted-foreground" title={row.conventionBasis}>
+                        Factor {row.conventionFactor.toFixed(8).replace(/0+$/, '').replace(/\.$/, '')} · {row.conventionBasis}
+                      </div>
+                    </TableCell>
                     <TableCell className="text-right">
                       {row.depreciationMethodSnapshot === 'UnitsOfProduction'
                         ? row.periodProductionUnits.toFixed(4)

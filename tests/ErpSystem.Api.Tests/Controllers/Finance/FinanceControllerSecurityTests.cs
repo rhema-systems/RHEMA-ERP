@@ -15,6 +15,24 @@ namespace ErpSystem.Api.Tests.Controllers.Finance;
 
 public sealed class FinanceControllerSecurityTests
 {
+    [Theory]
+    [InlineData("RunRevaluation")]
+    [InlineData("ReverseRevaluation")]
+    [Trait("Batch", "FinanceGoLive-FXSettlementRevaluation")]
+    [Trait("Category", "FinanceSecurity")]
+    public void FxRevaluationMutationsRequireReadAndRunPermissions(string actionName)
+    {
+        var action = typeof(RootFinanceController).GetMethod(actionName);
+        action.Should().NotBeNull();
+
+        GetMappedPolicies(typeof(RootFinanceController), action!)
+            .Should().BeEquivalentTo(new[]
+            {
+                FinancePermissions.ViewFinance,
+                FinancePermissions.RunFxRevaluation
+            });
+    }
+
     public static TheoryData<Type> CashAndBankControllerTypes => new()
     {
         typeof(BankAccountController),
@@ -191,10 +209,18 @@ public sealed class FinanceControllerSecurityTests
     [InlineData(typeof(OpeningBalancesController), "Submit", FinancePermissions.PrepareOpeningBalances)]
     [InlineData(typeof(OpeningBalancesController), "Submit", FinancePermissions.WorkflowSubmit)]
     [InlineData(typeof(OpeningBalancesController), "Post", FinancePermissions.RunMigrationAdjustments)]
+    [InlineData(typeof(OpeningBalancesController), "GetReversals", FinancePermissions.ViewFinance)]
+    [InlineData(typeof(OpeningBalancesController), "RequestReversal", FinancePermissions.RunMigrationAdjustments)]
+    [InlineData(typeof(OpeningBalancesController), "ReviewReversal", FinancePermissions.ApproveOpeningBalanceReversal)]
+    [InlineData(typeof(OpeningBalancesController), "PostReversal", FinancePermissions.RunMigrationAdjustments)]
     [InlineData(typeof(RootFinanceController), "GetTrialBalance", FinancePermissions.RunFinanceReports)]
     [InlineData(typeof(FixedAssetsController), "ExportToExcel", FinancePermissions.ExportFinanceReports)]
     [InlineData(typeof(FinanceReportExportsController), "Export", FinancePermissions.ExportFinanceReports)]
     [InlineData(typeof(FinanceReportExportsController), "Print", FinancePermissions.ExportFinanceReports)]
+    [InlineData(typeof(AccountBookCurrencyPoliciesController), "Get", FinancePermissions.ViewFinance)]
+    [InlineData(typeof(AccountBookCurrencyPoliciesController), "Save", FinancePermissions.OverrideFxRevaluationPolicy)]
+    [InlineData(typeof(AccountBookCurrencyPoliciesController), "Approve", FinancePermissions.ApproveFxRevaluationPolicy)]
+    [InlineData(typeof(AccountBookCurrencyPoliciesController), "Reject", FinancePermissions.ApproveFxRevaluationPolicy)]
     [InlineData(typeof(WithholdingTaxCertificatesController), "GetApCertificates", FinancePermissions.RunFinanceReports)]
     [InlineData(typeof(WithholdingTaxCertificatesController), "GenerateApCertificate", FinancePermissions.ManageTaxConfiguration)]
     [InlineData(typeof(WithholdingTaxCertificatesController), "ReissueApCertificate", FinancePermissions.ManageTaxConfiguration)]

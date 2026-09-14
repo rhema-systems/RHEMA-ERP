@@ -23,7 +23,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         var migration = ReadSource(
             "src",
             "ErpSystem.Data",
-            "Migrations",
+            "LegacyMigrationsArchive",
             "20260822120000_BackfillPropertyListingApplicationFields.cs");
 
         fieldKeys.Should().Contain([

@@ -44,6 +44,8 @@ public sealed partial class AllocationRunBatchServiceTests
             .Include(item => item.Lines)
             .SingleAsync(item => item.Id == batch.Id);
         persisted.Status.Should().Be(AllocationRunBatchStatus.Draft);
+        persisted.BookClassification.Should().Be("PRIMARY_FULL");
+        persisted.FunctionalCurrencyCode.Should().Be("GHS");
         persisted.Lines.Should().HaveCount(2);
 
         var duplicate = () => service.CreateRunBatchAsync(CreateRunRequest(fixture));
@@ -241,13 +243,36 @@ public sealed partial class AllocationRunBatchServiceTests
         var source = SeedAccount(db, tenantId, "6100", "Shared Rent", AccountType.Expense);
         var targetOne = SeedAccount(db, tenantId, "6110", "Rent - Sales", AccountType.Expense);
         var targetTwo = SeedAccount(db, tenantId, "6120", "Rent - Admin", AccountType.Expense);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "PRIMARY_FULL", Name = "Primary full book",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
+        var expenseClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "OPERATING_EXPENSE", Name = "Operating expense", CoreAccountType = AccountType.Expense,
+            IsPostingClassification = true, Status = AccountClassificationStatus.Active
+        };
+        db.AccountClassifications.Add(expenseClassification);
+        foreach (var account in new[] { source, targetOne, targetTwo })
+            db.AccountAccountingBooks.Add(new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
+                AccountingBookId = book.Id, AccountClassificationId = expenseClassification.Id, IsEnabled = true
+            });
         db.Set<AccountBalance>().Add(new AccountBalance
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
             AccountId = source.Id,
+            AccountingBookId = book.Id,
             FiscalPeriodId = period.Id,
-            BookClassification = "IFRS",
+            BookClassification = book.Code,
             Currency = "GHS",
             ClosingBalance = 1000m,
             ClosingBalanceType = "DR"
@@ -309,11 +334,18 @@ public sealed partial class AllocationRunBatchServiceTests
 
     private static FiscalPeriod SeedPeriod(ApplicationDbContext db, Guid tenantId)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = "FY2026", Year = 2026, FiscalYearType = "Calendar",
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            Status = "Open", IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "January 2026",
             PeriodCode = "2026-01",
             PeriodNumber = 1,
@@ -326,6 +358,7 @@ public sealed partial class AllocationRunBatchServiceTests
             IsClosed = false,
             IsLocked = false
         };
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         return period;
     }

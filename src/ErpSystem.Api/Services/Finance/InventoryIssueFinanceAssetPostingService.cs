@@ -133,7 +133,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             $"InventoryIssueVoucherId={voucher.Id:N}",
             "INV-ISSUE-CONTROL"));
 
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -145,7 +145,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Governed inventory issue {voucher.VoucherNumber} - {movementReason}",
             PostingDate = voucher.IssuedAtUtc,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryIssueVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -309,7 +309,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
                         ? $"INV-RETURN-FA-{token}" : $"INV-RETURN-EXP-{token}"));
         }
 
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -321,7 +321,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Governed Store Return Voucher {voucher.VoucherNumber}",
             PostingDate = voucher.PostedAtUtc ?? DateTime.UtcNow,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryReturnVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -420,7 +420,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             PreserveFixedAssetReversalLineage(plan.ReversalLines, originalLines, fixedAssetAllocations, reason);
         }
         var settings = await GetFinanceSettingsAsync(voucher.TenantId, cancellationToken);
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -435,7 +435,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Reversal of Store Return Voucher {voucher.VoucherNumber}",
             PostingDate = plan.ReversalDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = Currency(settings.BaseCurrency),
             IdempotencyKey = $"InventoryReturnVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Reverse",
             ReturnExistingOnDuplicate = true,

@@ -184,55 +184,125 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Returns selectable entry identities without mutating either supplier master.
-        /// Canonical report lookup remains separate from the approved onboarding handoff.
+        /// Returns AP invoice-entry options across the approved Business Partner and canonical
+        /// Supplier masters. The query is read-only: an unmatched Business Partner is resolved to
+        /// a Supplier only inside the purpose-authorized invoice command transaction.
         /// </summary>
-        [HttpGet("supplier-entry-options")]
+        [HttpGet("entry-suppliers")]
         [Authorize(Policy = FinancePermissions.ViewFinance)]
-        public async Task<ActionResult<IReadOnlyList<ApInvoiceSupplierEntryDto>>> GetSupplierEntryOptions(
+        [ProducesResponseType(typeof(IReadOnlyList<ApInvoiceSupplierEntryOptionDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<IReadOnlyList<ApInvoiceSupplierEntryOptionDto>>> GetEntrySuppliers(
             CancellationToken cancellationToken)
         {
             Guid tenantId;
-            try { tenantId = _currentUserService.GetRequiredFinanceTenantId(); }
-            catch (InvalidOperationException) { return Forbid(); }
-
-            // Include inactive/deleted identities when resolving collisions so this read cannot
-            // offer an approved partner as a way around an existing inactive Finance supplier.
-            var suppliers = await _dbContext.Suppliers.IgnoreQueryFilters().AsNoTracking()
-                .Where(s => s.TenantId == tenantId).ToListAsync(cancellationToken);
-            var partners = await _dbContext.BusinessPartners.IgnoreQueryFilters().AsNoTracking()
-                .Where(p => p.TenantId == tenantId).ToListAsync(cancellationToken);
-            static bool Linked(ErpSystem.Core.Entities.Procurement.Supplier supplier,
-                ErpSystem.Core.Entities.Procurement.BusinessPartner partner) =>
-                supplier.Id == partner.Id || (!string.IsNullOrWhiteSpace(partner.PartnerCode) &&
-                    string.Equals(supplier.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase));
-            static bool Eligible(ErpSystem.Core.Entities.Procurement.BusinessPartner partner) =>
-                !partner.IsDeleted && partner.IsActive && !partner.IsBlacklisted &&
-                (partner.PartnerType is "Supplier" or "Vendor" or "Manufacturer") &&
-                (partner.RegistrationStatus is "Active" or "Approved");
-
-            var options = new List<ApInvoiceSupplierEntryDto>();
-            foreach (var supplier in suppliers.Where(s => !s.IsDeleted && s.IsActive && s.Status == "Active"))
+            try
             {
-                var linked = partners.Where(p => Linked(supplier, p)).ToList();
-                if (linked.Count > 1 || (linked.Count == 1 &&
-                    (!Eligible(linked[0]) || suppliers.Count(s => Linked(s, linked[0])) != 1))) continue;
-                options.Add(new ApInvoiceSupplierEntryDto
+                tenantId = _currentUserService.GetRequiredFinanceTenantId();
+            }
+            catch (InvalidOperationException)
+            {
+                return Forbid();
+            }
+
+            var allSuppliers = await _dbContext.Suppliers
+                .AsNoTracking()
+                .Where(supplier =>
+                    supplier.TenantId == tenantId &&
+                    !supplier.IsDeleted)
+                .ToListAsync(cancellationToken);
+            var suppliers = allSuppliers
+                .Where(supplier => supplier.IsActive && !supplier.IsBlacklisted && supplier.Status == "Active")
+                .ToList();
+
+            var partners = await _dbContext.BusinessPartners
+                .AsNoTracking()
+                .Where(partner =>
+                    partner.TenantId == tenantId &&
+                    !partner.IsDeleted &&
+                    partner.IsActive &&
+                    !partner.IsBlacklisted &&
+                    partner.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+                    (partner.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+                     partner.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
+                    (partner.PartnerType == "Supplier" ||
+                     partner.PartnerType == "Contractor" ||
+                     partner.PartnerType == "Both"))
+                .ToListAsync(cancellationToken);
+
+            var links = await _dbContext.ApSupplierIdentityLinks
+                .AsNoTracking()
+                .Where(link => link.TenantId == tenantId && !link.IsDeleted)
+                .ToListAsync(cancellationToken);
+
+            var partnersById = partners.ToDictionary(partner => partner.Id);
+            var linkedPartnerBySupplierId = links
+                .Where(link => partnersById.ContainsKey(link.BusinessPartnerId))
+                .ToDictionary(link => link.SupplierId, link => partnersById[link.BusinessPartnerId]);
+            var unavailableSupplierIds = allSuppliers
+                .Where(supplier => !supplier.IsActive || supplier.IsBlacklisted || supplier.Status != "Active")
+                .Select(supplier => supplier.Id)
+                .ToHashSet();
+            var unavailablePartnerIds = links
+                .Where(link => unavailableSupplierIds.Contains(link.SupplierId))
+                .Select(link => link.BusinessPartnerId)
+                .ToHashSet();
+            foreach (var partner in partners)
+            {
+                if (allSuppliers.Any(supplier => unavailableSupplierIds.Contains(supplier.Id) &&
+                    (supplier.Id == partner.Id || (!string.IsNullOrWhiteSpace(supplier.SupplierCode) &&
+                     string.Equals(supplier.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase)))))
+                    unavailablePartnerIds.Add(partner.Id);
+            }
+            var matchedPartnerIds = new HashSet<Guid>();
+            var options = new List<ApInvoiceSupplierEntryOptionDto>();
+
+            foreach (var supplier in suppliers)
+            {
+                linkedPartnerBySupplierId.TryGetValue(supplier.Id, out var partner);
+                if (partner == null)
                 {
-                    Id = supplier.Id, BusinessPartnerId = linked.SingleOrDefault()?.Id,
-                    Code = supplier.SupplierCode, Name = supplier.Name, PaymentTermId = supplier.PaymentTermId
+                    var exactMatches = partners
+                        .Where(candidate =>
+                            candidate.Id == supplier.Id ||
+                            (!string.IsNullOrWhiteSpace(supplier.SupplierCode) &&
+                             string.Equals(candidate.PartnerCode, supplier.SupplierCode, StringComparison.OrdinalIgnoreCase)))
+                        .ToList();
+                    if (exactMatches.Count == 1)
+                        partner = exactMatches[0];
+                }
+
+                if (partner != null)
+                    matchedPartnerIds.Add(partner.Id);
+
+                options.Add(new ApInvoiceSupplierEntryOptionDto
+                {
+                    Id = supplier.Id,
+                    SupplierId = supplier.Id,
+                    BusinessPartnerId = partner?.Id,
+                    Code = partner?.PartnerCode ?? supplier.SupplierCode,
+                    Name = partner?.PartnerName ?? supplier.Name,
+                    PaymentTermId = partner?.PaymentTermId ?? supplier.PaymentTermId,
+                    Currency = partner?.Currency
                 });
             }
-            foreach (var partner in partners.Where(Eligible))
-            {
-                if (suppliers.Any(s => Linked(s, partner))) continue;
-                options.Add(new ApInvoiceSupplierEntryDto
+
+            options.AddRange(partners
+                .Where(partner => !matchedPartnerIds.Contains(partner.Id) && !unavailablePartnerIds.Contains(partner.Id))
+                .Select(partner => new ApInvoiceSupplierEntryOptionDto
                 {
-                    Id = partner.Id, BusinessPartnerId = partner.Id,
-                    Code = partner.PartnerCode, Name = partner.PartnerName, PaymentTermId = partner.PaymentTermId
-                });
-            }
-            return Ok(options.OrderBy(s => s.Name).ThenBy(s => s.Code).ToList());
+                    Id = partner.Id,
+                    BusinessPartnerId = partner.Id,
+                    Code = partner.PartnerCode,
+                    Name = partner.PartnerName,
+                    PaymentTermId = partner.PaymentTermId,
+                    Currency = partner.Currency
+                }));
+
+            return Ok(options
+                .OrderBy(option => option.Name)
+                .ThenBy(option => option.Code)
+                .ToList());
         }
 
         /// <summary>

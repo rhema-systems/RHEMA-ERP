@@ -71,6 +71,14 @@ public sealed class JournalBatchController : ControllerBase
         CancellationToken cancellationToken)
         => _batches.CreateJournalAsync(id, dto.JournalEntry, cancellationToken);
 
+    [HttpGet("{id:guid}/eligible-draft-journals")]
+    public Task<IReadOnlyList<EligibleJournalBatchDraftDto>> GetEligibleDraftJournals(
+        Guid id,
+        [FromQuery] string? search,
+        [FromQuery] int take,
+        CancellationToken cancellationToken)
+        => _batches.GetEligibleDraftJournalsAsync(id, search, take <= 0 ? 50 : Math.Min(take, 100), cancellationToken);
+
     [HttpPost("{id:guid}/entries/attach")]
     public Task<JournalBatchDetailDto> AddExistingJournal(
         Guid id,

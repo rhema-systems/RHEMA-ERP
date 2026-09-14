@@ -157,17 +157,15 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         public bool LookupTableRequired { get; set; }
 
-        /// <summary>
-        /// Indicates whether this segment is mandatory for all GL accounts.
-        /// 
-        /// TRUE:
-        /// - Every account must have a value for this segment.
-        /// - System should block account creation if this segment is blank.
-        /// 
-        /// FALSE:
-        /// - Segment is optional; some accounts may omit it.
-        /// </summary>
-        public bool IsMandatory { get; set; }
+        /// <summary>Every Active or Frozen account-number segment is required by definition.</summary>
+        public bool IsRequired => true;
+
+        public string LifecycleStatus { get; set; } = "Draft";
+        public string RowVersion { get; set; } = string.Empty;
+        public bool IsSystemDefined { get; set; }
+        public int AccountUsageCount { get; set; }
+        public bool CanActivate { get; set; }
+        public bool CanFreeze { get; set; }
 
         /// <summary>
         /// Controls whether this segment is exposed as a reporting dimension
@@ -417,38 +415,12 @@ namespace ErpSystem.Core.DTOs.Finance
         public bool LookupTableRequired { get; set; } = false;
 
         /// <summary>
-        /// True if this segment is mandatory for all GL accounts.
-        /// 
-        /// UI HINT:
-        /// - If true, frontend should mark the field as required and validate accordingly.
-        /// </summary>
-        [Required]
-        public bool IsMandatory { get; set; } = true;
-
-        /// <summary>
-        /// True if this segment should appear in report filters and BI tools.
-        /// 
-        /// RECOMMENDATION:
-        /// - Only mark segments that are meaningful for analysis (e.g., Department, Project).
-        /// </summary>
-        [Required]
-        public bool IsReportingDimension { get; set; } = true;
-
-        /// <summary>
         /// True if this is the "Natural Account" segment.
         /// 
         /// RULE:
         /// - Typically only one segment is marked as natural; validation can enforce this.
         /// </summary>
         public bool IsNaturalAccount { get; set; } = false;
-
-        /// <summary>
-        /// Initial active status for the segment.
-        /// 
-        /// DEFAULT:
-        /// - New segments are active by default.
-        /// </summary>
-        public bool IsActive { get; set; } = true;
 
         /// <summary>
         /// Optional notes describing usage, restrictions, or business meaning.
@@ -478,6 +450,24 @@ namespace ErpSystem.Core.DTOs.Finance
         /// </summary>
         [Required]
         public Guid Id { get; set; }
+
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
+    }
+
+    public sealed class AccountSegmentLifecycleTransitionDto
+    {
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
+
+        [MaxLength(500)]
+        public string? Reason { get; set; }
+    }
+
+    public sealed class AccountSegmentDeleteDto
+    {
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
     }
 
     // ========================================================================

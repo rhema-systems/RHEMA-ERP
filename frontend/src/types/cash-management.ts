@@ -1,4 +1,5 @@
 import type { ControlledDocumentIssueSummary } from '@/types/controlled-documents';
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from '@/types/finance';
 
 // Cash Management & Bank Reconciliation Types
 
@@ -153,6 +154,7 @@ export interface CashTransaction {
     reversedById?: string;
     reversalReason?: string;
     paymentSlipIssuance?: ControlledDocumentIssueSummary;
+    financeDimensions?: FinanceSourceDocumentDimension;
     createdAt: string;
     createdBy?: string;
 }
@@ -479,6 +481,7 @@ export interface BankDepositAllocation {
     entryNumber: string;
     entryDate: string;
     liquidityAccountName: string;
+    glAccountId: string;
     entryType: string;
     allocationType: BankDepositAllocationType;
     amount: number;
@@ -493,6 +496,7 @@ export interface BankDeposit {
     depositNumber: string;
     bankAccountId: string;
     bankAccountName: string;
+    bankGLAccountId?: string;
     depositDate: string;
     depositReference: string;
     currency: string;
@@ -524,6 +528,8 @@ export interface BankDeposit {
     cancellationReason?: string;
     allocations: BankDepositAllocation[];
     attachments: BankingAttachment[];
+    financeDimensions?: import('./finance').FinanceSourceDocumentDimension;
+    settlementDimensionEvidence?: import('./finance').FinanceSettlementDimensionComponent[];
     rowVersion: string;
 }
 
@@ -568,6 +574,8 @@ export interface ReturnedChequeCase {
     notes?: string;
     rejectionReason?: string;
     attachments: BankingAttachment[];
+    financeDimensions?: import('./finance').FinanceSourceDocumentDimension;
+    settlementDimensionEvidence?: import('./finance').FinanceSettlementDimensionComponent[];
     rowVersion: string;
 }
 
@@ -586,11 +594,13 @@ export interface CreateCashReceiptDto {
     amount: number;
     currency: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentMethodId?: string;
     referenceNumber?: string;
     payerName?: string;
     description?: string;
     glAccountId?: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface CreateCashPaymentDto {
@@ -599,12 +609,14 @@ export interface CreateCashPaymentDto {
     amount: number;
     currency: string;
     exchangeRate?: number;
+    exchangeRateId?: string;
     paymentMethodId?: string;
     referenceNumber?: string;
     payeeName?: string;
     description?: string;
     glAccountId?: string;
     chequeId?: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface CreateBankTransferDto {
@@ -619,6 +631,7 @@ export interface CreateBankTransferDto {
     destinationExchangeRateId?: string;
     referenceNumber?: string;
     description?: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 /**
@@ -711,6 +724,7 @@ export interface CreateReconciliationAdjustmentDto {
     description?: string;
     notes?: string;
     idempotencyKey: string;
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface ReconciliationAdjustment {
@@ -726,6 +740,14 @@ export interface ReconciliationAdjustment {
     referenceNumber?: string;
     transactionDate: string;
     wasDuplicate: boolean;
+    currency: string;
+    baseAmount: number;
+    exchangeRate: number;
+    exchangeRateId?: string;
+    exchangeRateSource?: string;
+    exchangeRateDate?: string;
+    exchangeRateQuoteSide?: string;
+    financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 // Summary/Report Interfaces

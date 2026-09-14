@@ -43,7 +43,7 @@ describe('financialStatementLayoutDataService', () => {
             rowCount: 0,
             mappingCount: 0,
             definition: {
-                templateVersion: '1',
+                templateVersion: '2',
                 code: 'BS-TEST',
                 name: 'Test Balance Sheet',
                 statementType: 'BalanceSheet',
@@ -75,6 +75,26 @@ describe('financialStatementLayoutDataService', () => {
                 }),
             }),
         );
+    });
+
+    it('uses the governed clone and optimistic draft-row endpoints', async () => {
+        const fetchMock = vi.spyOn(global, 'fetch').mockImplementation(async () => jsonResponse({}));
+
+        await financialStatementLayoutDataService.cloneLayout('standard-1', {
+            code: 'BS-TENANT', name: 'Tenant Balance Sheet', accountingBookId: 'book-1',
+        });
+        await financialStatementLayoutDataService.replaceDraftRows('version-1', 7, [{
+            rowCode: 'CASH', label: 'Cash', rowType: 'Account', displayOrder: 10,
+            signMultiplier: 1, isVisible: true, suppressIfZero: false,
+            showAccountDetails: false, isBold: false, isItalic: false, isUnderlined: false,
+            indentLevel: 0, mappings: [{ mappingType: 'Classification', accountClassificationCode: 'CASH', includeClassificationDescendants: true }],
+        }]);
+
+        expect(fetchMock.mock.calls[0][0]).toEqual(expect.stringContaining('/standard-1/clone'));
+        expect(fetchMock.mock.calls[1][0]).toEqual(expect.stringContaining('/versions/version-1/rows'));
+        expect(fetchMock.mock.calls[1][1]).toEqual(expect.objectContaining({
+            method: 'PUT', body: expect.stringContaining('"expectedVersionRevision":7'),
+        }));
     });
 
     it('re-uploads the workbook and preview hash when committing a controlled import', async () => {

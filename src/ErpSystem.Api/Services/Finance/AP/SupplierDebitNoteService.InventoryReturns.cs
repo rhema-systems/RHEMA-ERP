@@ -4,8 +4,10 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.AP;
@@ -295,10 +297,10 @@ public sealed partial class SupplierDebitNoteService
             var postedEvent = await _db.Set<FinancePostingEvent>().AsNoTracking().AnyAsync(x => x.TenantId == TenantId &&
                 x.Id == existing.PostingEventId && !x.IsDeleted && x.PostingStatus == "Posted" && x.PostedAt.HasValue &&
                 x.JournalEntryId == existing.JournalEntryId && x.SourceDocumentId == source.Id &&
-                x.SourceDocumentType == "InventorySupplierReturnDispatch", cancellationToken);
+                x.SourceDocumentType == "SupplierReturnDispatch", cancellationToken);
             var postedJournal = await _db.JournalEntries.AsNoTracking().AnyAsync(x => x.TenantId == TenantId &&
                 x.Id == existing.JournalEntryId && !x.IsDeleted && !x.IsReversed && x.PostingStatus == "Posted" &&
-                x.SourceDocumentId == source.Id && x.SourceDocumentType == "InventorySupplierReturnDispatch", cancellationToken);
+                x.SourceDocumentId == source.Id && x.SourceDocumentType == "SupplierReturnDispatch", cancellationToken);
             if (!postedEvent || !postedJournal)
                 throw new InvalidOperationException("RTV_DISPATCH_POSTING_INVALID: the recorded Finance handoff is missing or reversed.");
             return existing;
@@ -312,19 +314,37 @@ public sealed partial class SupplierDebitNoteService
         await RequirePostingAccountAsync(clearing, postingDate, "Return-to-vendor clearing account", true, cancellationToken);
         await RequirePostingAccountAsync(inventory, postingDate, "Inventory control account", true, cancellationToken);
         var currency = NormalizeCurrency(settings.BaseCurrency, "GHS");
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var producer = FinanceExternalProducerContractCatalog.GetRequired(
+            FinanceExternalProducerContractId.ProcurementSupplierReturnDispatch);
+        var clearingLineId = FinanceExternalDimensionIdentity.SourceLine(
+            FinanceExternalProducerContractId.ProcurementSupplierReturnDispatch, source.Id, "return-clearing");
+        var inventoryLineId = FinanceExternalDimensionIdentity.SourceLine(
+            FinanceExternalProducerContractId.ProcurementSupplierReturnDispatch, source.Id, "inventory-control");
+        var lines = new[]
         {
-            SourceModule = "Inventory", SourceDocumentType = "InventorySupplierReturnDispatch", SourceDocumentId = source.Id,
+            PostingLine(clearing, $"Supplier return clearing {source.ReturnNumber}", carrying, 0, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 1, "RTV-Dispatch-Clearing", clearingLineId),
+            PostingLine(inventory, $"Dispatched Inventory {source.ReturnNumber}", 0, carrying, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 2, "RTV-Dispatch-Inventory", inventoryLineId)
+        };
+        if (_sourceDimensions == null)
+            throw new InvalidOperationException("Finance source dimensions are not configured for supplier-return dispatch.");
+        var contexts = lines.Select(line => new FinanceSourceDocumentLineContext(
+            line.SourceDocumentLineId!.Value, line.AccountId)).ToArray();
+        await _sourceDimensions.SynchronizeDraftAsync(producer, source.Id, postingDate, contexts, null, false, null,
+            "Supplier-return dispatch Finance adapter capture", cancellationToken);
+        await _sourceDimensions.ValidateAndFreezeAsync(producer, source.Id, postingDate, contexts, false, cancellationToken);
+        foreach (var line in lines)
+            line.Dimensions = await _sourceDimensions.ResolvePostingDimensionsAsync(
+                producer, source.Id, line.SourceDocumentLineId!.Value, line.AccountId, postingDate, cancellationToken);
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
+        {
+            SourceModule = "Procurement", OriginModuleCode = FinanceModuleLockCatalog.Procurement,
+            SourceDocumentType = "SupplierReturnDispatch", SourceDocumentId = source.Id,
             SourceDocumentTenantId = TenantId, SourceDocumentReference = source.ReturnNumber,
-            PostingAction = "Dispatch", PostingDate = postingDate, JournalType = "Supplier Return Dispatch", BookClassification = "IFRS",
+            PostingAction = "Dispatch", PostingDate = postingDate, JournalType = "Supplier Return Dispatch", AccountingBookCode = "IFRS",
             Description = $"Dispatched supplier return {source.ReturnNumber}", FunctionalCurrencyCode = currency,
             IdempotencyKey = $"Inventory:SupplierReturn:{TenantId:N}:{source.Id:N}:Dispatch", ReturnExistingOnDuplicate = true,
-            Lines = new[]
-            {
-                PostingLine(clearing, $"Supplier return clearing {source.ReturnNumber}", carrying, 0, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 1, "RTV-Dispatch-Clearing"),
-                PostingLine(inventory, $"Dispatched Inventory {source.ReturnNumber}", 0, carrying, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 2, "RTV-Dispatch-Inventory")
-            }
-        }, cancellationToken);
+            Lines = lines
+        }, producer, cancellationToken);
         var record = new InventorySupplierReturnPosting
         {
             Id = Guid.NewGuid(), TenantId = TenantId, InventoryPurchaseReturnId = source.Id, OriginalVendorInvoiceId = invoice.Id,
@@ -337,7 +357,7 @@ public sealed partial class SupplierDebitNoteService
         return record;
     }
 
-    private async Task PrepareInventoryReturnPostingAsync(SupplierDebitNote note, FinancePostingRequestDto request, CancellationToken cancellationToken)
+    private async Task PrepareInventoryReturnPostingAsync(SupplierDebitNote note, FinancePostingRequestV2Dto request, CancellationToken cancellationToken)
     {
         var source = await RequireDispatchedReturnAsync(note.InventoryPurchaseReturnId!.Value, cancellationToken);
         var invoice = note.OriginalVendorInvoice ?? throw new InvalidOperationException("RTV_ORIGINAL_INVOICE_REQUIRED");

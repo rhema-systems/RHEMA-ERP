@@ -1,0 +1,12 @@
+BACKUP_COPY_ONLY_CHECKSUM_START
+Processed 53176 pages for database 'RhemaERP', file 'RhemaERP' on file 1.
+Processed 2 pages for database 'RhemaERP', file 'RhemaERP_log' on file 1.
+BACKUP DATABASE successfully processed 53178 pages in 2.761 seconds (150.470 MB/sec).
+BACKUP_COPY_ONLY_CHECKSUM_COMPLETE
+The backup set on file 1 is valid.
+RESTORE_VERIFYONLY_CHECKSUM_COMPLETE
+Processed 53176 pages for database 'RHEMAERP_GL_REHEARSAL_CLONE_A2', file 'RhemaERP' on file 1.
+Processed 2 pages for database 'RHEMAERP_GL_REHEARSAL_CLONE_A2', file 'RhemaERP_log' on file 1.
+RESTORE DATABASE successfully processed 53178 pages in 1.007 seconds (412.561 MB/sec).
+RESTORE_TARGET_COMPLETE
+DBCC_CHECKDB_PHYSICAL_ONLY_COMPLETE

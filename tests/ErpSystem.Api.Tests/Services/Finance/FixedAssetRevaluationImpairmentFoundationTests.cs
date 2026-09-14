@@ -606,6 +606,7 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
         SeedTenant(db, tenantId);
         var period = SeedOpenPeriod(db, tenantId, periodIsOpen, periodIsClosed);
         var book = SeedBook(db, tenantId);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         var assetAccount = SeedAccount(db, tenantId, "1600", AccountType.Asset);
         var accumulatedDepreciationAccount = SeedAccount(db, tenantId, "1699", AccountType.Asset);
         var depreciationExpenseAccount = SeedAccount(db, tenantId, "6700", AccountType.Expense);
@@ -614,6 +615,18 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
         var impairmentLossAccount = SeedAccount(db, tenantId, "6720", AccountType.Expense);
         var accumulatedImpairmentAccount = SeedAccount(db, tenantId, "1698", AccountType.Asset);
         var impairmentReversalAccount = SeedAccount(db, tenantId, "4800", AccountType.Revenue);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+            db,
+            tenantId,
+            book,
+            assetAccount,
+            accumulatedDepreciationAccount,
+            depreciationExpenseAccount,
+            revaluationSurplusAccount,
+            revaluationLossAccount,
+            impairmentLossAccount,
+            accumulatedImpairmentAccount,
+            impairmentReversalAccount);
 
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -805,11 +818,19 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
         bool isOpen,
         bool isClosed)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = $"FY26-{tenantId.ToString("N")[..4]}", Year = 2026,
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            TotalDays = 365, NumberOfPeriods = 12, Status = "Open", IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
+            FiscalYear = fiscalYear,
             PeriodName = "July 2026",
             PeriodCode = $"2026-07-{tenantId.ToString("N")[..4]}",
             PeriodNumber = 7,
@@ -823,6 +844,7 @@ public sealed class FixedAssetRevaluationImpairmentFoundationTests
             IsLocked = false
         };
 
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         return period;
     }

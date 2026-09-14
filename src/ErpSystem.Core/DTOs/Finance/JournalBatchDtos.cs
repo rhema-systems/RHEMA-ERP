@@ -168,6 +168,18 @@ public sealed class AddExistingJournalToBatchDto
     public Guid JournalEntryId { get; set; }
 }
 
+public sealed class EligibleJournalBatchDraftDto
+{
+    public Guid Id { get; set; }
+    public string JournalEntryNumber { get; set; } = string.Empty;
+    public DateTime EntryDate { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string? ReferenceNumber { get; set; }
+    public decimal TotalDebit { get; set; }
+    public decimal TotalCredit { get; set; }
+    public int LineCount { get; set; }
+}
+
 public sealed class CreateJournalBatchEntryDto
 {
     [Required]

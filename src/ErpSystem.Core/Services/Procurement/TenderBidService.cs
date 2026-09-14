@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -2098,13 +2099,27 @@ public class TenderBidService : ITenderBidService
                 "TENDER_FEE_FOREIGN_CURRENCY_NOT_SUPPORTED",
                 "Tender fee payments must use the tenant functional currency until a controlled exchange-rate snapshot is provided.");
 
+        string accountingBookCode;
+        try
+        {
+            accountingBookCode = FinanceAccountingBookCodeResolver.ResolveLegacySingleBook(
+                settings?.SubledgerPostingMode, settings is not null);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_ACCOUNTING_BOOK_REQUIRED",
+                exception.Message);
+        }
+
         return new TenderFeePostingAccounts(
             receivingAccount.Id,
             revenueAccount.Id,
-            functionalCurrency);
+            functionalCurrency,
+            accountingBookCode);
     }
 
-    private static FinancePostingRequestDto BuildTenderFeePostingRequest(
+    private static FinancePostingRequestV2Dto BuildTenderFeePostingRequest(
         TenderBid bid,
         TenderFee fee,
         TenderPayment payment,
@@ -2113,7 +2128,9 @@ public class TenderBidService : ITenderBidService
     {
         var reference = payment.PaymentReference.Trim();
         var description = $"Tender fee {fee.FeeType} for bid {bid.BidNumber}";
-        return new FinancePostingRequestDto
+        // Procurement emits one concrete book to Finance's leaf executor. Finance, not this
+        // tender workflow, owns any future multi-book applicability or event orchestration.
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "Procurement",
             OriginModuleCode = "PROC",
@@ -2126,7 +2143,8 @@ public class TenderBidService : ITenderBidService
             Description = description,
             JournalType = "System Generated",
             FunctionalCurrencyCode = accounts.FunctionalCurrencyCode,
-            IdempotencyKey = $"PROCUREMENT|TENDER-FEE|{payment.Id:N}|POST",
+            AccountingBookCode = accounts.AccountingBookCode,
+            IdempotencyKey = $"PROCUREMENT|TENDER-FEE|{payment.Id:N}|{accounts.AccountingBookCode}|POST",
             ReturnExistingOnDuplicate = true,
             Lines =
             [
@@ -2159,7 +2177,8 @@ public class TenderBidService : ITenderBidService
     private sealed record TenderFeePostingAccounts(
         Guid ReceivingAccountId,
         Guid RevenueAccountId,
-        string FunctionalCurrencyCode);
+        string FunctionalCurrencyCode,
+        string AccountingBookCode);
 
     private static TenderPaymentDto MapPaymentToDto(TenderPayment payment)
     {

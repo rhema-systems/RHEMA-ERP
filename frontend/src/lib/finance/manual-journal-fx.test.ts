@@ -144,6 +144,7 @@ describe('manual journal FX policy', () => {
         rateStatus: 'loading' as const,
       },
       {
+        id: 'rate-1',
         rate: 12.5,
         currentExchangeRate: 12.5,
         rateSource: 'Approved daily rate',
@@ -152,6 +153,7 @@ describe('manual journal FX policy', () => {
     );
 
     expect(result).toMatchObject({
+      exchangeRateId: 'rate-1',
       exchangeRate: 12.5,
       debit: 1250,
       rateStatus: 'ready',
@@ -182,6 +184,7 @@ describe('manual journal FX policy', () => {
       getManualJournalFxBlocker(
         {
           currencyCode: 'USD',
+          exchangeRateId: 'rate-1',
           exchangeRate: 12.5,
           rateStatus: 'ready',
           debit: 1250,
@@ -193,6 +196,7 @@ describe('manual journal FX policy', () => {
       getManualJournalFxBlocker(
         {
           currencyCode: 'USD',
+          exchangeRateId: 'rate-1',
           exchangeRate: 12.5,
           rateStatus: 'ready',
           debit: 1250,

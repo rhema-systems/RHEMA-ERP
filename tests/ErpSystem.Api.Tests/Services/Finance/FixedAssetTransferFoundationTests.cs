@@ -668,12 +668,23 @@ public sealed class FixedAssetTransferFoundationTests
         SeedTenant(db, tenantId, codePrefix);
         var period = SeedOpenPeriod(db, tenantId);
         var book = SeedBook(db, tenantId);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         var assetAccount = SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Asset);
         var accumulatedAccount = SeedAccount(db, tenantId, $"16{codePrefix[..Math.Min(2, codePrefix.Length)]}9", AccountType.Asset);
         var expenseAccount = SeedAccount(db, tenantId, $"67{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Expense);
         var targetAssetAccount = SeedAccount(db, tenantId, $"17{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Asset);
         var targetAccumulatedAccount = SeedAccount(db, tenantId, $"17{codePrefix[..Math.Min(2, codePrefix.Length)]}9", AccountType.Asset);
         var targetExpenseAccount = SeedAccount(db, tenantId, $"68{codePrefix[..Math.Min(2, codePrefix.Length)]}0", AccountType.Expense);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+            db,
+            tenantId,
+            book,
+            assetAccount,
+            accumulatedAccount,
+            expenseAccount,
+            targetAssetAccount,
+            targetAccumulatedAccount,
+            targetExpenseAccount);
 
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -849,7 +860,6 @@ public sealed class FixedAssetTransferFoundationTests
             SegmentPosition = 1,
             SegmentLength = Math.Min(10, value.Length),
             LookupTableRequired = true,
-            IsMandatory = true,
             IsReportingDimension = true,
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
@@ -879,7 +889,7 @@ public sealed class FixedAssetTransferFoundationTests
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            Code = $"IFRS-{tenantId.ToString("N")[..4]}",
+            Code = "IFRS",
             Name = "IFRS",
             Purpose = "Primary",
             IsActive = true,
@@ -896,11 +906,26 @@ public sealed class FixedAssetTransferFoundationTests
 
     private static FiscalPeriod SeedOpenPeriod(ApplicationDbContext db, Guid tenantId)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = $"FY26-{tenantId.ToString("N")[..4]}",
+            Year = 2026,
+            StartDate = new DateTime(2026, 1, 1),
+            EndDate = new DateTime(2026, 12, 31),
+            TotalDays = 365,
+            NumberOfPeriods = 12,
+            Status = "Open",
+            IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
+            FiscalYear = fiscalYear,
             PeriodName = "July 2026",
             PeriodCode = $"2026-07-{tenantId.ToString("N")[..4]}",
             PeriodNumber = 7,
@@ -914,6 +939,7 @@ public sealed class FixedAssetTransferFoundationTests
             IsLocked = false
         };
 
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         return period;
     }

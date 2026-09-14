@@ -10,7 +10,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ErpSystem.Api.Services.Finance.GL;
 
 /// <summary>
-/// Tenant-scoped readiness evidence for the three Finance-owned PR 2 routes. It deliberately
+/// Tenant-scoped readiness evidence for Finance-owned source and banking-settlement routes. It deliberately
 /// reads only persisted source provenance and current Finance rules; external producers that use
 /// the same lifecycle services do not acquire the manual Finance route identity.
 /// </summary>
@@ -26,8 +26,10 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         RouteId = routeId;
         if (routeId is not FinanceDimensionRouteId.FinanceApVendorInvoice
             and not FinanceDimensionRouteId.FinanceApSupplierDebitNote
-            and not FinanceDimensionRouteId.FinanceArCustomerInvoice)
-            throw new ArgumentOutOfRangeException(nameof(routeId), routeId, "The route is not owned by the Finance PR 2 adapter.");
+            and not FinanceDimensionRouteId.FinanceArCustomerInvoice
+            and not FinanceDimensionRouteId.FinanceBankDeposit
+            and not FinanceDimensionRouteId.FinanceReturnedCheque)
+            throw new ArgumentOutOfRangeException(nameof(routeId), routeId, "The route is not supported by the Finance source-dimension readiness adapter.");
     }
 
     public FinanceDimensionRouteId RouteId { get; }
@@ -48,6 +50,10 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
                 await LoadSupplierDebitNotesAsync(tenantId, cancellationToken),
             FinanceDimensionRouteId.FinanceArCustomerInvoice =>
                 await LoadCustomerInvoicesAsync(tenantId, cancellationToken),
+            FinanceDimensionRouteId.FinanceBankDeposit =>
+                await LoadBankDepositsAsync(tenantId, cancellationToken),
+            FinanceDimensionRouteId.FinanceReturnedCheque =>
+                await LoadReturnedChequesAsync(tenantId, cancellationToken),
             _ => []
         };
         var documentIds = documents.Select(item => item.Id).ToArray();
@@ -66,6 +72,14 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
             : await _db.FinanceDimensionSets.AsNoTracking().Include(item => item.Items)
                 .Where(item => item.TenantId == tenantId && setIds.Contains(item.Id) && !item.IsDeleted)
                 .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var settlementEvidence = documentIds.Length == 0
+            ? []
+            : await _db.FinanceSettlementDimensionComponents.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.RouteId == RouteId
+                    && documentIds.Contains(item.SourceDocumentId) && !item.IsDeleted)
+                .ToListAsync(cancellationToken);
+        var settlementGroups = settlementEvidence.GroupBy(item => item.SourceDocumentId)
+            .ToDictionary(group => group.Key, group => group.ToList());
         var activeReservations = new Dictionary<Guid, string>();
         if (RouteId == FinanceDimensionRouteId.FinanceApVendorInvoice)
         {
@@ -144,6 +158,38 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
                         issue.FixedRuleDrift));
             }
 
+            if (document.ExpectedSettlementLineIds.Count > 0)
+            {
+                settlementGroups.TryGetValue(document.Id, out var documentEvidence);
+                documentEvidence ??= [];
+                foreach (var expectedLineId in document.ExpectedSettlementLineIds)
+                {
+                    if (documentEvidence.All(item => item.SettlementSourceLineId != expectedLineId))
+                        blockers.Add(Blocker(
+                            document,
+                            "SETTLEMENT_EVIDENCE_MISSING",
+                            $"Settlement source line {expectedLineId} has no persisted allocation-dimension evidence.",
+                            "Return the document to Draft and save its Finance coding again.",
+                            "Allocation-level settlement evidence is missing."));
+                }
+                if (document.RequiresFrozenEvidence
+                    && documentEvidence.Any(item => !item.EvidenceFrozenAt.HasValue))
+                    blockers.Add(Blocker(
+                        document,
+                        "SETTLEMENT_EVIDENCE_NOT_FROZEN",
+                        $"The {document.LifecycleState} document contains mutable settlement evidence.",
+                        "Recall the document, revalidate the allocation evidence and start a new approval workflow.",
+                        "Settlement evidence is not frozen."));
+            }
+            else if (document.RequiresInheritedSettlementEvidence
+                     && !settlementGroups.ContainsKey(document.Id))
+                blockers.Add(Blocker(
+                    document,
+                    "INHERITED_SETTLEMENT_EVIDENCE_MISSING",
+                    "The returned cheque has no exact originating receipt-allocation dimension evidence.",
+                    "Remediate the original receipt evidence before promoting or completing this case.",
+                    "Inherited principal/discount combinations are missing."));
+
             if (document.BudgetRelevant
                 && !string.Equals(header.BudgetEvidenceStatus, "Current", StringComparison.Ordinal))
                 blockers.Add(Blocker(
@@ -160,7 +206,10 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         var assignmentWatermark = assignments.Count == 0
             ? 0L
             : assignments.Max(item => (item.UpdatedAt ?? item.CreatedAt).Ticks);
-        var watermark = $"{route.ContractVersion}:{documents.Count}:{assignments.Count}:{documentWatermark}:{assignmentWatermark}:{blockers.Count}";
+        var settlementWatermark = settlementEvidence.Count == 0
+            ? 0L
+            : settlementEvidence.Max(item => (item.UpdatedAt ?? item.CreatedAt).Ticks);
+        var watermark = $"{route.ContractVersion}:{documents.Count}:{assignments.Count}:{settlementEvidence.Count}:{documentWatermark}:{assignmentWatermark}:{settlementWatermark}:{blockers.Count}";
         return new FinanceDimensionReadinessContribution(watermark, blockers);
     }
 
@@ -216,7 +265,9 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
                 invoice.Status is VendorInvoiceStatus.PendingApproval or VendorInvoiceStatus.Approved,
                 invoice.LineItems.Any(line => line.BudgetEntryId.HasValue),
                 (invoice.UpdatedAt ?? invoice.CreatedAt).Ticks,
-                lines);
+                lines,
+                [],
+                false);
         }).ToArray();
     }
 
@@ -261,7 +312,9 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
             false,
             (note.UpdatedAt ?? note.CreatedAt).Ticks,
             note.LineItems.OrderBy(line => line.CreatedAt).ThenBy(line => line.Id)
-                .Select(line => new ReadinessLine(line.Id, line.ResolvedCreditAccountId)).ToArray()))
+                .Select(line => new ReadinessLine(line.Id, line.ResolvedCreditAccountId)).ToArray(),
+            [],
+            false))
             .ToArray();
     }
 
@@ -293,8 +346,86 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
                 .Select(line => new ReadinessLine(
                     line.Id,
                     invoice.IsOpeningBalance ? settings?.MigrationClearingAccountId : line.GLAccountId))
-                .ToArray()))
+                .ToArray(),
+            [],
+            false))
             .ToArray();
+    }
+
+    private async Task<IReadOnlyList<ReadinessDocument>> LoadBankDepositsAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var deposits = await _db.BankDepositBatches.AsNoTracking()
+            .Include(item => item.BankAccount)
+            .Include(item => item.Allocations)
+                .ThenInclude(item => item.LiquidityAccountEntry)
+                    .ThenInclude(item => item.LiquidityAccount)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && (item.Status == BankDepositStatus.Draft
+                    || item.Status == BankDepositStatus.Returned
+                    || item.Status == BankDepositStatus.Submitted
+                    || item.Status == BankDepositStatus.Approved))
+            .AsSplitQuery()
+            .ToListAsync(cancellationToken);
+        return deposits.Select(deposit => new ReadinessDocument(
+            deposit.Id,
+            deposit.DepositNumber,
+            deposit.Status.ToString(),
+            deposit.DepositDate,
+            $"/finance/cash/deposits/{deposit.Id}",
+            deposit.Status is BankDepositStatus.Submitted or BankDepositStatus.Approved,
+            false,
+            (deposit.UpdatedAt ?? deposit.CreatedAt).Ticks,
+            new[] { new ReadinessLine(deposit.Id, deposit.BankAccount.GLAccountId) }
+                .Concat(deposit.Allocations.OrderBy(item => item.Id).Select(item =>
+                    new ReadinessLine(item.Id, item.LiquidityAccountEntry.LiquidityAccount.GLAccountId)))
+                .ToArray(),
+            deposit.Allocations.Select(item => item.Id).ToArray(),
+            false)).ToArray();
+    }
+
+    private async Task<IReadOnlyList<ReadinessDocument>> LoadReturnedChequesAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        var settings = await _db.FinanceSettings.AsNoTracking()
+            .SingleOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        var cases = await _db.ReturnedChequeCases.AsNoTracking()
+            .Include(item => item.BankAccount)
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                && (item.Status == ReturnedChequeCaseStatus.Draft
+                    || item.Status == ReturnedChequeCaseStatus.Returned
+                    || item.Status == ReturnedChequeCaseStatus.Submitted
+                    || item.Status == ReturnedChequeCaseStatus.Approved))
+            .ToListAsync(cancellationToken);
+        return cases.Select(item => new ReadinessDocument(
+            item.Id,
+            item.CaseNumber,
+            item.Status.ToString(),
+            item.ReturnDate,
+            "/finance/cash/returned-cheques",
+            item.Status is ReturnedChequeCaseStatus.Submitted or ReturnedChequeCaseStatus.Approved,
+            false,
+            (item.UpdatedAt ?? item.CreatedAt).Ticks,
+            new[]
+            {
+                new ReadinessLine(
+                    FinanceBankingDimensionIdentity.ReturnedChequeBankLine(item.Id),
+                    item.BankAccount.GLAccountId),
+                new ReadinessLine(
+                    FinanceBankingDimensionIdentity.ReturnedChequeCustomerLine(item.Id),
+                    settings?.ControlAccountArId)
+            }.Concat(item.ExpenseChargeAmount > 0m
+                ? new[]
+                {
+                    new ReadinessLine(
+                        FinanceBankingDimensionIdentity.ReturnedChequeExpenseLine(item.Id),
+                        settings?.ReturnedChequeBankChargeAccountId)
+                }
+                : []).ToArray(),
+            [],
+            true)).ToArray();
     }
 
     private async Task<IReadOnlyList<RuleIssue>> ValidateAccountRulesAsync(
@@ -440,6 +571,8 @@ public sealed class FinanceOwnedSourceDimensionReadinessProvider : IFinanceDimen
         bool RequiresFrozenEvidence,
         bool BudgetRelevant,
         long VersionTicks,
-        IReadOnlyList<ReadinessLine> Lines);
+        IReadOnlyList<ReadinessLine> Lines,
+        IReadOnlyList<Guid> ExpectedSettlementLineIds,
+        bool RequiresInheritedSettlementEvidence);
     private sealed record RuleIssue(string Code, string Message, bool FixedRuleDrift);
 }

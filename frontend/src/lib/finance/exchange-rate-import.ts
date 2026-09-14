@@ -31,9 +31,7 @@ const EXCHANGE_RATE_RATE_TYPES: ExchangeRateType[] = [
     'MonthEnd',
     'QuarterEnd',
     'YearEnd',
-    'Budget',
     'Fixed',
-    'Spot',
 ];
 
 type ExchangeRateImportColumn =

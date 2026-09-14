@@ -150,7 +150,6 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     GeographicRegion = dto.GeographicRegion,
                     AutoRetrieveExchangeRate = dto.AutoRetrieveExchangeRate,
                     ExchangeRateUpdateFrequency = dto.ExchangeRateUpdateFrequency,
-                    DefaultRateType = dto.DefaultRateType,
                     IsActive = dto.IsActive,
                     ActivationDate = now,
                     CountryCode = string.IsNullOrWhiteSpace(dto.CountryCode) ? null : dto.CountryCode.Trim().ToUpperInvariant(),
@@ -228,7 +227,6 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             currency.GeographicRegion = dto.GeographicRegion;
             currency.AutoRetrieveExchangeRate = dto.AutoRetrieveExchangeRate;
             currency.ExchangeRateUpdateFrequency = dto.ExchangeRateUpdateFrequency;
-            currency.DefaultRateType = dto.DefaultRateType;
             currency.IsActive = dto.IsActive;
             currency.UpdatedAt = DateTime.UtcNow;
             currency.UpdatedBy = UserName;
@@ -485,7 +483,6 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 GeographicRegion = currency.GeographicRegion,
                 AutoRetrieveExchangeRate = currency.AutoRetrieveExchangeRate,
                 ExchangeRateUpdateFrequency = currency.ExchangeRateUpdateFrequency,
-                DefaultRateType = currency.DefaultRateType,
                 IsActive = currency.IsActive,
                 ActivationDate = currency.ActivationDate,
                 DeactivationDate = currency.DeactivationDate,

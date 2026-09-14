@@ -29,14 +29,28 @@ describe('accounts payable supplier identity client', () => {
     expect(apiService.get).toHaveBeenCalledWith('/ap/invoices/suppliers');
   });
 
-  it('uses a separate entry lookup with the Procurement id for PO filtering', async () => {
-    const response = [{ id: 'canonical-id', businessPartnerId: 'procurement-id', code: 'SUP-001', name: 'Supplier' }];
+  it('loads unified invoice-entry options without changing the canonical report lookup', async () => {
+    const response = [
+      {
+        id: 'business-partner-id',
+        businessPartnerId: 'business-partner-id',
+        supplierId: null,
+        code: 'SUP260001',
+        name: 'USD Supplier',
+        currency: 'USD',
+      },
+    ];
     vi.mocked(apiService.get).mockResolvedValueOnce(response);
-    await expect(accountsPayableService.getInvoiceSupplierEntryOptions()).resolves.toEqual(response);
-    expect(apiService.get).toHaveBeenCalledWith('/ap/invoices/supplier-entry-options');
+
+    await expect(
+      accountsPayableService.getInvoiceSupplierEntryOptions()
+    ).resolves.toEqual(response);
+    expect(apiService.get).toHaveBeenCalledWith(
+      '/ap/invoices/entry-suppliers'
+    );
   });
 
-  it('keeps the reusable create/edit form on entry options and preserves the PO identity', () => {
+  it('keeps the reusable create/edit form on entry options and preserves the Procurement identity', () => {
     const source = readFileSync('src/app/finance/ap/invoices/create/page.tsx', 'utf8');
     expect(source).toContain('accountsPayableService.getInvoiceSupplierEntryOptions()');
     expect(source).toContain('supplierId: selectedSupplier.businessPartnerId || selectedSupplier.id');

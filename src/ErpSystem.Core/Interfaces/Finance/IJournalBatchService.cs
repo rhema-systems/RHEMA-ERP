@@ -9,6 +9,7 @@ public interface IJournalBatchService
     Task<JournalBatchDetailDto> CreateAsync(CreateJournalBatchDto dto, CancellationToken cancellationToken = default);
     Task<JournalBatchDetailDto> UpdateAsync(Guid id, UpdateJournalBatchDto dto, CancellationToken cancellationToken = default);
     Task DeleteAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<EligibleJournalBatchDraftDto>> GetEligibleDraftJournalsAsync(Guid id, string? search, int take = 50, CancellationToken cancellationToken = default);
     Task<JournalBatchDetailDto> AddExistingJournalAsync(Guid id, Guid journalEntryId, CancellationToken cancellationToken = default);
     Task<JournalBatchDetailDto> CreateJournalAsync(Guid id, CreateJournalEntryDto dto, CancellationToken cancellationToken = default);
     Task<JournalBatchDetailDto> UpdateJournalAsync(Guid id, Guid journalEntryId, UpdateJournalEntryDto dto, CancellationToken cancellationToken = default);

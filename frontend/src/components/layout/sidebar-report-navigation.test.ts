@@ -44,6 +44,16 @@ describe('main Reports navigation', () => {
 });
 
 describe('navigation surfaces', () => {
+  it('exposes the governed Finance ad hoc builder from Finance reporting', () => {
+    const adHocBuilder = findByTitle(navigationItems, 'Ad Hoc Report Builder');
+
+    expect(adHocBuilder).toMatchObject({
+      href: '/reports/financial/ad-hoc',
+      permissions: ['Finance.Reports.AdHoc.Build'],
+    });
+    expect(containsHref(sidebarNavigationItems, '/reports/financial/ad-hoc')).toBe(true);
+  });
+
   it('exposes the controlled journal-batch workspace under General Ledger', () => {
     // This assertion guards against a fully implemented Finance workspace becoming
     // reachable only by a memorised URL after future sidebar reorganisations.
@@ -125,6 +135,7 @@ describe('navigation surfaces', () => {
     expect(containsHref(settingsNavigationItems, '/finance/exchange-rates')).toBe(false);
     expect(containsHref(settingsNavigationItems, '/administration/inventory/units-of-measure')).toBe(true);
     expect(containsHref(settingsNavigationItems, '/finance/accounts')).toBe(true);
+    expect(containsHref(settingsNavigationItems, '/administration/finance/accounts')).toBe(false);
     expect(containsHref(settingsNavigationItems, '/sales/journal-templates')).toBe(true);
     expect(containsHref(settingsNavigationItems, '/notifications#center')).toBe(true);
     expect(containsHref(settingsNavigationItems, '/administration/audit-logs')).toBe(true);

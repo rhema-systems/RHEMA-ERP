@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Data;
@@ -12,11 +13,16 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
 {
     private readonly ApplicationDbContext _db;
     private readonly IFinancePostingEngine _posting;
+    private readonly IFinanceSourceDimensionService _dimensions;
 
-    public InventoryReceiptFinancePostingService(ApplicationDbContext db, IFinancePostingEngine posting)
+    public InventoryReceiptFinancePostingService(
+        ApplicationDbContext db,
+        IFinancePostingEngine posting,
+        IFinanceSourceDimensionService dimensions)
     {
         _db = db;
         _posting = posting;
+        _dimensions = dimensions;
     }
 
     public async Task<InventoryFinancePostingResult> PostAcceptedReceiptAsync(
@@ -53,7 +59,7 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
         var lines = new List<FinancePostingLineDto>
         {
             Line(inventoryAccount, $"Accepted stock {receipt.ReceiptNumber}", inventoryValue, 0m,
-                currency, 1, receipt.ReceiptNumber, "INV-RECEIPT-CONTROL")
+                currency, 1, receipt.ReceiptNumber, "INV-RECEIPT-CONTROL", SourceLine(receipt.Id, "inventory-control"))
         };
         var lineNumber = 2;
         if (purchasePriceVariance != 0m)
@@ -63,15 +69,17 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
                     "Write-off Expense Account is required as the configured purchase-price variance account.");
             lines.Add(purchasePriceVariance > 0m
                 ? Line(varianceAccount, $"Purchase price variance {receipt.ReceiptNumber}", purchasePriceVariance,
-                    0m, currency, lineNumber++, receipt.ReceiptNumber, "INV-RECEIPT-PRICE-VARIANCE")
+                    0m, currency, lineNumber++, receipt.ReceiptNumber, "INV-RECEIPT-PRICE-VARIANCE", SourceLine(receipt.Id, "price-variance"))
                 : Line(varianceAccount, $"Purchase price variance {receipt.ReceiptNumber}", 0m,
                     Math.Abs(purchasePriceVariance), currency, lineNumber++, receipt.ReceiptNumber,
-                    "INV-RECEIPT-PRICE-VARIANCE"));
+                    "INV-RECEIPT-PRICE-VARIANCE", SourceLine(receipt.Id, "price-variance")));
         }
         lines.Add(Line(accrualAccount, $"GRV accrual {receipt.ReceiptNumber}", 0m, accrualValue,
-            currency, lineNumber, receipt.ReceiptNumber, "INV-RECEIPT-GRV-ACCRUAL"));
+            currency, lineNumber, receipt.ReceiptNumber, "INV-RECEIPT-GRV-ACCRUAL", SourceLine(receipt.Id, "grv-accrual")));
 
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var producer = Producer();
+        await ApplyDimensionsAsync(producer, receipt.Id, receipt.ReceiptDate, lines, cancellationToken);
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -83,18 +91,19 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
             Description = $"Accepted inventory receipt {receipt.ReceiptNumber}",
             PostingDate = receipt.ReceiptDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"ProcurementPurchaseOrderReceipt:{receipt.TenantId:N}:{receipt.Id:N}:AcceptedInventory",
             Lines = lines
-        }, cancellationToken);
+        }, producer, cancellationToken);
         return new InventoryFinancePostingResult(result.PostingEventId, result.JournalEntryId, result.WasDuplicate);
     }
 
     internal static FinancePostingLineDto Line(Guid accountId, string description, decimal debit, decimal credit,
-        string currency, int number, string reference, string tag) => new()
+        string currency, int number, string reference, string tag, Guid sourceLineId) => new()
     {
         AccountId = accountId,
+        SourceDocumentLineId = sourceLineId,
         Description = description,
         DebitAmount = Round(debit),
         CreditAmount = Round(credit),
@@ -112,17 +121,54 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
     internal static decimal Round(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
     internal static string Currency(string? value) => string.IsNullOrWhiteSpace(value)
         ? "GHS" : value.Trim().ToUpperInvariant();
+
+    private async Task ApplyDimensionsAsync(
+        FinancePostingProducerContext producer, Guid documentId, DateTime date,
+        IReadOnlyList<FinancePostingLineDto> lines, CancellationToken cancellationToken)
+    {
+        var contexts = lines.Select(line => new FinanceSourceDocumentLineContext(line.SourceDocumentLineId!.Value, line.AccountId)).ToArray();
+        if (!await HasCompleteFrozenEvidenceAsync(producer, documentId, contexts, cancellationToken))
+            await _dimensions.SynchronizeDraftAsync(producer, documentId, date, contexts, null, false, null,
+                "Accepted inventory receipt Finance adapter capture", cancellationToken);
+        await _dimensions.ValidateAndFreezeAsync(producer, documentId, date, contexts, false, cancellationToken);
+        foreach (var line in lines)
+            line.Dimensions = await _dimensions.ResolvePostingDimensionsAsync(
+                producer, documentId, line.SourceDocumentLineId!.Value, line.AccountId, date, cancellationToken);
+    }
+
+    private async Task<bool> HasCompleteFrozenEvidenceAsync(
+        FinancePostingProducerContext producer, Guid documentId,
+        IReadOnlyList<FinanceSourceDocumentLineContext> lines, CancellationToken cancellationToken)
+    {
+        var expected = lines.Select(line => line.SourceLineId).ToHashSet();
+        var frozen = await _db.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Where(item => item.RouteId == producer.RouteId && item.SourceDocumentId == documentId
+                && item.SourceLineId.HasValue && item.EvidenceFrozenAt.HasValue && !item.IsDeleted)
+            .Select(item => item.SourceLineId!.Value).ToListAsync(cancellationToken);
+        return frozen.ToHashSet().SetEquals(expected);
+    }
+
+    private static Guid SourceLine(Guid documentId, string kind) => FinanceExternalDimensionIdentity.SourceLine(
+        FinanceExternalProducerContractId.ProcurementAcceptedInventoryReceipt, documentId, kind);
+
+    private static FinancePostingProducerContext Producer() => FinanceExternalProducerContractCatalog.GetRequired(
+        FinanceExternalProducerContractId.ProcurementAcceptedInventoryReceipt);
 }
 
 public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedCostFinancePostingService
 {
     private readonly ApplicationDbContext _db;
     private readonly IFinancePostingEngine _posting;
+    private readonly IFinanceSourceDimensionService _dimensions;
 
-    public InventoryLandedCostFinancePostingService(ApplicationDbContext db, IFinancePostingEngine posting)
+    public InventoryLandedCostFinancePostingService(
+        ApplicationDbContext db,
+        IFinancePostingEngine posting,
+        IFinanceSourceDimensionService dimensions)
     {
         _db = db;
         _posting = posting;
+        _dimensions = dimensions;
     }
 
     public async Task<InventoryFinancePostingResult> PostLandedCostAsync(
@@ -163,19 +209,21 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
         var lines = new List<FinancePostingLineDto>();
         var number = 1;
         AddSigned(lines, inventoryAccount, $"Landed cost inventory {landedCost.LandedCostNumber}", inventoryValue,
-            currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-CONTROL");
+            currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-CONTROL", SourceLine(landedCost.Id, "inventory-control"));
         if (varianceValue != 0m)
         {
             var varianceAccount = settings.WriteOffExpenseAccountId
                 ?? throw new InvalidOperationException(
                     "Write-off Expense Account is required as the configured landed-cost variance account.");
             AddSigned(lines, varianceAccount, $"Landed cost variance {landedCost.LandedCostNumber}", varianceValue,
-                currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-VARIANCE");
+                currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-VARIANCE", SourceLine(landedCost.Id, "variance"));
         }
         AddSigned(lines, accrualAccount, $"Landed cost accrual {landedCost.LandedCostNumber}", -postedValue,
-            currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-ACCRUAL");
+            currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-ACCRUAL", SourceLine(landedCost.Id, "accrual"));
 
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var producer = Producer();
+        await ApplyDimensionsAsync(producer, landedCost.Id, landedCost.PostedDate ?? landedCost.CostDate, lines, cancellationToken);
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -187,21 +235,53 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
             Description = $"Inventory landed cost {landedCost.LandedCostNumber}",
             PostingDate = landedCost.PostedDate ?? landedCost.CostDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryLandedCost:{landedCost.TenantId:N}:{landedCost.Id:N}:Post",
             Lines = lines
-        }, cancellationToken);
+        }, producer, cancellationToken);
         return new InventoryFinancePostingResult(result.PostingEventId, result.JournalEntryId, result.WasDuplicate);
     }
 
     private static void AddSigned(List<FinancePostingLineDto> lines, Guid accountId, string description,
-        decimal signedDebit, string currency, ref int number, string reference, string tag)
+        decimal signedDebit, string currency, ref int number, string reference, string tag, Guid sourceLineId)
     {
         if (signedDebit == 0m) return;
         lines.Add(InventoryReceiptFinancePostingService.Line(accountId, description,
             signedDebit > 0m ? signedDebit : 0m,
             signedDebit < 0m ? Math.Abs(signedDebit) : 0m,
-            currency, number++, reference, tag));
+            currency, number++, reference, tag, sourceLineId));
     }
+
+    private async Task ApplyDimensionsAsync(
+        FinancePostingProducerContext producer, Guid documentId, DateTime date,
+        IReadOnlyList<FinancePostingLineDto> lines, CancellationToken cancellationToken)
+    {
+        var contexts = lines.Select(line => new FinanceSourceDocumentLineContext(line.SourceDocumentLineId!.Value, line.AccountId)).ToArray();
+        if (!await HasCompleteFrozenEvidenceAsync(producer, documentId, contexts, cancellationToken))
+            await _dimensions.SynchronizeDraftAsync(producer, documentId, date, contexts, null, false, null,
+                "Inventory landed-cost Finance adapter capture", cancellationToken);
+        await _dimensions.ValidateAndFreezeAsync(producer, documentId, date, contexts, false, cancellationToken);
+        foreach (var line in lines)
+            line.Dimensions = await _dimensions.ResolvePostingDimensionsAsync(
+                producer, documentId, line.SourceDocumentLineId!.Value, line.AccountId, date, cancellationToken);
+    }
+
+    private async Task<bool> HasCompleteFrozenEvidenceAsync(
+        FinancePostingProducerContext producer, Guid documentId,
+        IReadOnlyList<FinanceSourceDocumentLineContext> lines, CancellationToken cancellationToken)
+    {
+        var expected = lines.Select(line => line.SourceLineId).ToHashSet();
+        var frozen = await _db.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Where(item => item.RouteId == producer.RouteId && item.SourceDocumentId == documentId
+                && item.SourceLineId.HasValue && item.EvidenceFrozenAt.HasValue && !item.IsDeleted)
+            .Select(item => item.SourceLineId!.Value).ToListAsync(cancellationToken);
+        return frozen.ToHashSet().SetEquals(expected);
+    }
+
+    private static Guid SourceLine(Guid documentId, string kind) => FinanceExternalDimensionIdentity.SourceLine(
+        FinanceExternalProducerContractId.InventoryLandedCost, documentId, kind);
+
+    private static FinancePostingProducerContext Producer() => FinanceExternalProducerContractCatalog.GetRequired(
+        FinanceExternalProducerContractId.InventoryLandedCost);
 }

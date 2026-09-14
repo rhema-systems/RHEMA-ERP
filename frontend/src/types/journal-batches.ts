@@ -84,6 +84,17 @@ export interface JournalBatchItem {
     reviews: JournalBatchReview[];
 }
 
+export interface EligibleJournalBatchDraft {
+    id: string;
+    journalEntryNumber: string;
+    entryDate: string;
+    description: string;
+    referenceNumber?: string;
+    totalDebit: number;
+    totalCredit: number;
+    lineCount: number;
+}
+
 export interface JournalBatchPostingRun {
     id: string;
     runNumber: number;

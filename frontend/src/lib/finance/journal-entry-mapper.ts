@@ -32,6 +32,7 @@
  *   [Required] Reference         string   max 50
  *              CurrencyCode      string?  max 3
  *              ForeignAmount     decimal?
+ *              ExchangeRateId    Guid?
  *              ExchangeRate      decimal?
  *              LineNumber        int      default 1
  */
@@ -60,6 +61,7 @@ export interface JournalEntryFormLine {
     accountId: string;
     description: string;
     currencyCode: string;
+    exchangeRateId?: string;
     exchangeRate: number | '';
     debit: number;
     credit: number;
@@ -107,6 +109,9 @@ export function mapJournalEntryFormToCreateDto(
         if (isForeign && rate <= 0) {
             throw new Error(`An approved ${transactionCurrency} exchange rate is required.`);
         }
+        if (isForeign && !l.exchangeRateId) {
+            throw new Error(`The approved ${transactionCurrency} exchange-rate record is required.`);
+        }
         if (isForeign && l.debit > 0 && !(l.foreignDebit && l.foreignDebit > 0)) {
             throw new Error(`The original ${transactionCurrency} debit amount is required.`);
         }
@@ -123,6 +128,7 @@ export function mapJournalEntryFormToCreateDto(
                 reference: header.referenceNumber || 'JE',
                 currencyCode: isForeign ? transactionCurrency : undefined,
                 foreignAmount: isForeign ? (l.foreignDebit || undefined) : undefined,
+                exchangeRateId: isForeign ? l.exchangeRateId : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,
                 dimensions: Object.entries(l.dimensions ?? {})
@@ -140,6 +146,7 @@ export function mapJournalEntryFormToCreateDto(
                 reference: header.referenceNumber || 'JE',
                 currencyCode: isForeign ? transactionCurrency : undefined,
                 foreignAmount: isForeign ? (l.foreignCredit || undefined) : undefined,
+                exchangeRateId: isForeign ? l.exchangeRateId : undefined,
                 exchangeRate: isForeign ? rate : undefined,
                 lineNumber: lineNo++,
                 dimensions: Object.entries(l.dimensions ?? {})
@@ -165,7 +172,6 @@ export function mapJournalEntryFormToCreateDto(
         reference: header.referenceNumber || undefined,
         notes: header.notes || undefined,
         bookClassification: header.bookClassification || undefined,
-        sourceDocumentType: header.journalType === 'Opening Balance' ? 'ManualOpeningBalance' : undefined,
         // SourceModule is intentionally omitted for manual entries
         // (controller forces it to null anyway as a security measure)
         transactions,
@@ -181,7 +187,6 @@ export function validateJournalEntryForm(
     lines: JournalEntryFormLine[],
     journalNumber: string | undefined,
     options?: {
-        openingBalanceAutoRoutingEnabled?: boolean;
         requireJournalNumber?: boolean;
     },
 ): string[] {
@@ -198,29 +203,17 @@ export function validateJournalEntryForm(
         errors.push('Description is required.');
     }
 
-    const isOpeningBalance = header.journalType === 'Opening Balance';
-    const allowOpeningAutoRouting = isOpeningBalance && Boolean(options?.openingBalanceAutoRoutingEnabled);
-
-    // Need at least 2 valid lines for normal journals.
-    // For Opening Balance with auto-routing, allow single-sided entry and let backend add balancing line.
+    // Manual journals always require a complete balanced entry. Opening balances use the
+    // controlled source-specific workspace and never rely on this mapper.
     const validLines = lines.filter(l => l.accountId && (l.debit > 0 || l.credit > 0));
-    const minRequiredLines = allowOpeningAutoRouting ? 1 : 2;
-    if (validLines.length < minRequiredLines) {
-        errors.push(
-            allowOpeningAutoRouting
-                ? 'At least 1 transaction line with amount is required for Opening Balance auto-routing.'
-                : 'At least 2 transaction lines with amounts are required.'
-        );
+    if (validLines.length < 2) {
+        errors.push('At least 2 transaction lines with amounts are required.');
     }
 
-    // Must be balanced for normal journals.
-    // Opening Balance journals can be auto-balanced to Migration Clearing account on the backend.
-    if (!allowOpeningAutoRouting) {
-        const totalDebit = lines.reduce((sum, l) => sum + (l.debit || 0), 0);
-        const totalCredit = lines.reduce((sum, l) => sum + (l.credit || 0), 0);
-        if (Math.abs(totalDebit - totalCredit) >= 0.01) {
-            errors.push(`Entry is not balanced. Debits (${totalDebit.toFixed(2)}) != Credits (${totalCredit.toFixed(2)}).`);
-        }
+    const totalDebit = lines.reduce((sum, l) => sum + (l.debit || 0), 0);
+    const totalCredit = lines.reduce((sum, l) => sum + (l.credit || 0), 0);
+    if (Math.abs(totalDebit - totalCredit) >= 0.01) {
+        errors.push(`Entry is not balanced. Debits (${totalDebit.toFixed(2)}) != Credits (${totalCredit.toFixed(2)}).`);
     }
 
     return errors;

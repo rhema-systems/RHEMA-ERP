@@ -14,6 +14,7 @@ import {
 } from './transaction-dimension-editor';
 import type {
   FinanceDimensionCertificationState,
+  FinanceSettlementDimensionComponent,
   FinanceSourceDocumentDimension,
 } from '@/types/finance';
 
@@ -36,6 +37,53 @@ export interface SourceDocumentDimensionPanelProps {
   onApplyDefaultToAll?: () => void;
   certificationState?: FinanceDimensionCertificationState;
   disabled?: boolean;
+}
+
+export interface SourceDocumentDimensionDefaultsPanelProps {
+  effectiveDate: string;
+  values: Record<string, string>;
+  onChange: (values: Record<string, string>) => void;
+  disabled?: boolean;
+}
+
+/**
+ * Capture surface for server-derived economic lines whose stable IDs/accounts are not available
+ * until the Finance action builds its posting proposal. The server applies this clearable default
+ * only to eligible lines, resolves Fixed values, and remains authoritative for every line.
+ */
+export function SourceDocumentDimensionDefaultsPanel({
+  effectiveDate,
+  values,
+  onChange,
+  disabled = false,
+}: SourceDocumentDimensionDefaultsPanelProps) {
+  const { data: definitions = [], isLoading } = useQuery({
+    queryKey: ['finance-dimensions', 'source-document-defaults'],
+    queryFn: () => financeDataService.getFinanceDimensions(),
+  });
+
+  if (isLoading)
+    return <div className="rounded-lg border p-4 text-sm text-muted-foreground">Loading Finance coding dimensions…</div>;
+  if (definitions.length === 0) return null;
+
+  return (
+    <div className="space-y-2 rounded-lg border p-4">
+      <TransactionDimensionDefaults
+        definitions={definitions}
+        effectiveDate={effectiveDate}
+        values={values}
+        onChange={onChange}
+        onApplyToAll={() => undefined}
+        showApplyToAll={false}
+        disabled={disabled}
+      />
+      <p className="flex items-start gap-2 text-xs text-muted-foreground">
+        <LockKeyhole className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        Finance applies this default to eligible economic lines. Fixed values are resolved and locked
+        by the server; prohibited values are never copied. Each resulting line remains authoritative.
+      </p>
+    </div>
+  );
 }
 
 export function SourceDocumentDimensionPanel({
@@ -201,6 +249,47 @@ export function SourceDocumentDimensionEvidence({
           {warning}
         </p>
       ))}
+    </div>
+  );
+}
+
+export function SettlementDimensionEvidence({
+  evidence = [],
+}: {
+  evidence?: FinanceSettlementDimensionComponent[];
+}) {
+  if (evidence.length === 0) return null;
+  return (
+    <div className="space-y-3 rounded-lg border p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="font-medium">Settlement dimension evidence</h3>
+        <Badge variant="outline">{evidence.length} component lines</Badge>
+      </div>
+      <div className="space-y-2">
+        {evidence.map((item) => (
+          <div key={item.id} className="rounded-md bg-muted/40 p-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <span className="font-medium">{item.componentType}</span>
+              {item.evidenceFrozenAt && <Badge variant="secondary">Frozen evidence</Badge>}
+            </div>
+            <p className="mt-1 text-muted-foreground">
+              {item.transactionCurrencyCode} {item.transactionAmount.toFixed(2)} · Functional{' '}
+              {item.functionalAmount.toFixed(2)}
+              {item.isFinalResidualRecipient ? ' · final residual line' : ''}
+            </p>
+            <p className="mt-1">
+              {item.dimensionValues.length
+                ? item.dimensionValues
+                    .map(
+                      (value) =>
+                        `${value.dimensionCode} (${value.dimensionName}): ${value.valueCode} — ${value.valueName}`,
+                    )
+                    .join(' · ')
+                : 'No dimensions assigned'}
+            </p>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

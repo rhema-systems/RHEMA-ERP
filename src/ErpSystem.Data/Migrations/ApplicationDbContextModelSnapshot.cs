@@ -282,6 +282,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<string>("IdempotencyKey")
+                        .HasMaxLength(450)
+                        .HasColumnType("nvarchar(450)");
+
                     b.Property<string>("IpAddress")
                         .IsRequired()
                         .HasMaxLength(45)
@@ -336,11 +340,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("Resource");
 
-                    b.HasIndex("TenantId");
-
                     b.HasIndex("Timestamp");
 
                     b.HasIndex("UserId");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[IdempotencyKey] IS NOT NULL");
 
                     b.ToTable("AuditLogs", null, t =>
                         {
@@ -5657,6 +5663,10 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal?>("AllocatedCost")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<decimal>("AreaSquareFeet")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
@@ -5670,6 +5680,19 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<bool>("BoundaryVerified")
                         .HasColumnType("bit");
+
+                    b.Property<string>("ChildFixedAssetReference")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("CostAllocationMethod")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<decimal?>("CostPerAcre")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -5697,11 +5720,77 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("EstateManagedAssetId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int?>("ExternalLeaseTermMonths")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ExternalListingCurrency")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
+                    b.Property<string>("ExternalListingNotes")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<decimal?>("ExternalListingPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ExternalListingStatus")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("ExternalListingType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<decimal?>("ExternalMonthlyRent")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime?>("ExternalPublishedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal?>("ExternalSalePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("FixedAssetPostedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FixedAssetPostingStatus")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPublishedToExternalPortal")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsReadyForProjectManagement")
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ParentDemarcationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ParentFixedAssetReference")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<string>("ParentLandAssetReference")
+                        .HasMaxLength(120)
+                        .HasColumnType("nvarchar(120)");
+
+                    b.Property<decimal?>("TargetSalePrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
@@ -5716,8 +5805,14 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("EstateManagedAssetId");
 
+                    b.HasIndex("ParentDemarcationId");
+
                     b.HasIndex("TenantId", "EstateManagedAssetId", "DemarcationNumber")
                         .IsUnique();
+
+                    b.HasIndex("TenantId", "EstateManagedAssetId", "ParentDemarcationId");
+
+                    b.HasIndex("TenantId", "IsReadyForProjectManagement", "IsPublishedToExternalPortal");
 
                     b.ToTable("EstateLandDemarcations", (string)null);
                 });
@@ -5731,26 +5826,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal?>("AreaSquareMeters")
                         .HasPrecision(18, 4)
                         .HasColumnType("decimal(18,4)");
-
-                    b.Property<decimal?>("OwnerConsiderationCost")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("ExternalSurveyorCost")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("StampDutyCost")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("OtherAcquisitionCost")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
-
-                    b.Property<decimal?>("TotalCapitalizedCost")
-                        .HasPrecision(18, 2)
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("AreaUnit")
                         .HasMaxLength(40)
@@ -5860,6 +5935,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal?>("ExternalSalePrice")
                         .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("ExternalSurveyorCost")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("FloorLabel")
@@ -5976,6 +6054,12 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
 
+                    b.Property<decimal?>("OtherAcquisitionCost")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal?>("OwnerConsiderationCost")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("OwnershipHistoryJson")
                         .HasColumnType("nvarchar(max)");
 
@@ -6041,6 +6125,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("nvarchar(40)");
 
+                    b.Property<decimal?>("StampDutyCost")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(40)
@@ -6059,6 +6146,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("TotalCapitalizedCost")
+                        .HasColumnType("decimal(18,2)");
 
                     b.Property<string>("Town")
                         .HasMaxLength(120)
@@ -7848,8 +7938,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ParentAccountId");
 
-                    b.HasIndex("TenantId");
-
                     b.ToTable("Accounts");
                 });
 
@@ -7857,6 +7945,9 @@ namespace ErpSystem.Data.Migrations
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountClassificationId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("AccountId")
@@ -7893,6 +7984,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<Guid>("TenantId")
                         .HasColumnType("uniqueidentifier");
 
@@ -7903,6 +8000,8 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("AccountClassificationId");
 
                     b.HasIndex("AccountId");
 
@@ -7921,6 +8020,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal?>("BaseCurrencyEquivalent")
@@ -7953,6 +8055,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("Currency")
+                        .IsRequired()
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
@@ -8099,15 +8202,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AccountId");
-
-                    b.HasIndex("FiscalPeriodId");
-
                     b.HasIndex("CostCenterSegment", "FiscalPeriodId");
 
                     b.HasIndex("DepartmentSegment", "FiscalPeriodId");
 
                     b.HasIndex("ProjectSegment", "FiscalPeriodId");
+
+                    b.HasIndex("TenantId", "AccountingBookId");
 
                     b.HasIndex("TenantId", "IsReconciled");
 
@@ -8117,10 +8218,340 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "FiscalPeriodId", "BookClassification");
 
-                    b.HasIndex("TenantId", "AccountId", "FiscalPeriodId", "BookClassification", "Currency")
+                    b.HasIndex("TenantId", "AccountId", "AccountingBookId", "FiscalPeriodId", "Currency")
                         .IsUnique();
 
                     b.ToTable("AccountBalances", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountBookCurrencyPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountAccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountCurrencyLinkId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("LifecycleStatus")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<string>("OverrideReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("PendingReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool?>("PendingRevaluationOverride")
+                        .HasColumnType("bit");
+
+                    b.Property<DateTime?>("RequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool?>("RevaluationOverride")
+                        .HasColumnType("bit");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountAccountingBookId");
+
+                    b.HasIndex("AccountCurrencyLinkId");
+
+                    b.HasIndex("TenantId", "AccountAccountingBookId", "AccountCurrencyLinkId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("AccountBookCurrencyPolicies", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountClassification", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("CoreAccountType")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("DefaultRevaluationTreatment")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<int>("DisplayOrder")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsPostingClassification")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<Guid?>("ParentClassificationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RetiredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetiredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RetirementReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("int");
+
+                    b.Property<int?>("SystemRole")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("AccountingBookId");
+
+                    b.HasIndex("ParentClassificationId");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "Code")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "SystemRole")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "ParentClassificationId", "DisplayOrder");
+
+                    b.ToTable("AccountClassifications", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountCurrencyExposure", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountingBookCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("EffectiveDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ExpirationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FirstTransactionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FunctionalCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("LastRebuiltAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("LastTransactionDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ReferenceNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal>("SignedForeignBalance")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("SignedFunctionalBalance")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("SourceFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Tags")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("TransactionCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("TransactionCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookId");
+
+                    b.HasIndex("TenantId", "AccountId", "AccountingBookId", "TransactionCurrencyCode")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("AccountCurrencyExposures", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountCurrencyExposures_DistinctCurrency", "[TransactionCurrencyCode] <> [FunctionalCurrencyCode]");
+
+                            t.HasCheckConstraint("CK_AccountCurrencyExposures_TransactionCount", "[TransactionCount] >= 0");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountCurrencyLink", b =>
@@ -8245,9 +8676,6 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
-                    b.Property<bool>("RevaluationRequired")
-                        .HasColumnType("bit");
-
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasMaxLength(50)
@@ -8318,13 +8746,16 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<DateTime?>("FrozenAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("FrozenByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsDeleted")
-                        .HasColumnType("bit");
-
-                    b.Property<bool>("IsMandatory")
                         .HasColumnType("bit");
 
                     b.Property<bool>("IsNaturalAccount")
@@ -8333,11 +8764,27 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsReportingDimension")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsSystemDefined")
+                        .HasColumnType("bit");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("LifecycleStatus")
+                        .HasColumnType("int");
+
                     b.Property<bool>("LookupTableRequired")
                         .HasColumnType("bit");
+
+                    b.Property<string>("RetirementReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
 
                     b.Property<string>("SegmentCode")
                         .IsRequired()
@@ -8370,9 +8817,22 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [IsNaturalAccount] = 1 AND [IsActive] = 1");
 
-                    b.ToTable("AccountSegmentStructures");
+                    b.HasIndex("TenantId", "SegmentCode")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.HasIndex("TenantId", "SegmentPosition")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [IsActive] = 1");
+
+                    b.ToTable("AccountSegmentStructures", t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountSegmentStructures_LifecycleActive", "([LifecycleStatus] IN (2, 3) AND [IsActive] = 1) OR ([LifecycleStatus] IN (1, 4) AND [IsActive] = 0)");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountSegmentValue", b =>
@@ -8443,13 +8903,17 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("AccountId");
+                    b.HasIndex("TenantId", "SegmentLookupValueId");
 
-                    b.HasIndex("SegmentLookupValueId");
+                    b.HasIndex("TenantId", "SegmentStructureId");
 
-                    b.HasIndex("SegmentStructureId");
+                    b.HasIndex("TenantId", "AccountId", "SegmentPosition")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "AccountId", "SegmentStructureId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
 
                     b.ToTable("AccountSegmentValues");
                 });
@@ -8461,6 +8925,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("BookClassification")
@@ -8666,17 +9133,17 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("FiscalPeriodId");
 
-                    b.HasIndex("JournalEntryId");
-
                     b.HasIndex("OriginalTransactionId");
 
                     b.HasIndex("ReversalTransactionId");
+
+                    b.HasIndex("TenantId", "JournalEntryId", "AccountingBookId");
 
                     b.HasIndex("TenantId", "SourceDocumentId", "SourceDocumentLineId");
 
                     b.HasIndex("TenantId", "TransactionCurrency", "ExchangeRateId");
 
-                    b.HasIndex("TenantId", "BookClassification", "TransactionDate", "AccountId");
+                    b.HasIndex("TenantId", "AccountingBookId", "TransactionDate", "AccountId");
 
                     b.HasIndex("TenantId", "FinanceDimensionSetId", "TransactionDate", "AccountId");
 
@@ -8691,6 +9158,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<bool>("AllowsPosting")
                         .HasColumnType("bit");
+
+                    b.Property<Guid?>("BaseAccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("BookType")
+                        .HasColumnType("int");
 
                     b.Property<string>("Code")
                         .IsRequired()
@@ -8716,6 +9189,19 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(500)
                         .HasColumnType("nvarchar(500)");
 
+                    b.Property<DateTime?>("EffectiveFromUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EffectiveToUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FunctionalCurrencyCode")
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("InitializationStartedAtUtc")
+                        .HasColumnType("datetime2");
+
                     b.Property<bool>("IsActive")
                         .HasColumnType("bit");
 
@@ -8731,17 +9217,392 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("LifecycleStatus")
+                        .HasColumnType("int");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
+
+                    b.Property<int?>("PendingLifecycleStatus")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PendingTransitionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
 
                     b.Property<string>("Purpose")
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
                     b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("TransitionDecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("TransitionDecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("TransitionDecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("TransitionRequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("TransitionRequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("TransitionWorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "BaseAccountingBookId");
+
+                    b.HasIndex("TenantId", "Code")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "IsDefault")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [IsDefault] = 1");
+
+                    b.ToTable("AccountingBooks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBooks_BaseShape", "[IsDeleted] = 1 OR ([BookType] = 3 AND [BaseAccountingBookId] IS NOT NULL AND [FunctionalCurrencyCode] IS NULL) OR ([BookType] IN (1, 2) AND [BaseAccountingBookId] IS NULL AND [FunctionalCurrencyCode] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_BookType", "[IsDeleted] = 1 OR [BookType] IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_CodeCanonical", "[IsDeleted] = 1 OR ([Code] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Code]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([Code]) = DATALENGTH(UPPER(LTRIM(RTRIM([Code])))) AND LEFT([Code], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [Code] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [Code] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL', N'ALL_ACTIVE_BOOKS', N'ALL_CLASSIFIED_BOOKS', N'ALLCLASSIFIEDBOOKS'))");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_DefaultType", "[IsDeleted] = 1 OR ([BookType] = 1 AND [IsDefault] = 1) OR ([BookType] <> 1 AND [IsDefault] = 0)");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_EffectiveDates", "[IsDeleted] = 1 OR [EffectiveToUtc] IS NULL OR [EffectiveFromUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_FunctionalCurrencyCanonical", "[IsDeleted] = 1 OR [FunctionalCurrencyCode] IS NULL OR (DATALENGTH([FunctionalCurrencyCode]) = 6 AND [FunctionalCurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_LifecycleStatus", "[IsDeleted] = 1 OR [LifecycleStatus] IN (1, 2, 3, 4, 5, 6)");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_NoSelfBase", "[IsDeleted] = 1 OR [BaseAccountingBookId] IS NULL OR [BaseAccountingBookId] <> [Id]");
+
+                            t.HasCheckConstraint("CK_AccountingBooks_PostingLifecycle", "[IsDeleted] = 1 OR ([LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([LifecycleStatus] <> 4 AND [IsActive] = 0 AND [AllowsPosting] = 0)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CreatedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("Description")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime>("EffectiveFrom")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("EffectiveTo")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("PolicyCode")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<int>("PolicyStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("PreparedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("RetiredAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetiredByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("RetirementDecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetirementDecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RetirementDecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("RetirementDecisionStatus")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("RetirementReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("RetirementRequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RetirementRequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("RetirementWorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid?>("SupersedesPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "PolicyCode", "SupersedesPolicyId");
+
+                    b.HasIndex("TenantId", "PolicyCode", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookApplicabilityPolicies", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_ApprovalShape", "([PolicyStatus] IN (1,2,4) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 5 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NOT NULL AND [RetiredAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_CodeCanonical", "LEN([PolicyCode]) > 0 AND [PolicyCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PolicyCode]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([PolicyCode]) = DATALENGTH(UPPER(LTRIM(RTRIM([PolicyCode])))) AND LEFT([PolicyCode], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_EffectiveRange", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementMakerChecker", "[RetiredByUserId] IS NULL OR [RetiredByUserId] <> [RetirementRequestedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementRequestShape", "([RetirementDecisionStatus] IS NULL AND [RetirementRequestedByUserId] IS NULL AND [RetirementRequestedAtUtc] IS NULL AND [RetirementReason] IS NULL AND [RetirementWorkflowInstanceId] IS NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] = 'Pending' AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] IN ('Approved','Rejected') AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NOT NULL AND [RetirementDecidedAtUtc] IS NOT NULL AND [RetirementDecisionReason] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_Status", "[PolicyStatus] IN (1, 2, 3, 4, 5)");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_VersionLineageShape", "([Version] = 1 AND [SupersedesPolicyId] IS NULL) OR ([Version] > 1 AND [SupersedesPolicyId] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookApplicabilityPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OriginatingModuleCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("PostingAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RuleCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "RuleCode")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "OriginatingModuleCode", "SourceDocumentType", "PostingAction", "Priority")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookApplicabilityRules", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_Priority", "[Priority] >= 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRules_RuleCodeCanonical", "LEN([RuleCode]) > 0 AND LEFT([RuleCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [RuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([RuleCode]))) COLLATE Latin1_General_100_BIN2 AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRuleBook", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookApplicabilityRuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountingBookCodeSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SelectionOrder")
                         .HasColumnType("int");
 
                     b.Property<Guid>("TenantId")
@@ -8755,10 +9616,1032 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("TenantId", "Code")
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityRuleId", "AccountingBookId")
                         .IsUnique();
 
-                    b.ToTable("AccountingBooks", (string)null);
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityRuleId", "SelectionOrder")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot");
+
+                    b.ToTable("AccountingBookApplicabilityRuleBooks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_NoDelete", "[IsDeleted] = 0");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ApprovedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("CoveredAccountCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CutoffDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("CutoffFiscalPeriodId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EvidenceFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("InitializationStatus")
+                        .HasColumnType("int");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("Mode")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime>("PreparedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ReconciliationFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime?>("RejectedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RejectedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("RequiredAccountCount")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid?>("SourceAccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("SupersedesInitializationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("TotalCredits")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("TotalDebits")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CutoffFiscalPeriodId");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "SourceAccountingBookId");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "InitializationStatus")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [InitializationStatus] = 3");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "SupersedesInitializationId");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookInitializations", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 4 AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_Balanced", "[IsDeleted] = 1 OR [TotalDebits] = [TotalCredits]");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_Coverage", "[RequiredAccountCount] >= 0 AND [CoveredAccountCount] >= 0 AND [CoveredAccountCount] <= [RequiredAccountCount]");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_DecisionMakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "LEN([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] = RTRIM([EvidenceFingerprint]) AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_Mode", "[IsDeleted] = 1 OR [Mode] IN (1, 2, 3)");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "LEN([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] = RTRIM([ReconciliationFingerprint]) AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_SourceShape", "([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializations_Status", "[IsDeleted] = 1 OR [InitializationStatus] IN (1, 2, 3, 4)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitializationLine", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookInitializationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("BaseBookSignedBalance")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("OpeningAdjustment")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("OpeningCredit")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<decimal>("OpeningDebit")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountId");
+
+                    b.HasIndex("TenantId", "AccountingBookInitializationId", "AccountId")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookInitializationLines", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookInitializationLines_Amounts", "[OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "LEN([CurrencyCode]) = 3 AND [CurrencyCode] = RTRIM([CurrencyCode]) AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
+
+                            t.HasCheckConstraint("CK_AccountingBookInitializationLines_NoDelete", "[IsDeleted] = 0");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookPeriod", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("FiscalPeriodId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PendingReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int?>("PendingStatus")
+                        .HasColumnType("int");
+
+                    b.Property<int>("PeriodStatus")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("RequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "FiscalPeriodId");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "FiscalPeriodId")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookPeriods", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookPeriods_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookPeriods_PendingStatus", "[PendingStatus] IS NULL OR [PendingStatus] IN (1, 2, 3, 4)");
+
+                            t.HasCheckConstraint("CK_AccountingBookPeriods_Status", "[IsDeleted] = 1 OR [PeriodStatus] IN (1, 2, 3, 4)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountingBookApplicabilityPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountingBookApplicabilityRuleId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("CalculationInputHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("EffectiveDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("FrozenAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("FrozenByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OriginatingModuleCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<int?>("PolicyVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("PostingAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<string>("SelectionFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "AccountingBookApplicabilityRuleId");
+
+                    b.HasIndex("TenantId", "AccountingBookApplicabilityPolicyId", "PolicyVersion");
+
+                    b.ToTable("AccountingBookSelectionEvidence", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_Fingerprint", "LEN([SelectionFingerprint]) = 64 AND [SelectionFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_InputHash", "LEN([CalculationInputHash]) = 64 AND [CalculationInputHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidence_RuleLineage", "([AccountingBookApplicabilityPolicyId] IS NULL AND [AccountingBookApplicabilityRuleId] IS NULL AND [PolicyVersion] IS NULL) OR ([AccountingBookApplicabilityPolicyId] IS NOT NULL AND [AccountingBookApplicabilityRuleId] IS NOT NULL AND [PolicyVersion] IS NOT NULL)");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidenceBook", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountingBookCodeSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingBookSelectionEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AuthorityFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("SelectionOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot");
+
+                    b.HasIndex("TenantId", "AccountingBookSelectionEvidenceId", "AccountingBookId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingBookSelectionEvidenceId", "SelectionOrder")
+                        .IsUnique();
+
+                    b.ToTable("AccountingBookSelectionEvidenceBooks", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_NoDelete", "[IsDeleted] = 0");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountingBookSelectionEvidenceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CorrectsAccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime>("EventDate")
+                        .HasColumnType("date");
+
+                    b.Property<string>("EventKind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OriginatingModuleCode")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("PostingAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<DateTime>("PreparedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ProducerDecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ProducerDecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProducerDecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ProducerDecisionStatus")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("ProducerIntentSnapshotHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("ProducerIntentSnapshotJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ProducerParticipantIdentity")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ReleaseReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("ReleasedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReleasedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("RequestedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversesAccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RootAccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SelectionFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("SourceDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("SupersedesAccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookSelectionEvidenceId");
+
+                    b.HasIndex("TenantId", "CorrectsAccountingEventId");
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ReversesAccountingEventId");
+
+                    b.HasIndex("TenantId", "SupersedesAccountingEventId");
+
+                    b.HasIndex("TenantId", "RootAccountingEventId", "Version")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "OriginatingModuleCode", "SourceDocumentType", "SourceDocumentId", "PostingAction", "Version")
+                        .IsUnique();
+
+                    b.ToTable("AccountingEvents", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingEvents_Kind", "[EventKind] IN ('Original','Correction','Reversal')");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_Lineage", "([EventKind] = 'Original' AND [Version] = 1 AND [RootAccountingEventId] = [Id] AND [SupersedesAccountingEventId] IS NULL AND [CorrectsAccountingEventId] IS NULL AND [ReversesAccountingEventId] IS NULL) OR ([EventKind] = 'Correction' AND [Version] > 1 AND [SupersedesAccountingEventId] = [CorrectsAccountingEventId] AND [CorrectsAccountingEventId] IS NOT NULL AND [ReversesAccountingEventId] IS NULL) OR ([EventKind] = 'Reversal' AND [Version] > 1 AND [SupersedesAccountingEventId] = [ReversesAccountingEventId] AND [ReversesAccountingEventId] IS NOT NULL AND [CorrectsAccountingEventId] IS NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_MakerChecker", "[ReleasedByUserId] IS NULL OR [ReleasedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_ProducerDecision", "([ProducerDecisionStatus] = 'NotRequired' AND [ProducerParticipantIdentity] IS NULL AND [ProducerIntentSnapshotJson] IS NULL AND [ProducerIntentSnapshotHash] IS NULL AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] = 'Pending' AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerIntentSnapshotJson] IS NOT NULL AND LEN([ProducerIntentSnapshotHash]) = 64 AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] IN ('Approved','Rejected') AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerIntentSnapshotJson] IS NOT NULL AND LEN([ProducerIntentSnapshotHash]) = 64 AND [ProducerDecidedByUserId] IS NOT NULL AND [ProducerDecidedAtUtc] IS NOT NULL AND [ProducerDecisionReason] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_ResultShape", "([Status] = 'PendingApproval' AND [AccountingBookSelectionEvidenceId] IS NULL AND [ReleasedByUserId] IS NULL AND [ReleasedAtUtc] IS NULL AND [ReleaseReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Pending' AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [AccountingBookSelectionEvidenceId] IS NOT NULL AND LEN([SelectionFingerprint]) = 64 AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_SelectionFingerprint", "[SelectionFingerprint] = '' OR (LEN([SelectionFingerprint]) = 64 AND [SelectionFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%')");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_Status", "[Status] IN ('PendingApproval','Pending','Posted','Failed')");
+
+                            t.HasCheckConstraint("CK_AccountingEvents_Version", "[Version] > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEventAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingEventId", "AttemptNumber")
+                        .IsUnique();
+
+                    b.ToTable("AccountingEventAttempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingEventAttempts_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingEventAttempts_Number", "[AttemptNumber] > 0");
+
+                            t.HasCheckConstraint("CK_AccountingEventAttempts_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingEventAttempts_ResultShape", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingEventAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEventPosting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountingBookCodeSnapshot")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AuthorityFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("EventVersion")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("FinancePostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("JournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("PostedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("SelectionOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookId");
+
+                    b.HasIndex("TenantId", "FinancePostingEventId")
+                        .IsUnique()
+                        .HasFilter("[FinancePostingEventId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "JournalEntryId")
+                        .IsUnique()
+                        .HasFilter("[JournalEntryId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "AccountingEventId", "EventVersion", "AccountingBookId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingEventId", "EventVersion", "SelectionOrder")
+                        .IsUnique();
+
+                    b.ToTable("AccountingEventPostings", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingEventPostings_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingEventPostings_EventVersion", "[EventVersion] > 0");
+
+                            t.HasCheckConstraint("CK_AccountingEventPostings_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingEventPostings_ResultShape", "([Status] = 'Pending' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [FinancePostingEventId] IS NOT NULL AND [JournalEntryId] IS NOT NULL AND [PostedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_AccountingEventPostings_Status", "[Status] IN ('Pending','Posted','Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEventProducerReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EffectFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid>("OwnerEntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerEntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ParticipantCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingEventId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "AccountingEventId", "ParticipantCode")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ParticipantCode", "EffectFingerprint")
+                        .IsUnique();
+
+                    b.ToTable("AccountingEventProducerReceipts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_AccountingEventProducerReceipts_EffectFingerprint", "LEN([EffectFingerprint]) = 64 AND [EffectFingerprint] <> REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_AccountingEventProducerReceipts_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_AccountingEventProducerReceipts_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                        });
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AllocationRule", b =>
@@ -8850,11 +10733,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AllocationRunBatch", b =>
                 {
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -8869,6 +10747,11 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(30)
                         .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("datetime2");
@@ -9007,6 +10890,8 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_AllocationRunBatches_ApprovalPolicy");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AllocationRunBatchLine", b =>
@@ -11862,6 +13747,123 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("FinanceAdHocReportDefinitions", (string)null);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceBalanceRebuildRun", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("AbsoluteDrift")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("AccountingBookCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("BalanceRows")
+                        .HasColumnType("int");
+
+                    b.Property<string>("CommandFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<DateTime>("CompletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("EffectiveDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ExpirationDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<int>("ExposureRows")
+                        .HasColumnType("int");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Metadata")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Priority")
+                        .HasColumnType("int");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<string>("ReferenceNumber")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("Tags")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "IdempotencyKey")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("FinanceBalanceRebuildRuns", (string)null);
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceBudgetOverrideRequest", b =>
                 {
                     b.Property<Guid>("Id")
@@ -14364,6 +16366,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("BookClassification")
                         .IsRequired()
                         .HasMaxLength(20)
@@ -14442,6 +16447,14 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(3)
                         .HasColumnType("nvarchar(3)");
 
+                    b.Property<string>("RequestFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RequestFingerprintVersion")
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
                     b.Property<DateTime>("RequestedAt")
                         .HasColumnType("datetime2");
 
@@ -14490,15 +16503,17 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId", "HasForeignCurrencyLines");
 
-                    b.HasIndex("TenantId", "IdempotencyKey")
+                    b.HasIndex("TenantId", "AccountingBookId", "IdempotencyKey")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0 AND [IdempotencyKey] IS NOT NULL");
 
-                    b.HasIndex("TenantId", "SourceDocumentType", "SourceDocumentId", "PostingAction")
+                    b.HasIndex("TenantId", "JournalEntryId", "AccountingBookId");
+
+                    b.HasIndex("TenantId", "AccountingBookId", "SourceDocumentType", "SourceDocumentId", "PostingAction")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
-                    b.HasIndex("TenantId", "SourceModule", "SourceDocumentType", "SourceDocumentId", "PostingAction")
+                    b.HasIndex("TenantId", "AccountingBookId", "SourceModule", "SourceDocumentType", "SourceDocumentId", "PostingAction")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
@@ -14507,14 +16522,14 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrder", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("ApprovalRequired")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
-
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -14601,6 +16616,8 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_FinancePurchaseOrders_ApprovalPolicy");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrderItem", b =>
@@ -14720,14 +16737,14 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrderReceipt", b =>
                 {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("ApprovalRequired")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
-
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("datetime2");
@@ -14817,6 +16834,8 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_FinancePurchaseOrderReceipts_ApprovalPolicy");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePurchaseOrderReceiptItem", b =>
@@ -15056,6 +17075,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("Priority")
                         .HasColumnType("int");
 
+                    b.Property<Guid?>("PurchaseReturnVarianceAccountId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("RealizedFxGainAccountId")
                         .HasColumnType("uniqueidentifier");
 
@@ -15088,6 +17110,9 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("bit");
 
                     b.Property<Guid?>("RetainedEarningsAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReturnToVendorClearingAccountId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ReturnedChequeBankChargeAccountId")
@@ -15173,11 +17198,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("MigrationClearingAccountId");
 
+                    b.HasIndex("PurchaseReturnVarianceAccountId");
+
                     b.HasIndex("RealizedFxGainAccountId");
 
                     b.HasIndex("RealizedFxLossAccountId");
 
                     b.HasIndex("RetainedEarningsAccountId");
+
+                    b.HasIndex("ReturnToVendorClearingAccountId");
 
                     b.HasIndex("ReturnedChequeBankChargeAccountId");
 
@@ -15200,7 +17229,164 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("FinanceSettings", null, t =>
                         {
+                            t.HasCheckConstraint("CK_FinanceSettings_BaseCurrencyCanonical_C3", "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+
                             t.HasCheckConstraint("CK_FinanceSettings_TDC0504ApMatchTolerances", "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSettlementDimensionComponent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal?>("ComparisonExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("ComparisonExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("ComponentType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("ContractVersion")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("EvidenceFrozenAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("EvidenceHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("EvidenceVersion")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)")
+                        .HasDefaultValue("1.0");
+
+                    b.Property<decimal>("ExchangeRate")
+                        .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceDimensionSetId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("FinanceDimensionSnapshotId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("FunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<bool>("IsFinalResidualRecipient")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OriginatingDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OriginatingSourceLineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ProducerModule")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<decimal>("RoundingResidualFunctionalAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("RoundingResidualTransactionAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("RouteId")
+                        .HasColumnType("int");
+
+                    b.Property<byte[]>("RowVersion")
+                        .IsConcurrencyToken()
+                        .IsRequired()
+                        .ValueGeneratedOnAddOrUpdate()
+                        .HasColumnType("rowversion");
+
+                    b.Property<Guid?>("SettlementAllocationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SettlementSourceLineId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("SourceDocumentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceDocumentType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("SourceRoute")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("TransactionAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("TransactionCurrencyCode")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("nvarchar(3)");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FinanceDimensionSetId");
+
+                    b.HasIndex("FinanceDimensionSnapshotId");
+
+                    b.HasIndex("TenantId", "RouteId", "SourceDocumentId");
+
+                    b.HasIndex("TenantId", "RouteId", "SourceDocumentId", "SettlementSourceLineId", "OriginatingSourceLineId", "ComponentType")
+                        .IsUnique()
+                        .HasDatabaseName("IX_FinanceSettlementDimensionComponents_EvidenceKey")
+                        .HasFilter("[IsDeleted] = 0");
+
+                    b.ToTable("FinanceSettlementDimensionComponents", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_FinanceSettlementDimensionComponents_ComponentType", "[ComponentType] IN (0,1,2,3,4,5,6)");
                         });
                 });
 
@@ -15247,6 +17433,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<DateTime?>("EvidenceFrozenAt")
                         .HasColumnType("datetime2");
 
+                    b.Property<int?>("ExpectedSourceLineCount")
+                        .HasColumnType("int");
+
                     b.Property<Guid?>("FinanceDimensionSetId")
                         .HasColumnType("uniqueidentifier");
 
@@ -15264,6 +17453,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<Guid?>("ResolvedAccountId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<int>("RouteId")
                         .HasColumnType("int");
 
@@ -15272,6 +17464,9 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .ValueGeneratedOnAddOrUpdate()
                         .HasColumnType("rowversion");
+
+                    b.Property<DateTime?>("SourceDocumentDate")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid>("SourceDocumentId")
                         .HasColumnType("uniqueidentifier");
@@ -15283,6 +17478,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("SourceLineId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("SourceLineManifestHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<string>("SourceRoute")
                         .IsRequired()
@@ -15305,6 +17504,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("FinanceDimensionSnapshotId")
                         .IsUnique()
                         .HasFilter("[FinanceDimensionSnapshotId] IS NOT NULL AND [IsDeleted] = 0");
+
+                    b.HasIndex("ResolvedAccountId");
+
+                    b.HasIndex("TenantId", "ResolvedAccountId");
 
                     b.HasIndex("TenantId", "RouteId", "SourceDocumentId");
 
@@ -15478,6 +17681,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("IsProtectedStandard")
+                        .HasColumnType("bit");
+
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
 
@@ -15489,6 +17695,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<int>("Revision")
                         .IsConcurrencyToken()
                         .HasColumnType("int");
+
+                    b.Property<Guid?>("StandardSourceLayoutId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<int>("StatementType")
                         .HasColumnType("int");
@@ -15505,6 +17714,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("AccountingBookId");
+
+                    b.HasIndex("StandardSourceLayoutId");
 
                     b.HasIndex("TenantId", "Code")
                         .IsUnique();
@@ -15544,6 +17755,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("FinancialStatementLayoutId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("HierarchyFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -15554,6 +17769,21 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<string>("PublicationSnapshotSchemaVersion")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("PublishedAccountingBookCode")
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("PublishedAccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("PublishedAccountingBookName")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
                     b.Property<DateTime?>("PublishedAt")
                         .HasColumnType("datetime2");
 
@@ -15563,6 +17793,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("PublishedByName")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ResolutionFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
 
                     b.Property<int>("Revision")
                         .IsConcurrencyToken()
@@ -15593,6 +17827,118 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "FinancialStatementLayoutId", "Status", "EffectiveFrom", "EffectiveTo");
 
                     b.ToTable("FinancialStatementLayoutVersions", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancialStatementPublicationAccount", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountClassificationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("AccountNumber")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("AccountType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("AccountingBookCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ClassificationCode")
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<string>("ClassificationName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("ClassificationPath")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("FinancialStatementLayoutVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FinancialStatementRowId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FinancialStatementRowMappingId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MappingSelector")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<int>("MappingType")
+                        .HasColumnType("int");
+
+                    b.Property<string>("RowCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("FinancialStatementLayoutVersionId");
+
+                    b.HasIndex("FinancialStatementRowId");
+
+                    b.HasIndex("FinancialStatementRowMappingId");
+
+                    b.HasIndex("TenantId", "AccountClassificationId");
+
+                    b.HasIndex("TenantId", "FinancialStatementLayoutVersionId", "AccountId")
+                        .IsUnique();
+
+                    b.ToTable("FinancialStatementPublicationAccounts", (string)null);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancialStatementRow", b =>
@@ -15701,6 +18047,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("AccountClassificationId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("AccountId")
                         .HasColumnType("uniqueidentifier");
 
@@ -15726,6 +18075,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
 
+                    b.Property<bool>("IncludeClassificationDescendants")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -15750,9 +18102,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountClassificationId");
+
                     b.HasIndex("AccountId");
 
                     b.HasIndex("FinancialStatementRowId");
+
+                    b.HasIndex("TenantId", "AccountClassificationId");
 
                     b.HasIndex("TenantId", "AccountId");
 
@@ -15988,8 +18344,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("FiscalYearId");
-
-                    b.HasIndex("TenantId");
 
                     b.ToTable("FiscalPeriods", (string)null);
                 });
@@ -16323,6 +18677,20 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("nvarchar(20)");
 
+                    b.Property<string>("ConventionBasis")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("nvarchar(80)");
+
+                    b.Property<DateTime?>("ConventionEligibleFromDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("ConventionEligibleToDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<decimal>("ConventionFactor")
+                        .HasColumnType("decimal(18,4)");
+
                     b.Property<int>("CorrectionSequence")
                         .HasColumnType("int");
 
@@ -16353,6 +18721,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DepreciationAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<int>("DepreciationConventionSnapshot")
+                        .HasColumnType("int");
+
                     b.Property<int>("DepreciationMethodSnapshot")
                         .HasColumnType("int");
 
@@ -16362,8 +18733,20 @@ namespace ErpSystem.Data.Migrations
                     b.Property<decimal>("DiminishingBalanceRatePercentSnapshot")
                         .HasColumnType("decimal(18,4)");
 
+                    b.Property<DateTime?>("FiscalPeriodEndDateSnapshot")
+                        .HasColumnType("datetime2");
+
                     b.Property<Guid>("FiscalPeriodId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("FiscalPeriodStartDateSnapshot")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FiscalYearEndDateSnapshot")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime?>("FiscalYearStartDateSnapshot")
+                        .HasColumnType("datetime2");
 
                     b.Property<Guid?>("FixedAssetDepreciationRunId")
                         .HasColumnType("uniqueidentifier");
@@ -16616,6 +18999,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal>("FinalDepreciationAmount")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("FinalDepreciationConventionFactor")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<int?>("FinalDepreciationConventionSnapshot")
+                        .HasColumnType("int");
 
                     b.Property<decimal>("FinalDepreciationCumulativeProductionUnitsAfter")
                         .HasColumnType("decimal(18,4)");
@@ -17798,6 +20187,38 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
 
+                    b.Property<DateTime?>("CapitalizationApprovalApprovedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CapitalizationApprovalApprovedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CapitalizationApprovalExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CapitalizationApprovalInvalidatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CapitalizationApprovalInvalidationReason")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("CapitalizationApprovalSnapshotHash")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("CapitalizationApprovalSnapshotJson")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("CapitalizationApprovalSubmittedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CapitalizationApprovalSubmittedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("CapitalizationApprovalWorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateTime?>("CapitalizationDate")
                         .HasColumnType("datetime2");
 
@@ -17958,6 +20379,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("CapitalizationApprovalExchangeRateId");
+
                     b.HasIndex("CurrentCustodianId");
 
                     b.HasIndex("CurrentSegmentLookupValueId");
@@ -18078,6 +20501,15 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<bool>("OpeningPostedToGl")
                         .HasColumnType("bit");
+
+                    b.Property<Guid?>("OpeningReversalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("OpeningReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("OpeningReversedAt")
+                        .HasColumnType("datetime2");
 
                     b.Property<string>("OpeningSource")
                         .IsRequired()
@@ -19285,6 +21717,14 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("AccountingBookCode")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("AutoReverseNextPeriod")
                         .HasColumnType("bit");
 
@@ -19343,6 +21783,10 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("PostingEventId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("PreviewFingerprint")
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
                     b.Property<DateTime>("RevaluationDate")
                         .HasColumnType("datetime2");
 
@@ -19382,6 +21826,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountingBookId");
+
                     b.HasIndex("FiscalPeriodId");
 
                     b.HasIndex("JournalEntryId");
@@ -19398,7 +21844,7 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
-                    b.HasIndex("TenantId", "Scope", "RevaluationDate", "FiscalPeriodId")
+                    b.HasIndex("TenantId", "AccountingBookId", "Scope", "RevaluationDate", "FiscalPeriodId")
                         .IsUnique()
                         .HasFilter("[IsDeleted] = 0");
 
@@ -19411,17 +21857,59 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("AccountAccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("AccountBookCurrencyPolicyId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountClassificationCode")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<Guid>("AccountClassificationId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("AccountClassificationName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
                     b.Property<Guid>("AccountId")
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<decimal>("CarryingFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
 
+                    b.Property<string>("ClassificationDefault")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("nvarchar(10)");
+
                     b.Property<decimal>("ClosingExchangeRate")
                         .HasColumnType("decimal(18,4)");
 
                     b.Property<Guid>("ClosingExchangeRateId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ClosingQuoteSide")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<DateTime>("ClosingRateDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("ClosingRateType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("CoreAccountType")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -19437,6 +21925,14 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EffectivePolicySource")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<bool>("EffectiveRevaluationRequired")
+                        .HasColumnType("bit");
 
                     b.Property<decimal>("ForeignCurrencyBalance")
                         .HasColumnType("decimal(18,4)");
@@ -19460,6 +21956,13 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(10)
                         .HasColumnType("nvarchar(10)");
 
+                    b.Property<string>("GovernanceWarning")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<bool>("HasGovernanceWarning")
+                        .HasColumnType("bit");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -19475,6 +21978,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("PostingEventId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("PriorUnreversedAdjustment")
+                        .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool?>("RevaluationOverride")
+                        .HasColumnType("bit");
 
                     b.Property<decimal>("RevaluedFunctionalAmount")
                         .HasColumnType("decimal(18,2)");
@@ -19507,6 +22016,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("AccountAccountingBookId");
+
+                    b.HasIndex("AccountBookCurrencyPolicyId");
+
+                    b.HasIndex("AccountClassificationId");
+
                     b.HasIndex("AccountId");
 
                     b.HasIndex("ClosingExchangeRateId");
@@ -19526,18 +22041,165 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("FxRevaluationLines", (string)null);
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.Invoice", b =>
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FxRevaluationRateUsage", b =>
                 {
-                    b.Property<bool>("ApprovalRequired")
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<Guid?>("WorkflowInstanceId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("ExchangeRateId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("FxRevaluationBatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("PostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("UsageCount")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ExchangeRateId");
+
+                    b.HasIndex("FxRevaluationBatchId");
+
+                    b.HasIndex("PostingEventId");
+
+                    b.HasIndex("TenantId", "FxRevaluationBatchId", "PostingEventId", "ExchangeRateId")
+                        .IsUnique();
+
+                    b.ToTable("FxRevaluationRateUsages", (string)null);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.InventorySupplierReturnPosting", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("CarryingAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<Guid>("ClearingAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("InventoryAccountId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("InventoryPurchaseReturnId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid>("JournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OriginalVendorInvoiceId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("PostingDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClearingAccountId");
+
+                    b.HasIndex("InventoryAccountId");
+
+                    b.HasIndex("InventoryPurchaseReturnId");
+
+                    b.HasIndex("JournalEntryId");
+
+                    b.HasIndex("OriginalVendorInvoiceId");
+
+                    b.HasIndex("PostingEventId");
+
+                    b.HasIndex("TenantId", "InventoryPurchaseReturnId")
+                        .IsUnique();
+
+                    b.ToTable("InventorySupplierReturnPostings", null, t =>
+                        {
+                            t.HasTrigger("TR_InventorySupplierReturnPostings_Immutable");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.Invoice", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<decimal>("BaseCurrencyAmount")
                         .HasColumnType("decimal(18,2)");
@@ -19659,6 +22321,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("BusinessPartnerId");
@@ -19675,6 +22340,8 @@ namespace ErpSystem.Data.Migrations
                         {
                             t.HasTrigger("TR_Invoices_OptionalApproval");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.InvoiceLineItem", b =>
@@ -19988,10 +22655,13 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("JournalBatches", null, t =>
                         {
                             t.HasTrigger("TR_JournalBatches_OptionalApproval");
+
                             t.HasCheckConstraint("CK_JournalBatches_ExpectedDebitTotal", "[ExpectedDebitTotal] > 0");
 
                             t.HasCheckConstraint("CK_JournalBatches_ExpectedJournalCount", "[ExpectedJournalCount] IS NULL OR [ExpectedJournalCount] > 0");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.JournalBatchAttachment", b =>
@@ -20283,8 +22953,11 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("JournalBatchItems", null, t =>
                         {
                             t.HasTrigger("TR_JournalBatchItems_OptionalApproval");
+
                             t.HasCheckConstraint("CK_JournalBatchItems_SequenceNumber", "[SequenceNumber] > 0");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.JournalBatchItemReview", b =>
@@ -20532,6 +23205,9 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid>("AccountingBookId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ApprovalStatus")
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
@@ -20767,13 +23443,20 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("ReversalJournalEntryId");
 
-                    b.HasIndex("TenantId");
+                    b.HasIndex("TenantId", "AccountingBookId");
+
+                    b.HasIndex("TenantId", "OriginalJournalEntryId")
+                        .IsUnique()
+                        .HasFilter("[OriginalJournalEntryId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.ToTable("JournalEntries", null, t =>
                         {
-                            t.HasTrigger("TR_JournalEntries_OptionalApprovalSubmission");
                             t.HasTrigger("TR_JournalEntries_BatchOptionalApproval");
+
+                            t.HasTrigger("TR_JournalEntries_OptionalApprovalSubmission");
                         });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.JournalEntryAttachment", b =>
@@ -21282,6 +23965,151 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("OpeningBalanceBatches", (string)null);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceBatchReversal", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("BookClassification")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("FailureReason")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<string>("ImpactAssessment")
+                        .IsRequired()
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OpeningBalanceBatchId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("OriginalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("OriginalOpeningDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("OriginalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<decimal>("OriginalTotalCredit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<decimal>("OriginalTotalDebit")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("PostedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<DateTime>("RequestedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RequestedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestedByUserName")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("RequestedReversalDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReversalJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReviewComment")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReviewedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReviewedByUserName")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("SourceKind")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("nvarchar(40)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("nvarchar(30)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("OpeningBalanceBatchId");
+
+                    b.HasIndex("OriginalJournalEntryId");
+
+                    b.HasIndex("OriginalPostingEventId");
+
+                    b.HasIndex("ReversalJournalEntryId");
+
+                    b.HasIndex("ReversalPostingEventId");
+
+                    b.HasIndex("TenantId", "OpeningBalanceBatchId")
+                        .IsUnique()
+                        .HasFilter("[IsDeleted] = 0 AND [Status] <> N'Rejected'");
+
+                    b.HasIndex("TenantId", "ReversalPostingEventId");
+
+                    b.HasIndex("TenantId", "Status");
+
+                    b.ToTable("OpeningBalanceBatchReversals", (string)null);
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceLine", b =>
                 {
                     b.Property<Guid>("Id")
@@ -21538,6 +24366,7 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
 
@@ -21641,6 +24470,7 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PaymentBatch", null, t =>
                         {
                             t.HasTrigger("TR_PaymentBatch_OptionalApproval");
+
                             t.HasTrigger("TR_PaymentBatch_TDC0505Readiness");
 
                             t.HasTrigger("TR_PaymentBatch_TDC0506InvoiceProcessorSod");
@@ -22073,6 +24903,438 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("PeriodModuleLock", (string)null);
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("CorrectsProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DecidedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DecidedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("DecisionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("nvarchar(500)");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("ExpectedOwnerEffectFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("GroupFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("GroupKind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<string>("IdempotencyKey")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("MemberCount")
+                        .HasColumnType("int");
+
+                    b.Property<string>("OwnerAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid>("OwnerEntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerEntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ParticipantCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<DateTime>("PreparedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("PreparedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestSnapshotHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RequestSnapshotJson")
+                        .IsRequired()
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("ReversesProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("RootProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid?>("SupersedesProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<int>("Version")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "CorrectsProducerIntentGroupId");
+
+                    b.HasIndex("TenantId", "GroupFingerprint")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "IdempotencyKey")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ReversesProducerIntentGroupId");
+
+                    b.HasIndex("TenantId", "SupersedesProducerIntentGroupId")
+                        .IsUnique()
+                        .HasFilter("[SupersedesProducerIntentGroupId] IS NOT NULL");
+
+                    b.HasIndex("TenantId", "RootProducerIntentGroupId", "Version")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroups", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Decision", "([Status] = 'PendingApproval' AND [DecidedByUserId] IS NULL AND [DecidedAtUtc] IS NULL AND [DecisionReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] IN ('Approved','Rejected') AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_EffectFingerprint", "LEN([ExpectedOwnerEffectFingerprint]) = 64 AND [ExpectedOwnerEffectFingerprint] <> REPLICATE('0',64) AND [ExpectedOwnerEffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_IdempotencyAscii", "DATALENGTH([IdempotencyKey])=LEN([IdempotencyKey])*2 AND LEFT([IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z0-9]' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.:-]%' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Kind", "[GroupKind] IN ('Original','Correction','Reversal')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Lineage", "([GroupKind] = 'Original' AND [Version] = 1 AND [RootProducerIntentGroupId] = [Id] AND [SupersedesProducerIntentGroupId] IS NULL AND [CorrectsProducerIntentGroupId] IS NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Correction' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [CorrectsProducerIntentGroupId] AND [CorrectsProducerIntentGroupId] IS NOT NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Reversal' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [ReversesProducerIntentGroupId] AND [ReversesProducerIntentGroupId] IS NOT NULL AND [CorrectsProducerIntentGroupId] IS NULL)");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_MakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_MemberCount", "[MemberCount] BETWEEN 2 AND 20");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_OwnerActionAscii", "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_OwnerEntityAscii", "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_ParticipantAscii", "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_SnapshotHash", "LEN([RequestSnapshotHash]) = 64 AND [RequestSnapshotHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroups_Status", "[Status] IN ('PendingApproval','Approved','Rejected','Posted','Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupAttempt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int>("AttemptNumber")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("CompletedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("FailedAccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("FailedMemberOrder")
+                        .HasColumnType("int");
+
+                    b.Property<string>("FailureMessage")
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("GroupFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("ProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("StartedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("nvarchar(20)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProducerIntentGroupId", "AttemptNumber")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroupAttempts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Fingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Number", "[AttemptNumber] > 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Result", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL AND (([FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([FailedMemberOrder] IS NOT NULL AND [FailedAccountingEventId] IS NOT NULL)))");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupMember", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("AccountingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("MemberFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<int>("MemberOrder")
+                        .HasColumnType("int");
+
+                    b.Property<Guid>("ProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "AccountingEventId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ProducerIntentGroupId", "MemberOrder")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroupMembers", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroupMembers_Fingerprint", "LEN([MemberFingerprint]) = 64 AND [MemberFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupMembers_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupMembers_Order", "[MemberOrder] > 0");
+                        });
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupReceipt", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<string>("EffectFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("GroupFingerprint")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerAction")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("nvarchar(60)");
+
+                    b.Property<Guid>("OwnerEntityId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("OwnerEntityType")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("ParticipantCode")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<Guid>("ProducerIntentGroupId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime>("RecordedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid>("RecordedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "ProducerIntentGroupId")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId", "ParticipantCode", "EffectFingerprint")
+                        .IsUnique();
+
+                    b.ToTable("ProducerIntentGroupReceipts", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_EffectFingerprint", "LEN([EffectFingerprint]) = 64 AND [EffectFingerprint] <> REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_NoDelete", "[IsDeleted] = 0");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_OwnerActionAscii", "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_OwnerEntityAscii", "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+
+                            t.HasCheckConstraint("CK_ProducerIntentGroupReceipts_ParticipantAscii", "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                        });
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.RatioDefinition", b =>
                 {
                     b.Property<Guid>("Id")
@@ -22290,11 +25552,37 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("PostedByUserId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<int>("ReversalAttemptCount")
+                        .HasColumnType("int");
+
+                    b.Property<DateTime?>("ReversalAuthorizedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReversalAuthorizedByUserId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<DateOnly?>("ReversalDueDate")
                         .HasColumnType("date");
 
+                    b.Property<string>("ReversalError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("nvarchar(2000)");
+
                     b.Property<Guid?>("ReversalJournalEntryId")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("ReversalLastAttemptAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("ReversalPostingEventId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ReversalProcessedBy")
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<int>("ReversalStatus")
+                        .HasColumnType("int");
 
                     b.Property<DateTime?>("ReversedAt")
                         .HasColumnType("datetime2");
@@ -22357,6 +25645,8 @@ namespace ErpSystem.Data.Migrations
                         .HasFilter("[JournalEntryId] IS NOT NULL");
 
                     b.HasIndex("TemplateId");
+
+                    b.HasIndex("TenantId", "ReversalStatus", "ReversalDueDate");
 
                     b.HasIndex("TenantId", "Status", "EffectiveDate");
 
@@ -22920,8 +26210,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("ParentValueId");
 
                     b.HasIndex("SegmentStructureId");
-
-                    b.HasIndex("TenantId");
 
                     b.ToTable("SegmentLookupValues");
                 });
@@ -23594,11 +26882,23 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("DeletedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<decimal>("DirectInvoiceAppliedAmount")
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<DateTime?>("DirectInvoiceAppliedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("DirectInvoiceAppliedById")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<decimal>("DiscountAmount")
                         .HasColumnType("decimal(18,2)");
 
                     b.Property<decimal>("ExchangeRate")
                         .HasColumnType("decimal(18,6)");
+
+                    b.Property<Guid?>("InventoryPurchaseReturnId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
@@ -23632,6 +26932,12 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("RejectionReason")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<Guid?>("ReturnDispatchJournalEntryId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid?>("ReturnDispatchPostingEventId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("ReversalJournalEntryId")
                         .HasColumnType("uniqueidentifier");
@@ -23700,11 +27006,17 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasKey("Id");
 
+                    b.HasIndex("InventoryPurchaseReturnId");
+
                     b.HasIndex("JournalEntryId");
 
                     b.HasIndex("OriginalVendorInvoiceId");
 
                     b.HasIndex("PostingEventId");
+
+                    b.HasIndex("ReturnDispatchJournalEntryId");
+
+                    b.HasIndex("ReturnDispatchPostingEventId");
 
                     b.HasIndex("ReversalJournalEntryId");
 
@@ -23722,6 +27034,11 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique()
                         .HasDatabaseName("UX_SupplierDebitNotes_Tenant_DebitNoteNumber");
 
+                    b.HasIndex("TenantId", "InventoryPurchaseReturnId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_SupplierDebitNotes_Tenant_InventoryReturn")
+                        .HasFilter("[InventoryPurchaseReturnId] IS NOT NULL AND [IsDeleted] = 0");
+
                     b.HasIndex("TenantId", "Status", "DebitNoteDate")
                         .HasDatabaseName("IX_SupplierDebitNotes_Tenant_Status_Date");
 
@@ -23730,7 +27047,12 @@ namespace ErpSystem.Data.Migrations
                         .HasDatabaseName("UX_SupplierDebitNotes_Tenant_Vendor_SupplierReference")
                         .HasFilter("[SupplierCreditNoteReference] IS NOT NULL AND [IsDeleted] = 0");
 
-                    b.ToTable("SupplierDebitNotes", (string)null);
+                    b.ToTable("SupplierDebitNotes", null, t =>
+                        {
+                            t.HasTrigger("TR_SupplierDebitNotes_InventoryReturnCreditGuard");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteApplication", b =>
@@ -23875,6 +27197,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("GLAccountId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("InventoryPurchaseReturnItemId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
 
@@ -23931,6 +27256,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("GLAccountId");
+
+                    b.HasIndex("InventoryPurchaseReturnItemId");
 
                     b.HasIndex("OriginalAccountTransactionId");
 
@@ -25148,16 +28475,13 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.UnitJournalEntry", b =>
                 {
-                    b.Property<bool>("ApprovalRequired")
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<Guid?>("WorkflowInstanceId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("datetime2");
@@ -25251,6 +28575,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("UpdatedBy")
                         .HasColumnType("nvarchar(max)");
 
+                    b.Property<Guid?>("WorkflowInstanceId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.HasKey("Id");
 
                     b.HasIndex("EntryDate");
@@ -25264,7 +28591,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "EntryNumber")
                         .IsUnique();
 
-                    b.ToTable("UnitJournalEntries", null, t => t.HasTrigger("TR_UnitJournalEntries_OptionalApproval"));
+                    b.ToTable("UnitJournalEntries", null, t =>
+                        {
+                            t.HasTrigger("TR_UnitJournalEntries_OptionalApproval");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.UnitJournalEntryLine", b =>
@@ -25402,11 +28734,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<int?>("AcceptedSupplyKind")
                         .HasColumnType("int");
 
@@ -25430,6 +28757,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("ApprovalComments")
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("ApprovalStatus")
                         .IsRequired()
@@ -25654,9 +28986,10 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("VendorInvoice", null, t =>
                         {
                             t.HasTrigger("TR_VendorInvoice_AcceptedSupplyProtected");
-                            t.HasTrigger("TR_VendorInvoices_OptionalApproval");
 
                             t.HasTrigger("TR_VendorInvoice_TDC0504MandatoryMatch");
+
+                            t.HasTrigger("TR_VendorInvoices_OptionalApproval");
 
                             t.HasCheckConstraint("CK_VendorInvoice_AcceptedSupplyCoherent", "([AcceptedSupplyKind] IS NULL AND [AcceptedSupplySourceId] IS NULL AND [AcceptedSupplySourceReference] IS NULL AND [AcceptedSupplySnapshotHash] IS NULL AND [AcceptedSupplyValidatedAtUtc] IS NULL) OR ([AcceptedSupplyKind] BETWEEN 1 AND 3 AND [AcceptedSupplySourceId] IS NOT NULL AND LEN([AcceptedSupplySourceReference]) BETWEEN 1 AND 100 AND LEN([AcceptedSupplySnapshotHash]) = 64 AND [AcceptedSupplyValidatedAtUtc] IS NOT NULL)");
 
@@ -25675,13 +29008,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
-
-                    b.Property<Guid?>("LandedCostItemId")
-                        .HasColumnType("uniqueidentifier");
-
-                    b.HasIndex("LandedCostItemId")
-                        .IsUnique()
-                        .HasFilter("[LandedCostItemId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.Property<Guid?>("BudgetEntryId")
                         .HasColumnType("uniqueidentifier");
@@ -25744,6 +29070,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("bit");
+
+                    b.Property<Guid?>("LandedCostItemId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
@@ -25819,6 +29148,10 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("GLAccountId");
 
                     b.HasIndex("InventoryItemId");
+
+                    b.HasIndex("LandedCostItemId")
+                        .IsUnique()
+                        .HasFilter("[LandedCostItemId] IS NOT NULL AND [IsDeleted] = 0");
 
                     b.HasIndex("LocationId");
 
@@ -26338,10 +29671,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("ApprovalRequired")
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<decimal>("AllocatedAmount")
                         .HasColumnType("decimal(18,2)");
 
@@ -26358,6 +29687,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<string>("ApprovalControlSnapshotJson")
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<Guid?>("AuthorizedById")
                         .HasColumnType("uniqueidentifier");
@@ -26604,49 +29938,13 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("VendorPayment", null, t =>
                         {
-                            t.HasTrigger("TR_VendorPayment_OptionalApproval");
                             t.HasTrigger("TR_VendorPayment_DirectEvidence");
+
+                            t.HasTrigger("TR_VendorPayment_OptionalApproval");
+
                             t.HasTrigger("TR_VendorPayment_TDC0506InvoiceProcessorSod");
                         });
 
-                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
-                });
-
-            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentEvidenceLink", b =>
-                {
-                    b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uniqueidentifier");
-                    b.Property<Guid>("CentralDocumentRecordId").HasColumnType("uniqueidentifier");
-                    b.Property<Guid>("CentralDocumentVersionId").HasColumnType("uniqueidentifier");
-                    b.Property<string>("ChecksumSha256").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
-                    b.Property<Guid>("ClientRequestId").HasColumnType("uniqueidentifier");
-                    b.Property<string>("ContentType").IsRequired().HasMaxLength(200).HasColumnType("nvarchar(200)");
-                    b.Property<DateTime>("CreatedAt").HasColumnType("datetime2");
-                    b.Property<string>("CreatedBy").HasColumnType("nvarchar(max)");
-                    b.Property<Guid?>("CreatedById").HasColumnType("uniqueidentifier");
-                    b.Property<DateTime?>("DeletedAt").HasColumnType("datetime2");
-                    b.Property<string>("DeletedBy").HasColumnType("nvarchar(max)");
-                    b.Property<DateTime?>("ExpiryDate").HasColumnType("datetime2");
-                    b.Property<string>("FileName").IsRequired().HasMaxLength(255).HasColumnType("nvarchar(255)");
-                    b.Property<long>("FileSize").HasColumnType("bigint");
-                    b.Property<Guid>("FileUploadRecordId").HasColumnType("uniqueidentifier");
-                    b.Property<bool>("IsDeleted").HasColumnType("bit");
-                    b.Property<Guid?>("LastModifiedById").HasColumnType("uniqueidentifier");
-                    b.Property<string>("RequestHash").IsRequired().HasMaxLength(64).HasColumnType("nvarchar(64)");
-                    b.Property<string>("RequirementKey").IsRequired().HasMaxLength(150).HasColumnType("nvarchar(150)");
-                    b.Property<Guid>("TenantId").HasColumnType("uniqueidentifier");
-                    b.Property<DateTime?>("UpdatedAt").HasColumnType("datetime2");
-                    b.Property<string>("UpdatedBy").HasColumnType("nvarchar(max)");
-                    b.Property<Guid>("VendorPaymentId").HasColumnType("uniqueidentifier");
-                    b.HasKey("Id");
-                    b.HasIndex("CentralDocumentRecordId");
-                    b.HasIndex("CentralDocumentVersionId");
-                    b.HasIndex("FileUploadRecordId");
-                    b.HasIndex("VendorPaymentId");
-                    b.HasIndex("TenantId", "ClientRequestId").IsUnique()
-                        .HasDatabaseName("UX_VendorPaymentEvidenceLinks_Tenant_Request");
-                    b.HasIndex("TenantId", "VendorPaymentId", "RequirementKey", "ChecksumSha256").IsUnique()
-                        .HasDatabaseName("UX_VendorPaymentEvidenceLinks_Tenant_Payment_Requirement_Hash");
-                    b.ToTable("VendorPaymentEvidenceLinks", null, t => t.HasTrigger("TR_VendorPaymentEvidenceLinks_SourceGuard"));
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
@@ -26796,6 +30094,114 @@ namespace ErpSystem.Data.Migrations
                             t.HasTrigger("TR_VendorPaymentAllocation_TDC0505PaymentReadiness");
 
                             t.HasCheckConstraint("CK_VendorPaymentAllocation_TDC0505Snapshot", "[PaymentReadinessSnapshotHash] IS NULL OR LEN([PaymentReadinessSnapshotHash]) = 64");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentEvidenceLink", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CentralDocumentRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<Guid>("CentralDocumentVersionId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ChecksumSha256")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<Guid>("ClientRequestId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("CreatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid?>("CreatedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("DeletedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<DateTime?>("ExpiryDate")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("FileName")
+                        .IsRequired()
+                        .HasMaxLength(255)
+                        .HasColumnType("nvarchar(255)");
+
+                    b.Property<long>("FileSize")
+                        .HasColumnType("bigint");
+
+                    b.Property<Guid>("FileUploadRecordId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("IsDeleted")
+                        .HasColumnType("bit");
+
+                    b.Property<Guid?>("LastModifiedById")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("RequestHash")
+                        .IsRequired()
+                        .HasMaxLength(64)
+                        .HasColumnType("nvarchar(64)");
+
+                    b.Property<string>("RequirementKey")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<Guid>("TenantId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<DateTime?>("UpdatedAt")
+                        .HasColumnType("datetime2");
+
+                    b.Property<string>("UpdatedBy")
+                        .HasColumnType("nvarchar(max)");
+
+                    b.Property<Guid>("VendorPaymentId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CentralDocumentRecordId");
+
+                    b.HasIndex("CentralDocumentVersionId");
+
+                    b.HasIndex("FileUploadRecordId");
+
+                    b.HasIndex("VendorPaymentId");
+
+                    b.HasIndex("TenantId", "ClientRequestId")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VendorPaymentEvidenceLinks_Tenant_Request");
+
+                    b.HasIndex("TenantId", "VendorPaymentId", "RequirementKey", "ChecksumSha256")
+                        .IsUnique()
+                        .HasDatabaseName("UX_VendorPaymentEvidenceLinks_Tenant_Payment_Requirement_Hash");
+
+                    b.ToTable("VendorPaymentEvidenceLinks", null, t =>
+                        {
+                            t.HasTrigger("TR_VendorPaymentEvidenceLinks_SourceGuard");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -95148,8 +98554,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.LandedCostItem", b =>
                 {
-                    b.Property<Guid?>("PurchaseOrderItemId").HasColumnType("uniqueidentifier");
-                    b.HasIndex("PurchaseOrderItemId");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -95215,6 +98619,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("PurchaseOrderItemId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<string>("ReferenceNumber")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");
@@ -95239,6 +98646,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("LandedCostId");
 
+                    b.HasIndex("PurchaseOrderItemId");
+
                     b.HasIndex("TenantId");
 
                     b.ToTable("LandedCostItems");
@@ -95250,14 +98659,14 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ABCClass")
+                        .HasMaxLength(1)
+                        .HasColumnType("nvarchar(1)");
+
                     b.Property<bool>("ApprovalRequired")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
-
-                    b.Property<string>("ABCClass")
-                        .HasMaxLength(1)
-                        .HasColumnType("nvarchar(1)");
 
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
@@ -95746,17 +99155,17 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.PurchaseReturn", b =>
                 {
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("AcknowledgedDate")
                         .HasColumnType("datetime2");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
@@ -95915,7 +99324,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("WarehouseId");
 
-                    b.ToTable("PurchaseReturns", t => t.HasTrigger("TR_PurchaseReturns_OptionalApproval"));
+                    b.ToTable("PurchaseReturns", null, t =>
+                        {
+                            t.HasTrigger("TR_PurchaseReturns_OptionalApproval");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.PurchaseReturnItem", b =>
@@ -96041,11 +99455,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<DateTime>("AdjustmentDate")
                         .HasColumnType("datetime2");
 
@@ -96053,6 +99462,11 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasMaxLength(50)
                         .HasColumnType("nvarchar(50)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("datetime2");
@@ -96222,6 +99636,8 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("StockAdjustments", null, t =>
                         {
                             t.HasTrigger("TR_StockAdjustments_ControlledLifecycle");
+
+                            t.HasTrigger("TR_StockAdjustments_FifoSequenceGuard");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -97220,8 +100636,6 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("LocationCode");
 
                     b.HasIndex("ParentLocationId");
-
-                    b.HasIndex("TenantId");
 
                     b.HasIndex("WarehouseId");
 
@@ -109693,9 +113107,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("IsRequired")
                         .HasColumnType("bit");
 
-                    b.Property<bool>("RequiresDocument")
-                        .HasColumnType("bit");
-
                     b.Property<string>("ItemText")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -109703,6 +113114,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<Guid?>("LastModifiedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<bool>("RequiresDocument")
+                        .HasColumnType("bit");
 
                     b.Property<Guid>("TemplateId")
                         .HasColumnType("uniqueidentifier");
@@ -111813,8 +115227,8 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("uniqueidentifier");
 
                     b.Property<string>("ContentType")
-                        .HasMaxLength(255)
-                        .HasColumnType("nvarchar(255)");
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
 
                     b.Property<Guid>("ContractId")
                         .HasColumnType("uniqueidentifier");
@@ -113852,8 +117266,11 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ProcurementAwardReadinessDecisions", null, t =>
                         {
                             t.HasTrigger("TR_ProcurementAwardReadinessDecisions_ExceptionalApprovalPolicy");
+
                             t.HasTrigger("TR_ProcurementAwardReadinessDecisions_Immutable");
+
                             t.HasTrigger("TR_ProcurementAwardReadinessDecisions_RfqApprovalPolicy");
+
                             t.HasTrigger("TR_ProcurementAwardReadinessDecisions_TenderApprovalPolicy");
 
                             t.HasCheckConstraint("CK_ProcurementAwardReadinessDecisions_State", "[SourceType] BETWEEN 0 AND 2 AND [Method] BETWEEN 0 AND 8 AND [DecisionSequence] >= 1 AND [Status] BETWEEN 0 AND 1 AND LEN([SourceIntegrityHash]) = 64 AND LEN([IntegrityHash]) = 64 AND ISJSON([RecommendedSubjectIdsJson]) = 1 AND ISJSON([RecommendedBusinessPartnerIdsJson]) = 1 AND ISJSON([RecommendationSnapshotJson]) = 1 AND ISJSON([EvaluationLineageJson]) = 1 AND ISJSON([SupplierLineageJson]) = 1 AND ISJSON([PrequalificationLineageJson]) = 1 AND ISJSON([VerificationLineageJson]) = 1 AND ISJSON([AuthorityLineageJson]) = 1 AND ISJSON([EvidenceLineageJson]) = 1 AND ISJSON([PrerequisiteSnapshotJson]) = 1 AND ISJSON([TimelineSnapshotJson]) = 1 AND ISJSON([BlockedReasonsJson]) = 1");
@@ -114822,13 +118239,13 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<decimal>("AllocatedAmount")
+                        .HasColumnType("decimal(18,2)");
+
                     b.Property<bool>("ApprovalRequired")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
-
-                    b.Property<decimal>("AllocatedAmount")
-                        .HasColumnType("decimal(18,2)");
 
                     b.Property<Guid?>("ApprovedById")
                         .HasColumnType("uniqueidentifier");
@@ -114950,7 +118367,12 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("TenantId", "BudgetCode")
                         .IsUnique();
 
-                    b.ToTable("ProcurementBudgets", null, t => t.HasTrigger("TR_ProcurementBudgets_ApprovalPolicy"));
+                    b.ToTable("ProcurementBudgets", null, t =>
+                        {
+                            t.HasTrigger("TR_ProcurementBudgets_ApprovalPolicy");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementBudgetAllocation", b =>
@@ -115429,7 +118851,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ProcurementBudgetRevisions", null, t => t.HasTrigger("TR_ProcurementBudgetRevisions_ApprovalPolicy"));
+                    b.ToTable("ProcurementBudgetRevisions", null, t =>
+                        {
+                            t.HasTrigger("TR_ProcurementBudgetRevisions_ApprovalPolicy");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementCalendarOccurrence", b =>
@@ -118277,16 +121704,17 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("ApprovalRequired")
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<DateTime?>("AcceptedAtUtc")
                         .HasColumnType("datetime2");
 
                     b.Property<string>("ApprovalActorsJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime?>("ApprovedAtUtc")
                         .HasColumnType("datetime2");
@@ -118565,6 +121993,7 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ProcurementExceptionalSourcingControls", null, t =>
                         {
                             t.HasTrigger("TR_ProcurementExceptionalSourcingControls_ApprovalPolicy");
+
                             t.HasTrigger("TR_ProcurementExceptionalSourcingControls_Lifecycle");
                         });
 
@@ -121119,13 +124548,13 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<string>("ApprovalComments")
+                        .HasColumnType("nvarchar(max)");
+
                     b.Property<bool>("ApprovalRequired")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("bit")
                         .HasDefaultValue(true);
-
-                    b.Property<string>("ApprovalComments")
-                        .HasColumnType("nvarchar(max)");
 
                     b.Property<decimal>("ApprovedBudget")
                         .HasColumnType("decimal(18,4)");
@@ -121286,7 +124715,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("TenantId");
 
-                    b.ToTable("ProcurementPlans", null, t => t.HasTrigger("TR_ProcurementPlans_ApprovalPolicy"));
+                    b.ToTable("ProcurementPlans", null, t =>
+                        {
+                            t.HasTrigger("TR_ProcurementPlans_ApprovalPolicy");
+                        });
+
+                    b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementPlanItem", b =>
@@ -122919,10 +126353,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("ApprovalRequired")
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<DateTime?>("AdvertisedAtUtc")
                         .HasColumnType("datetime2");
 
@@ -122936,6 +126366,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("AdvertisementReference")
                         .HasMaxLength(300)
                         .HasColumnType("nvarchar(300)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("CategoryIdsJson")
                         .IsRequired()
@@ -123088,6 +126523,7 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("ProcurementPrequalificationExercises", null, t =>
                         {
                             t.HasTrigger("TR_ProcurementPrequalificationExercises_ApprovalPolicy");
+
                             t.HasTrigger("TR_ProcurementPrequalificationExercises_Lifecycle");
                         });
 
@@ -124408,10 +127844,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("ApprovalRequired")
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<decimal>("AcceptedQuantity")
                         .HasColumnType("decimal(18,4)");
 
@@ -124420,6 +127852,10 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal>("ApEligibleQuantity")
                         .HasColumnType("decimal(18,4)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<string>("AuthorityName")
                         .IsRequired()
@@ -125716,11 +129152,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementRfqEvaluation", b =>
                 {
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -125732,6 +129163,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("ApprovalReference")
                         .HasMaxLength(200)
                         .HasColumnType("nvarchar(200)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime?>("ApprovedAtUtc")
                         .HasColumnType("datetime2");
@@ -125852,8 +129288,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("ProcurementRfqEvaluations", null, t =>
                         {
-                            t.HasTrigger("TR_ProcurementRfqEvaluations_Lifecycle");
                             t.HasTrigger("TR_ProcurementRfqEvaluations_ApprovalPolicy");
+
+                            t.HasTrigger("TR_ProcurementRfqEvaluations_Lifecycle");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -130023,11 +133460,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.ProcurementTenderControl", b =>
                 {
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -130051,6 +133483,11 @@ namespace ErpSystem.Data.Migrations
                     b.Property<string>("ApprovalActorsJson")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime?>("ApprovedAtUtc")
                         .HasColumnType("datetime2");
@@ -130274,8 +133711,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("ProcurementTenderControls", null, t =>
                         {
-                            t.HasTrigger("TR_ProcurementTenderControls_Lifecycle");
                             t.HasTrigger("TR_ProcurementTenderControls_ApprovalPolicy");
+
+                            t.HasTrigger("TR_ProcurementTenderControls_Lifecycle");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -130472,20 +133910,20 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<Guid?>("NewTemplateVersionId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime?>("NewOpeningScheduledAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("NewTemplateVersionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("NewValueUtc")
                         .HasColumnType("datetime2");
 
-                    b.Property<Guid?>("PreviousTemplateVersionId")
-                        .HasColumnType("uniqueidentifier");
-
                     b.Property<DateTime?>("PreviousOpeningScheduledAtUtc")
                         .HasColumnType("datetime2");
+
+                    b.Property<Guid?>("PreviousTemplateVersionId")
+                        .HasColumnType("uniqueidentifier");
 
                     b.Property<DateTime?>("PreviousValueUtc")
                         .HasColumnType("datetime2");
@@ -132460,7 +135898,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("PurchaseOrders", null, t =>
                         {
-                            t.HasTrigger("TR_PurchaseOrders_ApprovalPolicy");
                             t.HasTrigger("TR_PurchaseOrders_ApprovedSourceProtected");
 
                             t.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
@@ -132477,11 +135914,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", b =>
                 {
-                    b.Property<int>("LineType")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("int")
-                        .HasDefaultValue(1);
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -132535,6 +135967,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<decimal>("LineTotal")
                         .HasColumnType("decimal(18,2)");
+
+                    b.Property<int>("LineType")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int")
+                        .HasDefaultValue(1);
 
                     b.Property<string>("Notes")
                         .HasMaxLength(1000)
@@ -132598,8 +136035,9 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("PurchaseOrderItems", null, t =>
                         {
-                            t.HasCheckConstraint("CK_PurchaseOrderItems_LineType", "[LineType] IN (1, 2, 3, 4)");
                             t.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected");
+
+                            t.HasCheckConstraint("CK_PurchaseOrderItems_LineType", "[LineType] IN (1, 2, 3, 4)");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -132675,8 +136113,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderLandedCostPlanItem", b =>
                 {
-                    b.Property<Guid?>("PurchaseOrderItemId").HasColumnType("uniqueidentifier");
-                    b.HasIndex("PurchaseOrderItemId");
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -132733,6 +136169,9 @@ namespace ErpSystem.Data.Migrations
                         .HasMaxLength(1000)
                         .HasColumnType("nvarchar(1000)");
 
+                    b.Property<Guid?>("PurchaseOrderItemId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid>("PurchaseOrderLandedCostPlanId")
                         .HasColumnType("uniqueidentifier");
 
@@ -132757,6 +136196,8 @@ namespace ErpSystem.Data.Migrations
                         .HasColumnType("nvarchar(max)");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("PurchaseOrderItemId");
 
                     b.HasIndex("PurchaseOrderLandedCostPlanId");
 
@@ -133051,11 +136492,6 @@ namespace ErpSystem.Data.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
 
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
                     b.Property<string>("AmendmentNotes")
                         .HasMaxLength(2000)
                         .HasColumnType("nvarchar(2000)");
@@ -133066,6 +136502,11 @@ namespace ErpSystem.Data.Migrations
 
                     b.Property<int>("ApprovalLevel")
                         .HasColumnType("int");
+
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
 
                     b.Property<DateTime?>("ApprovedAt")
                         .HasColumnType("datetime2");
@@ -133349,7 +136790,6 @@ namespace ErpSystem.Data.Migrations
 
                     b.ToTable("PurchaseRequisitions", null, t =>
                         {
-                            t.HasTrigger("TR_PurchaseRequisitions_ApprovalPolicy");
                             t.HasTrigger("TR_PurchaseRequisitions_LinkageGuard");
 
                             t.HasCheckConstraint("CK_PurchaseRequisitions_ExceptionLink", "([ApprovedExceptionRuleId] IS NULL AND [ExceptionWorkflowInstanceId] IS NULL AND [ExceptionApprovalReference] IS NULL AND [ExceptionApprovedAtUtc] IS NULL) OR ([ApprovedExceptionRuleId] IS NOT NULL AND [ExceptionWorkflowInstanceId] IS NOT NULL AND [ExceptionApprovalReference] IS NOT NULL AND [ExceptionApprovedAtUtc] IS NOT NULL)");
@@ -134744,14 +138184,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.Tender", b =>
                 {
-                    b.Property<bool>("ApprovalRequired")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("bit")
-                        .HasDefaultValue(true);
-
-                    b.Property<int?>("BidValidityPeriodDays")
-                        .HasColumnType("int");
-
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uniqueidentifier");
@@ -134767,11 +138199,19 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("AllowPartialBids")
                         .HasColumnType("bit");
 
+                    b.Property<bool>("ApprovalRequired")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bit")
+                        .HasDefaultValue(true);
+
                     b.Property<DateTime?>("AwardDate")
                         .HasColumnType("datetime2");
 
                     b.Property<Guid?>("AwardedById")
                         .HasColumnType("uniqueidentifier");
+
+                    b.Property<int?>("BidValidityPeriodDays")
+                        .HasColumnType("int");
 
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("datetime2");
@@ -134927,9 +138367,12 @@ namespace ErpSystem.Data.Migrations
                     b.ToTable("Tenders", null, t =>
                         {
                             t.HasTrigger("TR_Tenders_ApprovalPolicy");
-                            t.HasTrigger("TR_Tenders_SourcingReleaseGuard");
-                            t.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
+
                             t.HasTrigger("TR_Tenders_BidValidityTerms_Immutable");
+
+                            t.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
+
+                            t.HasTrigger("TR_Tenders_SourcingReleaseGuard");
                         });
 
                     b.HasAnnotation("SqlServer:UseSqlOutputClause", false);
@@ -170250,7 +173693,10 @@ namespace ErpSystem.Data.Migrations
                         .IsUnique()
                         .HasFilter("[Domain] IS NOT NULL");
 
-                    b.ToTable("Tenants");
+                    b.ToTable("Tenants", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_Tenants_BaseCurrencyCanonical_C3", "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+                        });
 
                     b.HasData(
                         new
@@ -174104,6 +177550,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Estate.EstateLandDemarcation", "ParentDemarcation")
+                        .WithMany("ChildDemarcations")
+                        .HasForeignKey("ParentDemarcationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -174111,6 +177562,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("EstateManagedAsset");
+
+                    b.Navigation("ParentDemarcation");
 
                     b.Navigation("Tenant");
                 });
@@ -174444,6 +177897,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountAccountingBook", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountClassification", "AccountClassification")
+                        .WithMany("AccountMappings")
+                        .HasForeignKey("AccountClassificationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
                         .WithMany("AccountingBooks")
                         .HasForeignKey("AccountId")
@@ -174464,6 +177922,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("Account");
 
+                    b.Navigation("AccountClassification");
+
                     b.Navigation("AccountingBook");
 
                     b.Navigation("Tenant");
@@ -174471,15 +177931,53 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountBalance", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
                         .WithMany()
-                        .HasForeignKey("AccountId")
+                        .HasForeignKey("TenantId", "AccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
                         .WithMany()
-                        .HasForeignKey("FiscalPeriodId")
+                        .HasForeignKey("TenantId", "FiscalPeriodId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("FiscalPeriod");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountBookCurrencyPolicy", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountAccountingBook", "AccountAccountingBook")
+                        .WithMany("CurrencyPolicies")
+                        .HasForeignKey("AccountAccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountCurrencyLink", "AccountCurrencyLink")
+                        .WithMany("BookPolicies")
+                        .HasForeignKey("AccountCurrencyLinkId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -174489,9 +177987,64 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("AccountAccountingBook");
+
+                    b.Navigation("AccountCurrencyLink");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountClassification", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany("AccountClassifications")
+                        .HasForeignKey("AccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountClassification", "ParentClassification")
+                        .WithMany("Children")
+                        .HasForeignKey("ParentClassificationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("ParentClassification");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountCurrencyExposure", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Account");
 
-                    b.Navigation("FiscalPeriod");
+                    b.Navigation("AccountingBook");
 
                     b.Navigation("Tenant");
                 });
@@ -174532,25 +178085,29 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountSegmentValue", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
                         .WithMany("SegmentValues")
-                        .HasForeignKey("AccountId")
-                        .OnDelete(DeleteBehavior.Cascade)
+                        .HasForeignKey("TenantId", "AccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.SegmentLookupValue", "SegmentLookupValue")
                         .WithMany("AccountSegmentValues")
-                        .HasForeignKey("SegmentLookupValueId");
+                        .HasForeignKey("TenantId", "SegmentLookupValueId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountSegmentStructure", "SegmentStructure")
                         .WithMany()
-                        .HasForeignKey("SegmentStructureId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany()
-                        .HasForeignKey("TenantId")
+                        .HasForeignKey("TenantId", "SegmentStructureId")
+                        .HasPrincipalKey("TenantId", "Id")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
@@ -174592,12 +178149,6 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "JournalEntry")
-                        .WithMany("Transactions")
-                        .HasForeignKey("JournalEntryId")
-                        .OnDelete(DeleteBehavior.Restrict)
-                        .IsRequired();
-
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountTransaction", "OriginalTransaction")
                         .WithMany()
                         .HasForeignKey("OriginalTransactionId")
@@ -174614,7 +178165,23 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "JournalEntry")
+                        .WithMany("Transactions")
+                        .HasForeignKey("TenantId", "JournalEntryId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id", "AccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.Navigation("Account");
+
+                    b.Navigation("AccountingBook");
 
                     b.Navigation("ExchangeRateRecord");
 
@@ -174640,6 +178207,378 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "BaseAccountingBook")
+                        .WithMany("DerivedBooks")
+                        .HasForeignKey("TenantId", "BaseAccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("BaseAccountingBook");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", "SupersedesPolicy")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "PolicyCode", "SupersedesPolicyId")
+                        .HasPrincipalKey("TenantId", "PolicyCode", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("SupersedesPolicy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", "Policy")
+                        .WithMany("Rules")
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityPolicyId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Policy");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRuleBook", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", "Rule")
+                        .WithMany("SelectedBooks")
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityRuleId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot")
+                        .HasPrincipalKey("TenantId", "Id", "Code")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("Rule");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany("Initializations")
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "CutoffFiscalPeriod")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CutoffFiscalPeriodId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "SourceAccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "SourceAccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", "SupersedesInitialization")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId", "SupersedesInitializationId")
+                        .HasPrincipalKey("TenantId", "AccountingBookId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("CutoffFiscalPeriod");
+
+                    b.Navigation("SourceAccountingBook");
+
+                    b.Navigation("SupersedesInitialization");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitializationLine", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", "Initialization")
+                        .WithMany("Lines")
+                        .HasForeignKey("TenantId", "AccountingBookInitializationId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Account");
+
+                    b.Navigation("Initialization");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookPeriod", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany("BookPeriods")
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FiscalPeriodId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("FiscalPeriod");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", "Rule")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityPolicyId", "AccountingBookApplicabilityRuleId")
+                        .HasPrincipalKey("TenantId", "AccountingBookApplicabilityPolicyId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", "Policy")
+                        .WithMany("SelectionEvidence")
+                        .HasForeignKey("TenantId", "AccountingBookApplicabilityPolicyId", "PolicyVersion")
+                        .HasPrincipalKey("TenantId", "Id", "Version")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Policy");
+
+                    b.Navigation("Rule");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidenceBook", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", "Evidence")
+                        .WithMany("Books")
+                        .HasForeignKey("TenantId", "AccountingBookSelectionEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId", "AccountingBookCodeSnapshot")
+                        .HasPrincipalKey("TenantId", "Id", "Code")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("Evidence");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEvent", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", "AccountingBookSelectionEvidence")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookSelectionEvidenceId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "CorrectsAccountingEvent")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CorrectsAccountingEventId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "ReversesAccountingEvent")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ReversesAccountingEventId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "RootAccountingEvent")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "RootAccountingEventId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "SupersedesAccountingEvent")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "SupersedesAccountingEventId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingBookSelectionEvidence");
+
+                    b.Navigation("CorrectsAccountingEvent");
+
+                    b.Navigation("ReversesAccountingEvent");
+
+                    b.Navigation("RootAccountingEvent");
+
+                    b.Navigation("SupersedesAccountingEvent");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEventAttempt", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "AccountingEvent")
+                        .WithMany("Attempts")
+                        .HasForeignKey("TenantId", "AccountingEventId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingEvent");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEventPosting", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", "FinancePostingEvent")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "FinancePostingEventId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "JournalEntryId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "AccountingEvent")
+                        .WithMany("Postings")
+                        .HasForeignKey("TenantId", "AccountingEventId", "EventVersion")
+                        .HasPrincipalKey("TenantId", "Id", "Version")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("AccountingEvent");
+
+                    b.Navigation("FinancePostingEvent");
+
+                    b.Navigation("JournalEntry");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEventProducerReceipt", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "AccountingEvent")
+                        .WithOne("ProducerReceipt")
+                        .HasForeignKey("ErpSystem.Core.Entities.Finance.AccountingEventProducerReceipt", "TenantId", "AccountingEventId")
+                        .HasPrincipalKey("ErpSystem.Core.Entities.Finance.AccountingEvent", "TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingEvent");
 
                     b.Navigation("Tenant");
                 });
@@ -175497,6 +179436,26 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceBalanceRebuildRun", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceBudgetOverrideRequest", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -176070,11 +180029,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancePostingEvent", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "JournalEntry")
-                        .WithMany()
-                        .HasForeignKey("JournalEntryId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", "PrimaryExchangeRateRecord")
                         .WithMany()
                         .HasForeignKey("PrimaryExchangeRateId")
@@ -176085,6 +180039,21 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("TenantId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", "JournalEntry")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "JournalEntryId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id", "AccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("AccountingBook");
 
                     b.Navigation("JournalEntry");
 
@@ -176273,6 +180242,11 @@ namespace ErpSystem.Data.Migrations
                         .WithMany()
                         .HasForeignKey("MigrationClearingAccountId");
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseReturnVarianceAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "RealizedFxGainAccount")
                         .WithMany()
                         .HasForeignKey("RealizedFxGainAccountId");
@@ -176284,6 +180258,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "RetainedEarningsAccount")
                         .WithMany()
                         .HasForeignKey("RetainedEarningsAccountId");
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ReturnToVendorClearingAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "ReturnedChequeBankChargeAccount")
                         .WithMany()
@@ -176380,6 +180359,31 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("WriteOffRecoveryAccount");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSettlementDimensionComponent", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
+                        .WithMany()
+                        .HasForeignKey("FinanceDimensionSetId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSnapshot", "FinanceDimensionSnapshot")
+                        .WithMany()
+                        .HasForeignKey("FinanceDimensionSnapshotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("FinanceDimensionSet");
+
+                    b.Navigation("FinanceDimensionSnapshot");
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSourceDimensionAssignment", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSet", "FinanceDimensionSet")
@@ -176390,6 +180394,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinanceDimensionSnapshot", "FinanceDimensionSnapshot")
                         .WithMany()
                         .HasForeignKey("FinanceDimensionSnapshotId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ResolvedAccountId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
@@ -176448,6 +180457,11 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancialStatementLayout", "StandardSourceLayout")
+                        .WithMany()
+                        .HasForeignKey("StandardSourceLayoutId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
                         .HasForeignKey("TenantId")
@@ -176455,6 +180469,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("AccountingBook");
+
+                    b.Navigation("StandardSourceLayout");
 
                     b.Navigation("Tenant");
                 });
@@ -176474,6 +180490,41 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("FinancialStatementLayout");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancialStatementPublicationAccount", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancialStatementLayoutVersion", "FinancialStatementLayoutVersion")
+                        .WithMany("PublicationAccounts")
+                        .HasForeignKey("FinancialStatementLayoutVersionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancialStatementRow", "FinancialStatementRow")
+                        .WithMany()
+                        .HasForeignKey("FinancialStatementRowId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancialStatementRowMapping", "FinancialStatementRowMapping")
+                        .WithMany()
+                        .HasForeignKey("FinancialStatementRowMappingId")
+                        .OnDelete(DeleteBehavior.NoAction)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("FinancialStatementLayoutVersion");
+
+                    b.Navigation("FinancialStatementRow");
+
+                    b.Navigation("FinancialStatementRowMapping");
 
                     b.Navigation("Tenant");
                 });
@@ -176506,6 +180557,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancialStatementRowMapping", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountClassification", "AccountClassification")
+                        .WithMany()
+                        .HasForeignKey("AccountClassificationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
                         .WithMany()
                         .HasForeignKey("AccountId")
@@ -176524,6 +180580,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Account");
+
+                    b.Navigation("AccountClassification");
 
                     b.Navigation("FinancialStatementRow");
 
@@ -177127,6 +181185,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FixedAssets.FixedAsset", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", null)
+                        .WithMany()
+                        .HasForeignKey("CapitalizationApprovalExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.HR.Employee", "CurrentCustodian")
                         .WithMany()
                         .HasForeignKey("CurrentCustodianId")
@@ -177674,6 +181737,12 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FxRevaluationBatch", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("AccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.FiscalPeriod", "FiscalPeriod")
                         .WithMany()
                         .HasForeignKey("FiscalPeriodId")
@@ -177706,6 +181775,8 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("AccountingBook");
+
                     b.Navigation("FiscalPeriod");
 
                     b.Navigation("JournalEntry");
@@ -177721,6 +181792,23 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FxRevaluationLine", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountAccountingBook", "AccountAccountingBook")
+                        .WithMany()
+                        .HasForeignKey("AccountAccountingBookId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountBookCurrencyPolicy", "AccountBookCurrencyPolicy")
+                        .WithMany()
+                        .HasForeignKey("AccountBookCurrencyPolicyId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountClassification", "AccountClassification")
+                        .WithMany()
+                        .HasForeignKey("AccountClassificationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", "Account")
                         .WithMany()
                         .HasForeignKey("AccountId")
@@ -177763,6 +181851,12 @@ namespace ErpSystem.Data.Migrations
 
                     b.Navigation("Account");
 
+                    b.Navigation("AccountAccountingBook");
+
+                    b.Navigation("AccountBookCurrencyPolicy");
+
+                    b.Navigation("AccountClassification");
+
                     b.Navigation("Batch");
 
                     b.Navigation("ClosingExchangeRateRecord");
@@ -177772,6 +181866,88 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("JournalEntry");
 
                     b.Navigation("PostingEvent");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FxRevaluationRateUsage", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ExchangeRate", "ExchangeRate")
+                        .WithMany()
+                        .HasForeignKey("ExchangeRateId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FxRevaluationBatch", "Batch")
+                        .WithMany()
+                        .HasForeignKey("FxRevaluationBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", "PostingEvent")
+                        .WithMany()
+                        .HasForeignKey("PostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Batch");
+
+                    b.Navigation("ExchangeRate");
+
+                    b.Navigation("PostingEvent");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.InventorySupplierReturnPosting", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("ClearingAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryAccountId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturn", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryPurchaseReturnId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("JournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.VendorInvoice", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalVendorInvoiceId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("PostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.Navigation("Tenant");
                 });
@@ -178090,6 +182266,15 @@ namespace ErpSystem.Data.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingBook", "AccountingBook")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "AccountingBookId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingBook");
+
                     b.Navigation("FiscalPeriod");
 
                     b.Navigation("OriginalJournalEntry");
@@ -178203,6 +182388,47 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("FiscalPeriod");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceBatchReversal", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Finance.OpeningBalanceBatch", "OpeningBalanceBatch")
+                        .WithMany("Reversals")
+                        .HasForeignKey("OpeningBalanceBatchId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("OriginalPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("ReversalPostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("OpeningBalanceBatch");
 
                     b.Navigation("Tenant");
                 });
@@ -178426,6 +182652,119 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("FiscalPeriod");
 
                     b.Navigation("ModuleDefinition");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "CorrectsProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "CorrectsProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ReversesProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "ReversesProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "RootProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "RootProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "SupersedesProducerIntentGroup")
+                        .WithMany()
+                        .HasForeignKey("TenantId", "SupersedesProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("CorrectsProducerIntentGroup");
+
+                    b.Navigation("ReversesProducerIntentGroup");
+
+                    b.Navigation("RootProducerIntentGroup");
+
+                    b.Navigation("SupersedesProducerIntentGroup");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupAttempt", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ProducerIntentGroup")
+                        .WithMany("Attempts")
+                        .HasForeignKey("TenantId", "ProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProducerIntentGroup");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupMember", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.AccountingEvent", "AccountingEvent")
+                        .WithOne()
+                        .HasForeignKey("ErpSystem.Core.Entities.Finance.ProducerIntentGroupMember", "TenantId", "AccountingEventId")
+                        .HasPrincipalKey("ErpSystem.Core.Entities.Finance.AccountingEvent", "TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ProducerIntentGroup")
+                        .WithMany("Members")
+                        .HasForeignKey("TenantId", "ProducerIntentGroupId")
+                        .HasPrincipalKey("TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("AccountingEvent");
+
+                    b.Navigation("ProducerIntentGroup");
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroupReceipt", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "ProducerIntentGroup")
+                        .WithOne("Receipt")
+                        .HasForeignKey("ErpSystem.Core.Entities.Finance.ProducerIntentGroupReceipt", "TenantId", "ProducerIntentGroupId")
+                        .HasPrincipalKey("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", "TenantId", "Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("ProducerIntentGroup");
+
+                    b.Navigation("Tenant");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.RatioDefinition", b =>
@@ -178781,6 +183120,11 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNote", b =>
                 {
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturn", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryPurchaseReturnId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
                         .WithMany()
                         .HasForeignKey("JournalEntryId")
@@ -178793,6 +183137,16 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
                         .WithMany()
                         .HasForeignKey("PostingEventId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
+                        .WithMany()
+                        .HasForeignKey("ReturnDispatchJournalEntryId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null)
+                        .WithMany()
+                        .HasForeignKey("ReturnDispatchPostingEventId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
@@ -178892,6 +183246,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Finance.Account", null)
                         .WithMany()
                         .HasForeignKey("GLAccountId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturnItem", null)
+                        .WithMany()
+                        .HasForeignKey("InventoryPurchaseReturnItemId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Finance.AccountTransaction", null)
@@ -179434,11 +183793,6 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorInvoiceLineItem", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.Inventory.LandedCostItem", null)
-                        .WithMany()
-                        .HasForeignKey("LandedCostItemId")
-                        .OnDelete(DeleteBehavior.Restrict);
-
                     b.HasOne("ErpSystem.Core.Entities.Finance.BudgetEntry", "BudgetEntry")
                         .WithMany()
                         .HasForeignKey("BudgetEntryId")
@@ -179457,6 +183811,11 @@ namespace ErpSystem.Data.Migrations
                     b.HasOne("ErpSystem.Core.Entities.Inventory.InventoryItem", "InventoryItem")
                         .WithMany()
                         .HasForeignKey("InventoryItemId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.HasOne("ErpSystem.Core.Entities.Inventory.LandedCostItem", null)
+                        .WithMany()
+                        .HasForeignKey("LandedCostItemId")
                         .OnDelete(DeleteBehavior.Restrict);
 
                     b.HasOne("ErpSystem.Core.Entities.Inventory.WarehouseLocation", "Location")
@@ -179705,25 +184064,6 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("WithholdingTaxAccount");
                 });
 
-            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentEvidenceLink", b =>
-                {
-                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentRecord", "CentralDocumentRecord")
-                        .WithMany().HasForeignKey("CentralDocumentRecordId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentVersion", "CentralDocumentVersion")
-                        .WithMany().HasForeignKey("CentralDocumentVersionId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                    b.HasOne("ErpSystem.Core.Entities.FileUploadRecord", "FileUploadRecord")
-                        .WithMany().HasForeignKey("FileUploadRecordId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                    b.HasOne("ErpSystem.Core.Entities.Finance.VendorPayment", "VendorPayment")
-                        .WithMany().HasForeignKey("VendorPaymentId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
-                        .WithMany().HasForeignKey("TenantId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                    b.Navigation("CentralDocumentRecord");
-                    b.Navigation("CentralDocumentVersion");
-                    b.Navigation("FileUploadRecord");
-                    b.Navigation("VendorPayment");
-                    b.Navigation("Tenant");
-                });
-
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentAllocation", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null)
@@ -179764,6 +184104,49 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Tenant");
 
                     b.Navigation("VendorInvoice");
+
+                    b.Navigation("VendorPayment");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.VendorPaymentEvidenceLink", b =>
+                {
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentRecord", "CentralDocumentRecord")
+                        .WithMany()
+                        .HasForeignKey("CentralDocumentRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.DocumentManagement.CentralDocumentVersion", "CentralDocumentVersion")
+                        .WithMany()
+                        .HasForeignKey("CentralDocumentVersionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.FileUploadRecord", "FileUploadRecord")
+                        .WithMany()
+                        .HasForeignKey("FileUploadRecordId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Finance.VendorPayment", "VendorPayment")
+                        .WithMany()
+                        .HasForeignKey("VendorPaymentId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("CentralDocumentRecord");
+
+                    b.Navigation("CentralDocumentVersion");
+
+                    b.Navigation("FileUploadRecord");
+
+                    b.Navigation("Tenant");
 
                     b.Navigation("VendorPayment");
                 });
@@ -200327,13 +204710,16 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.LandedCostItem", b =>
                 {
-                    b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", null)
-                        .WithMany().HasForeignKey("PurchaseOrderItemId").OnDelete(DeleteBehavior.NoAction);
                     b.HasOne("ErpSystem.Core.Entities.Inventory.LandedCost", "LandedCost")
                         .WithMany("Items")
                         .HasForeignKey("LandedCostId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
+
+                    b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", null)
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderItemId")
+                        .OnDelete(DeleteBehavior.NoAction);
 
                     b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -209694,7 +214080,10 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Procurement.PurchaseOrderLandedCostPlanItem", b =>
                 {
                     b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderItem", null)
-                        .WithMany().HasForeignKey("PurchaseOrderItemId").OnDelete(DeleteBehavior.NoAction);
+                        .WithMany()
+                        .HasForeignKey("PurchaseOrderItemId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("ErpSystem.Core.Entities.Procurement.PurchaseOrderLandedCostPlan", "PurchaseOrderLandedCostPlan")
                         .WithMany("Items")
                         .HasForeignKey("PurchaseOrderLandedCostPlanId")
@@ -221316,6 +225705,11 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Reviews");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Estate.EstateLandDemarcation", b =>
+                {
+                    b.Navigation("ChildDemarcations");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Estate.EstateManagedAsset", b =>
                 {
                     b.Navigation("Demarcations");
@@ -221367,6 +225761,23 @@ namespace ErpSystem.Data.Migrations
                     b.Navigation("Transactions");
                 });
 
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountAccountingBook", b =>
+                {
+                    b.Navigation("CurrencyPolicies");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountClassification", b =>
+                {
+                    b.Navigation("AccountMappings");
+
+                    b.Navigation("Children");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountCurrencyLink", b =>
+                {
+                    b.Navigation("BookPolicies");
+                });
+
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountSegmentStructure", b =>
                 {
                     b.Navigation("LookupValues");
@@ -221374,7 +225785,46 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBook", b =>
                 {
+                    b.Navigation("AccountClassifications");
+
                     b.Navigation("AccountMappings");
+
+                    b.Navigation("BookPeriods");
+
+                    b.Navigation("DerivedBooks");
+
+                    b.Navigation("Initializations");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityPolicy", b =>
+                {
+                    b.Navigation("Rules");
+
+                    b.Navigation("SelectionEvidence");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookApplicabilityRule", b =>
+                {
+                    b.Navigation("SelectedBooks");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookInitialization", b =>
+                {
+                    b.Navigation("Lines");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingBookSelectionEvidence", b =>
+                {
+                    b.Navigation("Books");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AccountingEvent", b =>
+                {
+                    b.Navigation("Attempts");
+
+                    b.Navigation("Postings");
+
+                    b.Navigation("ProducerReceipt");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.AllocationRule", b =>
@@ -221553,6 +226003,8 @@ namespace ErpSystem.Data.Migrations
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinancialStatementLayoutVersion", b =>
                 {
+                    b.Navigation("PublicationAccounts");
+
                     b.Navigation("Rows");
                 });
 
@@ -221687,6 +226139,8 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.OpeningBalanceBatch", b =>
                 {
                     b.Navigation("Lines");
+
+                    b.Navigation("Reversals");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.PaymentBatch", b =>
@@ -221704,6 +226158,15 @@ namespace ErpSystem.Data.Migrations
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.PaymentMethod", b =>
                 {
                     b.Navigation("Transactions");
+                });
+
+            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.ProducerIntentGroup", b =>
+                {
+                    b.Navigation("Attempts");
+
+                    b.Navigation("Members");
+
+                    b.Navigation("Receipt");
                 });
 
             modelBuilder.Entity("ErpSystem.Core.Entities.Finance.RecurringJournalTemplate", b =>
@@ -225382,95 +229845,6 @@ namespace ErpSystem.Data.Migrations
                 {
                     b.Navigation("Notches");
                 });
-            // 20260912235500: Finance-owned Inventory return handoff and direct invoice credit.
-            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNote", b =>
-            {
-                b.Property<Guid?>("InventoryPurchaseReturnId").HasColumnType("uniqueidentifier");
-                b.Property<Guid?>("ReturnDispatchPostingEventId").HasColumnType("uniqueidentifier");
-                b.Property<Guid?>("ReturnDispatchJournalEntryId").HasColumnType("uniqueidentifier");
-                b.Property<decimal>("DirectInvoiceAppliedAmount").HasColumnType("decimal(18,2)");
-                b.Property<DateTime?>("DirectInvoiceAppliedAt").HasColumnType("datetime2");
-                b.Property<Guid?>("DirectInvoiceAppliedById").HasColumnType("uniqueidentifier");
-                b.HasIndex("InventoryPurchaseReturnId");
-                b.HasIndex("ReturnDispatchPostingEventId");
-                b.HasIndex("ReturnDispatchJournalEntryId");
-                b.HasIndex("TenantId", "InventoryPurchaseReturnId").IsUnique()
-                    .HasDatabaseName("UX_SupplierDebitNotes_Tenant_InventoryReturn")
-                    .HasFilter("[InventoryPurchaseReturnId] IS NOT NULL AND [IsDeleted] = 0");
-                b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturn", null).WithMany()
-                    .HasForeignKey("InventoryPurchaseReturnId").OnDelete(DeleteBehavior.Restrict);
-                b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null).WithMany()
-                    .HasForeignKey("ReturnDispatchPostingEventId").OnDelete(DeleteBehavior.Restrict);
-                b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null).WithMany()
-                    .HasForeignKey("ReturnDispatchJournalEntryId").OnDelete(DeleteBehavior.Restrict);
-                b.ToTable("SupplierDebitNotes", t => t.HasTrigger("TR_SupplierDebitNotes_InventoryReturnCreditGuard"));
-            });
-            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.SupplierDebitNoteLineItem", b =>
-            {
-                b.Property<Guid?>("InventoryPurchaseReturnItemId").HasColumnType("uniqueidentifier");
-                b.HasIndex("InventoryPurchaseReturnItemId");
-                b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturnItem", null).WithMany()
-                    .HasForeignKey("InventoryPurchaseReturnItemId").OnDelete(DeleteBehavior.Restrict);
-            });
-            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.FinanceSettings", b =>
-            {
-                b.Property<Guid?>("ReturnToVendorClearingAccountId").HasColumnType("uniqueidentifier");
-                b.Property<Guid?>("PurchaseReturnVarianceAccountId").HasColumnType("uniqueidentifier");
-                b.HasIndex("ReturnToVendorClearingAccountId");
-                b.HasIndex("PurchaseReturnVarianceAccountId");
-                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
-                    .HasForeignKey("ReturnToVendorClearingAccountId").OnDelete(DeleteBehavior.Restrict);
-                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
-                    .HasForeignKey("PurchaseReturnVarianceAccountId").OnDelete(DeleteBehavior.Restrict);
-            });
-            modelBuilder.Entity("ErpSystem.Core.Entities.Finance.InventorySupplierReturnPosting", b =>
-            {
-                b.Property<Guid>("Id").ValueGeneratedOnAdd().HasColumnType("uniqueidentifier");
-                b.Property<Guid>("TenantId").HasColumnType("uniqueidentifier");
-                b.Property<Guid>("InventoryPurchaseReturnId").HasColumnType("uniqueidentifier");
-                b.Property<Guid>("OriginalVendorInvoiceId").HasColumnType("uniqueidentifier");
-                b.Property<Guid>("PostingEventId").HasColumnType("uniqueidentifier");
-                b.Property<Guid>("JournalEntryId").HasColumnType("uniqueidentifier");
-                b.Property<Guid>("ClearingAccountId").HasColumnType("uniqueidentifier");
-                b.Property<Guid>("InventoryAccountId").HasColumnType("uniqueidentifier");
-                b.Property<decimal>("CarryingAmount").HasColumnType("decimal(18,2)");
-                b.Property<DateTime>("PostingDate").HasColumnType("datetime2");
-                b.Property<DateTime>("CreatedAt").HasColumnType("datetime2");
-                b.Property<DateTime?>("UpdatedAt").HasColumnType("datetime2");
-                b.Property<string>("CreatedBy").HasColumnType("nvarchar(max)");
-                b.Property<string>("UpdatedBy").HasColumnType("nvarchar(max)");
-                b.Property<Guid?>("CreatedById").HasColumnType("uniqueidentifier");
-                b.Property<Guid?>("LastModifiedById").HasColumnType("uniqueidentifier");
-                b.Property<bool>("IsDeleted").HasColumnType("bit");
-                b.Property<DateTime?>("DeletedAt").HasColumnType("datetime2");
-                b.Property<string>("DeletedBy").HasColumnType("nvarchar(max)");
-                b.HasKey("Id");
-                b.HasIndex("TenantId", "InventoryPurchaseReturnId").IsUnique();
-                b.HasIndex("InventoryPurchaseReturnId");
-                b.HasIndex("OriginalVendorInvoiceId");
-                b.HasIndex("PostingEventId");
-                b.HasIndex("JournalEntryId");
-                b.HasIndex("ClearingAccountId");
-                b.HasIndex("InventoryAccountId");
-                b.HasOne("ErpSystem.Core.Entities.Inventory.PurchaseReturn", null).WithMany()
-                    .HasForeignKey("InventoryPurchaseReturnId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                b.HasOne("ErpSystem.Core.Entities.Finance.VendorInvoice", null).WithMany()
-                    .HasForeignKey("OriginalVendorInvoiceId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                b.HasOne("ErpSystem.Core.Entities.Finance.FinancePostingEvent", null).WithMany()
-                    .HasForeignKey("PostingEventId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                b.HasOne("ErpSystem.Core.Entities.Finance.JournalEntry", null).WithMany()
-                    .HasForeignKey("JournalEntryId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
-                    .HasForeignKey("ClearingAccountId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                b.HasOne("ErpSystem.Core.Entities.Finance.Account", null).WithMany()
-                    .HasForeignKey("InventoryAccountId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                b.HasOne("ErpSystem.Core.Entities.Tenant", "Tenant").WithMany()
-                    .HasForeignKey("TenantId").OnDelete(DeleteBehavior.Restrict).IsRequired();
-                b.Navigation("Tenant");
-                b.ToTable("InventorySupplierReturnPostings", t => t.HasTrigger("TR_InventorySupplierReturnPostings_Immutable"));
-            });
-            modelBuilder.Entity("ErpSystem.Core.Entities.Inventory.StockAdjustment", b =>
-                b.ToTable("StockAdjustments", t => t.HasTrigger("TR_StockAdjustments_FifoSequenceGuard")));
 #pragma warning restore 612, 618
         }
     }

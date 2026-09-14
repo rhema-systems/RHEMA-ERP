@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Api.Configuration;
+using ErpSystem.Api.Extensions;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
@@ -22,6 +23,7 @@ using ErpSystem.Shared;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ErpSystem.Web.Services
 {
@@ -10290,8 +10292,26 @@ namespace ErpSystem.Web.Services
     // Extension methods for easy registration
     public static class DatabaseSeedingServiceExtensions
     {
+        public static IServiceCollection AddDatabaseSeedingFinanceBoundary(this IServiceCollection services)
+        {
+            // The supplier-onboarding fixture owns Procurement intent, while Finance retains
+            // canonical account/classification/segment/book provisioning. Reduced seed-command
+            // hosts therefore need this same production boundary without loading the entire web
+            // service graph. Request-backed web registrations win because these are TryAdd fallbacks.
+            services.TryAddScoped<DatabaseSeedingCurrentUserContext>();
+            services.TryAddScoped<ErpSystem.Core.Interfaces.ICurrentUserService>(provider =>
+                provider.GetRequiredService<DatabaseSeedingCurrentUserContext>());
+            services.TryAddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider>(provider =>
+                provider.GetRequiredService<DatabaseSeedingCurrentUserContext>());
+            services.AddFinanceAccountProvisioning();
+
+            return services;
+        }
+
         public static IServiceCollection AddDatabaseSeeding(this IServiceCollection services)
         {
+            services.AddDatabaseSeedingFinanceBoundary();
+
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
             services.AddScoped<FinanceCloseTemplateBaselineSeeder>();

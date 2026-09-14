@@ -74,6 +74,7 @@
     <Compile Include="Services\Inventory\StockAdjustmentTrackedStateTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentCountFreezeOrderingTests.cs" />
     <Compile Include="Services\Inventory\StockAdjustmentDirectDisposalSourceTests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerApprovedExecutionContractTests.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">

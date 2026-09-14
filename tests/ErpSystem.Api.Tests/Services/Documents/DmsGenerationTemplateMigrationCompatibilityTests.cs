@@ -1,5 +1,6 @@
 using ErpSystem.Data;
 using ErpSystem.Data.Migrations;
+using ErpSystem.Api.Tests.Services.Finance;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -37,8 +38,11 @@ public sealed class DmsGenerationTemplateMigrationCompatibilityTests
         using var context = new ApplicationDbContext(options);
         var migrations = context.GetService<IMigrationsAssembly>().Migrations;
 
-        migrations.Should().ContainKey(SchemaOwnerMigrationId);
-        migrations.Should().ContainKey(CompatibilityMigrationId);
+        migrations.Keys.Should().Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        ArchivedMigrationSource.Read("20260820120000_AddDmsGenerationTemplateWordSource.cs")
+            .Should().Contain("class AddDmsGenerationTemplateWordSource");
+        ArchivedMigrationSource.Read("20260822130000_AddUploadedDocumentTemplateColumns.cs")
+            .Should().Contain(CompatibilityMigrationId);
         string.CompareOrdinal(SchemaOwnerMigrationId, CompatibilityMigrationId)
             .Should().BeNegative();
     }
@@ -47,15 +51,9 @@ public sealed class DmsGenerationTemplateMigrationCompatibilityTests
     [Trait("Category", "Architecture")]
     public void SchemaOwnerUp_ShouldCreateEveryColumnAndIndexIdempotently()
     {
-        var migrationBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableSchemaOwnerMigration().ApplyUp(migrationBuilder);
-
-        var sql = migrationBuilder.Operations.Should().ContainSingle()
-            .Which.Should().BeOfType<SqlOperation>().Which.Sql;
-
-        migrationBuilder.Operations.Should().NotContain(operation =>
-            operation.GetType() == typeof(AddColumnOperation) ||
-            operation.GetType() == typeof(CreateIndexOperation));
+        var sql = ArchivedMigrationSource.Read("20260820120000_AddDmsGenerationTemplateWordSource.cs");
+        sql.Should().NotContain("migrationBuilder.AddColumn")
+            .And.NotContain("migrationBuilder.CreateIndex");
         foreach (var column in Columns)
         {
             sql.Should().Contain(
@@ -71,26 +69,10 @@ public sealed class DmsGenerationTemplateMigrationCompatibilityTests
     [Trait("Category", "Architecture")]
     public void LaterDuplicateMigration_ShouldBeACompatibilityNoOp()
     {
-        var upBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        var downBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        var migration = new TestableCompatibilityMigration();
-
-        migration.ApplyUp(upBuilder);
-        migration.ApplyDown(downBuilder);
-
-        upBuilder.Operations.Should().BeEmpty();
-        downBuilder.Operations.Should().BeEmpty();
-    }
-
-    private sealed class TestableSchemaOwnerMigration : AddDmsGenerationTemplateWordSource
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
-    }
-
-    private sealed class TestableCompatibilityMigration : AddUploadedDocumentTemplateColumns
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
-
-        public void ApplyDown(MigrationBuilder migrationBuilder) => Down(migrationBuilder);
+        var source = ArchivedMigrationSource.Read("20260822130000_AddUploadedDocumentTemplateColumns.cs");
+        source.Should().Contain("Compatibility marker only")
+            .And.Contain("The earlier schema-owning migration removes these columns")
+            .And.NotContain("migrationBuilder.AddColumn")
+            .And.NotContain("migrationBuilder.DropColumn");
     }
 }

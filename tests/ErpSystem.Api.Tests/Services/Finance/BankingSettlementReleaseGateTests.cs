@@ -108,6 +108,49 @@ public sealed class BankingSettlementReleaseGateTests
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-BankingSettlement")]
+    [Trait("Category", "CashBank-Dimensions")]
+    public async Task DepositDraftEdit_ShouldPreserveStableAllocationIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var setup = await SeedSetupAsync(db, tenantId);
+        var receipt = SeedLiquidityEntry(
+            setup,
+            LiquidityEntryType.CustomerReceipt,
+            LiquidityEntryDirection.Increase,
+            500m);
+        db.LiquidityAccountEntries.Add(receipt);
+        await db.SaveChangesAsync();
+        var service = CreateBankingService(db, tenantId, Guid.NewGuid(), CreateWorkflow());
+        var created = await service.CreateDepositAsync(CreateDepositRequest(setup, receipt));
+        var allocationId = created.Allocations.Single().Id;
+
+        var updated = await service.UpdateDepositAsync(created.Id, new UpdateBankDepositDto
+        {
+            BankAccountId = setup.BankAccount.Id,
+            DepositDate = created.DepositDate,
+            DepositReference = "SLIP-001-EDITED",
+            RowVersion = created.RowVersion,
+            Allocations =
+            [
+                new BankDepositAllocationRequestDto
+                {
+                    LiquidityAccountEntryId = receipt.Id,
+                    AllocationType = BankDepositAllocationType.Receipt,
+                    Amount = 400m
+                }
+            ]
+        });
+
+        updated.Allocations.Should().ContainSingle();
+        updated.Allocations.Single().Id.Should().Be(allocationId);
+        updated.Allocations.Single().Amount.Should().Be(400m);
+        (await db.LiquidityAccountEntries.SingleAsync(item => item.Id == receipt.Id))
+            .AllocatedAmount.Should().Be(400m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-BankingSettlement")]
     [Trait("Category", "CashBank")]
     public async Task Deposit_ShouldRequireMakerCheckerThenPostOneNetBankTransaction()
     {
@@ -416,11 +459,25 @@ public sealed class BankingSettlementReleaseGateTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         };
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = "FY2026", Year = 2026, FiscalYearType = "Calendar",
+            StartDate = new DateTime(2026, 1, 1), EndDate = new DateTime(2026, 12, 31),
+            Status = "Open", IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -475,8 +532,13 @@ public sealed class BankingSettlementReleaseGateTests
             ReturnedChequeBankChargeAccountId = expense.Id
         };
         db.Tenants.Add(tenant);
+        db.AccountingBooks.Add(book);
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         db.Accounts.AddRange(bankGl, holdingGl, arControl, expense);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+            db, tenantId, book, bankGl, holdingGl, arControl, expense);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         db.BankAccounts.Add(bank);
         db.LiquidityAccounts.Add(holding);
         db.Set<FinanceSettings>().Add(settings);
@@ -681,6 +743,7 @@ public sealed class BankingSettlementReleaseGateTests
         Guid creditAccountId,
         decimal amount)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == setup.TenantId && item.Code == "IFRS");
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(),
@@ -701,6 +764,7 @@ public sealed class BankingSettlementReleaseGateTests
             ApprovalStatus = "Approved",
             PostingDate = new DateTime(2026, 7, 6),
             BookClassification = "IFRS",
+            AccountingBookId = book.Id,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         };
@@ -716,6 +780,7 @@ public sealed class BankingSettlementReleaseGateTests
             FiscalPeriodId = setup.Period.Id,
             PostingStatus = "Posted",
             BookClassification = "IFRS",
+            AccountingBookId = book.Id,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         });
@@ -732,6 +797,7 @@ public sealed class BankingSettlementReleaseGateTests
             FiscalPeriodId = setup.Period.Id,
             PostingStatus = "Posted",
             BookClassification = "IFRS",
+            AccountingBookId = book.Id,
             CreatedAt = DateTime.UtcNow,
             CreatedBy = "seed"
         });

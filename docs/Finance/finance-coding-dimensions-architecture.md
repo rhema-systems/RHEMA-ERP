@@ -175,6 +175,93 @@ unchanged.
 7. Certify Finance and operational adapters individually.
 8. Enable mandatory enforcement by account/source only after certification.
 
+### Finance-owned settlement expansion
+
+The Finance-owned settlement slice covers vendor payments, customer payments/receipts, direct Cash
+payments, direct Cash receipts and cash/bank transfers.
+It captures stable source-line evidence for allocations, advances, direct offsets and both transfer
+legs. Invoice settlements inherit the exact originating invoice-line combinations; discounts,
+withholding, fees, write-offs and realised FX must remain split over those combinations with the
+final deterministic allocation carrying any rounding residual.
+
+Bank deposits and returned cheques now extend that generic source/settlement store with their own
+compiled `CaptureOptional` routes. Deposits retain the destination bank leg and every persisted
+allocation independently. Returned cheques inherit exact frozen principal/discount combinations
+from the original receipt; bank, customer-charge and expense lines resolve their own account rules.
+Both routes have tenant-scoped readiness providers and require stable, frozen evidence before a
+future promotion to `Enforced`.
+
+Finance-owned bank reconciliation adjustments use the dedicated
+`finance.cash.bank-reconciliation-adjustments` route in `CaptureOptional`. The bank leg and offset
+leg have separate deterministic source-line identities, resolve their own account rules and freeze
+their canonical combination, rule version and exchange-rate evidence on the exact source and
+posting lines. Because this high-control action approves and posts immediately, an account rule
+marked `Required` must be satisfied before posting even during optional capture; dimensions governed
+by `Optional` rules remain optional. Historical adjustment rows without the trusted route provenance
+remain legacy evidence and are not silently certified.
+
+### External producer adapter boundary
+
+Non-Finance posting producers now have compiled, additive Finance contracts rather than inheriting
+the identity of an underlying manual AP, AR or GL service. Route IDs 61–77 distinguish accepted
+Procurement receipts, Inventory adjustments/landed cost/disposal proceeds, QS certificates, Estate
+billing/acquisitions, Legal transfer fees, Maintenance work-order billing, HR payroll, and the two
+supplier-return milestones. Sales credit notes retain their existing route 30.
+
+`IExternalFinancePostingAdapter` accepts only independently approved server-to-server evidence. It
+validates the authenticated tenant, registered contract, source-document and unique source-line
+identities, accounts, balanced positive amounts and currency/rate evidence. Its canonical SHA-256
+evidence binds those approved facts and submitted dimension codes, independent of collection order;
+a well-formed but mismatched hash is rejected. Stored set IDs and posting-line dimension bypasses
+are not accepted from external producers.
+Finance then resolves account rules, canonical dimension sets and immutable line snapshots and posts
+with a server-derived producer context and idempotency scope. External callers cannot select a manual
+Finance route or stored dimension-set ID.
+
+All external routes deploy as `CaptureOptional`. Their provisional readiness providers are tenant
+scoped and intentionally retain a `PRODUCER_ADOPTION_CENSUS_REQUIRED` blocker: assignment-only
+discovery cannot prove that every external source document used the adapter. Promotion remains
+fail-closed until the owning module adopts its specific contract and supplies authoritative census
+and consumer tests. Captured documents additionally require a trusted document date, source-line
+count, server-resolved account per line and matching line-manifest hash. No producer-module
+implementation was changed by this Finance expansion.
+
+### Finance Fixed Assets expansion (routes 46-60)
+
+Finance-owned Fixed Assets posting paths use separate compiled `CaptureOptional` routes for direct
+capitalization and reversal, depreciation and reversal, revaluation, impairment, impairment
+reversal, valuation correction, disposal, disposal-sale AR invoice, disposal-sale immediate
+receipt, GL reclassification, capital-project settlement, lease recognition and lease-period
+posting. Route identity is not inferred from the underlying posting service.
+
+Every economic component has a deterministic source-line identity. Depreciation keys include the
+asset, book and schedule lineage; disposal cost, accumulated depreciation, impairment, proceeds,
+gain/loss and equity-transfer components remain distinct. Capital-project rounding residuals are
+assigned to the final ordered settlement rule. Lease recognition and each schedule-period component
+resolve account rules independently.
+
+Direct Finance source values and defaults persist through the generic source-assignment store.
+Fixed values remain server-resolved and read-only. Submitted evidence is frozen per source line and
+copied to the exact posting line. Capitalization, depreciation and valuation reversals register the
+original line's frozen set/snapshot instead of resolving current defaults. Disposal-sale invoice and
+receipt orchestration uses dedicated typed producer contexts; the receipt allocation inherits the
+exact disposal-sale invoice-line combinations and cannot impersonate a manual AR route.
+
+Each route has a tenant-scoped readiness provider. The generic assignment store persists the trusted
+document accounting date, resolved economic account for every line, expected line count and a
+deterministic line/account manifest hash. Promotion replays current effective account rules and is
+blocked by in-flight legacy documents, incomplete or changed line manifests, unresolved accounts,
+ambiguous rules, Fixed-value drift, prohibited assignments, missing Required values, unavailable
+canonical sets, unfrozen submitted evidence or missing immutable snapshots. Legacy assignments that
+lack trusted context must be reopened and saved through their Finance route; a dimension-set ID alone
+is not certification evidence.
+
+Fixed Asset action screens capture a clearable document default before the server constructs their
+derived economic lines. The server applies it only to eligible lines and remains authoritative for
+each resulting line; Fixed values are resolved automatically and reversal screens continue to inherit
+the original frozen evidence. Procurement-origin capitalization and every other external producer
+remain outside these Finance-owned routes and require the separate additive adapter track.
+
 ## Acceptance criteria
 
 - Two postings to the same GL account can carry different dimension sets.

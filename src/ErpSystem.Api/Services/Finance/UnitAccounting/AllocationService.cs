@@ -14,6 +14,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Core.Services.Workflow;
 using Microsoft.Extensions.Logging.Abstractions;
+using ErpSystem.Api.Services.Finance.GL;
 
 namespace ErpSystem.Api.Services.Finance.UnitAccounting
 {
@@ -334,7 +335,10 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     ValidateAllocationRuleShape(rule.SourceAccountId, rule.AllocationType, rule.DriverUnitAccountId, activeTargets.Select(ToCreateTargetDto).ToList());
                     ValidateTargetAccountTypes(rule);
 
-                    var sourceBalance = await GetSourceAccountPeriodBalanceAsync(rule.SourceAccountId, dto.FiscalPeriodId, cancellationToken);
+                    var bookAuthority = await PrimaryBookCompatibilityAuthorityResolver.ResolveAsync(
+                        _unitOfWork, TenantId, cancellationToken);
+                    var sourceBalance = await GetSourceAccountPeriodBalanceAsync(
+                        rule.SourceAccountId, dto.FiscalPeriodId, bookAuthority, cancellationToken);
                     var sourceAmount = Math.Abs(sourceBalance);
                     if (sourceAmount == 0m)
                         throw new InvalidOperationException("Allocation source account has no period balance to allocate.");
@@ -343,7 +347,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                     var totalAllocated = lines.Sum(line => line.AllocatedAmount);
                     var postingLines = BuildPostingLines(rule, lines, totalAllocated);
 
-                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "GL",
                         OriginModuleCode = "FIN",
@@ -357,8 +361,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         PostingDate = allocationDate,
                         FiscalPeriodId = dto.FiscalPeriodId,
                         JournalType = "Allocation",
-                        BookClassification = "IFRS",
-                        FunctionalCurrencyCode = "GHS",
+                        AccountingBookCode = bookAuthority.AccountingBookCode,
+                        FunctionalCurrencyCode = bookAuthority.FunctionalCurrencyCode,
                         IdempotencyKey = $"allocation:{TenantId:N}:{rule.Id:N}:{dto.FiscalPeriodId:N}",
                         ReturnExistingOnDuplicate = true,
                         Lines = postingLines
@@ -467,9 +471,12 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         activeTargets.Select(ToCreateTargetDto).ToList());
                     ValidateTargetAccountTypes(rule);
 
+                    var bookAuthority = await PrimaryBookCompatibilityAuthorityResolver.ResolveAsync(
+                        _unitOfWork, TenantId, cancellationToken);
                     var sourceBalance = await GetSourceAccountPeriodBalanceAsync(
                         rule.SourceAccountId,
                         fiscalPeriod.Id,
+                        bookAuthority,
                         cancellationToken);
                     var sourceAmount = Math.Abs(sourceBalance);
                     if (sourceAmount == 0m)
@@ -500,8 +507,8 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         SourcePeriodBalance = sourceBalance,
                         TotalAllocated = totalAllocated,
                         AllocationType = rule.AllocationType.ToString(),
-                        BookClassification = "IFRS",
-                        FunctionalCurrencyCode = "GHS",
+                        BookClassification = bookAuthority.AccountingBookCode,
+                        FunctionalCurrencyCode = bookAuthority.FunctionalCurrencyCode,
                         IdempotencyKey = idempotencyKey,
                         CreatedAt = now,
                         CreatedBy = UserName
@@ -736,7 +743,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         snapshotLines,
                         batch.TotalAllocated);
 
-                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var postingResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
                         SourceModule = "GL",
                         OriginModuleCode = "FIN",
@@ -750,7 +757,7 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
                         PostingDate = batch.AllocationDate,
                         FiscalPeriodId = batch.FiscalPeriodId,
                         JournalType = "Allocation",
-                        BookClassification = batch.BookClassification,
+                        AccountingBookCode = batch.BookClassification,
                         FunctionalCurrencyCode = batch.FunctionalCurrencyCode,
                         IdempotencyKey = batch.IdempotencyKey ?? $"allocation-run-batch:{TenantId:N}:{batch.Id:N}",
                         ReturnExistingOnDuplicate = true,
@@ -1037,15 +1044,31 @@ namespace ErpSystem.Api.Services.Finance.UnitAccounting
             Guid fiscalPeriodId,
             CancellationToken cancellationToken)
         {
-            // The current run contract has no book/currency fields yet; use the default IFRS/GHS balance for now.
-            return await _unitOfWork.Repository<AccountBalance>()
+            var authority = await PrimaryBookCompatibilityAuthorityResolver.ResolveAsync(
+                _unitOfWork, TenantId, cancellationToken);
+            return await GetSourceAccountPeriodBalanceAsync(
+                sourceAccountId, fiscalPeriodId, authority, cancellationToken);
+        }
+
+        private async Task<decimal> GetSourceAccountPeriodBalanceAsync(
+            Guid sourceAccountId,
+            Guid fiscalPeriodId,
+            PrimaryBookCompatibilityAuthority authority,
+            CancellationToken cancellationToken)
+        {
+            var balances = await _unitOfWork.Repository<AccountBalance>()
                 .GetQueryable(b => b.TenantId == TenantId
                     && b.AccountId == sourceAccountId
                     && b.FiscalPeriodId == fiscalPeriodId
-                    && b.BookClassification == "IFRS"
+                    && b.AccountingBookId == authority.AccountingBookId
+                    && b.Currency == authority.FunctionalCurrencyCode
                     && !b.IsDeleted)
                 .Select(b => (decimal?)b.ClosingBalance)
-                .FirstOrDefaultAsync(cancellationToken) ?? 0m;
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (balances.Count > 1)
+                throw new InvalidOperationException("The exact primary-book allocation balance grain is ambiguous.");
+            return balances.SingleOrDefault() ?? 0m;
         }
 
         private async Task<List<AllocationLineResultDto>> CalculateAllocationLinesAsync(

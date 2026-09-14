@@ -4,17 +4,19 @@ using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
-using ErpSystem.Data.Migrations;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class InventorySupplierReturnCreditTests
 {
+    private const string MigrationFile = "20260912235500_InventorySupplierReturnInvoiceCredit.cs";
+    private static string DispatchGuard => ArchivedMigrationSource.RawStringConstant(MigrationFile, "DispatchGuard");
+    private static string CreditGuard => ArchivedMigrationSource.RawStringConstant(MigrationFile, "CreditGuard");
+
     [Theory]
     [InlineData(706.87, 700, 0, 6.87, 0)]
     [InlineData(690, 700, 0, 0, 10)]
@@ -219,21 +221,20 @@ public sealed class InventorySupplierReturnCreditTests
     [Fact]
     public void Database_guards_retain_immutable_dispatch_and_original_invoice_application()
     {
-        InventorySupplierReturnInvoiceCredit.DispatchGuard.Should().Contain("RTV_FINANCE_DISPATCH_IMMUTABLE").And.Contain("ApSupplierIdentityLinks");
-        InventorySupplierReturnInvoiceCredit.CreditGuard.Should().Contain("RTV_CREDIT_LINK_OR_APPLICATION_IMMUTABLE")
+        DispatchGuard.Should().Contain("RTV_FINANCE_DISPATCH_IMMUTABLE").And.Contain("ApSupplierIdentityLinks");
+        CreditGuard.Should().Contain("RTV_CREDIT_LINK_OR_APPLICATION_IMMUTABLE")
             .And.Contain("i.DirectInvoiceAppliedAmount<>i.TotalAmount").And.Contain("i.SupplierReturnId IS NOT NULL");
     }
 
     [Fact]
     public void Migration_uses_the_existing_singular_vendor_invoice_table_for_fk_and_guards()
     {
-        var links = new InventorySupplierReturnInvoiceCredit().UpOperations.OfType<AddForeignKeyOperation>().ToList();
-        links.Should().ContainSingle(x => x.Table == "InventorySupplierReturnPostings" &&
-            x.Columns.SequenceEqual(new[] { "OriginalVendorInvoiceId" }) && x.PrincipalTable == "VendorInvoice");
-        links.Should().NotContain(x => x.PrincipalTable == "VendorInvoices");
-        InventorySupplierReturnInvoiceCredit.DispatchGuard.Should().Contain("LEFT JOIN dbo.VendorInvoice v")
+        var source = ArchivedMigrationSource.Read(MigrationFile);
+        source.Should().Contain("AddLink(migrationBuilder, \"InventorySupplierReturnPostings\", \"OriginalVendorInvoiceId\", \"VendorInvoice\")")
+            .And.NotContain("AddLink(migrationBuilder, \"InventorySupplierReturnPostings\", \"OriginalVendorInvoiceId\", \"VendorInvoices\")");
+        DispatchGuard.Should().Contain("LEFT JOIN dbo.VendorInvoice v")
             .And.NotContain("dbo.VendorInvoices");
-        InventorySupplierReturnInvoiceCredit.CreditGuard.Should().Contain("LEFT JOIN dbo.VendorInvoice v")
+        CreditGuard.Should().Contain("LEFT JOIN dbo.VendorInvoice v")
             .And.NotContain("dbo.VendorInvoices");
     }
 

@@ -90,6 +90,8 @@ public sealed class FiscalYearCloseTests
             .Where(p => p.FiscalYearId == fixture.FiscalYear.Id)
             .Select(p => p.Id)
             .SingleAsync();
+        var book = await fixture.Db.AccountingBooks.SingleAsync(item =>
+            item.TenantId == fixture.FiscalYear.TenantId && item.Code == "IFRS");
 
         fixture.Db.JournalEntries.Add(new JournalEntry
         {
@@ -99,6 +101,8 @@ public sealed class FiscalYearCloseTests
             Description = "Unposted year-end adjustment",
             EntryDate = new DateTime(2026, 12, 31),
             FiscalPeriodId = periodId,
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             PostingStatus = "Draft",
             ApprovalStatus = "Draft"
         });
@@ -127,6 +131,8 @@ public sealed class FiscalYearCloseTests
             .Where(p => p.FiscalYearId == fixture.FiscalYear.Id)
             .Select(p => p.Id)
             .SingleAsync();
+        var book = await fixture.Db.AccountingBooks.SingleAsync(item =>
+            item.TenantId == fixture.FiscalYear.TenantId && item.Code == "IFRS");
 
         fixture.Db.AccountTransactions.Add(new AccountTransaction
         {
@@ -135,6 +141,8 @@ public sealed class FiscalYearCloseTests
             AccountId = fixture.Expense.Id,
             JournalEntryId = Guid.NewGuid(),
             FiscalPeriodId = periodId,
+            AccountingBookId = book.Id,
+            BookClassification = book.Code,
             TransactionDate = new DateTime(2026, 12, 31),
             PostingStatus = "Draft",
             FunctionalCurrencyCode = "GHS",
@@ -235,6 +243,14 @@ public sealed class FiscalYearCloseTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
 
         var fiscalYear = new FiscalYear
         {
@@ -265,14 +281,18 @@ public sealed class FiscalYearCloseTests
             PeriodDays = 365,
             PeriodStatus = "Open",
             IsOpen = true,
-            IsClosed = false
+            IsClosed = false,
+            AllowFutureDating = true
         };
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
 
         var cash = SeedAccount(db, tenantId, "1000", AccountType.Asset);
         var revenue = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
         var expense = SeedAccount(db, tenantId, "5000", AccountType.Expense);
         var retainedEarnings = SeedAccount(db, tenantId, "3900", AccountType.Equity);
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(
+            db, tenantId, book, cash, revenue, expense, retainedEarnings);
         await db.SaveChangesAsync();
 
         var currentUser = CreateCurrentUser(tenantId);
@@ -318,9 +338,9 @@ public sealed class FiscalYearCloseTests
         return new Fixture(db, glService, fiscalYear, revenue, expense, retainedEarnings);
     }
 
-    private static FinancePostingRequestDto ActivityRequest(Guid tenantId, string reference, FinancePostingLineDto[] lines)
+    private static FinancePostingRequestV2Dto ActivityRequest(Guid tenantId, string reference, FinancePostingLineDto[] lines)
     {
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "YearActivity",
@@ -331,7 +351,7 @@ public sealed class FiscalYearCloseTests
             Description = $"Activity {reference}",
             PostingDate = new DateTime(2026, 6, 15),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = lines
         };

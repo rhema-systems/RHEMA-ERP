@@ -75,9 +75,6 @@ namespace ErpSystem.Core.DTOs.Finance
         /// <summary>Update frequency: "Daily", "Hourly", "RealTime", "Weekly"</summary>
         public string ExchangeRateUpdateFrequency { get; set; } = "Daily";
         
-        /// <summary>Default rate type: "Daily", "Average", "MonthEnd", "Budget", "Fixed"</summary>
-        public string DefaultRateType { get; set; } = "Daily";
-        
         /// <summary>TRUE if currency is active for new transactions</summary>
         public bool IsActive { get; set; }
         
@@ -173,9 +170,6 @@ namespace ErpSystem.Core.DTOs.Finance
         [MaxLength(20)]
         public string ExchangeRateUpdateFrequency { get; set; } = "Daily";
         
-        [MaxLength(20)]
-        public string DefaultRateType { get; set; } = "Daily";
-        
         public bool IsActive { get; set; } = true;
         
         [MaxLength(2)]
@@ -248,9 +242,6 @@ namespace ErpSystem.Core.DTOs.Finance
         
         [MaxLength(20)]
         public string ExchangeRateUpdateFrequency { get; set; } = "Daily";
-        
-        [MaxLength(20)]
-        public string DefaultRateType { get; set; } = "Daily";
         
         public bool IsActive { get; set; } = true;
     }

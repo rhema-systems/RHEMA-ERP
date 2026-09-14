@@ -27,6 +27,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? UpdatedBy { get; set; }
         public List<ProjectCostLineDto> CostLines { get; set; } = new();
         public List<ProjectSettlementRuleDto> SettlementRules { get; set; } = new();
+        public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
     }
 
     public class ProjectCostLineDto
@@ -92,5 +93,10 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid TargetFixedAssetCategoryId { get; set; }
         public string ProposedAssetName { get; set; } = string.Empty;
         public decimal AllocationPercentage { get; set; }
+    }
+
+    public sealed class CapitalizeCapitalProjectDto
+    {
+        public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
     }
 }

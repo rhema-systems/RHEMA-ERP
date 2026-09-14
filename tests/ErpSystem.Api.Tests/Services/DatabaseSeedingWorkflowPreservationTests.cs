@@ -139,11 +139,13 @@ public partial class DatabaseSeedingServiceTests
         var api = Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api");
         var program = File.ReadAllText(Path.Combine(api, "Program.cs"));
         program.Should().Contain($"app.Configuration.GetValue(\"StartupInitialization:{setting}\", false)");
-        foreach (var file in new[] { "appsettings.json", "appsettings.Development.json" })
+        foreach (var path in Directory.GetFiles(api, "appsettings*.json", SearchOption.TopDirectoryOnly))
         {
-            using var configuration = JsonDocument.Parse(File.ReadAllText(Path.Combine(api, file)),
+            using var configuration = JsonDocument.Parse(File.ReadAllText(path),
                 new JsonDocumentOptions { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true });
-            configuration.RootElement.GetProperty("StartupInitialization").GetProperty(setting).GetBoolean().Should().BeFalse();
+            if (configuration.RootElement.TryGetProperty("StartupInitialization", out var startup) &&
+                startup.TryGetProperty(setting, out var configured))
+                configured.GetBoolean().Should().BeFalse();
         }
         var explicitConfiguration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
         { [$"StartupInitialization:{setting}"] = "true" }).Build();

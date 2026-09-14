@@ -46,6 +46,13 @@ namespace ErpSystem.Core.Interfaces.Finance
         /// <param name="cancellationToken">Optional cancellation token.</param>
         Task<AccountDto?> GetByAccountNumberAsync(string accountNumber, CancellationToken cancellationToken = default);
 
+        Task<AccountTransactionInquiryPageDto> GetTransactionsAsync(
+            Guid accountId,
+            string accountingBookCode,
+            int page = 1,
+            int pageSize = 10,
+            CancellationToken cancellationToken = default);
+
         /// <summary>
         /// Retrieves a list of all accounts for the current tenant.
         /// 

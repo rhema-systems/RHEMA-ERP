@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Documents;
 using ErpSystem.Core.Interfaces.Finance;
@@ -29,6 +30,7 @@ public class CashTransactionService : ICashTransactionService
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowIntegrationService? _workflowIntegrationService;
     private readonly IFinanceControlledDocumentIssueService? _controlledDocumentIssueService;
+    private readonly IFinanceSourceDimensionService? _sourceDimensions;
 
     public CashTransactionService(
         ApplicationDbContext context,
@@ -41,7 +43,8 @@ public class CashTransactionService : ICashTransactionService
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IWorkflowIntegrationService? workflowIntegrationService = null,
-        IFinanceControlledDocumentIssueService? controlledDocumentIssueService = null)
+        IFinanceControlledDocumentIssueService? controlledDocumentIssueService = null,
+        IFinanceSourceDimensionService? sourceDimensions = null)
     {
         _context = context;
         _tenantSettingsService = tenantSettingsService;
@@ -53,6 +56,7 @@ public class CashTransactionService : ICashTransactionService
         _financeAuditService = financeAuditService;
         _workflowIntegrationService = workflowIntegrationService;
         _controlledDocumentIssueService = controlledDocumentIssueService;
+        _sourceDimensions = sourceDimensions;
     }
 
     private Guid TenantId => _currentUserService.GetRequiredFinanceTenantId();
@@ -138,6 +142,21 @@ public class CashTransactionService : ICashTransactionService
             result.PaymentSlipIssuance = await _controlledDocumentIssueService.GetSummaryAsync(
                 DocumentTypes.FinanceCashBankPaymentSlip,
                 result.Id);
+        }
+
+        if (result != null && _sourceDimensions is not null
+            && result.TransactionType is CashTransactionType.Receipt
+                or CashTransactionType.Payment
+                or CashTransactionType.Transfer)
+        {
+            var dimensionSource = await LoadCashTransactionForDimensionAsync(result.Id, default);
+            dimensionSource = await ResolvePostingSourceTransactionAsync(dimensionSource, default);
+            var producer = await ResolveCashProducerAsync(dimensionSource, requestedProducer: null, default);
+            if (await HasCashDimensionProvenanceAsync(dimensionSource, producer, default))
+                result.FinanceDimensions = await _sourceDimensions.GetAsync(
+                    producer, dimensionSource.Id, dimensionSource.TransactionDate,
+                    await BuildCashDimensionLineContextsAsync(dimensionSource, producer, default),
+                    default);
         }
 
         return result;
@@ -284,23 +303,47 @@ public class CashTransactionService : ICashTransactionService
             .ToListAsync();
     }
 
-    public async Task<CashTransactionDto> CreateReceiptAsync(CreateCashReceiptDto dto)
+    public Task<CashTransactionDto> CreateReceiptAsync(CreateCashReceiptDto dto) =>
+        CreateReceiptAsync(dto, executionStrategyScope: false, producer: null, cancellationToken: default);
+
+    public Task<CashTransactionDto> CreateReceiptForProducerAsync(
+        CreateCashReceiptDto dto,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default)
     {
+        ValidateTrustedCashProducer(producer);
+        return CreateReceiptAsync(dto, executionStrategyScope: false, producer, cancellationToken);
+    }
+
+    private async Task<CashTransactionDto> CreateReceiptAsync(
+        CreateCashReceiptDto dto,
+        bool executionStrategyScope,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken)
+    {
+        if (!executionStrategyScope)
+            return await _context.Database.CreateExecutionStrategy().ExecuteAsync(
+                () => CreateReceiptAsync(dto, executionStrategyScope: true, producer, cancellationToken));
+        await using var dbTransaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
         var tenantId = TenantId;
         await _financeAccessScopeService.EnsureBankAccountAccessAsync(
             dto.BankAccountId,
             FinanceAccessLevel.Operate);
         await ValidateBankAccountAsync(dto.BankAccountId, tenantId, "receipt");
         await ValidatePaymentMethodAsync(dto.PaymentMethodId, tenantId, dto.ReferenceNumber, dto.BankAccountId, "receipt");
-        if (dto.GLAccountId.HasValue)
-        {
-            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "receipt");
-        }
+        if (!dto.GLAccountId.HasValue)
+            throw new InvalidOperationException("A direct cash receipt requires an offset GL account.");
+        await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "receipt");
 
         var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.CashReceipt, dto.TransactionDate);
         var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
         var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
-        var exchangeRate = ResolveExchangeRate(transactionCurrency, baseCurrencyCode, dto.ExchangeRate);
+        var rateSnapshot = await ResolveDirectCashRateSnapshotAsync(
+            tenantId, baseCurrencyCode, transactionCurrency, dto.TransactionDate, dto.ExchangeRateId);
+        if (dto.ExchangeRate.HasValue && RoundRate(dto.ExchangeRate.Value) != RoundRate(rateSnapshot.Rate))
+            throw new InvalidOperationException("The cash receipt exchange-rate value does not match the approved rate record.");
+        var exchangeRate = rateSnapshot.Rate;
         var baseAmount = ToBaseAmount(dto.Amount, exchangeRate);
 
         var transaction = new CashTransaction
@@ -313,6 +356,10 @@ public class CashTransactionService : ICashTransactionService
             Amount = dto.Amount,
             Currency = transactionCurrency,
             ExchangeRate = exchangeRate,
+            ExchangeRateId = rateSnapshot.ExchangeRateId,
+            ExchangeRateSource = rateSnapshot.RateSource,
+            ExchangeRateDate = rateSnapshot.RateDate,
+            ExchangeRateQuoteSide = rateSnapshot.QuoteSide,
             BaseAmount = baseAmount,
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
@@ -326,6 +373,14 @@ public class CashTransactionService : ICashTransactionService
 
         _context.Set<CashTransaction>().Add(transaction);
         await _context.SaveChangesAsync();
+        await SynchronizeCashDimensionsAsync(
+            transaction,
+            dto.FinanceDimensions,
+            producer ?? CashProducer(transaction),
+            cancellationToken);
+        if (producer?.RouteId == FinanceDimensionRouteId.FinanceBankReconciliationAdjustment)
+            await ValidateAndFreezeCashDimensionsAsync(
+                transaction, producer, cancellationToken);
 
         await RecordCashBankAuditAsync(
             FinanceAuditEvents.CashBankTransactionCaptured,
@@ -344,26 +399,51 @@ public class CashTransactionService : ICashTransactionService
             comment: "Cash/bank receipt captured as an unposted operational transaction.",
             cancellationToken: default);
 
+        await dbTransaction.CommitAsync(cancellationToken);
         return await GetByIdAsync(transaction.Id) ?? throw new Exception("Failed to create receipt");
     }
 
-    public async Task<CashTransactionDto> CreatePaymentAsync(CreateCashPaymentDto dto)
+    public Task<CashTransactionDto> CreatePaymentAsync(CreateCashPaymentDto dto) =>
+        CreatePaymentAsync(dto, executionStrategyScope: false, producer: null, cancellationToken: default);
+
+    public Task<CashTransactionDto> CreatePaymentForProducerAsync(
+        CreateCashPaymentDto dto,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default)
     {
+        ValidateTrustedCashProducer(producer);
+        return CreatePaymentAsync(dto, executionStrategyScope: false, producer, cancellationToken);
+    }
+
+    private async Task<CashTransactionDto> CreatePaymentAsync(
+        CreateCashPaymentDto dto,
+        bool executionStrategyScope,
+        FinancePostingProducerContext? producer,
+        CancellationToken cancellationToken)
+    {
+        if (!executionStrategyScope)
+            return await _context.Database.CreateExecutionStrategy().ExecuteAsync(
+                () => CreatePaymentAsync(dto, executionStrategyScope: true, producer, cancellationToken));
+        await using var dbTransaction = await _context.Database.BeginTransactionAsync(
+            IsolationLevel.Serializable, cancellationToken);
         var tenantId = TenantId;
         await _financeAccessScopeService.EnsureBankAccountAccessAsync(
             dto.BankAccountId,
             FinanceAccessLevel.Operate);
         await ValidateBankAccountAsync(dto.BankAccountId, tenantId, "payment");
         await ValidatePaymentMethodAsync(dto.PaymentMethodId, tenantId, dto.ReferenceNumber, dto.BankAccountId, "payment");
-        if (dto.GLAccountId.HasValue)
-        {
-            await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "payment");
-        }
+        if (!dto.GLAccountId.HasValue)
+            throw new InvalidOperationException("A direct cash payment requires an offset GL account.");
+        await ValidateGLAccountAsync(dto.GLAccountId.Value, tenantId, "payment");
 
         var transactionNumber = await GenerateTransactionNumberAsync(FinanceDocumentTypes.CashPayment, dto.TransactionDate);
         var baseCurrencyCode = await _tenantSettingsService.GetBaseCurrencyAsync();
         var transactionCurrency = string.IsNullOrWhiteSpace(dto.Currency) ? baseCurrencyCode : dto.Currency.Trim().ToUpperInvariant();
-        var exchangeRate = ResolveExchangeRate(transactionCurrency, baseCurrencyCode, dto.ExchangeRate);
+        var rateSnapshot = await ResolveDirectCashRateSnapshotAsync(
+            tenantId, baseCurrencyCode, transactionCurrency, dto.TransactionDate, dto.ExchangeRateId);
+        if (dto.ExchangeRate.HasValue && RoundRate(dto.ExchangeRate.Value) != RoundRate(rateSnapshot.Rate))
+            throw new InvalidOperationException("The cash payment exchange-rate value does not match the approved rate record.");
+        var exchangeRate = rateSnapshot.Rate;
         var baseAmount = ToBaseAmount(dto.Amount, exchangeRate);
 
         var transaction = new CashTransaction
@@ -376,6 +456,10 @@ public class CashTransactionService : ICashTransactionService
             Amount = dto.Amount,
             Currency = transactionCurrency,
             ExchangeRate = exchangeRate,
+            ExchangeRateId = rateSnapshot.ExchangeRateId,
+            ExchangeRateSource = rateSnapshot.RateSource,
+            ExchangeRateDate = rateSnapshot.RateDate,
+            ExchangeRateQuoteSide = rateSnapshot.QuoteSide,
             BaseAmount = baseAmount,
             PaymentMethodId = dto.PaymentMethodId,
             ReferenceNumber = dto.ReferenceNumber,
@@ -390,6 +474,14 @@ public class CashTransactionService : ICashTransactionService
 
         _context.Set<CashTransaction>().Add(transaction);
         await _context.SaveChangesAsync();
+        await SynchronizeCashDimensionsAsync(
+            transaction,
+            dto.FinanceDimensions,
+            producer ?? CashProducer(transaction),
+            cancellationToken);
+        if (producer?.RouteId == FinanceDimensionRouteId.FinanceBankReconciliationAdjustment)
+            await ValidateAndFreezeCashDimensionsAsync(
+                transaction, producer, cancellationToken);
 
         await RecordCashBankAuditAsync(
             FinanceAuditEvents.CashBankTransactionCaptured,
@@ -408,6 +500,7 @@ public class CashTransactionService : ICashTransactionService
             comment: "Cash/bank payment captured as an unposted operational transaction.",
             cancellationToken: default);
 
+        await dbTransaction.CommitAsync(cancellationToken);
         return await GetByIdAsync(transaction.Id) ?? throw new Exception("Failed to create payment");
     }
 
@@ -437,8 +530,17 @@ public class CashTransactionService : ICashTransactionService
         return MapBankTransferPreview(plan);
     }
 
-    public async Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(CreateBankTransferDto dto)
+    public Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(
+        CreateBankTransferDto dto) =>
+        CreateTransferAsync(dto, executionStrategyScope: false);
+
+    private async Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync(
+        CreateBankTransferDto dto,
+        bool executionStrategyScope)
     {
+        if (!executionStrategyScope)
+            return await _context.Database.CreateExecutionStrategy().ExecuteAsync(
+                () => CreateTransferAsync(dto, executionStrategyScope: true));
         ArgumentNullException.ThrowIfNull(dto);
         ValidateTransferRequestBasics(dto);
 
@@ -527,6 +629,11 @@ public class CashTransactionService : ICashTransactionService
 
         _context.Set<CashTransaction>().AddRange(fromTransaction, toTransaction);
         await _context.SaveChangesAsync();
+        await SynchronizeCashDimensionsAsync(
+            fromTransaction,
+            dto.FinanceDimensions,
+            CashProducer(fromTransaction),
+            default);
 
         await RecordCashBankAuditAsync(
             plan.IsCrossCurrency
@@ -571,6 +678,7 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto> SubmitAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Operate, cancellationToken);
+        transaction = await ResolvePostingSourceTransactionAsync(transaction, cancellationToken);
         if (transaction.IsPosted || transaction.ApprovalStatus == CashTransactionApprovalStatus.Posted)
         {
             throw new InvalidOperationException("Posted cash/bank transactions cannot be submitted.");
@@ -585,6 +693,11 @@ public class CashTransactionService : ICashTransactionService
         {
             throw new InvalidOperationException("Only captured or returned cash/bank transactions can be submitted.");
         }
+
+        await ValidateAndFreezeCashDimensionsAsync(
+            transaction,
+            await ResolveCashProducerAsync(transaction, requestedProducer: null, cancellationToken),
+            cancellationToken);
 
         var workflow = RequireWorkflowIntegration();
         var workflowResult = await workflow.SubmitAsync(CashTransactionWorkflowEntityType, transaction.Id);
@@ -624,6 +737,7 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto> ApproveAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default)
     {
         var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Approve, cancellationToken);
+        transaction = await ResolvePostingSourceTransactionAsync(transaction, cancellationToken);
         if (transaction.ApprovalStatus != CashTransactionApprovalStatus.Submitted)
         {
             throw new InvalidOperationException("Only submitted cash/bank transactions can be approved.");
@@ -635,6 +749,11 @@ public class CashTransactionService : ICashTransactionService
         {
             throw new UnauthorizedAccessException("The current user is not authorized to approve this cash/bank workflow step.");
         }
+
+        await ValidateAndFreezeCashDimensionsAsync(
+            transaction,
+            await ResolveCashProducerAsync(transaction, requestedProducer: null, cancellationToken),
+            cancellationToken);
 
         var workflowResult = await workflow.ProcessApprovalAsync(CashTransactionWorkflowEntityType, transaction.Id, userId, "Approve", comments);
         EnsureWorkflowSucceeded(workflowResult, "approve");
@@ -710,6 +829,7 @@ public class CashTransactionService : ICashTransactionService
     public async Task<CashTransactionDto> ReturnAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default)
     {
         var transaction = await LoadCashTransactionForWorkflowAsync(id, FinanceAccessLevel.Approve, cancellationToken);
+        transaction = await ResolvePostingSourceTransactionAsync(transaction, cancellationToken);
         if (transaction.ApprovalStatus != CashTransactionApprovalStatus.Submitted)
         {
             throw new InvalidOperationException("Only submitted cash/bank transactions can be returned for changes.");
@@ -734,6 +854,10 @@ public class CashTransactionService : ICashTransactionService
         transaction.UpdatedBy = _currentUserService.UserName;
 
         await _context.SaveChangesAsync(cancellationToken);
+        var producer = await ResolveCashProducerAsync(
+            transaction, requestedProducer: null, cancellationToken);
+        await SynchronizeCashDimensionsAsync(
+            transaction, input: null, producer, cancellationToken);
         await RecordCashBankAuditAsync(
             FinanceAuditEvents.CashBankTransactionReturned,
             transaction,
@@ -803,7 +927,24 @@ public class CashTransactionService : ICashTransactionService
         return await GetByIdAsync(transaction.Id) ?? throw new Exception("Failed to load cancelled cash/bank transaction");
     }
 
-    public async Task<CashTransactionDto> PostAsync(Guid id, CancellationToken cancellationToken = default)
+    public Task<CashTransactionDto> PostAsync(
+        Guid id,
+        CancellationToken cancellationToken = default) =>
+        PostAsync(id, requestedProducer: null, cancellationToken);
+
+    public Task<CashTransactionDto> PostForProducerAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTrustedCashProducer(producer);
+        return PostAsync(id, producer, cancellationToken);
+    }
+
+    private async Task<CashTransactionDto> PostAsync(
+        Guid id,
+        FinancePostingProducerContext? requestedProducer,
+        CancellationToken cancellationToken)
     {
         if (_financePostingEngine == null)
         {
@@ -812,10 +953,13 @@ public class CashTransactionService : ICashTransactionService
 
         var requestedTransaction = await LoadCashTransactionForPostingAsync(id, cancellationToken);
         var sourceTransaction = await ResolvePostingSourceTransactionAsync(requestedTransaction, cancellationToken);
+        var producer = await ResolveCashProducerAsync(
+            sourceTransaction, requestedProducer, cancellationToken);
         await EnsureTransactionAccessAsync(sourceTransaction, FinanceAccessLevel.Operate, cancellationToken);
         var wasAlreadyLinked = sourceTransaction.JournalEntryId.HasValue;
 
         await EnforceCashBankPostingEligibilityAsync(sourceTransaction, cancellationToken);
+        await ValidateAndFreezeCashDimensionsAsync(sourceTransaction, producer, cancellationToken);
 
         // Keep the posting engine, cash transaction flags, and bank read-side
         // balance snapshots in one commit so retry/idempotency cannot strand them.
@@ -823,8 +967,10 @@ public class CashTransactionService : ICashTransactionService
 
         try
         {
-            var postingRequest = await BuildCashBankPostingRequestAsync(sourceTransaction, cancellationToken);
-            var postingResult = await _financePostingEngine.PostAsync(postingRequest, cancellationToken);
+            var postingRequest = await BuildCashBankPostingRequestAsync(
+                sourceTransaction, producer, cancellationToken);
+            var postingResult = await _financePostingEngine.PostAsync(
+                postingRequest, producer, cancellationToken);
 
             if (sourceTransaction.JournalEntryId.HasValue && sourceTransaction.JournalEntryId.Value != postingResult.JournalEntryId)
             {
@@ -1015,7 +1161,8 @@ public class CashTransactionService : ICashTransactionService
             .ThenBy(item => item.TransactionNumber)
             .ToListAsync(cancellationToken);
 
-        var sourceDocumentType = GetCashBankSourceDocumentType(source);
+        var sourceDocumentType = (await ResolveCashProducerAsync(
+            source, requestedProducer: null, cancellationToken)).Definition.DocumentType;
         var postingEvents = await _context.FinancePostingEvents
             .AsNoTracking()
             .Include(item => item.JournalEntry)
@@ -1040,7 +1187,7 @@ public class CashTransactionService : ICashTransactionService
 
         var trace = new CashTransactionTraceDto
         {
-            Transaction = MapCashTransactionDto(requested),
+            Transaction = await GetByIdAsync(requested.Id) ?? MapCashTransactionDto(requested),
             RelatedTransactions = related
                 .Where(item => item.Id != requested.Id)
                 .Select(MapCashTransactionDto)
@@ -1165,7 +1312,8 @@ public class CashTransactionService : ICashTransactionService
                     throw new InvalidOperationException("A compensating bank-transfer pair cannot itself be reversed.");
             }
 
-            var sourceDocumentType = GetCashBankSourceDocumentType(source);
+            var sourceDocumentType = (await ResolveCashProducerAsync(
+                source, requestedProducer: null, cancellationToken)).Definition.DocumentType;
             var originalPosting = await _context.FinancePostingEvents
                 .SingleOrDefaultAsync(item =>
                     item.TenantId == TenantId &&
@@ -1185,7 +1333,7 @@ public class CashTransactionService : ICashTransactionService
                 policy.Reason,
                 policy.ReversalDate,
                 cancellationToken);
-            var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+            var reversalResult = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
             {
                 SourceModule = "CASHBANK",
                 SourceDocumentType = sourceDocumentType,
@@ -1196,7 +1344,7 @@ public class CashTransactionService : ICashTransactionService
                 Description = $"Reverse {source.TransactionNumber}: {policy.Reason}",
                 PostingDate = policy.ReversalDate,
                 JournalType = $"{GetCashBankJournalType(source)} Reversal",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = originalPosting.FunctionalCurrencyCode,
                 ReversalOfJournalEntryId = reversalPlan.OriginalJournalEntryId,
                 ReversalReason = policy.Reason,
@@ -1383,7 +1531,9 @@ public class CashTransactionService : ICashTransactionService
         }
     }
 
-    private async Task EnforceCashBankPostingEligibilityAsync(CashTransaction transaction, CancellationToken cancellationToken)
+    private async Task EnforceCashBankPostingEligibilityAsync(
+        CashTransaction transaction,
+        CancellationToken cancellationToken)
     {
         if (transaction.IsPosted || transaction.JournalEntryId.HasValue || transaction.ApprovalStatus == CashTransactionApprovalStatus.Posted)
         {
@@ -1546,6 +1696,245 @@ public class CashTransactionService : ICashTransactionService
             ?? throw new InvalidOperationException("Cash/bank transaction was not found for this tenant.");
     }
 
+    private async Task<CashTransaction> LoadCashTransactionForDimensionAsync(
+        Guid id,
+        CancellationToken cancellationToken) =>
+        await _context.Set<CashTransaction>()
+            .Include(item => item.BankAccount)
+            .Include(item => item.ToBankAccount)
+            .SingleOrDefaultAsync(item => item.TenantId == TenantId
+                && item.Id == id && !item.IsDeleted, cancellationToken)
+        ?? throw new InvalidOperationException("Cash/bank transaction was not found for this tenant.");
+
+    private async Task<IReadOnlyList<FinanceSourceDocumentLineContext>> BuildCashDimensionLineContextsAsync(
+        CashTransaction source,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken)
+    {
+        if (source.TransactionType is CashTransactionType.Receipt or CashTransactionType.Payment)
+        {
+            var offsetAccountId = source.GLAccountId
+                ?? throw new InvalidOperationException(
+                    "A direct cash transaction requires an offset GL account before Finance dimensions can be validated.");
+            if (producer.RouteId == FinanceDimensionRouteId.FinanceBankReconciliationAdjustment)
+            {
+                var bankAccountId = await _context.BankAccounts.AsNoTracking()
+                    .Where(item => item.TenantId == TenantId && item.Id == source.BankAccountId
+                        && !item.IsDeleted)
+                    .Select(item => item.GLAccountId)
+                    .SingleOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException(
+                        "The reconciliation bank account must have a tenant-scoped GL account before Finance dimensions can be validated.");
+                return new[]
+                {
+                    new FinanceSourceDocumentLineContext(
+                        FinanceReconciliationDimensionIdentity.BankLine(source.Id), bankAccountId),
+                    new FinanceSourceDocumentLineContext(
+                        FinanceReconciliationDimensionIdentity.OffsetLine(source.Id), offsetAccountId)
+                };
+            }
+            return new[] { new FinanceSourceDocumentLineContext(source.Id, offsetAccountId) };
+        }
+        if (source.TransactionType != CashTransactionType.Transfer)
+            throw new InvalidOperationException(
+                "This cash/bank route is outside the certified Finance dimension scope.");
+
+        var outgoing = IsIncomingTransferLeg(source)
+            ? await ResolvePostingSourceTransactionAsync(source, cancellationToken)
+            : source;
+        var incoming = await FindLinkedTransferLegAsync(outgoing, cancellationToken)
+            ?? throw new InvalidOperationException(
+                "The transfer destination leg was not found for Finance dimension validation.");
+        var bankAccounts = await _context.BankAccounts.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted
+                && (item.Id == outgoing.BankAccountId || item.Id == incoming.BankAccountId))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        if (!bankAccounts.TryGetValue(outgoing.BankAccountId, out var sourceBank)
+            || !sourceBank.GLAccountId.HasValue
+            || !bankAccounts.TryGetValue(incoming.BankAccountId, out var destinationBank)
+            || !destinationBank.GLAccountId.HasValue)
+            throw new InvalidOperationException(
+                "Both transfer bank accounts must have tenant-scoped GL accounts before dimensions can be captured.");
+        return new[]
+        {
+            new FinanceSourceDocumentLineContext(outgoing.Id, sourceBank.GLAccountId.Value),
+            new FinanceSourceDocumentLineContext(incoming.Id, destinationBank.GLAccountId.Value)
+        };
+    }
+
+    private async Task<FinanceSourceDocumentDimensionDto?> SynchronizeCashDimensionsAsync(
+        CashTransaction source,
+        FinanceSourceDocumentDimensionInputDto? input,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is null)
+            return null;
+        source = await ResolvePostingSourceTransactionAsync(source, cancellationToken);
+        var lines = await BuildCashDimensionLineContextsAsync(source, producer, cancellationToken);
+        FinanceSourceDocumentDimensionInputDto? trustedInput = input;
+        if (input is not null)
+        {
+            if (input.Lines.Count > lines.Count)
+                throw new InvalidOperationException(
+                    "The Finance dimension payload contains more lines than the cash/bank source document.");
+            var contextsByAccount = lines.ToDictionary(item => item.AccountId);
+            var normalized = new List<FinanceSourceLineDimensionInputDto>();
+            foreach (var supplied in input.Lines)
+            {
+                if (!contextsByAccount.TryGetValue(supplied.AccountId, out var context))
+                    throw new InvalidOperationException(
+                        "A Finance dimension line does not match a server-resolved cash/bank account.");
+                if (normalized.Any(item => item.SourceLineId == context.SourceLineId))
+                    throw new InvalidOperationException(
+                        "A cash/bank economic line may receive only one Finance dimension assignment.");
+                normalized.Add(new FinanceSourceLineDimensionInputDto
+                {
+                    SourceLineId = context.SourceLineId,
+                    AccountId = context.AccountId,
+                    Dimensions = supplied.Dimensions
+                });
+            }
+            trustedInput = new FinanceSourceDocumentDimensionInputDto
+            {
+                DefaultDimensions = input.DefaultDimensions,
+                ApplyDefaultToEligibleLines = input.ApplyDefaultToEligibleLines,
+                Lines = normalized
+            };
+        }
+
+        return await _sourceDimensions.SynchronizeDraftAsync(
+            producer, source.Id, source.TransactionDate, lines, trustedInput,
+            inheritDefaultForUnassignedLines: true,
+            budgetReservationSourceDocumentType: null,
+            reason: "Cash/bank Finance dimensions synchronized from the captured source.",
+            cancellationToken);
+    }
+
+    public async Task<FinanceSourceDocumentDimensionDto?> ValidateDimensionsForProducerAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateTrustedCashProducer(producer);
+        if (_sourceDimensions is null)
+            return null;
+        var source = await LoadCashTransactionForDimensionAsync(id, cancellationToken);
+        source = await ResolvePostingSourceTransactionAsync(source, cancellationToken);
+        producer = await ResolveCashProducerAsync(source, producer, cancellationToken);
+        if (!await HasCashDimensionProvenanceAsync(source, producer, cancellationToken))
+            await SynchronizeCashDimensionsAsync(
+                source, input: null, producer, cancellationToken);
+        var result = await _sourceDimensions.ValidateAndFreezeAsync(
+            producer, source.Id, source.TransactionDate,
+            await BuildCashDimensionLineContextsAsync(source, producer, cancellationToken),
+            requireCurrentBudgetEvidence: false,
+            cancellationToken);
+        if (result.ReadinessWarnings.Any(message =>
+                message.Contains(" is required ", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                "Required Finance dimensions are missing from one or more cash/bank economic lines.");
+        return result;
+    }
+
+    private async Task ValidateAndFreezeCashDimensionsAsync(
+        CashTransaction source,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is null)
+            return;
+        source = await ResolvePostingSourceTransactionAsync(source, cancellationToken);
+        if (!await HasCashDimensionProvenanceAsync(source, producer, cancellationToken))
+            await SynchronizeCashDimensionsAsync(
+                source, input: null, producer, cancellationToken);
+        var result = await _sourceDimensions.ValidateAndFreezeAsync(
+            producer, source.Id, source.TransactionDate,
+            await BuildCashDimensionLineContextsAsync(source, producer, cancellationToken),
+            requireCurrentBudgetEvidence: false,
+            cancellationToken);
+        if (result.ReadinessWarnings.Any(message =>
+                message.Contains(" is required ", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                "Required Finance dimensions are missing from one or more cash/bank economic lines.");
+    }
+
+    private async Task<bool> HasCashDimensionProvenanceAsync(
+        CashTransaction source,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken)
+    {
+        return await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+            .AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted
+                && item.RouteId == producer.RouteId && item.SourceDocumentId == source.Id
+                && !item.SourceLineId.HasValue,
+                cancellationToken);
+    }
+
+    private async Task<FinancePostingProducerContext> ResolveCashProducerAsync(
+        CashTransaction source,
+        FinancePostingProducerContext? requestedProducer,
+        CancellationToken cancellationToken)
+    {
+        var persistedRoutes = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted
+                && item.SourceDocumentId == source.Id && !item.SourceLineId.HasValue)
+            .Select(item => item.RouteId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        if (persistedRoutes.Count > 1)
+            throw new InvalidOperationException(
+                "The cash/bank source document has conflicting trusted Finance route provenance.");
+        if (requestedProducer is not null)
+        {
+            if (persistedRoutes.Count == 1 && persistedRoutes[0] != requestedProducer.RouteId)
+                throw new InvalidOperationException(
+                    "The requested Finance producer does not match the persisted cash/bank route provenance.");
+            EnsureCashProducerCompatible(source, requestedProducer);
+            return requestedProducer;
+        }
+        var resolved = persistedRoutes.Count == 1
+            ? new FinancePostingProducerContext(persistedRoutes[0])
+            : CashProducer(source);
+        EnsureCashProducerCompatible(source, resolved);
+        return resolved;
+    }
+
+    private static void ValidateTrustedCashProducer(FinancePostingProducerContext producer)
+    {
+        ArgumentNullException.ThrowIfNull(producer);
+        if (producer.RouteId != FinanceDimensionRouteId.FinanceBankReconciliationAdjustment)
+            throw new InvalidOperationException(
+                "This Finance cash adapter accepts only the compiled bank-reconciliation adjustment route.");
+    }
+
+    private static void EnsureCashProducerCompatible(
+        CashTransaction source,
+        FinancePostingProducerContext producer)
+    {
+        if (producer.RouteId == FinanceDimensionRouteId.FinanceBankReconciliationAdjustment)
+        {
+            if (source.TransactionType is not (CashTransactionType.Receipt or CashTransactionType.Payment))
+                throw new InvalidOperationException(
+                    "The bank-reconciliation adjustment route accepts only receipt or payment cash transactions.");
+            return;
+        }
+
+        if (producer.RouteId != CashProducer(source).RouteId)
+            throw new InvalidOperationException(
+                "The persisted Finance route is incompatible with the cash/bank transaction type.");
+    }
+
+    private static FinancePostingProducerContext CashProducer(CashTransaction source) =>
+        new(source.TransactionType switch
+        {
+            CashTransactionType.Payment => FinanceDimensionRouteId.FinanceCashPayment,
+            CashTransactionType.Receipt => FinanceDimensionRouteId.FinanceCashReceipt,
+            CashTransactionType.Transfer => FinanceDimensionRouteId.FinanceCashBankTransfer,
+            _ => throw new InvalidOperationException(
+                "This cash/bank transaction is outside the certified Finance dimension routes.")
+        });
+
     private async Task<CashTransaction> ResolvePostingSourceTransactionAsync(
         CashTransaction transaction,
         CancellationToken cancellationToken)
@@ -1644,8 +2033,9 @@ public class CashTransactionService : ICashTransactionService
         return await query.FirstOrDefaultAsync(cancellationToken);
     }
 
-    private async Task<FinancePostingRequestDto> BuildCashBankPostingRequestAsync(
+    private async Task<FinancePostingRequestV2Dto> BuildCashBankPostingRequestAsync(
         CashTransaction transaction,
+        FinancePostingProducerContext producer,
         CancellationToken cancellationToken)
     {
         var tenantId = TenantId;
@@ -1659,7 +2049,7 @@ public class CashTransactionService : ICashTransactionService
             throw new InvalidOperationException("Cash/bank transaction amount must be greater than zero.");
         }
 
-        var sourceDocumentType = GetCashBankSourceDocumentType(transaction);
+        var sourceDocumentType = producer.Definition.DocumentType;
         if (transaction.IsPosted || transaction.JournalEntryId.HasValue)
         {
             var hasPostingEvent = await _context.FinancePostingEvents
@@ -1699,12 +2089,16 @@ public class CashTransactionService : ICashTransactionService
         var description = string.IsNullOrWhiteSpace(transaction.Description)
             ? $"{transaction.TransactionType} {transaction.TransactionNumber}"
             : transaction.Description.Trim();
+        var sourceDimensions = _sourceDimensions is null
+            ? new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>()
+            : await _sourceDimensions.GetPostingDimensionsAsync(
+                producer, transaction.Id, cancellationToken);
 
         var lines = transaction.TransactionType switch
         {
-            CashTransactionType.Receipt => await BuildReceiptLinesAsync(transaction, description, transactionCurrency, exchangeRate, tenantId, cancellationToken),
-            CashTransactionType.Payment => await BuildPaymentLinesAsync(transaction, description, transactionCurrency, exchangeRate, tenantId, cancellationToken),
-            CashTransactionType.Transfer => await BuildTransferLinesAsync(transaction, description, baseCurrencyCode, tenantId, cancellationToken),
+            CashTransactionType.Receipt => await BuildReceiptLinesAsync(transaction, producer, description, transactionCurrency, exchangeRate, tenantId, sourceDimensions, cancellationToken),
+            CashTransactionType.Payment => await BuildPaymentLinesAsync(transaction, producer, description, transactionCurrency, exchangeRate, tenantId, sourceDimensions, cancellationToken),
+            CashTransactionType.Transfer => await BuildTransferLinesAsync(transaction, description, baseCurrencyCode, tenantId, sourceDimensions, cancellationToken),
             _ => throw new InvalidOperationException("Unsupported cash/bank transaction type.")
         };
 
@@ -1715,7 +2109,7 @@ public class CashTransactionService : ICashTransactionService
             throw new InvalidOperationException("Cash/bank posting request is not balanced.");
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "CASHBANK",
             SourceDocumentType = sourceDocumentType,
@@ -1728,7 +2122,7 @@ public class CashTransactionService : ICashTransactionService
             Description = description,
             PostingDate = transaction.TransactionDate.Date,
             JournalType = GetCashBankJournalType(transaction),
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = baseCurrencyCode,
             IdempotencyKey = $"CASHBANK:{sourceDocumentType}:{tenantId:N}:{transaction.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -1738,10 +2132,12 @@ public class CashTransactionService : ICashTransactionService
 
     private async Task<IReadOnlyList<FinancePostingLineDto>> BuildReceiptLinesAsync(
         CashTransaction transaction,
+        FinancePostingProducerContext producer,
         string description,
         string transactionCurrency,
         decimal exchangeRate,
         Guid tenantId,
+        IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceDimensions,
         CancellationToken cancellationToken)
     {
         if (!transaction.GLAccountId.HasValue)
@@ -1752,19 +2148,34 @@ public class CashTransactionService : ICashTransactionService
         await ValidatePostingAccountAsync(transaction.BankAccount.GLAccountId!.Value, tenantId, "cash receipt bank account", cancellationToken);
         await ValidatePostingAccountAsync(transaction.GLAccountId.Value, tenantId, "cash receipt offset account", cancellationToken);
 
+        var reconciliationAdjustment =
+            producer.RouteId == FinanceDimensionRouteId.FinanceBankReconciliationAdjustment;
+        var bankLineId = reconciliationAdjustment
+            ? FinanceReconciliationDimensionIdentity.BankLine(transaction.Id)
+            : (Guid?)null;
+        var offsetLineId = reconciliationAdjustment
+            ? FinanceReconciliationDimensionIdentity.OffsetLine(transaction.Id)
+            : transaction.Id;
+
         return new List<FinancePostingLineDto>
         {
-            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: transaction.BaseAmount, creditAmount: 0m, transaction, transactionCurrency, exchangeRate, 1, "CashBankReceipt.Bank"),
-            CreatePostingLine(transaction.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, transactionCurrency, exchangeRate, 2, "CashBankReceipt.Offset")
+            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: transaction.BaseAmount, creditAmount: 0m, transaction, transactionCurrency, exchangeRate, 1, "CashBankReceipt.Bank",
+                bankLineId, bankLineId.HasValue
+                    ? sourceDimensions.GetValueOrDefault(bankLineId.Value) ?? Array.Empty<FinancePostingDimensionValueDto>()
+                    : Array.Empty<FinancePostingDimensionValueDto>()),
+            CreatePostingLine(transaction.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, transactionCurrency, exchangeRate, 2, "CashBankReceipt.Offset",
+                offsetLineId, sourceDimensions.GetValueOrDefault(offsetLineId) ?? Array.Empty<FinancePostingDimensionValueDto>())
         };
     }
 
     private async Task<IReadOnlyList<FinancePostingLineDto>> BuildPaymentLinesAsync(
         CashTransaction transaction,
+        FinancePostingProducerContext producer,
         string description,
         string transactionCurrency,
         decimal exchangeRate,
         Guid tenantId,
+        IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceDimensions,
         CancellationToken cancellationToken)
     {
         if (!transaction.GLAccountId.HasValue)
@@ -1775,10 +2186,23 @@ public class CashTransactionService : ICashTransactionService
         await ValidatePostingAccountAsync(transaction.BankAccount.GLAccountId!.Value, tenantId, "cash payment bank account", cancellationToken);
         await ValidatePostingAccountAsync(transaction.GLAccountId.Value, tenantId, "cash payment offset account", cancellationToken);
 
+        var reconciliationAdjustment =
+            producer.RouteId == FinanceDimensionRouteId.FinanceBankReconciliationAdjustment;
+        var bankLineId = reconciliationAdjustment
+            ? FinanceReconciliationDimensionIdentity.BankLine(transaction.Id)
+            : (Guid?)null;
+        var offsetLineId = reconciliationAdjustment
+            ? FinanceReconciliationDimensionIdentity.OffsetLine(transaction.Id)
+            : transaction.Id;
+
         return new List<FinancePostingLineDto>
         {
-            CreatePostingLine(transaction.GLAccountId.Value, description, debitAmount: transaction.BaseAmount, creditAmount: 0m, transaction, transactionCurrency, exchangeRate, 1, "CashBankPayment.Offset"),
-            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, transactionCurrency, exchangeRate, 2, "CashBankPayment.Bank")
+            CreatePostingLine(transaction.GLAccountId.Value, description, debitAmount: transaction.BaseAmount, creditAmount: 0m, transaction, transactionCurrency, exchangeRate, 1, "CashBankPayment.Offset",
+                offsetLineId, sourceDimensions.GetValueOrDefault(offsetLineId) ?? Array.Empty<FinancePostingDimensionValueDto>()),
+            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, transactionCurrency, exchangeRate, 2, "CashBankPayment.Bank",
+                bankLineId, bankLineId.HasValue
+                    ? sourceDimensions.GetValueOrDefault(bankLineId.Value) ?? Array.Empty<FinancePostingDimensionValueDto>()
+                    : Array.Empty<FinancePostingDimensionValueDto>())
         };
     }
 
@@ -1787,6 +2211,7 @@ public class CashTransactionService : ICashTransactionService
         string description,
         string functionalCurrency,
         Guid tenantId,
+        IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>> sourceDimensions,
         CancellationToken cancellationToken)
     {
         if (IsIncomingTransferLeg(transaction))
@@ -1861,8 +2286,10 @@ public class CashTransactionService : ICashTransactionService
 
         var lines = new List<FinancePostingLineDto>
         {
-            CreatePostingLine(destinationLeg.BankAccount.GLAccountId!.Value, description, debitAmount: destinationLeg.BaseAmount, creditAmount: 0m, destinationLeg, destinationCurrency, ResolveExchangeRate(destinationCurrency, functionalCurrency, destinationLeg.ExchangeRate), 1, "CashBankTransfer.Destination"),
-            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, sourceCurrency, ResolveExchangeRate(sourceCurrency, functionalCurrency, transaction.ExchangeRate), 2, "CashBankTransfer.Source")
+            CreatePostingLine(destinationLeg.BankAccount.GLAccountId!.Value, description, debitAmount: destinationLeg.BaseAmount, creditAmount: 0m, destinationLeg, destinationCurrency, ResolveExchangeRate(destinationCurrency, functionalCurrency, destinationLeg.ExchangeRate), 1, "CashBankTransfer.Destination",
+                destinationLeg.Id, sourceDimensions.GetValueOrDefault(destinationLeg.Id) ?? Array.Empty<FinancePostingDimensionValueDto>()),
+            CreatePostingLine(transaction.BankAccount.GLAccountId.Value, description, debitAmount: 0m, creditAmount: transaction.BaseAmount, transaction, sourceCurrency, ResolveExchangeRate(sourceCurrency, functionalCurrency, transaction.ExchangeRate), 2, "CashBankTransfer.Source",
+                transaction.Id, sourceDimensions.GetValueOrDefault(transaction.Id) ?? Array.Empty<FinancePostingDimensionValueDto>())
         };
 
         if (realizedFxGainLoss != 0m)
@@ -1890,15 +2317,35 @@ public class CashTransactionService : ICashTransactionService
                 gain ? "realised FX gain" : "realised FX loss",
                 cancellationToken);
 
-            lines.Add(CreateFunctionalPostingLine(
-                fxAccountId.Value,
-                $"Realised FX {(gain ? "gain" : "loss")} - {description}",
-                debitAmount: gain ? 0m : Math.Abs(realizedFxGainLoss),
-                creditAmount: gain ? realizedFxGainLoss : 0m,
-                functionalCurrency,
-                transaction,
-                lineNumber: 3,
-                transactionTag: gain ? "CashBankTransfer.RealizedFxGain" : "CashBankTransfer.RealizedFxLoss"));
+            var derivedAmount = Math.Abs(realizedFxGainLoss);
+            var legShares = AllocateTransferDerivedAmount(
+                derivedAmount,
+                new[]
+                {
+                    (transaction.Id, transaction.BaseAmount),
+                    (destinationLeg.Id, destinationLeg.BaseAmount)
+                });
+            var lineNumber = 3;
+            foreach (var share in legShares)
+            {
+                var dimensions = _sourceDimensions is null
+                    ? sourceDimensions.GetValueOrDefault(share.SourceLineId)
+                        ?? Array.Empty<FinancePostingDimensionValueDto>()
+                    : await _sourceDimensions.ResolvePostingDimensionsAsync(
+                        CashProducer(transaction), transaction.Id, share.SourceLineId,
+                        fxAccountId.Value, transaction.TransactionDate, cancellationToken);
+                lines.Add(CreateFunctionalPostingLine(
+                    fxAccountId.Value,
+                    $"Realised FX {(gain ? "gain" : "loss")} - {description}",
+                    debitAmount: gain ? 0m : share.Amount,
+                    creditAmount: gain ? share.Amount : 0m,
+                    functionalCurrency,
+                    transaction,
+                    lineNumber: lineNumber++,
+                    transactionTag: gain ? "CashBankTransfer.RealizedFxGain" : "CashBankTransfer.RealizedFxLoss",
+                    sourceDocumentLineId: share.SourceLineId,
+                    dimensions: dimensions));
+            }
         }
 
         return lines;
@@ -1913,11 +2360,14 @@ public class CashTransactionService : ICashTransactionService
         string transactionCurrency,
         decimal exchangeRate,
         int lineNumber,
-        string transactionTag)
+        string transactionTag,
+        Guid? sourceDocumentLineId = null,
+        IReadOnlyList<FinancePostingDimensionValueDto>? dimensions = null)
     {
         return new FinancePostingLineDto
         {
             AccountId = accountId,
+            SourceDocumentLineId = sourceDocumentLineId,
             Description = description,
             DebitAmount = RoundMoney(debitAmount),
             CreditAmount = RoundMoney(creditAmount),
@@ -1931,7 +2381,8 @@ public class CashTransactionService : ICashTransactionService
                 ? transaction.TransactionNumber
                 : transaction.ReferenceNumber,
             LineNumber = lineNumber,
-            TransactionTag = transactionTag
+            TransactionTag = transactionTag,
+            Dimensions = dimensions ?? Array.Empty<FinancePostingDimensionValueDto>()
         };
     }
 
@@ -1957,15 +2408,6 @@ public class CashTransactionService : ICashTransactionService
         }
     }
 
-    private static string GetCashBankSourceDocumentType(CashTransaction transaction)
-        => transaction.TransactionType switch
-        {
-            CashTransactionType.Receipt => "CashBankReceipt",
-            CashTransactionType.Payment => "CashBankPayment",
-            CashTransactionType.Transfer => "CashBankTransfer",
-            _ => "CashBankTransaction"
-        };
-
     private static string GetCashBankJournalType(CashTransaction transaction)
         => transaction.TransactionType switch
         {
@@ -1989,6 +2431,39 @@ public class CashTransactionService : ICashTransactionService
 
     private static decimal RoundMoney(decimal amount)
         => decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+    private static decimal RoundRate(decimal amount)
+        => decimal.Round(amount, 6, MidpointRounding.AwayFromZero);
+
+    private static IReadOnlyList<TransferDerivedShare> AllocateTransferDerivedAmount(
+        decimal total,
+        IReadOnlyCollection<(Guid SourceLineId, decimal Weight)> sourceLines)
+    {
+        var ordered = sourceLines.OrderBy(item => item.SourceLineId).ToArray();
+        if (ordered.Length == 0 || ordered.Any(item => item.SourceLineId == Guid.Empty || item.Weight <= 0m))
+            throw new InvalidOperationException(
+                "Transfer-derived Finance evidence requires stable source lines with positive weights.");
+        var totalWeight = ordered.Sum(item => item.Weight);
+        var result = new List<TransferDerivedShare>(ordered.Length);
+        decimal allocated = 0m;
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var independentlyRounded = RoundMoney(total * ordered[index].Weight / totalWeight);
+            var amount = index == ordered.Length - 1
+                ? RoundMoney(total - allocated)
+                : independentlyRounded;
+            result.Add(new TransferDerivedShare(
+                ordered[index].SourceLineId,
+                amount,
+                index == ordered.Length - 1,
+                index == ordered.Length - 1 ? RoundMoney(amount - independentlyRounded) : 0m));
+            allocated += amount;
+        }
+        if (RoundMoney(result.Sum(item => item.Amount)) != RoundMoney(total))
+            throw new InvalidOperationException(
+                "Transfer-derived Finance dimension allocation did not reconcile to the realised FX total.");
+        return result;
+    }
 
     private static decimal RoundCrossRate(decimal rate)
         => decimal.Round(rate, 8, MidpointRounding.AwayFromZero);
@@ -2282,13 +2757,16 @@ public class CashTransactionService : ICashTransactionService
         string functionalCurrency,
         CashTransaction sourceTransaction,
         int lineNumber,
-        string transactionTag)
+        string transactionTag,
+        Guid? sourceDocumentLineId = null,
+        IReadOnlyList<FinancePostingDimensionValueDto>? dimensions = null)
     {
         // Functional-currency gain/loss lines intentionally carry no foreign amount or rate id;
         // those belong to the two bank legs whose valuation difference produced this line.
         return new FinancePostingLineDto
         {
             AccountId = accountId,
+            SourceDocumentLineId = sourceDocumentLineId,
             Description = description,
             DebitAmount = RoundMoney(debitAmount),
             CreditAmount = RoundMoney(creditAmount),
@@ -2297,9 +2775,16 @@ public class CashTransactionService : ICashTransactionService
                 ? sourceTransaction.TransactionNumber
                 : sourceTransaction.ReferenceNumber,
             LineNumber = lineNumber,
-            TransactionTag = transactionTag
+            TransactionTag = transactionTag,
+            Dimensions = dimensions ?? Array.Empty<FinancePostingDimensionValueDto>()
         };
     }
+
+    private readonly record struct TransferDerivedShare(
+        Guid SourceLineId,
+        decimal Amount,
+        bool IsFinalResidualRecipient,
+        decimal RoundingResidualAmount);
 
     private async Task RecordCashBankAuditAsync(
         string eventType,
@@ -2317,12 +2802,15 @@ public class CashTransactionService : ICashTransactionService
             return;
         }
 
+        var producer = await ResolveCashProducerAsync(
+            transaction, requestedProducer: null, cancellationToken);
+
         await _financeAuditService.RecordAsync(new FinanceAuditEventDto
         {
             EventType = eventType,
             TenantId = transaction.TenantId,
-            SourceModule = "CASHBANK",
-            SourceDocumentType = GetCashBankSourceDocumentType(transaction),
+            SourceModule = producer.Definition.PostingSourceModule,
+            SourceDocumentType = producer.Definition.DocumentType,
             SourceDocumentId = transaction.Id,
             JournalEntryId = journalEntryId ?? transaction.JournalEntryId,
             PostingEventId = postingEventId,
@@ -2608,6 +3096,30 @@ public class CashTransactionService : ICashTransactionService
             : new BankTransferRatePolicy(
                 ParseBankTransferRateType(link.TransactionRateType),
                 link.TransactionQuoteSide);
+    }
+
+    private async Task<BankTransferRateSnapshot> ResolveDirectCashRateSnapshotAsync(
+        Guid tenantId,
+        string functionalCurrency,
+        string transactionCurrency,
+        DateTime transactionDate,
+        Guid? requestedRateId,
+        CancellationToken cancellationToken = default)
+    {
+        var settings = await _context.FinanceSettings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted, cancellationToken);
+        var quoteSide = settings?.DirectionalExchangeRatePolicyEnabled == true
+            ? settings.DefaultTransactionQuoteSide
+            : ExchangeRateQuoteSide.Mid;
+        return await ResolveBankTransferRateSnapshotAsync(
+            tenantId,
+            functionalCurrency,
+            transactionCurrency,
+            transactionDate,
+            requestedRateId,
+            new BankTransferRatePolicy(ExchangeRateType.Daily, quoteSide),
+            cancellationToken);
     }
 
     private async Task<BankTransferRateSnapshot> ResolveBankTransferRateSnapshotAsync(

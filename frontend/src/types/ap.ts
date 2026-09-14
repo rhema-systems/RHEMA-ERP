@@ -1,4 +1,4 @@
-import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
+import type { FinanceSettlementDimensionComponent, FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
 
 export type VendorInvoiceStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Voided' | 'Rejected' | 'OnHold';
 export type InvoiceMatchingType = 'None' | 'TwoWay' | 'ThreeWay';
@@ -27,8 +27,12 @@ export interface ApInvoiceSupplier {
     currency?: string | null;
 }
 
-/** Entry-only identity; reports must continue using canonical ApInvoiceSupplier ids. */
-export interface ApInvoiceSupplierEntry extends ApInvoiceSupplier {
+/**
+ * Supplier option for invoice entry. `id` may be a canonical Supplier id or an approved
+ * Business Partner id; the Finance invoice command resolves it to the persisted Supplier id.
+ */
+export interface ApInvoiceSupplierEntryOption extends ApInvoiceSupplier {
+    supplierId?: string | null;
     businessPartnerId?: string | null;
 }
 
@@ -494,6 +498,8 @@ export interface VendorPayment {
     createdAt: string;
     allocations: VendorPaymentAllocation[];
     supplierDebitNoteApplications?: SupplierDebitNoteApplication[];
+    financeDimensions?: FinanceSourceDocumentDimension;
+    settlementDimensions?: FinanceSettlementDimensionComponent[];
 }
 
 export interface SupplierDebitNoteLine {
@@ -670,6 +676,7 @@ export interface VendorPaymentCreateRequest {
     withholdingCertificateDate?: string;
     notes?: string;
     allocations?: VendorPaymentAllocationCreateRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface VendorPaymentAllocation {

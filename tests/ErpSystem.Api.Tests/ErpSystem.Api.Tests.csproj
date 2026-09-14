@@ -19,6 +19,7 @@
     <PackageReference Include="FluentAssertions" Version="6.12.0" />
     <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="8.0.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" Version="8.0.0" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="8.0.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
   </ItemGroup>
 
@@ -148,24 +149,49 @@
     <Compile Include="Controllers\DashboardControllerDateRangeTests.cs" />
     <Compile Include="Services\DatabaseSeedingServiceTests.cs" />
     <Compile Include="Services\DatabaseSeedingWorkflowPreservationTests.cs" />
+    <Compile Include="Services\DatabaseSeedingDependencyGraphTests.cs" />
+    <Compile Include="Services\UnitOfWorkTransactionLockTests.cs" />
     <Compile Include="Services\Estate\EstateGisNetworkPolicyTests.cs" />
     <Compile Include="Services\Estate\EstateBoundaryGeometryTests.cs" />
     <Compile Include="Services\Estate\EstateWorkflowIntegrationRegressionTests.cs" />
     <Compile Include="Services\Estate\EstateRentPenaltyStatusTests.cs" />
     <Compile Include="Services\QuantitySurvey\**\*.cs" />
     <Compile Include="Services\Finance\BankAccountTenantIsolationTests.cs" />
+    <Compile Include="Services\Finance\AccountCurrencyLinkPersistenceTests.cs" />
+    <Compile Include="Services\Finance\AccountTransactionInquiryPhase6Tests.cs" />
     <Compile Include="Services\Finance\BudgetServiceHardeningTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetControlServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceBudgetCommitmentServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceTenantGuardTests.cs" />
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
+    <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
+    <Compile Include="Services\Finance\FinanceAccountProvisioningTransactionTests.cs" />
+    <Compile Include="Services\Finance\DatabaseSeedFinanceProvisioningIsolationTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookClassificationAuthorityTests.cs" />
+    <Compile Include="Services\Finance\ArchivedMigrationSource.cs" />
+    <Compile Include="Services\Finance\ArchivedMigrationSourceTests.cs" />
+    <!-- Test-only retained migration bodies keep the original disposable predecessor rehearsals
+         executable without returning the legacy chain to ErpSystem.Data/runtime discovery. -->
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260905151918_AddStablePostingAccountingBookIdentity.cs" Link="LegacyMigrationBodies\20260905151918_AddStablePostingAccountingBookIdentity.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260905182403_AddBookAwareBalanceFoundation.cs" Link="LegacyMigrationBodies\20260905182403_AddBookAwareBalanceFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260905213000_AddGovernedAccountingBookLifecycle.cs" Link="LegacyMigrationBodies\20260905213000_AddGovernedAccountingBookLifecycle.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906140533_AddAccountingBookPeriodInitializationFoundation.cs" Link="LegacyMigrationBodies\20260906140533_AddAccountingBookPeriodInitializationFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906190846_AddAccountingBookApplicabilityFoundation.cs" Link="LegacyMigrationBodies\20260906190846_AddAccountingBookApplicabilityFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260907071922_AddAccountingEventOrchestrationFoundation.cs" Link="LegacyMigrationBodies\20260907071922_AddAccountingEventOrchestrationFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260907190000_AddProducerIntentStagingC7.cs" Link="LegacyMigrationBodies\20260907190000_AddProducerIntentStagingC7.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260908120000_AddProducerIntentGroupsC8.cs" Link="LegacyMigrationBodies\20260908120000_AddProducerIntentGroupsC8.cs" />
+    <Compile Include="Services\HR\PayrollFinanceAccountProvisioningTests.cs" />
+    <Compile Include="Services\Finance\MigrationRehearsalCorrectionTests.cs" />
+    <Compile Include="Services\Finance\MigrationCompatibilitySqlServerTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionAdministrationServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionCertificationServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionSourceInfrastructureMigrationTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionAssignmentStoreTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionServiceTests.cs" />
+    <Compile Include="Services\Finance\FinanceSettlementDimensionServiceTests.cs" />
     <Compile Include="Services\Finance\FinanceSourceDimensionsApArMigrationTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionRouteConsumerContractTests.cs" />
+    <Compile Include="Services\Finance\ExternalFinanceDimensionAdapterContractTests.cs" />
     <Compile Include="Services\Finance\FinanceOwnedSourceDimensionReadinessProviderTests.cs" />
     <Compile Include="Services\Finance\FinanceDimensionReportingFilterTests.cs" />
     <Compile Include="Services\Finance\FinanceAuditFoundationTests.cs" />
@@ -174,6 +200,7 @@
     <Compile Include="Services\Finance\JournalEntryOptionalApprovalTests.cs" />
     <Compile Include="Services\Finance\JournalBatchServiceTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSqlServerReleaseGateTests.cs" />
+    <Compile Include="Services\Finance\StablePostingBookIdentitySqlServerTests.cs" />
     <Compile Include="Services\Finance\FinancePerformanceReadinessTests.cs" />
     <!-- Operational resilience is a release gate rather than an optional infrastructure note.
          This project disables implicit compile items, so keep the evaluator and health-output
@@ -184,6 +211,7 @@
     <Compile Include="Services\Finance\FinanceDemoPrerequisiteSeederTests.cs" />
     <Compile Include="Services\Finance\JournalBatchSpreadsheetServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutImportServiceTests.cs" />
+    <Compile Include="Services\Finance\FinancialStatementClassificationLayoutPhase3Tests.cs" />
     <Compile Include="Services\Finance\ApInvoicePostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ApPaymentPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentOptionalApprovalTests.cs" />
@@ -196,17 +224,23 @@
     <Compile Include="Services\Finance\ProcurementFinanceReconciliationTests.cs" />
     <Compile Include="Services\Finance\InventoryValuationFinancePostingTests.cs" />
     <Compile Include="Services\Finance\E2E012InventoryAdjustmentFinancePostingTests.cs" />
+    <!-- C9 centralizes Stock Adjustment valuation in a pure Finance-owned intent builder.
+         Keep parity/purity coverage discoverable because this project disables implicit items. -->
+    <Compile Include="Services\Finance\StockAdjustmentValuationIntentBuilderC9Tests.cs" />
     <Compile Include="Services\Finance\InventoryValuationReconciliationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryAnalyticsServiceTests.cs" />
     <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalOptionalApprovalMigrationTests.cs" />
     <Compile Include="Services\Inventory\E2E013InventoryDisposalLifecycleTests.cs" />
+    <Compile Include="Services\Inventory\InventoryDisposalC7SqliteFixtureTests.cs" />
     <Compile Include="Services\Finance\VendorPaymentBatchCreationTests.cs" />
     <Compile Include="Services\Finance\VendorInvoiceMatchExceptionServiceTests.cs" />
     <Compile Include="Services\Finance\ArInvoicePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\InvoiceTradeDiscountPolicyTests.cs" />
     <Compile Include="Services\Finance\ArReceiptPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\ArCreditNotePostingMigrationTests.cs" />
+    <Compile Include="Services\Finance\ArCreditNoteProducerRelationalFixtureTests.cs" />
     <Compile Include="Services\Finance\CashBankTransactionPostingMigrationTests.cs" />
     <Compile Include="Services\Finance\CashBankWorkflowApprovalHardeningTests.cs" />
     <Compile Include="Services\Finance\CashBankOperationalBalanceHardeningTests.cs" />
@@ -230,8 +264,41 @@
     <Compile Include="Services\Finance\WhtComplianceLifecycleTests.cs" />
     <Compile Include="Services\Finance\FxFunctionalCurrencyGovernanceTests.cs" />
     <Compile Include="Services\Finance\FxRealizedUnrealizedRevaluationTests.cs" />
+    <Compile Include="Services\Finance\FxRevaluationMathTests.cs" />
+    <Compile Include="Services\Finance\AccountBookCurrencyPolicyServiceTests.cs" />
+    <Compile Include="Services\Finance\AccountSegmentIdentityPhase5Tests.cs" />
+    <Compile Include="Services\Finance\BookBalanceReadModelC2Tests.cs" />
+    <Compile Include="Services\Finance\BookBalanceMigrationC2Tests.cs" />
+    <Compile Include="Services\Finance\BookBalanceMigrationC2SqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookLifecycleC3MigrationTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookLifecycleC3MigrationSqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookLifecycleC3Tests.cs" />
+    <Compile Include="Services\Finance\AccountingBookLifecycleC3ConcurrencySqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4Tests.cs" />
+    <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4ConcurrencySqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationSqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookApplicabilityC5Tests.cs" />
+    <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookApplicabilityC5MigrationSqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingBookApplicabilityC5ConcurrencySqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6Tests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6MigrationTests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6MigrationSqlServerTests.cs" />
+    <Compile Include="Services\Finance\AccountingEventC6ConcurrencySqlServerTests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerIntentC7Tests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerReversalPreparationC13Tests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerReplayVerificationC15Tests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerIntentC7MigrationTests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerIntentGroupC8Tests.cs" />
+    <!-- C10 returns one Finance-resolved legacy compatibility representation without exposing
+         book selection to owner producers; this project disables implicit compile items. -->
+    <Compile Include="Services\Finance\FinanceProducerCompatibilityC10Tests.cs" />
+    <Compile Include="Services\Finance\BookBalanceConsumerAuthorityC2Tests.cs" />
+    <Compile Include="Services\Finance\GeneralLedgerPrimaryBalanceCompatibilityC2Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationFoundationTests.cs" />
+    <Compile Include="Services\Finance\FixedAssetDepreciationConventionCalculatorTests.cs" />
     <Compile Include="Services\Finance\FixedAssetRevaluationImpairmentFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetTransferFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDisposalFoundationTests.cs" />
@@ -264,6 +331,8 @@
     <Compile Include="Services\Finance\FinancialStatementLayoutServiceTests.cs" />
     <Compile Include="Services\Finance\FinancialStatementLayoutExecutionServiceTests.cs" />
     <Compile Include="Services\Finance\RecurringJournalRecurrenceCalculatorTests.cs" />
+    <Compile Include="Services\Finance\RecurringJournalAutomaticReversalTests.cs" />
+    <Compile Include="Services\Finance\RecurringJournalMultilineTests.cs" />
     <Compile Include="Services\Finance\FinanceReportAutomationTests.cs" />
     <!-- Keep FR-AR-009 in the default Finance regression suite. This project disables
          implicit compile items, so omitting the explicit entry would silently build the
@@ -271,6 +340,7 @@
     <Compile Include="Services\Finance\ArCollectionFollowUpServiceTests.cs" />
     <Compile Include="Services\Finance\SupplierDebitNoteFoundationTests.cs" />
     <Compile Include="Services\Finance\FinanceRouteContractTests.cs" />
+    <Compile Include="Services\Finance\ExchangeRateScheduleLifecycleTests.cs" />
     <Compile Include="Services\Finance\FinanceAdHocReportBuilderTests.cs" />
     <Compile Include="Services\HR\PayrollJournalPostingTransactionTests.cs" />
     <Compile Include="Services\Finance\PaymentTermBaselineSeederTests.cs" />

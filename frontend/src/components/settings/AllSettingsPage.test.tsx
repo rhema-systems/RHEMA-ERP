@@ -55,6 +55,20 @@ describe('AllSettingsPage', () => {
       .toEqual(expect.arrayContaining(['Incident Types', 'PPE Types', 'Reminder Engine']));
     const generalAdmin = administration?.cards.find(card => card.title === 'General Administration');
     expect(generalAdmin?.links.map(link => link.title) ?? []).not.toContain('Incident Types');
+    const finance = modules?.cards.find(card => card.title === 'Finance');
+    expect(finance?.links.filter(link => link.href === '/finance/accounts')).toHaveLength(1);
+    expect(finance?.links.map(link => link.href)).not.toContain('/administration/finance/accounts');
+    expect(finance?.links.filter(link => link.group === 'Unit Accounting').map(link => link.title)).toEqual([
+      'Unit Accounts',
+      'Unit Types',
+      'Ratio Definitions',
+    ]);
+    expect(finance?.links.filter(link => link.group === 'Fiscal & Close').map(link => link.title)).toEqual([
+      'Fiscal Calendar Setup',
+      'Fiscal Years',
+      'Fiscal Periods',
+       'Close Templates',
+     ]);
     expect(modules?.cards.find(card => card.title === 'Inventory')?.links.map(link => link.title)).toEqual([
       'Units of Measure',
       'UoM Schedules',

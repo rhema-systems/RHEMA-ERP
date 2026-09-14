@@ -144,7 +144,7 @@ export default function AssetImportPage() {
                 </Link>
                 <div>
                     <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Bulk Asset Import</h1>
-                    <p className="text-slate-500 dark:text-slate-400 text-sm">Upload an Excel file to import multiple fixed assets at once.</p>
+                    <p className="text-slate-500 dark:text-slate-400 text-sm">Validate and create controlled draft/opening records. Import never posts or activates assets.</p>
                 </div>
             </div>
 
@@ -249,6 +249,10 @@ export default function AssetImportPage() {
                             <li className="flex items-start gap-2">
                                 <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 flex-shrink-0" />
                                 <span>Location is optional and stored directly on the finance asset register</span>
+                            </li>
+                            <li className="flex items-start gap-2">
+                                <CheckCircle2 className="h-4 w-4 text-emerald-600 mt-0.5 flex-shrink-0" />
+                                <span>Historical opening values remain blocked from depreciation until their governed opening batch is posted</span>
                             </li>
                         </ul>
 

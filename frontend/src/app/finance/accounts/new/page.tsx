@@ -11,14 +11,15 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Plus, ArrowLeft, Save, Loader2, Eye, Layers, Wand2, Check, ChevronsUpDown } from 'lucide-react';
+import { Plus, ArrowLeft, Save, Loader2, Eye, Layers, Wand2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { AccountType, AccountStatus, CashFlowClassification, SegmentStructure, SegmentLookupValue, FinanceSettings } from '@/types/finance';
+import type { AccountType, AccountStatus, CashFlowClassification, SegmentStructure, SegmentLookupValue, FinanceSettings, AccountBookAssignmentInput } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
-import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
-import { cn } from '@/lib/utils';
+import { AccountBookAssignments } from '@/components/finance/accounts/account-book-assignments';
+import { composeAccountIdentityPreview } from '@/components/finance/accounts/account-identity-preview';
+import { getSegmentAccess } from '@/components/finance/segments/segment-access';
+import { useAuth } from '@/hooks/use-auth';
 
 interface SegmentValue {
     segmentId: string;
@@ -27,106 +28,24 @@ interface SegmentValue {
     isValid: boolean;
 }
 
-// IFRS/IAS/GAAP Standard Account Types
-const DETAILED_ACCOUNT_TYPES: { group: string; types: { label: string; value: string; type: AccountType }[] }[] = [
-    {
-        group: 'Assets',
-        types: [
-            { label: 'Cash and Cash Equivalents', value: 'Cash and Cash Equivalents', type: 'Asset' },
-            { label: 'Short-Term Investments', value: 'Short-Term Investments', type: 'Asset' },
-            { label: 'Accounts Receivable (Trade Debtors)', value: 'Accounts Receivable', type: 'Asset' },
-            { label: 'Inventory (Stock)', value: 'Inventory', type: 'Asset' },
-            { label: 'Prepaid Expenses', value: 'Prepaid Expenses', type: 'Asset' },
-            { label: 'Property, Plant & Equipment (PPE)', value: 'Property, Plant & Equipment', type: 'Asset' },
-            { label: 'Intangible Assets', value: 'Intangible Assets', type: 'Asset' },
-            { label: 'Goodwill', value: 'Goodwill', type: 'Asset' },
-            { label: 'Long-Term Investments', value: 'Long-Term Investments', type: 'Asset' },
-            { label: 'Deferred Tax Assets', value: 'Deferred Tax Assets', type: 'Asset' },
-            { label: 'Other Assets', value: 'Other Assets', type: 'Asset' },
-        ]
-    },
-    {
-        group: 'Liabilities',
-        types: [
-            { label: 'Accounts Payable (Trade Creditors)', value: 'Accounts Payable', type: 'Liability' },
-            { label: 'Accrued Liabilities', value: 'Accrued Liabilities', type: 'Liability' },
-            { label: 'Short-Term Debt / Bank Overdrafts', value: 'Short-Term Debt', type: 'Liability' },
-            { label: 'Deferred Revenue (Unearned Income)', value: 'Deferred Revenue', type: 'Liability' },
-            { label: 'Tax Payable', value: 'Tax Payable', type: 'Liability' },
-            { label: 'Long-Term Debt', value: 'Long-Term Debt', type: 'Liability' },
-            { label: 'Lease Liabilities', value: 'Lease Liabilities', type: 'Liability' },
-            { label: 'Provisions', value: 'Provisions', type: 'Liability' },
-            { label: 'Deferred Tax Liabilities', value: 'Deferred Tax Liabilities', type: 'Liability' },
-            { label: 'Other Liabilities', value: 'Other Liabilities', type: 'Liability' },
-        ]
-    },
-    {
-        group: 'Equity',
-        types: [
-            { label: 'Share Capital (Common/Preferred)', value: 'Share Capital', type: 'Equity' },
-            { label: 'Retained Earnings', value: 'Retained Earnings', type: 'Equity' },
-            { label: 'Additional Paid-In Capital', value: 'Additional Paid-In Capital', type: 'Equity' },
-            { label: 'Revaluation Surplus', value: 'Revaluation Surplus', type: 'Equity' },
-            { label: 'Other Comprehensive Income', value: 'Other Comprehensive Income', type: 'Equity' },
-            { label: 'Dividends Declared', value: 'Dividends Declared', type: 'Equity' },
-        ]
-    },
-    {
-        group: 'Revenue',
-        types: [
-            { label: 'Operating Revenue (Sales)', value: 'Operating Revenue', type: 'Revenue' },
-            { label: 'Service Revenue', value: 'Service Revenue', type: 'Revenue' },
-            { label: 'Interest Income', value: 'Interest Income', type: 'Revenue' },
-            { label: 'Dividend Income', value: 'Dividend Income', type: 'Revenue' },
-            { label: 'Rental Income', value: 'Rental Income', type: 'Revenue' },
-            { label: 'Other Income', value: 'Other Income', type: 'Revenue' },
-        ]
-    },
-    {
-        group: 'Expenses',
-        types: [
-            { label: 'Cost of Goods Sold (COGS)', value: 'Cost of Goods Sold', type: 'Expense' },
-            { label: 'Selling, General & Admin (SG&A)', value: 'Operating Expense', type: 'Expense' },
-            { label: 'Personnel / Payroll Expenses', value: 'Personnel Expense', type: 'Expense' },
-            { label: 'Rent & Utilities', value: 'Rent and Utilities', type: 'Expense' },
-            { label: 'Depreciation & Amortization', value: 'Depreciation and Amortization', type: 'Expense' },
-            { label: 'Finance Costs (Interest Expense)', value: 'Interest Expense', type: 'Expense' },
-            { label: 'Income Tax Expense', value: 'Tax Expense', type: 'Expense' },
-            { label: 'Other Expenses', value: 'Other Expenses', type: 'Expense' },
-        ]
-    }
-];
-
 export default function NewAccountPage() {
     const router = useRouter();
     const { toast } = useToast();
+    const { hasPermission, isLoading: authLoading } = useAuth();
+    const { canRead, canManage } = getSegmentAccess(hasPermission);
 
     // Settings and loading state
     const [settings, setSettings] = useState<FinanceSettings | null>(null);
     const [segments, setSegments] = useState<SegmentStructure[]>([]);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [reloadToken, setReloadToken] = useState(0);
     const [saving, setSaving] = useState(false);
-
-    const [openAccountType, setOpenAccountType] = useState(false);
-    const [accountTypeSearch, setAccountTypeSearch] = useState('');
-
-    // Filter account types based on search
-    const filteredAccountTypes = useMemo(() => {
-        if (!accountTypeSearch) return DETAILED_ACCOUNT_TYPES;
-        const search = accountTypeSearch.toLowerCase();
-        return DETAILED_ACCOUNT_TYPES.map(group => ({
-            ...group,
-            types: group.types.filter(type =>
-                type.label.toLowerCase().includes(search) ||
-                type.value.toLowerCase().includes(search) ||
-                group.group.toLowerCase().includes(search)
-            )
-        })).filter(group => group.types.length > 0);
-    }, [accountTypeSearch]);
 
     // Segment values for segmented COA
     const [segmentValues, setSegmentValues] = useState<Record<string, string>>({});
     const [segmentErrors, setSegmentErrors] = useState<Record<string, string>>({});
+    const [accountingBooks, setAccountingBooks] = useState<AccountBookAssignmentInput[]>([]);
 
     // Form data
     const [formData, setFormData] = useState({
@@ -139,94 +58,40 @@ export default function NewAccountPage() {
         description: '',
         currencyCode: 'GHS',
         isMultiCurrency: false,
-        isIFRSClassified: true,
-        isBaseClassified: true,
-        isLocalClassified: true,
         allowDirectPosting: true,
         isControlAccount: false,
         budgetTrackingEnabled: false,
         status: 'Active' as AccountStatus,
     });
-    // ... (skip lines until render)
-    // ...
-    <div className="space-y-2">
-        <Label htmlFor="accountType">Account Classification (IFRS/GAAP)</Label>
-        <Popover open={openAccountType} onOpenChange={setOpenAccountType}>
-            <PopoverTrigger asChild>
-                <Button
-                    variant="outline"
-                    role="combobox"
-                    aria-expanded={openAccountType}
-                    className="w-full justify-between font-normal"
-                >
-                    {formData.accountSubCategory
-                        ? DETAILED_ACCOUNT_TYPES.flatMap(g => g.types).find(t => t.value === formData.accountSubCategory)?.label
-                        : "Select detailed account type..."}
-                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-[400px] p-0" align="start">
-                <Command>
-                    <CommandInput placeholder="Search account types..." />
-                    <CommandList>
-                        <CommandEmpty>No account type found.</CommandEmpty>
-                        {DETAILED_ACCOUNT_TYPES.map((group) => (
-                            <CommandGroup key={group.group} heading={group.group}>
-                                {group.types.map((type) => (
-                                    <CommandItem
-                                        key={type.value}
-                                        value={type.label} // Searching by label is better
-                                        onSelect={() => {
-                                            setFormData({
-                                                ...formData,
-                                                accountType: type.type,
-                                                accountSubCategory: type.value,
-                                                accountName: formData.accountName ? formData.accountName : type.label
-                                            });
-                                            setOpenAccountType(false);
-                                        }}
-                                    >
-                                        <Check
-                                            className={cn(
-                                                "mr-2 h-4 w-4",
-                                                formData.accountSubCategory === type.value ? "opacity-100" : "opacity-0"
-                                            )}
-                                        />
-                                        {type.label}
-                                    </CommandItem>
-                                ))}
-                            </CommandGroup>
-                        ))}
-                    </CommandList>
-                </Command>
-            </PopoverContent>
-        </Popover>
-
-        <div className="text-xs text-muted-foreground mt-1">
-            Core Type: <Badge variant="outline" className="ml-1">{formData.accountType}</Badge>
-        </div>
-    </div>
-
     // Load settings and segments
     useEffect(() => {
         const loadData = async () => {
+            if (authLoading || !canRead) {
+                setLoading(false);
+                return;
+            }
             try {
                 setLoading(true);
+                setLoadError(null);
                 const [settingsData, segmentsData] = await Promise.all([
                     financeDataService.getFinanceSettings(),
                     financeDataService.getSegmentStructures(),
                 ]);
+                const activeSegments = segmentsData
+                    .filter(segment => segment.isActive && (segment.lifecycleStatus === 'Active' || segment.lifecycleStatus === 'Frozen'))
+                    .sort((a, b) => a.segmentPosition - b.segmentPosition);
                 setSettings(settingsData);
-                setSegments(segmentsData.sort((a, b) => a.segmentPosition - b.segmentPosition));
+                setSegments(activeSegments);
 
                 // Initialize segment values
                 const initialValues: Record<string, string> = {};
-                segmentsData.forEach(seg => {
+                activeSegments.forEach(seg => {
                     initialValues[seg.id] = '';
                 });
                 setSegmentValues(initialValues);
             } catch (error) {
                 console.error('Error loading data:', error);
+                setLoadError(error instanceof Error ? error.message : 'Failed to load settings and active account-number segments.');
                 toast({
                     title: 'Error',
                     description: 'Failed to load settings and segments',
@@ -237,39 +102,22 @@ export default function NewAccountPage() {
             }
         };
         loadData();
-    }, [toast]);
+    }, [authLoading, canRead, toast, reloadToken]);
 
     // Generate account code from segment values
     // Note: We ALWAYS use segmented accounts now
-    const generatedAccountCode = useMemo(() => {
-        if (segments.length === 0) return '';
-
-        const parts: string[] = [];
-        const sortedSegments = [...segments].sort((a, b) => a.segmentPosition - b.segmentPosition);
-
-        for (const segment of sortedSegments) {
-            const value = segmentValues[segment.id] || '';
-            if (value) {
-                parts.push(value.padStart(segment.segmentLength, '0'));
-            } else {
-                parts.push(''.padStart(segment.segmentLength, '0'));
-            }
-        }
-
-        // Join with the separator from settings (default to '-')
-        return parts.join(settings?.accountSeparator || '-');
-    }, [settings?.accountSeparator, segments, segmentValues]);
+    const generatedIdentity = useMemo(() => composeAccountIdentityPreview(
+        segments, segmentValues, settings?.accountSeparator || '-'),
+    [settings?.accountSeparator, segments, segmentValues]);
 
     // Update account code when segments change
     useEffect(() => {
-        if (generatedAccountCode) {
-            setFormData(prev => ({
-                ...prev,
-                accountCode: generatedAccountCode,
-                accountNumber: generatedAccountCode,
-            }));
-        }
-    }, [generatedAccountCode]);
+        setFormData(prev => ({
+            ...prev,
+            accountCode: generatedIdentity.naturalAccountCode,
+            accountNumber: generatedIdentity.accountNumber,
+        }));
+    }, [generatedIdentity]);
 
     const updateSegmentValue = (segmentId: string, value: string) => {
         setSegmentValues(prev => ({
@@ -301,7 +149,7 @@ export default function NewAccountPage() {
 
     const validateSegment = (seg: SegmentStructure, rawValue: string): string | undefined => {
         const value = rawValue.trim();
-        const isRequired = seg.isMandatory;
+        const isRequired = seg.isRequired;
 
         if (isRequired && !value) {
             return `${seg.segmentName} is required.`;
@@ -353,6 +201,11 @@ export default function NewAccountPage() {
                 throw new Error(Object.values(nextErrors)[0]);
             }
 
+            const enabledBooks = accountingBooks.filter(book => book.isEnabled);
+            if (enabledBooks.length === 0 || enabledBooks.some(book => !book.accountClassificationId)) {
+                toast({ title: 'Accounting-book assignment required', description: 'Enable at least one book and select a compatible classification for every enabled book.', variant: 'destructive' });
+                return;
+            }
             setSaving(true);
 
             // Build segment values array for segmented accounts
@@ -370,21 +223,19 @@ export default function NewAccountPage() {
                 accountNumber: formData.accountNumber,
                 accountName: formData.accountName,
                 accountType: formData.accountType,
-                accountCategory: formData.accountSubCategory || undefined,
-                accountSubCategory: formData.accountSubCategory || undefined,
+                accountCategory: undefined,
+                accountSubCategory: undefined,
                 cashFlowClassification: formData.cashFlowClassification || null,
                 currencyCode: formData.currencyCode,
                 isMultiCurrency: formData.isMultiCurrency,
-                isIFRSClassified: formData.isIFRSClassified,
-                isManagementClassified: formData.isBaseClassified,
-                isBaseFrameworkClassified: formData.isBaseClassified,
-                isLocalFrameworkClassified: formData.isLocalClassified,
+                isIFRSClassified: false,
                 isPostingAllowed: formData.allowDirectPosting,
                 isControlAccount: formData.isControlAccount,
                 budgetTrackingEnabled: formData.budgetTrackingEnabled,
                 status: formData.status,
                 isSegmented: true,  // Always segmented
                 segmentValues: segmentValueInputs,
+                accountingBooks,
             });
 
             toast({
@@ -486,12 +337,24 @@ export default function NewAccountPage() {
         }
     };
 
-    if (loading) {
+    if (authLoading || loading) {
         return (
             <div className="flex items-center justify-center min-h-[400px]">
                 <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
             </div>
         );
+    }
+
+    if (!canRead || !canManage) {
+        return <Alert variant="destructive"><AlertDescription>Finance.Read and Finance.ChartOfAccounts.Configure are required to create a GL account.</AlertDescription></Alert>;
+    }
+
+    if (loadError) {
+        return <Alert variant="destructive"><AlertDescription>{loadError}<Button className="ml-3" size="sm" variant="outline" onClick={() => setReloadToken(value => value + 1)}>Retry</Button></AlertDescription></Alert>;
+    }
+
+    if (segments.length === 0) {
+        return <Alert variant="destructive"><AlertDescription>No active account-number structure is available. Configure and activate the required Finance segments before creating an account.</AlertDescription></Alert>;
     }
 
     // Note: Standard COA is no longer supported - we ALWAYS use segmented accounts
@@ -561,7 +424,7 @@ export default function NewAccountPage() {
                                             <div className="flex items-center gap-2">
                                                 <Label className="font-medium">
                                                     {segment.segmentName}
-                                                    {segment.isMandatory && <span className="text-red-500">*</span>}
+                                                    <span className="text-red-500">*</span>
                                                 </Label>
                                                 <Badge variant="outline" className="text-xs">
                                                     {segment.lookupTableRequired ? 'Dropdown' : 'Text/Dropdown'}
@@ -582,9 +445,9 @@ export default function NewAccountPage() {
                                         <Eye className="h-4 w-4" />
                                         <AlertDescription>
                                             <div className="flex items-center justify-between">
-                                                <span className="font-medium">Generated Account Code:</span>
+                                                <span className="font-medium">Generated Account Number:</span>
                                                 <span className="font-mono text-lg font-bold text-blue-700">
-                                                    {generatedAccountCode || '---/---/----'}
+                                                    {generatedIdentity.accountNumber}
                                                 </span>
                                             </div>
                                         </AlertDescription>
@@ -653,69 +516,15 @@ export default function NewAccountPage() {
                                     />
                                 </div>
                                 <div className="space-y-2">
-                                    <Label htmlFor="accountType">Account Classification (IFRS/GAAP)</Label>
-                                    <Popover open={openAccountType} onOpenChange={setOpenAccountType}>
-                                        <PopoverTrigger asChild>
-                                            <Button
-                                                variant="outline"
-                                                role="combobox"
-                                                aria-expanded={openAccountType}
-                                                className="w-full justify-between font-normal"
-                                            >
-                                                {formData.accountSubCategory
-                                                    ? DETAILED_ACCOUNT_TYPES.flatMap(g => g.types).find(t => t.value === formData.accountSubCategory)?.label
-                                                    : "Select detailed account type..."}
-                                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-[500px] p-0" align="start">
-                                            <Command shouldFilter={false}>
-                                                <CommandInput
-                                                    placeholder="Search account types..."
-                                                    value={accountTypeSearch}
-                                                    onValueChange={setAccountTypeSearch}
-                                                />
-                                                <CommandList>
-                                                    <CommandEmpty>No account type found.</CommandEmpty>
-                                                    {filteredAccountTypes.map((group) => (
-                                                        <CommandGroup key={group.group} heading={group.group}>
-                                                            {group.types.map((type) => {
-                                                                const handleSelect = () => {
-                                                                    setFormData(prev => ({
-                                                                        ...prev,
-                                                                        accountType: type.type,
-                                                                        accountSubCategory: type.value,
-                                                                        accountName: prev.accountName ? prev.accountName : type.label
-                                                                    }));
-                                                                    setOpenAccountType(false);
-                                                                    setAccountTypeSearch('');
-                                                                };
-                                                                return (
-                                                                    <div
-                                                                        key={`${group.group}-${type.value}`}
-                                                                        onClick={handleSelect}
-                                                                        className="relative flex cursor-pointer select-none items-center rounded-sm px-2 py-1.5 text-sm outline-none hover:bg-accent hover:text-accent-foreground"
-                                                                    >
-                                                                        <Check
-                                                                            className={cn(
-                                                                                "mr-2 h-4 w-4",
-                                                                                formData.accountSubCategory === type.value ? "opacity-100" : "opacity-0"
-                                                                            )}
-                                                                        />
-                                                                        {type.label}
-                                                                    </div>
-                                                                );
-                                                            })}
-                                                        </CommandGroup>
-                                                    ))}
-                                                </CommandList>
-                                            </Command>
-                                        </PopoverContent>
-                                    </Popover>
-
-                                    <div className="text-xs text-muted-foreground mt-1">
-                                        Core Type: <Badge variant="outline" className="ml-1">{formData.accountType}</Badge>
-                                    </div>
+                                    <Label htmlFor="accountType">Core Account Type *</Label>
+                                    <Select value={formData.accountType} onValueChange={(value) => {
+                                        setFormData({ ...formData, accountType: value as AccountType, accountSubCategory: '' });
+                                        setAccountingBooks(current => current.map(mapping => ({ ...mapping, accountClassificationId: null })));
+                                    }}>
+                                        <SelectTrigger id="accountType"><SelectValue /></SelectTrigger>
+                                        <SelectContent>{(['Asset', 'Liability', 'Equity', 'Revenue', 'Expense'] as AccountType[]).map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
+                                    </Select>
+                                    <p className="text-xs text-muted-foreground">Choose the book-specific classification below. Options are loaded from Finance configuration.</p>
                                 </div>
                                 <div className="space-y-2">
                                     <Label htmlFor="description">Description</Label>
@@ -848,48 +657,14 @@ export default function NewAccountPage() {
                             </CardContent>
                         </Card>
 
-                        {/* Classification */}
+                        {/* Accounting-book assignments */}
                         <Card>
                             <CardHeader>
-                                <CardTitle>Classification</CardTitle>
+                                <CardTitle>Accounting Books</CardTitle>
+                                <CardDescription>Enable each reporting book this account belongs to, then select its detailed classification.</CardDescription>
                             </CardHeader>
-                            <CardContent className="space-y-3">
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isIFRSClassified"
-                                        checked={formData.isIFRSClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isIFRSClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isIFRSClassified" className="cursor-pointer text-sm">
-                                        IFRS Classification
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isBaseClassified"
-                                        checked={formData.isBaseClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isBaseClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isBaseClassified" className="cursor-pointer text-sm">
-                                        Base Classification
-                                    </Label>
-                                </div>
-                                <div className="flex items-center space-x-2">
-                                    <Checkbox
-                                        id="isLocalClassified"
-                                        checked={formData.isLocalClassified}
-                                        onCheckedChange={(checked) =>
-                                            setFormData({ ...formData, isLocalClassified: checked as boolean })
-                                        }
-                                    />
-                                    <Label htmlFor="isLocalClassified" className="cursor-pointer text-sm">
-                                        Local Classification
-                                    </Label>
-                                </div>
+                            <CardContent>
+                                <AccountBookAssignments accountType={formData.accountType} value={accountingBooks} onChange={setAccountingBooks} />
                             </CardContent>
                         </Card>
 

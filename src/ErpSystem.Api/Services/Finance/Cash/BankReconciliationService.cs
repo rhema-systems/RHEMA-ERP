@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
@@ -12,6 +13,9 @@ namespace ErpSystem.Api.Services.Finance.Cash;
 
 public class BankReconciliationService : IBankReconciliationService
 {
+    private static readonly FinancePostingProducerContext ReconciliationAdjustmentProducer =
+        new(FinanceDimensionRouteId.FinanceBankReconciliationAdjustment);
+
     private readonly ApplicationDbContext _context;
     private readonly BankReconciliationEngine _reconciliationEngine;
     private readonly ICurrentUserService _currentUserService;
@@ -184,8 +188,17 @@ public class BankReconciliationService : IBankReconciliationService
 
         var unmatchedLines = await unmatchedLinesQuery.ToListAsync();
 
+        var dateToleranceDays = await _context.FinanceSettings
+            .AsNoTracking()
+            .Where(settings => settings.TenantId == tenantId)
+            .Select(settings => (int?)settings.BankStatementMatchDateToleranceDays)
+            .FirstOrDefaultAsync() ?? 3;
+
         // Run auto-matching algorithm
-        var matches = _reconciliationEngine.AutoMatch(unreconciledTransactions, unmatchedLines);
+        var matches = _reconciliationEngine.AutoMatch(
+            unreconciledTransactions,
+            unmatchedLines,
+            dateToleranceDays);
 
         // Save matches
         var matchDtos = new List<ReconciliationMatchDto>();
@@ -575,7 +588,7 @@ public class BankReconciliationService : IBankReconciliationService
 
         if (existingAdjustment != null)
         {
-            var existingSourceType = GetCashBankSourceDocumentType(existingAdjustment);
+            var existingSourceType = ReconciliationAdjustmentProducer.Definition.DocumentType;
             var existingPostingEvent = await _context.FinancePostingEvents
                 .AsNoTracking()
                 .FirstOrDefaultAsync(e =>
@@ -602,6 +615,9 @@ public class BankReconciliationService : IBankReconciliationService
                 comment: "Duplicate reconciliation adjustment request returned the existing posted adjustment.",
                 cancellationToken: cancellationToken);
 
+            var existingDetails = await _cashTransactionService.GetByIdAsync(existingAdjustment.Id)
+                ?? throw new InvalidOperationException(
+                    "The existing reconciliation adjustment could not be loaded for evidence display.");
             return new ReconciliationAdjustmentDto
             {
                 ReconciliationId = reconciliation.Id,
@@ -615,7 +631,15 @@ public class BankReconciliationService : IBankReconciliationService
                 OffsetAccountId = existingAdjustment.GLAccountId ?? dto.OffsetAccountId,
                 ReferenceNumber = existingAdjustment.ReferenceNumber,
                 TransactionDate = existingAdjustment.TransactionDate,
-                WasDuplicate = true
+                WasDuplicate = true,
+                Currency = existingDetails.Currency,
+                BaseAmount = existingDetails.BaseAmount,
+                ExchangeRate = existingDetails.ExchangeRate ?? 1m,
+                ExchangeRateId = existingDetails.ExchangeRateId,
+                ExchangeRateSource = existingDetails.ExchangeRateSource,
+                ExchangeRateDate = existingDetails.ExchangeRateDate,
+                ExchangeRateQuoteSide = existingDetails.ExchangeRateQuoteSide,
+                FinanceDimensions = existingDetails.FinanceDimensions
             };
         }
 
@@ -626,37 +650,39 @@ public class BankReconciliationService : IBankReconciliationService
 
         if (cashTransactionType == CashTransactionType.Receipt)
         {
-            adjustment = await _cashTransactionService.CreateReceiptAsync(new CreateCashReceiptDto
+            adjustment = await _cashTransactionService.CreateReceiptForProducerAsync(new CreateCashReceiptDto
             {
                 BankAccountId = reconciliation.BankAccountId,
                 GLAccountId = dto.OffsetAccountId,
                 TransactionDate = dto.TransactionDate.Date,
                 Amount = dto.Amount,
                 Currency = reconciliation.BankAccount.Currency,
-                ExchangeRate = 1m,
                 ReferenceNumber = referenceNumber,
                 PayerName = "Bank reconciliation adjustment",
-                Description = description
-            });
+                Description = description,
+                FinanceDimensions = dto.FinanceDimensions
+            }, ReconciliationAdjustmentProducer, cancellationToken);
         }
         else
         {
-            adjustment = await _cashTransactionService.CreatePaymentAsync(new CreateCashPaymentDto
+            adjustment = await _cashTransactionService.CreatePaymentForProducerAsync(new CreateCashPaymentDto
             {
                 BankAccountId = reconciliation.BankAccountId,
                 GLAccountId = dto.OffsetAccountId,
                 TransactionDate = dto.TransactionDate.Date,
                 Amount = dto.Amount,
                 Currency = reconciliation.BankAccount.Currency,
-                ExchangeRate = 1m,
                 ReferenceNumber = referenceNumber,
                 PayeeName = "Bank reconciliation adjustment",
-                Description = description
-            });
+                Description = description,
+                FinanceDimensions = dto.FinanceDimensions
+            }, ReconciliationAdjustmentProducer, cancellationToken);
         }
 
         var adjustmentEntity = await _context.Set<CashTransaction>()
             .FirstAsync(t => t.TenantId == tenantId && t.Id == adjustment.Id && !t.IsDeleted, cancellationToken);
+        await _cashTransactionService.ValidateDimensionsForProducerAsync(
+            adjustmentEntity.Id, ReconciliationAdjustmentProducer, cancellationToken);
         var now = DateTime.UtcNow;
         adjustmentEntity.ReconciliationId = reconciliation.Id;
         adjustmentEntity.ApprovalStatus = CashTransactionApprovalStatus.Approved;
@@ -667,7 +693,8 @@ public class BankReconciliationService : IBankReconciliationService
         adjustmentEntity.UpdatedBy = _currentUserService.UserName;
         await _context.SaveChangesAsync(cancellationToken);
 
-        var postedAdjustment = await _cashTransactionService.PostAsync(adjustmentEntity.Id, cancellationToken);
+        var postedAdjustment = await _cashTransactionService.PostForProducerAsync(
+            adjustmentEntity.Id, ReconciliationAdjustmentProducer, cancellationToken);
         adjustmentEntity = await _context.Set<CashTransaction>()
             .FirstAsync(t => t.TenantId == tenantId && t.Id == adjustmentEntity.Id && !t.IsDeleted, cancellationToken);
         adjustmentEntity.IsReconciled = true;
@@ -680,7 +707,7 @@ public class BankReconciliationService : IBankReconciliationService
         reconciliation.Difference = RoundMoney(reconciliation.StatementBalance - reconciliation.BookBalance);
         await _context.SaveChangesAsync(cancellationToken);
 
-        var sourceDocumentType = GetCashBankSourceDocumentType(adjustmentEntity);
+        var sourceDocumentType = ReconciliationAdjustmentProducer.Definition.DocumentType;
         var postingEvent = await _context.FinancePostingEvents
             .AsNoTracking()
             .FirstOrDefaultAsync(e =>
@@ -704,9 +731,22 @@ public class BankReconciliationService : IBankReconciliationService
                 dto.AdjustmentType,
                 adjustmentEntity.TransactionType,
                 adjustmentEntity.Amount,
+                adjustmentEntity.Currency,
+                adjustmentEntity.BaseAmount,
+                adjustmentEntity.ExchangeRateId,
+                adjustmentEntity.ExchangeRate,
+                adjustmentEntity.ExchangeRateSource,
+                adjustmentEntity.ExchangeRateDate,
                 adjustmentEntity.GLAccountId,
                 adjustmentEntity.JournalEntryId,
-                postingEventId = postingEvent?.Id
+                postingEventId = postingEvent?.Id,
+                dimensionLines = postedAdjustment.FinanceDimensions?.Lines.Select(line => new
+                {
+                    line.SourceLineId,
+                    line.FinanceDimensionSetId,
+                    line.CombinationHash,
+                    line.IsFrozen
+                })
             },
             comment: dto.Notes,
             cancellationToken: cancellationToken);
@@ -724,7 +764,15 @@ public class BankReconciliationService : IBankReconciliationService
             OffsetAccountId = adjustmentEntity.GLAccountId ?? dto.OffsetAccountId,
             ReferenceNumber = adjustmentEntity.ReferenceNumber,
             TransactionDate = adjustmentEntity.TransactionDate,
-            WasDuplicate = false
+            WasDuplicate = false,
+            Currency = postedAdjustment.Currency,
+            BaseAmount = postedAdjustment.BaseAmount,
+            ExchangeRate = postedAdjustment.ExchangeRate ?? 1m,
+            ExchangeRateId = postedAdjustment.ExchangeRateId,
+            ExchangeRateSource = postedAdjustment.ExchangeRateSource,
+            ExchangeRateDate = postedAdjustment.ExchangeRateDate,
+            ExchangeRateQuoteSide = postedAdjustment.ExchangeRateQuoteSide,
+            FinanceDimensions = postedAdjustment.FinanceDimensions
         };
     }
 
@@ -1107,17 +1155,6 @@ public class BankReconciliationService : IBankReconciliationService
             ReconciliationAdjustmentType.CorrectionReceipt => "Bank reconciliation correction receipt",
             ReconciliationAdjustmentType.CorrectionPayment => "Bank reconciliation correction payment",
             _ => "Bank reconciliation adjustment"
-        };
-    }
-
-    private static string GetCashBankSourceDocumentType(CashTransaction transaction)
-    {
-        return transaction.TransactionType switch
-        {
-            CashTransactionType.Receipt => "CashBankReceipt",
-            CashTransactionType.Payment => "CashBankPayment",
-            CashTransactionType.Transfer => "CashBankTransfer",
-            _ => "CashBankTransaction"
         };
     }
 
