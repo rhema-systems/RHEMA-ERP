@@ -333,8 +333,39 @@ public sealed class AccountingBookClassificationAuthorityTests
             .Should().Be(3);
         (await db.AccountClassifications.Where(item => item.Code == "CASH")
             .AllAsync(item => item.ParentClassificationId != null)).Should().BeTrue();
+        (await db.AccountAccountingBooks.Include(item => item.AccountingBook)
+            .AllAsync(item => !item.IsEnabled && !item.AccountingBook.IsActive && !item.AccountingBook.AllowsPosting))
+            .Should().BeTrue("the manifest prepares exact lineage but never approves fresh Configuring books for posting");
         FinanceClassificationManifestSeeder.ResolveReviewedClassificationCode("5000", AccountType.Expense)
             .Should().Be("COST_OF_SALES");
+    }
+
+    [Fact]
+    public async Task ManifestSeeder_RejectsInvalidAdministratorEnabledMappingWithoutAutoApprovalOrRewrite()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        db.Tenants.Add(new Tenant
+        {
+            Id = tenantId, Code = "TDC", Name = "TDC", BaseCurrency = "GHS", Status = TenantStatus.Active
+        });
+        SeedAccount(db, tenantId, "1000", AccountType.Asset);
+        await db.SaveChangesAsync();
+        var seeder = new FinanceClassificationManifestSeeder(db, NullLogger.Instance);
+        await seeder.SeedAsync(tenantId, new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc));
+        var mapping = await db.AccountAccountingBooks.Include(item => item.AccountingBook)
+            .SingleAsync(item => item.Account!.AccountCode == "1000" && item.AccountingBook!.Code == "IFRS");
+        mapping.IsEnabled = true;
+        mapping.UpdatedBy = "finance.admin";
+        await db.SaveChangesAsync();
+
+        var action = () => seeder.SeedAsync(tenantId, DateTime.UtcNow);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FINANCE_CLASSIFICATION_ENABLED_MAPPING_LINEAGE_INVALID:*");
+        mapping.IsEnabled.Should().BeTrue("the manifest must not silently reverse an administrator decision");
+        mapping.AccountingBook!.IsActive.Should().BeFalse();
+        mapping.AccountingBook.AllowsPosting.Should().BeFalse();
     }
 
     [Fact]
@@ -824,9 +855,11 @@ public sealed class AccountingBookClassificationAuthorityTests
         repeated.WasCreated.Should().BeFalse();
         repeated.AccountId.Should().Be(created.AccountId);
         repeated.ClassificationCode.Should().Be("CASH");
-        repeated.AccountingBookCodes.Should().BeEquivalentTo("IFRS", "LOCAL_STATUTORY", "MANAGEMENT");
+        repeated.AccountingBookCodes.Should().BeEmpty(
+            "freshly configured books are not executable until governed activation allows posting");
         (await db.Accounts.CountAsync()).Should().Be(1);
         (await db.AccountAccountingBooks.CountAsync()).Should().Be(3);
+        (await db.AccountAccountingBooks.AllAsync(item => !item.IsEnabled)).Should().BeTrue();
     }
 
     [Theory]
@@ -871,8 +904,10 @@ public sealed class AccountingBookClassificationAuthorityTests
         account.IsSegmented.Should().BeTrue();
         account.SegmentValues.Where(item => !item.IsDeleted).Should().HaveCount(2);
         adopted.ClassificationCode.Should().Be(expectedClassification);
-        adopted.AccountingBookCodes.Should().BeEquivalentTo("IFRS", "LOCAL_STATUTORY", "MANAGEMENT");
+        adopted.AccountingBookCodes.Should().BeEmpty(
+            "freshly configured books are not executable until governed activation allows posting");
         (await db.AccountAccountingBooks.CountAsync()).Should().Be(3);
+        (await db.AccountAccountingBooks.AllAsync(item => !item.IsEnabled)).Should().BeTrue();
     }
 
     [Fact]

@@ -170,7 +170,11 @@ public sealed class FinanceClassificationManifestSeeder
                     mapping = new AccountAccountingBook
                     {
                         TenantId = tenantId, AccountId = account.Id, AccountingBookId = book.Id,
-                        AccountClassificationId = classification.Id, IsEnabled = true,
+                        AccountClassificationId = classification.Id,
+                        // Applicability can be prepared while a book is Configuring, but it cannot
+                        // become executable until the governed book lifecycle allows posting.
+                        // Seeding never activates a book or substitutes for that approval.
+                        IsEnabled = IsBookPostingReady(book),
                         CreatedAt = seedDate, CreatedBy = $"System ({ManifestVersion})"
                     };
                     _db.AccountAccountingBooks.Add(mapping);
@@ -180,10 +184,55 @@ public sealed class FinanceClassificationManifestSeeder
                 {
                     mapping.AccountClassificationId = classification.Id;
                 }
+
+                if (mapping.IsEnabled && !IsBookPostingReady(book)
+                    && string.Equals(mapping.CreatedBy, $"System ({ManifestVersion})", StringComparison.Ordinal)
+                    && mapping.UpdatedBy == null)
+                {
+                    // Repair only this manifest's untouched row. Administrator-owned applicability
+                    // is never silently rewritten; the lineage audit below will fail closed instead.
+                    mapping.IsEnabled = false;
+                }
             }
         }
+        AssertEnabledMappingLineage(tenantId, accounts, books, classifications, existingMappings);
         await _db.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Applied Finance classification manifest {ManifestVersion} for tenant {TenantId}.", ManifestVersion, tenantId);
+    }
+
+    private static bool IsBookPostingReady(AccountingBook book) =>
+        !book.IsDeleted && book.IsActive && book.AllowsPosting;
+
+    private static void AssertEnabledMappingLineage(
+        Guid tenantId,
+        IReadOnlyCollection<Account> accounts,
+        IReadOnlyCollection<AccountingBook> books,
+        IReadOnlyCollection<AccountClassification> classifications,
+        IReadOnlyCollection<AccountAccountingBook> mappings)
+    {
+        var invalid = mappings.Where(item => !item.IsDeleted && item.IsEnabled).Select(mapping =>
+        {
+            var account = accounts.SingleOrDefault(item => item.Id == mapping.AccountId);
+            var book = books.SingleOrDefault(item => item.Id == mapping.AccountingBookId);
+            var classification = mapping.AccountClassificationId.HasValue
+                ? classifications.SingleOrDefault(item => item.Id == mapping.AccountClassificationId.Value)
+                : null;
+            var valid = account is not null && book is not null && classification is not null
+                && !account.IsDeleted && IsBookPostingReady(book)
+                && mapping.TenantId == tenantId && account.TenantId == tenantId && book.TenantId == tenantId
+                && !classification.IsDeleted && classification.Status == AccountClassificationStatus.Active
+                && classification.IsPostingClassification && classification.TenantId == tenantId
+                && classification.AccountingBookId == mapping.AccountingBookId
+                && classification.CoreAccountType == account.AccountType;
+            return new { Mapping = mapping, IsValid = valid };
+        }).FirstOrDefault(item => !item.IsValid);
+
+        if (invalid is not null)
+        {
+            throw new InvalidOperationException(
+                $"FINANCE_CLASSIFICATION_ENABLED_MAPPING_LINEAGE_INVALID: mapping '{invalid.Mapping.Id}' " +
+                $"for tenant '{tenantId}' is not bound to one active posting book and compatible active posting classification.");
+        }
     }
 
     private static bool IsCanonicalCurrencyCode(string? value) =>

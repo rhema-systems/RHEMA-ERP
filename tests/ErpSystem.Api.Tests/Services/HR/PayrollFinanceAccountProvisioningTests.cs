@@ -54,7 +54,8 @@ public sealed class PayrollFinanceAccountProvisioningTests
             repeated.WasCreated.Should().BeFalse();
             repeated.AccountId.Should().Be(created.AccountId);
             repeated.ClassificationCode.Should().Be(intent.Item4);
-            repeated.AccountingBookCodes.Should().BeEquivalentTo("IFRS", "LOCAL_STATUTORY", "MANAGEMENT");
+            repeated.AccountingBookCodes.Should().BeEmpty(
+                "fresh manifest books are Configuring/non-posting and seeding cannot auto-enable their applicability");
         }
 
         var accounts = await db.Accounts.Include(item => item.SegmentValues).ToListAsync();
@@ -75,10 +76,12 @@ public sealed class PayrollFinanceAccountProvisioningTests
             .Include(item => item.AccountClassification)
             .ToListAsync();
         mappings.Should().HaveCount(15);
-        mappings.Should().OnlyContain(item => item.IsEnabled
+        mappings.Should().OnlyContain(item => !item.IsEnabled
             && item.TenantId == tenantId
             && item.Account.TenantId == tenantId
             && item.AccountingBook.TenantId == tenantId
+            && !item.AccountingBook.IsActive
+            && !item.AccountingBook.AllowsPosting
             && item.AccountClassification != null
             && item.AccountClassification.TenantId == tenantId
             && item.AccountClassification.AccountingBookId == item.AccountingBookId
