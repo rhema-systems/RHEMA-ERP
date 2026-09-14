@@ -7,13 +7,19 @@ and reviewed cutover `eeaf2c71abc801a5bf661ff7e817e847c624d2c4`. Independent GPT
 candidate `01b5cd28760fc0d9b605fdb2f0c63461554f33b8`, tree
 `8279da3030b435639acd77333ce1a0f1b9982fca`, with no P1 or P2 findings. Its regenerated single baseline represents
 the merged 1,629-table model and retains 596 archived migration identities, 493 active triggers, five functions, and
-one view. This integration and review did not access a database and do not authorize production/final cutover or
-C6/C7/C8 activation; separate operator gates remain mandatory.
-The local database proven by attempt 11 still contains the older 1,557-table / 459-trigger baseline body under the
-same migration ID. EF no-pending-model cannot detect that applied-body mismatch, so a newly authorized disposable
-reset from the exact approved merged candidate must prove the merged 1,629-table / 493-trigger model with C6/C7/C8
-still false. A successful reset must be followed by smoke verification before any separately gated, sequential
-feature activation.
+one view. The separately authorized attempt 12 then stopped fail-closed while applying that merged baseline: the
+single native migration command reached SQL Server error `-2` under the inherited 30-second per-command timeout.
+Its durable phase is `DATABASE_RECREATED`, failed operation `APPLY_MIGRATIONS`, and terminal evidence reports zero
+applied target migrations. C6/C7/C8 remained false; no retry, restore, cleanup, or feature activation followed.
+
+Offline correction `917ddedb419077b3fb9ef585d2d621c1932cdc69`, tree
+`6be5bc97482f9c2b122d320503bd8d09cd0d20dd`, gives only `apply-migrations` and `seed-db` a bounded 600-second SQL
+command profile with provider execution-strategy retries disabled. Each CLI path explicitly applies and reads back
+that finite timeout immediately before `MigrateAsync`; the normal web profile remains 30 seconds with five retries.
+The 5,736,330-byte generated zero-to-current SQL still parses, contains one migration transaction, and preserves the
+exact 493-trigger/five-function/one-view authority. This correction awaits independent Sol High review. Activation
+and any operational retry remain `NO-GO`; another reset requires fresh explicit authorization after review, followed
+by independent merged-model and smoke verification before any separately gated sequential feature activation.
 
 The merged baseline/governance audit is exact: one compiled baseline
 `20260913162402_DisposableDevelopmentCurrentModelBaseline`, 596 byte-preserved archived migration identities,

@@ -12,8 +12,8 @@ operator authorization gates.
 
 | Field | Value |
 |---|---|
-| Phase | Latest-master semantic integration |
-| Status | Sol High APPROVED exact merged candidate `01b5cd28760fc0d9b605fdb2f0c63461554f33b8`, tree `8279da3030b435639acd77333ce1a0f1b9982fca`, with no P1/P2; deployment and feature activation remain gated |
+| Phase | Attempt-12 migration-timeout correction review |
+| Status | Attempt 12 stopped fail-closed at `APPLY_MIGRATIONS`; correction candidate `917ddedb419077b3fb9ef585d2d621c1932cdc69`, tree `6be5bc97482f9c2b122d320503bd8d09cd0d20dd`, awaits Sol High review; reset retry, deployment, and feature activation remain `NO-GO` |
 | Implementing task | `rehearsal_harness` |
 | Integration parents | latest master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`; reviewed cutover `eeaf2c71abc801a5bf661ff7e817e847c624d2c4` |
 | Branch | `codex/finance-gl-cutover-master-integration` |
@@ -23,9 +23,9 @@ operator authorization gates.
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — deleted after code-cutover completion |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Independent GPT-5.6 Sol High review APPROVED exact `01b5cd28760fc0d9b605fdb2f0c63461554f33b8` / `8279da3030b435639acd77333ce1a0f1b9982fca` with no P1 or P2 findings; the frontend production build remains inconclusive, so deployment and C6/C7/C8 activation remain `NO-GO` |
-| Connectivity state | No database, environment connection, preserved evidence, backup, feature flag, remote, or primary worktree was accessed or changed during latest-master integration, corrections, review, or this reconciliation; attempt-11 runtime facts remain historical and unchanged |
-| Applied-baseline state | Attempt 11 proved the older 1,557-table / 459-trigger baseline body under the same migration ID; it does not prove the merged 1,629-table / 493-trigger baseline body |
+| Review status | Sol High approved the exact attempt-12 operational base `ed1321180177fd4f3530fa8e682eddcd3db07aab` / `4a9df246bc9028c856490de61c304d6c23453407`; the bounded CLI timeout/no-retry correction now requires independent Sol High review. Frontend production build, deployment, reset retry, and C6/C7/C8 activation remain gated |
+| Connectivity state | Attempt 12 performed only its explicitly authorized guarded backup/recreate/migration attempt. The subsequent correction used code and preserved logs read-only; it did not query a database, inspect connection environment, mutate evidence/backups, change flags, restore, retry, clean up, access a remote, or touch the primary worktree |
+| Applied-baseline state | Attempt-12 terminal evidence reports the exact local database recreated with zero target migration-history rows after the timed-out merged-baseline transaction; the merged 1,629-table / 493-trigger baseline is not yet operationally proven |
 
 The merged baseline now represents the latest-master model while retaining 596 exact archived migration identities,
 386 current-model plus 92 active non-model triggers, the separate 15-trigger C5-C8 set (493 unique total), 108
@@ -91,12 +91,12 @@ debt, while the two master-only failures are fixtures already corrected by the i
 not yield a conclusive PASS during integration verification. It is not represented as green and remains a deployment
 gate even though the targeted frontend, backend, baseline, governance, reset-safety, and evidence suites passed.
 
-Next operational gate: obtain separate authorization for one guarded disposable reset of local `RhemaERP` from
-exact approved commit `01b5cd28760fc0d9b605fdb2f0c63461554f33b8`, tree
-`8279da3030b435639acd77333ce1a0f1b9982fca`, with C6/C7/C8 explicitly false. The reset must independently prove the
-merged 1,629-table / 493-trigger baseline, seed-pass identity, Finance invariants, DBCC, and its bound evidence
-package. Only after that PASS and a separate smoke gate may activation proceed sequentially; this approval neither
-authorizes the reset nor changes any feature flag.
+Next gate: independent Sol High review of exact correction `917ddedb419077b3fb9ef585d2d621c1932cdc69`, tree
+`6be5bc97482f9c2b122d320503bd8d09cd0d20dd`. Only after approval may the user separately authorize one new guarded
+disposable reset of local `RhemaERP`, with C6/C7/C8 explicitly false. That reset must independently prove the merged
+1,629-table / 493-trigger baseline, seed-pass identity, Finance invariants, DBCC, and its bound evidence package.
+Only after that PASS and a separate smoke gate may activation proceed sequentially; this correction neither
+authorizes a reset nor changes any feature flag.
 
 ## Authoritative inputs
 
@@ -116,7 +116,7 @@ The user authorized the coordinator to:
 
 The implementing task should not be left idle between these approved phases. User intervention is reserved for the escalation gates below or an unrecoverable blocker.
 
-On 2026-09-04 the user explicitly authorized proceeding with the gated database migration/reset/reseed track and the bounded Procurement, Inventory, Sales and HR/Payroll AccountingBookCode V2 producer cutover. Disposable rehearsal databases and owner-scoped cross-module conversions are therefore in scope. Subsequent attempt-specific authorizations culminated in attempt 11 `PASS / COMPLETE`; that authority is exhausted. The current local `RhemaERP` and every preserved recovery/evidence asset require new explicit authority for any further access or mutation. Destructive repository cleanup, risky conflict resolution, pushes and PR operations remain escalation gates.
+On 2026-09-04 the user explicitly authorized proceeding with the gated database migration/reset/reseed track and the bounded Procurement, Inventory, Sales and HR/Payroll AccountingBookCode V2 producer cutover. Disposable rehearsal databases and owner-scoped cross-module conversions are therefore in scope. Attempt-specific authorizations continued through attempt 12, which stopped fail-closed during merged-baseline migration; that authority is exhausted. The current local `RhemaERP` and every preserved recovery/evidence asset require new explicit authority for any further access or mutation. Destructive repository cleanup, risky conflict resolution, pushes and PR operations remain escalation gates.
 
 ## Phase 1A review checklist
 
@@ -2978,3 +2978,35 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   non-posting Configuring books, preserving no-auto-approval.
 - Disposition: external evidence, log, and backup remain preserved and were not copied into the repository. No
   retry, restore, drop, cleanup, or post-PASS database mutation occurred.
+
+### Disposable reset attempt 12 / merged-baseline command-timeout handoff
+
+- Operational base: exact approved `ed1321180177fd4f3530fa8e682eddcd3db07aab`, tree
+  `4a9df246bc9028c856490de61c304d6c23453407`; the harness was invoked exactly once with C6/C7/C8 false.
+- Terminal outcome: `FAILED_NO_AUTOMATIC_RETRY`; durable phase `DATABASE_RECREATED`; failed operation
+  `APPLY_MIGRATIONS`. The sole merged-baseline native command failed with SQL timeout error `-2` and signed native
+  exit `-532462766`. Terminal evidence reports final migration count zero and no target-history/phase-07 claim.
+  Source fingerprint remained `1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`, with repository
+  count one, exact latest baseline, and zero orphans.
+- Preserved recovery media: media `417582cd7c194f629b4f63b68b006654`, file
+  `RhemaERP_DISPOSABLE_RESET_COPYONLY_417582cd7c194f629b4f63b68b006654.bak`, 104,521,728 bytes,
+  verified/current SHA-256 `C51B497FDAC842063DDC2CC44B0457E83D238F78D70431BBD1D6B490D8FDA3CB`, and path SHA-256
+  `5F32C2DD4ABA2110E2AB244AF7A566AC61AC7A0BD1E8596EC5058D1B68BD71B9`. The 28-entry manifest-file SHA-256 is
+  `A0B26C0490489A938A63215095F59CD0FB7BC236A5A8DD6F1A50B4FABD6B183B`; operator-log SHA-256 is
+  `A748F37A9CF04DF83827F4BAD9A12FD28AE0A6368EFAFA1526B9DC48AC26DBCD`. Backup, VERIFYONLY, logs, and evidence
+  remain external and untouched.
+- Diagnosis: the CLI used the normal SQL Server web profile, whose finite 30-second command timeout and retry-count
+  five apply to each command. The 5,736,330-byte merged baseline, 493 trigger definitions, and 108 chronological
+  patches exceeded that per-command boundary. All baseline/authority SQL remains inside the sole EF migration
+  transaction; the zero-history terminal result is consistent with rollback before migration-history commit.
+- Offline candidate: `917ddedb419077b3fb9ef585d2d621c1932cdc69`, tree
+  `6be5bc97482f9c2b122d320503bd8d09cd0d20dd`. `apply-migrations` and `seed-db` now use a dedicated finite
+  600-second SQL Server profile with execution-strategy retries disabled. Both explicitly set and read back the
+  timeout immediately before `MigrateAsync`; the ordinary web profile remains 30 seconds/retry-count five. The
+  reset and FinalClone harness pass the timeout explicitly to all two migration and four seed invocations.
+- Offline gates: focused CLI/profile/lockdown tests 12/12; Data and API Release builds zero errors; one-baseline
+  discovery and no-pending-model PASS; generated SQL 5,736,330 bytes with one `BEGIN TRANSACTION`/`COMMIT`, TSql160
+  grammar PASS, 493 triggers, five functions, and one view; baseline/archive/governance inspector PASS; disposable
+  reset safety and evidence, rehearsal safety, and FinalClone evidence suites PASS. No operational retry occurred.
+- Disposition: activation and reset retry remain `NO-GO`. The candidate requires independent Sol High review, then
+  any new guarded reset requires separate explicit authorization and a new evidence package.
