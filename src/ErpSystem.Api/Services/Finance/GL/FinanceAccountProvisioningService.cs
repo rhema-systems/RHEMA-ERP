@@ -8,6 +8,7 @@ using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ErpSystem.Api.Services.Finance.GL;
 
@@ -20,17 +21,33 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
     private readonly ICurrentUserService _currentUser;
     private readonly ILogger<FinanceAccountProvisioningService> _logger;
     private readonly IAccountSegmentIdentityService _segmentIdentity;
+    private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly bool _ownsIsolatedTracker;
 
     public FinanceAccountProvisioningService(
         ApplicationDbContext db,
         ICurrentUserService currentUser,
         ILogger<FinanceAccountProvisioningService> logger,
-        IAccountSegmentIdentityService? segmentIdentity = null)
+        IAccountSegmentIdentityService? segmentIdentity = null,
+        IServiceScopeFactory? scopeFactory = null)
+        : this(db, currentUser, logger, segmentIdentity, scopeFactory, ownsIsolatedTracker: false)
+    {
+    }
+
+    private FinanceAccountProvisioningService(
+        ApplicationDbContext db,
+        ICurrentUserService currentUser,
+        ILogger<FinanceAccountProvisioningService> logger,
+        IAccountSegmentIdentityService? segmentIdentity,
+        IServiceScopeFactory? scopeFactory,
+        bool ownsIsolatedTracker)
     {
         _db = db;
         _currentUser = currentUser;
         _logger = logger;
         _segmentIdentity = segmentIdentity ?? new ErpSystem.Api.Services.Finance.Segments.AccountSegmentIdentityService(db);
+        _scopeFactory = scopeFactory;
+        _ownsIsolatedTracker = ownsIsolatedTracker;
     }
 
     public async Task<ProvisionedFinanceAccountDto> ProvisionAsync(
@@ -60,6 +77,18 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                 provisionedAt, cancellationToken);
         }
 
+        if (_scopeFactory is not null)
+        {
+            EnsureCallerTrackerHasNoPendingWork();
+            await using var scope = _scopeFactory.CreateAsyncScope();
+            var isolatedDb = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            EnsureEquivalentIsolatedContext(isolatedDb);
+            var isolatedService = new FinanceAccountProvisioningService(
+                isolatedDb, _currentUser, _logger, segmentIdentity: null, scopeFactory: null,
+                ownsIsolatedTracker: true);
+            return await isolatedService.ProvisionAsync(request, cancellationToken);
+        }
+
         // SQL Server's retrying execution strategy must own the complete transaction unit.
         // A caller-owned transaction takes the branch above, so this boundary never nests or
         // independently commits work that belongs to its caller.
@@ -80,10 +109,13 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
             catch
             {
                 // A failed transaction can leave successfully written-but-rolled-back entities
-                // as Unchanged in this scoped context. Restore the exact pre-attempt tracker so
-                // the execution strategy can repeat the whole idempotent unit without duplicate
-                // identity instances, while retaining caller-owned pending state.
-                RestoreTrackedState(initialTrackedState);
+                // as Unchanged. The production owned unit has an isolated tracker, so it can be
+                // cleared without touching caller state. Directly constructed fallback hosts
+                // restore their exact validated-clean tracker snapshot instead.
+                if (_ownsIsolatedTracker)
+                    _db.ChangeTracker.Clear();
+                else
+                    RestoreTrackedState(initialTrackedState);
                 throw;
             }
         });
@@ -91,19 +123,49 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         return provisioned;
     }
 
+    private void EnsureCallerTrackerHasNoPendingWork()
+    {
+        _db.ChangeTracker.DetectChanges();
+        var unsafeEntry = _db.ChangeTracker.Entries().FirstOrDefault(entry =>
+            entry.State is not (EntityState.Unchanged or EntityState.Detached)
+            || entry.Properties.Any(property => property.IsTemporary));
+        if (unsafeEntry is not null)
+        {
+            throw new InvalidOperationException(
+                "FINANCE_ACCOUNT_PROVISIONING_CALLER_HAS_PENDING_WORK: service-owned provisioning uses an isolated " +
+                "scoped DbContext and cannot carry or commit caller-pending entity, key, or relationship state. " +
+                "Save the independent caller unit first, or provision inside a caller-owned transaction and execution strategy.");
+        }
+    }
+
+    private void EnsureEquivalentIsolatedContext(ApplicationDbContext isolatedDb)
+    {
+        if (ReferenceEquals(_db, isolatedDb)
+            || !string.Equals(_db.Database.ProviderName, isolatedDb.Database.ProviderName, StringComparison.Ordinal)
+            || !string.Equals(
+                _db.Database.GetDbConnection().ConnectionString,
+                isolatedDb.Database.GetDbConnection().ConnectionString,
+                StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "FINANCE_ACCOUNT_PROVISIONING_ISOLATION_INVALID: the scoped provisioning context must be a distinct " +
+                "context configured for the exact same provider and database target.");
+        }
+    }
+
     private IReadOnlyList<TrackedEntrySnapshot> CaptureRetryableTrackedState()
     {
         _db.ChangeTracker.DetectChanges();
         var unsafeEntry = _db.ChangeTracker.Entries().FirstOrDefault(entry =>
-            entry.State is EntityState.Added or EntityState.Deleted
+            entry.State is not (EntityState.Unchanged or EntityState.Detached)
             || entry.Properties.Any(property => property.IsTemporary
-                || (property.IsModified && property.Metadata.GetContainingForeignKeys().Any()))
+                || property.IsModified)
             || entry.Navigations.Any(navigation => navigation.IsLoaded || navigation.IsModified
                 || HasMaterializedRelationship(navigation.CurrentValue)));
         if (unsafeEntry is not null)
         {
             throw new InvalidOperationException(
-                "FINANCE_ACCOUNT_PROVISIONING_TRACKER_NOT_RETRY_SAFE: service-owned retry requires no added, deleted, " +
+                "FINANCE_ACCOUNT_PROVISIONING_TRACKER_NOT_RETRY_SAFE: service-owned retry requires no caller-pending, " +
                 "temporary-key, relationship-modified, or loaded-navigation state. Start a caller-owned transaction " +
                 "inside its execution strategy when provisioning must share that state.");
         }

@@ -147,6 +147,7 @@
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
     <Compile Include="Services\Finance\FinanceAccountProvisioningTransactionTests.cs" />
+    <Compile Include="Services\Finance\DatabaseSeedFinanceProvisioningIsolationTests.cs" />
     <Compile Include="Services\Finance\AccountingBookClassificationAuthorityTests.cs" />
     <Compile Include="Services\Finance\ArchivedMigrationSource.cs" />
     <Compile Include="Services\Finance\ArchivedMigrationSourceTests.cs" />

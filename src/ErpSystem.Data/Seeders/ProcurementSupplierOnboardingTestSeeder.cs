@@ -55,12 +55,6 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
             return;
         }
 
-        // Public OTP/token issuance is intentionally blocked unless the tenant opts in.
-        // This seeder is development/test-only, so make that prerequisite explicit and repeatable.
-        tenant.AllowSelfRegistration = true;
-        tenant.UpdatedAt = DateTime.UtcNow;
-        tenant.UpdatedBy = CreatedBy;
-
         var receiptAccount = await EnsureAccountAsync(
             tenant.Id,
             "1040",
@@ -79,6 +73,13 @@ public sealed class ProcurementSupplierOnboardingTestSeeder
             "Supplier Onboarding Tax Payable",
             AccountType.Liability,
             cancellationToken);
+
+        // Public OTP/token issuance is intentionally blocked unless the tenant opts in.
+        // Defer this independent caller mutation until Finance provisioning has completed in
+        // its isolated service-owned unit; pending caller work is never carried into that unit.
+        tenant.AllowSelfRegistration = true;
+        tenant.UpdatedAt = DateTime.UtcNow;
+        tenant.UpdatedBy = CreatedBy;
         await _context.SaveChangesAsync(cancellationToken);
 
         await EnsurePaymentMethodsAsync(tenant.Id, receiptAccount.AccountId, cancellationToken);

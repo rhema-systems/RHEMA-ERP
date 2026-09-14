@@ -1,5 +1,6 @@
 using System.Data.Common;
 using System.Text.RegularExpressions;
+using ErpSystem.Api.Extensions;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
@@ -15,6 +16,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
@@ -83,20 +85,120 @@ public sealed class FinanceAccountProvisioningTransactionTests
     {
         var transient = new OneShotTenantReadFailureInterceptor();
         await using var fixture = await Fixture.CreateAsync(useRetryingStrategy: true, transient);
-        var tenant = await fixture.Db.Tenants.SingleAsync(item => item.Id == fixture.TenantId);
-        tenant.AllowSelfRegistration = true;
-        tenant.UpdatedBy = "caller-owned-before-finance";
-
         var result = await fixture.Service().ProvisionAsync(Request(fixture.TenantId));
 
         transient.FailuresInjected.Should().Be(1);
         result.WasCreated.Should().BeTrue();
-        fixture.Db.ChangeTracker.Clear();
-        var persistedTenant = await fixture.Db.Tenants.AsNoTracking().SingleAsync(item => item.Id == fixture.TenantId);
-        persistedTenant.AllowSelfRegistration.Should().BeTrue();
-        persistedTenant.UpdatedBy.Should().Be("caller-owned-before-finance");
         (await fixture.Db.Accounts.CountAsync(item => item.AccountCode == "1040")).Should().Be(1);
         (await fixture.Db.AccountSegmentStructures.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    public async Task ScopedOwnedTransaction_PreservesUnchangedMaterializedCallerGraph_AndConvergesExactly()
+    {
+        await using var fixture = await ScopedFixture.CreateAsync(useRetryingStrategy: false);
+        var tenant = await fixture.Db.Tenants.SingleAsync(item => item.Id == fixture.TenantId);
+        var navigation = fixture.Db.Entry(tenant).Collection(item => item.UserTenants);
+        var materializedCollection = tenant.UserTenants;
+        navigation.IsLoaded = true;
+
+        var created = await fixture.Service.ProvisionAsync(Request(fixture.TenantId));
+        var repeated = await fixture.Service.ProvisionAsync(Request(fixture.TenantId));
+
+        repeated.AccountId.Should().Be(created.AccountId);
+        created.WasCreated.Should().BeTrue();
+        repeated.WasCreated.Should().BeFalse();
+        fixture.Db.Entry(tenant).State.Should().Be(EntityState.Unchanged);
+        tenant.UserTenants.Should().BeSameAs(materializedCollection);
+        navigation.IsLoaded.Should().BeTrue();
+        fixture.Db.ChangeTracker.Entries().Should().OnlyContain(entry => entry.State == EntityState.Unchanged);
+        await using var verify = fixture.CreateVerificationContext();
+        (await verify.Accounts.CountAsync(item => item.AccountCode == "1040")).Should().Be(1);
+        (await verify.AccountSegmentValues.CountAsync(item => item.AccountId == created.AccountId)).Should().Be(2);
+        (await verify.AccountAccountingBooks.CountAsync(item => item.AccountId == created.AccountId)).Should().Be(3);
+    }
+
+    [Fact]
+    public async Task ScopedOwnedTransaction_RejectsCallerPendingScalarBeforeCreatingIsolationScope()
+    {
+        await using var fixture = await ScopedFixture.CreateAsync(useRetryingStrategy: false);
+        var tenant = await fixture.Db.Tenants.SingleAsync(item => item.Id == fixture.TenantId);
+        tenant.AllowSelfRegistration = true;
+
+        await fixture.Service.Invoking(item => item.ProvisionAsync(Request(fixture.TenantId)))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FINANCE_ACCOUNT_PROVISIONING_CALLER_HAS_PENDING_WORK:*");
+
+        fixture.Db.Entry(tenant).State.Should().Be(EntityState.Modified);
+        tenant.AllowSelfRegistration.Should().BeTrue();
+        await using var verify = fixture.CreateVerificationContext();
+        (await verify.Accounts.CountAsync()).Should().Be(0);
+        (await verify.AccountSegmentStructures.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ScopedOwnedTransaction_RejectsPendingRelationshipWithoutChangingCallerGraph()
+    {
+        await using var fixture = await ScopedFixture.CreateAsync(useRetryingStrategy: false);
+        var firstAccount = TestAccount(fixture.TenantId, "1100");
+        var secondAccount = TestAccount(fixture.TenantId, "1200");
+        var structure = new AccountSegmentStructure
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, SegmentCode = "TEST_SEGMENT",
+            SegmentName = "Test segment", SegmentPosition = 1, SegmentLength = 4,
+            DataType = "Numeric", IsActive = true, LifecycleStatus = AccountSegmentLifecycleStatus.Active
+        };
+        var segment = new AccountSegmentValue
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, Account = firstAccount,
+            AccountId = firstAccount.Id, SegmentStructure = structure, SegmentStructureId = structure.Id,
+            SegmentPosition = 1, SegmentValue = "1100"
+        };
+        fixture.Db.AddRange(firstAccount, secondAccount, structure, segment);
+        await fixture.Db.SaveChangesAsync();
+        fixture.Db.ChangeTracker.Clear();
+        var callerSegment = await fixture.Db.AccountSegmentValues
+            .Include(item => item.Account).SingleAsync(item => item.Id == segment.Id);
+        var callerSecondAccount = await fixture.Db.Accounts.SingleAsync(item => item.Id == secondAccount.Id);
+        callerSegment.Account = callerSecondAccount;
+        callerSegment.AccountId = secondAccount.Id;
+
+        await fixture.Service.Invoking(item => item.ProvisionAsync(Request(fixture.TenantId)))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("FINANCE_ACCOUNT_PROVISIONING_CALLER_HAS_PENDING_WORK:*");
+
+        callerSegment.Account.Should().BeSameAs(callerSecondAccount);
+        callerSegment.AccountId.Should().Be(secondAccount.Id);
+        fixture.Db.Entry(callerSegment).State.Should().Be(EntityState.Modified);
+        await using var verify = fixture.CreateVerificationContext();
+        (await verify.Accounts.CountAsync(item => item.AccountCode == "1040")).Should().Be(0);
+        (await verify.AccountSegmentValues.AsNoTracking().SingleAsync(item => item.Id == segment.Id))
+            .AccountId.Should().Be(firstAccount.Id);
+    }
+
+    [Fact]
+    public async Task ScopedOwnedTransaction_PostWriteTransientFailureRetriesWholeUnitWithoutCallerGraphCorruption()
+    {
+        var transient = new OneShotPostWriteFailureInterceptor();
+        await using var fixture = await ScopedFixture.CreateAsync(useRetryingStrategy: true, transient);
+        var tenant = await fixture.Db.Tenants.SingleAsync(item => item.Id == fixture.TenantId);
+        var navigation = fixture.Db.Entry(tenant).Collection(item => item.UserTenants);
+        var materializedCollection = tenant.UserTenants;
+        navigation.IsLoaded = true;
+        transient.Arm();
+
+        var result = await fixture.Service.ProvisionAsync(Request(fixture.TenantId));
+
+        transient.FailuresInjected.Should().Be(1);
+        fixture.Db.Entry(tenant).State.Should().Be(EntityState.Unchanged);
+        tenant.UserTenants.Should().BeSameAs(materializedCollection);
+        navigation.IsLoaded.Should().BeTrue();
+        await using var verify = fixture.CreateVerificationContext();
+        (await verify.Accounts.CountAsync(item => item.AccountCode == "1040")).Should().Be(1);
+        (await verify.AccountSegmentValues.CountAsync(item => item.AccountId == result.AccountId)).Should().Be(2);
+        (await verify.AccountAccountingBooks.CountAsync(item => item.AccountId == result.AccountId)).Should().Be(3);
+        (await verify.AccountSegmentStructures.CountAsync()).Should().Be(2);
+        (await verify.FinanceDimensionDefinitions.CountAsync()).Should().Be(6);
     }
 
     [Fact]
@@ -251,7 +353,10 @@ public sealed class FinanceAccountProvisioningTransactionTests
             .And.Contain("RHEMA:FIN:PROVISION:MANIFEST:")
             .And.Contain("RHEMA:FIN:PROVISION:ACCOUNT:")
             .And.Contain("@LockOwner = 'Transaction'")
-            .And.Contain("CaptureRetryableTrackedState");
+            .And.Contain("CaptureRetryableTrackedState")
+            .And.Contain("EnsureCallerTrackerHasNoPendingWork")
+            .And.Contain("CreateAsyncScope")
+            .And.Contain("EnsureEquivalentIsolatedContext");
         segmentManifest.Should().NotContain("BeginTransaction")
             .And.NotContain("CommitAsync")
             .And.Contain("SaveChangesAsync");
@@ -341,6 +446,114 @@ public sealed class FinanceAccountProvisioningTransactionTests
         }
     }
 
+    private sealed class OneShotPostWriteFailureInterceptor : DbCommandInterceptor
+    {
+        private int _armed;
+        private int _remaining = 1;
+
+        public int FailuresInjected { get; private set; }
+
+        public void Arm() => Volatile.Write(ref _armed, 1);
+
+        public override ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command,
+            CommandExecutedEventData eventData,
+            DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            if (Volatile.Read(ref _armed) == 1
+                && command.CommandText.Contains("INSERT INTO \"AccountSegmentStructures\"", StringComparison.Ordinal)
+                && Interlocked.Exchange(ref _remaining, 0) == 1)
+            {
+                FailuresInjected++;
+                throw new RetryableOfflineException();
+            }
+
+            return ValueTask.FromResult(result);
+        }
+    }
+
+    private sealed class ScopedFixture : IAsyncDisposable
+    {
+        private readonly string _connectionString;
+        private readonly SqliteConnection _keeper;
+        private readonly ServiceProvider _provider;
+        private readonly AsyncServiceScope _scope;
+
+        private ScopedFixture(
+            string connectionString,
+            SqliteConnection keeper,
+            ServiceProvider provider,
+            AsyncServiceScope scope,
+            Guid tenantId)
+        {
+            _connectionString = connectionString;
+            _keeper = keeper;
+            _provider = provider;
+            _scope = scope;
+            TenantId = tenantId;
+            Db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            Service = scope.ServiceProvider.GetRequiredService<ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService>();
+        }
+
+        public ApplicationDbContext Db { get; }
+        public ErpSystem.Core.Interfaces.Finance.IFinanceAccountProvisioningService Service { get; }
+        public Guid TenantId { get; }
+
+        public static async Task<ScopedFixture> CreateAsync(
+            bool useRetryingStrategy,
+            params IInterceptor[] interceptors)
+        {
+            var connectionString = $"Data Source=finance-provisioning-{Guid.NewGuid():N};Mode=Memory;Cache=Shared";
+            var keeper = new SqliteConnection(connectionString);
+            await keeper.OpenAsync();
+            var setupOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(keeper).Options;
+            await using (var setup = new ApplicationDbContext(setupOptions))
+            {
+                await Fixture.CreateSchemaAsync(setup);
+                var tenantId = Guid.NewGuid();
+                setup.Tenants.Add(new Tenant
+                {
+                    Id = tenantId, Code = "TDC", Name = "TDC", BaseCurrency = "GHS", Status = TenantStatus.Active
+                });
+                await setup.SaveChangesAsync();
+
+                var currentUser = new Mock<ICurrentUserService>();
+                currentUser.SetupGet(item => item.TenantId).Returns(tenantId);
+                currentUser.SetupGet(item => item.UserName).Returns("transaction.tests");
+                var services = new ServiceCollection();
+                services.AddLogging();
+                services.AddSingleton(currentUser.Object);
+                services.AddDbContext<ApplicationDbContext>(options =>
+                {
+                    options.UseSqlite(connectionString);
+                    if (interceptors.Length > 0)
+                        options.AddInterceptors(interceptors);
+                    if (useRetryingStrategy)
+                        options.ReplaceService<IExecutionStrategyFactory, OfflineRetryingExecutionStrategyFactory>();
+                });
+                services.AddFinanceAccountProvisioning();
+                var provider = services.BuildServiceProvider(new ServiceProviderOptions
+                {
+                    ValidateOnBuild = true,
+                    ValidateScopes = true
+                });
+                var scope = provider.CreateAsyncScope();
+                return new ScopedFixture(connectionString, keeper, provider, scope, tenantId);
+            }
+        }
+
+        public ApplicationDbContext CreateVerificationContext() => new(
+            new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlite(_connectionString).Options);
+
+        public async ValueTask DisposeAsync()
+        {
+            await _scope.DisposeAsync();
+            await _provider.DisposeAsync();
+            await _keeper.DisposeAsync();
+        }
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -380,7 +593,7 @@ public sealed class FinanceAccountProvisioningTransactionTests
             return new Fixture(connection, db, tenantId);
         }
 
-        private static async Task CreateSchemaAsync(ApplicationDbContext db)
+        internal static async Task CreateSchemaAsync(ApplicationDbContext db)
         {
             await db.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
             var requiredTables = new[]
