@@ -65,7 +65,8 @@ public sealed class InventoryOpeningStockGovernanceTests
         currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
         currentUser.SetupGet(x => x.UserId).Returns(userId);
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
-        var service = CreateService(currentUser.Object);
+        await using var context = Context();
+        var service = CreateService(context, currentUser.Object, AllowAllAccess().Object);
         var request = new CreateStockAdjustmentDto
         {
             WarehouseId = Guid.NewGuid(),

@@ -275,7 +275,7 @@ public sealed class TenderPaymentFinancePostingTests
     }
 
     [Fact]
-    public void MigrationIsDiscoverableAndContainsThePostingLineageSchema()
+    public void ArchivedMigrationContainsPostingLineageWhileOnlyCurrentBaselineIsDiscoverable()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer(
@@ -283,8 +283,10 @@ public sealed class TenderPaymentFinancePostingTests
             .Options;
         using var context = new ApplicationDbContext(options);
 
-        context.GetService<IMigrationsAssembly>().Migrations.Should()
-            .ContainKey("20260831203000_AddTenderFeeFinancePostingLineage");
+        var discovered = context.GetService<IMigrationsAssembly>().Migrations;
+        discovered.Should().ContainSingle();
+        discovered.Should().ContainKey("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        discovered.Should().NotContainKey("20260831203000_AddTenderFeeFinancePostingLineage");
 
         var migration = new AddTenderFeeFinancePostingLineage();
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");

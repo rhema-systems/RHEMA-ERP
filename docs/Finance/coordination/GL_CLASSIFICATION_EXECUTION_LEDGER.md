@@ -48,6 +48,17 @@ re-consuming. Missing, extra, wrong-event, and wrong-journal consumed evidence f
 engine tests; the ordinary API-test build completed with zero errors. No database, connection environment, preserved
 evidence, or activation flag was accessed.
 
+The Core regression project is reconciled with the D3 archive boundary without adding any archived migration to the
+product assembly. A clean reevaluation against the regenerated Data assembly exposed 164 compiler diagnostics across
+68 test files (approximately 99 historical migration types); stale pre-D3 build output had previously hidden that
+scope. The test project now links 103 exact, individually named archived sources only where an existing regression
+executes the historical `Up`/`Down` operations, SQL constants, or final trigger builder. There is no archive glob, and
+the Data product continues to discover only the single current-model baseline. Current-baseline assertions use the
+sole compiled migration while historical assertions retain their original executable SQL/schema intent. The ordinary
+Core test build completes with zero errors, and the complete 75-class affected slice passes 504 tests with 29 guarded
+SQL Server tests skipped because their explicit disposable-test connection was not supplied. No database, connection
+environment, preserved evidence, or activation flag was accessed.
+
 ## Authoritative inputs
 
 - `docs/Finance/GL_CLASSIFICATION_REVALUATION_REFACTOR_HANDOFF.md`
