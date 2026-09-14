@@ -22,8 +22,10 @@ triggers total), 108 chronological trigger patches, five functions, and one view
 the archive and only the regenerated merged snapshot is compiled. The final Core correction moves all 67 direct
 historical source reads across 44 test files to the exact archive location and repairs the two merged-only Inventory
 fixture cases introduced by the cutover-required `AccountingBookId`. The broad non-environment Core result is
-3,213 passed / 57 failed / 0 skipped; exact latest master reproduces all 57 residual names and messages, leaving zero
-merge-only residual failures. Those 57 are parent debt, not a cutover regression. The frontend production build did
+3,213 passed / 57 failed / 0 skipped. Exact latest master has the same 57-name failure intersection and the same root
+assertions, leaving zero merge-only residual failures. One expected ProjectAssetLink FluentAssertions message-text
+drift remains because the assertion embeds differing archived `FastBuildMigrationMetadata` content. Those 57 are
+parent debt, not a cutover regression. The frontend production build did
 not reach a conclusive PASS and therefore remains an explicit deployment gate despite the backend, baseline,
 governance, focused frontend, and safety/evidence results.
 

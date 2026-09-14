@@ -84,8 +84,10 @@ environment, preserved evidence, or activation flag was accessed.
 Sol High review accepted the Core reconciliation without P1/P2. All 67 direct historical source readers in the 44
 affected files now use the exact archive path; the final ordinary Core Release build has zero errors and warnings.
 The final broad result remains 3,213 passed / 57 failed / 0 skipped. Comparison against exact latest master leaves
-zero merged-only failures and zero first-message drift: every residual failure is exact parent debt, while the two
-master-only failures are fixtures already corrected by the integration. The frontend production `next build` did
+the same 57-name failure intersection, the same root assertions, and zero merged-only failures. One expected
+ProjectAssetLink FluentAssertions message-text drift reflects differing archived `FastBuildMigrationMetadata`
+content embedded in the assertion; it is not a distinct behavioral failure. Every residual failure is exact parent
+debt, while the two master-only failures are fixtures already corrected by the integration. The frontend production `next build` did
 not yield a conclusive PASS during integration verification. It is not represented as green and remains a deployment
 gate even though the targeted frontend, backend, baseline, governance, reset-safety, and evidence suites passed.
 
