@@ -1,5 +1,7 @@
 # TDC customer demonstration & UAT walkthrough
 
+**B12–B22 session guide:** use the [short, step-by-step script](TDC_B12_B22_REHEARSAL_STEPS.md) ([printable version](TDC_B12_B22_REHEARSAL_STEPS.html)). [Readiness and outstanding checks](TDC_B12_B22_READINESS.md) are separate. The material below retains the full reference and historical evidence; old dates, costs, build and migration counts are not current readiness claims.
+
 **Supplier onboarding, budget, procurement, receipt, invoice matching and Stores**<br>
 Prepared: **7 September 2026, 09:04 UTC account check** · Environment: **localhost:3000 / DEFAULT**<br>
 Receipt-flow update: **9 September 2026 — GRN-only walkthrough; rehearsal screen verified**.<br>

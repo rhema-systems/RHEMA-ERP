@@ -1,5 +1,6 @@
 'use client';
 
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -13,7 +14,6 @@ import {
   StockMovementDto, 
   InventoryTransferDetailDto 
 } from '@/services/inventoryManagementService';
-import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { formatInventoryMoney } from '@/lib/inventory-currency';
 
@@ -38,8 +38,8 @@ const getMovementTypeInfo = (type: string) => {
 };
 
 export function MovementDetailDialog({ open, onOpenChange, movement, currencyCode }: MovementDetailDialogProps) {
-  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState('header');
+  const [documentPreview, setDocumentPreview] = useState<CentralDocumentViewerFile | null>(null);
   const [transferDetail, setTransferDetail] = useState<InventoryTransferDetailDto | null>(null);
   const [loadingTransfer, setLoadingTransfer] = useState(false);
 
@@ -47,6 +47,7 @@ export function MovementDetailDialog({ open, onOpenChange, movement, currencyCod
   const isTransferMovement = movement?.referenceType === 'Transfer' && movement?.referenceNumber;
 
   useEffect(() => {
+    setDocumentPreview(null);
     if (open && isTransferMovement && movement?.referenceNumber) {
       loadTransferDetails(movement.referenceNumber);
     } else {
@@ -68,28 +69,26 @@ export function MovementDetailDialog({ open, onOpenChange, movement, currencyCod
     }
   };
 
-  const handlePrintShipmentNote = async () => {
+  const handlePrintShipmentNote = () => {
     if (!transferDetail?.id) return;
-    try {
-      const blob = await inventoryManagementService.getShipmentNotePdf(transferDetail.id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating shipment note:', err);
-      toast({ title: 'Error', description: 'Failed to generate shipment note', variant: 'destructive' });
-    }
+    setDocumentPreview({
+      title: `Shipment Note ${transferDetail.transferNumber}`,
+      fileName: `ShipmentNote-${transferDetail.id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(transferDetail.id)}/shipment-note`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
-  const handlePrintGRN = async () => {
+  const handlePrintGRN = () => {
     if (!transferDetail?.id) return;
-    try {
-      const blob = await inventoryManagementService.getGoodsReceivedNotePdf(transferDetail.id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating GRN:', err);
-      toast({ title: 'Error', description: 'Failed to generate GRN', variant: 'destructive' });
-    }
+    setDocumentPreview({
+      title: `Goods Received Note ${transferDetail.transferNumber}`,
+      fileName: `GRN-${transferDetail.id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(transferDetail.id)}/grn`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
   if (!movement) return null;
@@ -99,6 +98,7 @@ export function MovementDetailDialog({ open, onOpenChange, movement, currencyCod
   const money = (value: number) => currencyCode ? formatInventoryMoney(value, currencyCode) : '—';
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -314,6 +314,9 @@ export function MovementDetailDialog({ open, onOpenChange, movement, currencyCod
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <CentralDocumentViewerDialog file={documentPreview} open={open && Boolean(documentPreview)}
+      onOpenChange={(previewOpen) => { if (!previewOpen) setDocumentPreview(null); }} enableAnnotations={false} />
+    </>
   );
 }
 

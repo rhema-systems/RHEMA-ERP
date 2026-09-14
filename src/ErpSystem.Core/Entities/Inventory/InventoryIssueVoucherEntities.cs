@@ -23,7 +23,8 @@ public sealed class InventoryIssueVoucher : TenantEntity
     public InventoryIssueVoucherStatus Status { get; set; }
     public Guid WarehouseId { get; set; }
     public Guid? LocationId { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
     [MaxLength(100)] public string? DepartmentName { get; set; }
     [MaxLength(100)] public string? CostCenter { get; set; }
     public Guid? ProjectId { get; set; }

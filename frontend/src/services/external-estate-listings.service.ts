@@ -49,20 +49,24 @@ export interface ExternalListingRequest {
 
 export interface ExternalListingEnquiry {
   id: string;
-  module: string;
-  entityType: string;
-  title: string;
-  referenceNumber?: string | null;
+  ticketNumber: string;
+  subject?: string | null;
   status: string;
-  currentStageName: string;
-  currentAssignedRole?: string | null;
-  createdAt: string;
-  salesOpportunityId?: string | null;
-  salesOpportunityName?: string | null;
-  estateListingId?: string | null;
-  estateListingReference?: string | null;
-  estateParentAssetId?: string | null;
-  estateDemarcationId?: string | null;
+}
+
+export interface EnquiryPartnerProfile {
+  id: string;
+  partnerName: string;
+  primaryEmail?: string | null;
+  primaryPhone?: string | null;
+  partnerType: string;
+}
+
+export interface CreatePropertyListingEnquiry {
+  submissionId: string;
+  message: string;
+  businessPartnerId?: string;
+  captchaToken?: string;
 }
 
 export interface ExternalListingRequestDocument {
@@ -131,6 +135,11 @@ export interface PublicEstateListingsPage {
 }
 
 class ExternalEstateListingsService {
+  async getEnquiryProfiles(): Promise<EnquiryPartnerProfile[]> {
+    const response = await apiService.get<ApiResponse<EnquiryPartnerProfile[]>>('/estate/external/enquiry-profiles');
+    return response.data || [];
+  }
+
   async getCustomerProfiles(): Promise<ExternalCustomerProfile[]> {
     const response = await apiService.get<ApiResponse<ExternalCustomerProfile[]>>(
       '/estate/external/customer-profiles'
@@ -153,6 +162,7 @@ class ExternalEstateListingsService {
   }
 
   async getListingsPage(query: {
+    listingId?: string;
     location?: string;
     listingType?: string;
     search?: string;
@@ -232,7 +242,7 @@ class ExternalEstateListingsService {
 
   async createEnquiry(
     listingId: string,
-    payload: CreateExternalListingRequest
+    payload: CreatePropertyListingEnquiry
   ): Promise<ExternalListingEnquiry> {
     const response = await apiService.post<ApiResponse<ExternalListingEnquiry>>(
       `/estate/external/listings/${listingId}/enquiries`,

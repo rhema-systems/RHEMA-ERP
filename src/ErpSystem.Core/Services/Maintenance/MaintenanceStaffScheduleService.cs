@@ -42,7 +42,7 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
         {
             ValidateScheduleWindow(createDto.StartDateTime, createDto.EndDateTime);
 
-            var technician = await _employeeRepository.GetByIdAsync(createDto.TechnicianId, e => e.Department);
+            var technician = await _employeeRepository.GetByIdAsync(createDto.TechnicianId, e => e.OrganizationUnit);
             if (technician == null)
                 throw new ArgumentException($"Technician with ID {createDto.TechnicianId} not found in HR system");
             if (!technician.IsActive)
@@ -107,7 +107,7 @@ public class MaintenanceStaffScheduleService : IMaintenanceStaffScheduleService
                 updateDto.EndDateTime.HasValue;
             if (assignmentChanged)
             {
-                var technician = await _employeeRepository.GetByIdAsync(proposedTechnicianId, e => e.Department);
+                var technician = await _employeeRepository.GetByIdAsync(proposedTechnicianId, e => e.OrganizationUnit);
                 if (technician == null)
                     throw new ArgumentException($"Technician with ID {proposedTechnicianId} not found in HR system");
                 if (!technician.IsActive)

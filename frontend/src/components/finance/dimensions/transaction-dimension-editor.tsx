@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/sheet';
 import {
   getActiveDimensionValues,
-  getApplicableDimensionRules,
+  getSourceLineDimensionRuleResolution,
   getDimensionSummary,
   getMissingRequiredDimensions,
   resolveSourceDimensionValues,
@@ -136,6 +136,8 @@ export interface TransactionDimensionLineEditorProps {
   effectiveDate: string;
   lineNumber: number;
   accountId: string;
+  additionalAccountIds?: string[];
+  requiredDimensionCodes?: string[];
   accountLabel?: string;
   values: Record<string, string>;
   defaults: Record<string, string>;
@@ -151,6 +153,8 @@ export function TransactionDimensionLineEditor({
   effectiveDate,
   lineNumber,
   accountId,
+  additionalAccountIds = [],
+  requiredDimensionCodes = [],
   accountLabel,
   values,
   defaults,
@@ -164,12 +168,14 @@ export function TransactionDimensionLineEditor({
         Select account first
       </span>
     );
-  const applicable = getApplicableDimensionRules(
+  const resolution = getSourceLineDimensionRuleResolution(
     rules,
     accountId,
     effectiveDate,
-    context
+    context,
+    additionalAccountIds
   );
+  const applicable = resolution.rules;
   const displayValues = applicable.reduce(
     (resolved, rule) => {
       if (rule.ruleType === 'Fixed' && rule.defaultValueCode)
@@ -192,9 +198,29 @@ export function TransactionDimensionLineEditor({
     accountId,
     effectiveDate,
     context,
-    values
+    values,
+    additionalAccountIds
   );
-  const isBlocking = certificationState === 'Enforced' && missing.length > 0;
+  const missingNames = [
+    ...new Set([
+      ...missing.map((rule) => rule.dimensionName),
+      ...requiredDimensionCodes
+        .filter(
+          (code) =>
+            !displayValues[code] &&
+            !applicable.find((rule) => rule.dimensionCode === code)
+              ?.defaultValueCode
+        )
+        .map(
+          (code) =>
+            definitions.find((definition) => definition.code === code)?.name ||
+            code
+        ),
+    ]),
+  ];
+  const isBlocking =
+    resolution.conflicts.length > 0 ||
+    (certificationState === 'Enforced' && missingNames.length > 0);
 
   return (
     <Sheet>
@@ -213,12 +239,14 @@ export function TransactionDimensionLineEditor({
           <span className="truncate">
             {getDimensionSummary(definitions, displayValues)}
           </span>
-          {missing.length > 0 && (
+          {(missingNames.length > 0 || resolution.conflicts.length > 0) && (
             <Badge
               variant={isBlocking ? 'destructive' : 'secondary'}
               className="ml-auto"
             >
-              {missing.length} {isBlocking ? 'required' : 'warning'}
+              {resolution.conflicts.length > 0
+                ? `${resolution.conflicts.length} conflict`
+                : `${missingNames.length} ${isBlocking ? 'required' : 'warning'}`}
             </Badge>
           )}
         </Button>
@@ -234,9 +262,19 @@ export function TransactionDimensionLineEditor({
             {context.sourceRoute || context.sourceDocumentType}
           </SheetDescription>
         </SheetHeader>
-        {missing.length > 0 && (
+        {resolution.conflicts.length > 0 && (
+          <div
+            role="alert"
+            className="mt-4 rounded-md border border-destructive bg-destructive/5 p-3 text-sm text-destructive"
+          >
+            {resolution.conflicts.map((conflict) => (
+              <p key={conflict.dimensionCode}>{conflict.message}</p>
+            ))}
+          </div>
+        )}
+        {missingNames.length > 0 && (
           <div className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
-            Missing {missing.map((rule) => rule.dimensionName).join(', ')}.
+            Missing {missingNames.join(', ')}.
             {certificationState === 'CaptureOptional'
               ? ' This is a readiness warning until the route is promoted.'
               : ''}
@@ -253,7 +291,10 @@ export function TransactionDimensionLineEditor({
                 <div className="flex items-center justify-between">
                   <Label>
                     {definition.name}
-                    {rule?.ruleType === 'Required' ? ' *' : ''}
+                    {rule?.ruleType === 'Required' ||
+                    requiredDimensionCodes.includes(definition.code)
+                      ? ' *'
+                      : ''}
                   </Label>
                   {fixed && <Badge variant="secondary">Fixed</Badge>}
                 </div>
@@ -264,7 +305,7 @@ export function TransactionDimensionLineEditor({
                     onChange(setValue(values, definition.code, value))
                   }
                 >
-                  <SelectTrigger>
+                  <SelectTrigger aria-label={definition.name}>
                     <SelectValue placeholder="Not assigned" />
                   </SelectTrigger>
                   <SelectContent>
@@ -295,7 +336,8 @@ export function TransactionDimensionLineEditor({
                   accountId,
                   effectiveDate,
                   context,
-                  defaults
+                  defaults,
+                  additionalAccountIds
                 )
               )
             }

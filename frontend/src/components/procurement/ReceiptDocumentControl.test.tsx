@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { purchasingService, type ProcurementReceiptDocumentOverviewDto } from '@/services/purchasingService';
 import { ReceiptDocumentControl } from './ReceiptDocumentControl';
 
+const previewMocks = vi.hoisted(() => ({ download: vi.fn() }));
+vi.mock('@/services/api.service', () => ({ apiService: { downloadBlob: previewMocks.download } }));
+vi.mock('next/dynamic', () => ({ default: () => (props: { fileData?: Uint8Array; enableAnnotations?: boolean }) =>
+  <div role="region" aria-label="PDF content" data-annotations={String(props.enableAnnotations)}>{props.fileData?.length} authorized bytes</div> }));
+
 vi.mock('@/services/purchasingService', () => ({ purchasingService: {
   getReceiptDocumentControl: vi.fn(), ensureReceiptDocuments: vi.fn(),
   reconcileReceiptDocuments: vi.fn(), signReceiptDocument: vi.fn(), issueReceiptDocument: vi.fn(),
@@ -20,7 +25,7 @@ const fixture = (): ProcurementReceiptDocumentOverviewDto => ({
     { code: 'INSPECTION', label: 'Inspection/acceptance', passed: false, message: 'Inspection is Draft.' },
   ],
   documents: [{
-    id: 'grn-1', documentKind: 'GRN', documentNumber: 'GRN-1', templateCode: 'TDC-GRN',
+    id: 'grn-1', documentKind: 'Grn', documentNumber: 'GRN-1', templateCode: 'TDC-GRN',
     status: 'PendingSignatures', reconciliationStatus: 'Pending', preparedByName: 'John Manager',
     preparedAtUtc: '2026-09-09T12:00:00Z', sourceIntegrityHash: 'retained-integrity-hash',
     centralDocumentRecordId: 'retained-dms-id', requiredSignatures: ['Stores', 'Approving Officer'],
@@ -46,10 +51,10 @@ describe('ReceiptDocumentControl disclosure', () => {
     expect(screen.getByText('retained-integrity-hash')).not.toBeVisible();
     expect(screen.getByText('Record retained-dms-id')).not.toBeVisible();
     expect(screen.getByText('Generated from DEC-013 configuration.')).not.toBeVisible();
-    expect(within(document).getByRole('button', { name: 'Sign', exact: true })).toBeEnabled();
-    expect(within(document).getByRole('button', { name: 'Issue', exact: true })).toBeDisabled();
+    expect(within(document).getByRole('button', { name: 'Sign' })).toBeEnabled();
+    expect(within(document).getByRole('button', { name: 'Issue' })).toBeDisabled();
     expect(screen.queryByRole('button', { name: 'Create receipt documents' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Reconcile', exact: true })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Reconcile' })).toBeVisible();
   });
 
   it('reveals technical evidence without changing the form or invoking business actions', async () => {
@@ -102,11 +107,11 @@ describe('ReceiptDocumentControl disclosure', () => {
     expect(screen.queryByTestId('receipt-document-mrn')).not.toBeInTheDocument();
     expect(screen.queryByText('MRN-ARCHIVE', { exact: false })).not.toBeInTheDocument();
     expect(screen.queryByText('Retained MRN history')).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Sign', exact: true })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Sign' })).toHaveLength(1);
     expect(overview.documents).toHaveLength(2);
     expect(purchasingService.ensureReceiptDocuments).not.toHaveBeenCalled();
     expect(purchasingService.issueReceiptDocument).not.toHaveBeenCalled();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Sign', exact: true })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Sign' })); });
     expect(purchasingService.signReceiptDocument).toHaveBeenCalledWith('grn-1', {
       requiredRole: 'Stores', comment: undefined, rowVersion: 'AQID',
     });
@@ -143,7 +148,7 @@ describe('ReceiptDocumentControl disclosure', () => {
     await screen.findByTestId('receipt-document-grn');
     fireEvent.change(screen.getByRole('textbox'), { target: { value: 'Issue approved GRN' } });
     expect(screen.getByText('Needs attention')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Issue', exact: true })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Issue' })).toBeDisabled();
     expect(screen.getAllByText('The saved receipt document register is incomplete.').some(node => !node.closest('[hidden]'))).toBe(true);
   });
 
@@ -156,5 +161,38 @@ describe('ReceiptDocumentControl disclosure', () => {
     expect(screen.queryByTestId('receipt-document-mrn')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Create receipt documents' })).not.toBeInTheDocument();
     expect(purchasingService.ensureReceiptDocuments).not.toHaveBeenCalled();
+  });
+
+  it('opens the issued GRN inside the page from its protected route without popup or stock mutation', async () => {
+    const overview = fixture();
+    overview.documents[0].status = 'Issued';
+    overview.documents[0].allowedActions = ['download'];
+    vi.mocked(purchasingService.getReceiptDocumentControl).mockResolvedValue(overview);
+    previewMocks.download.mockResolvedValue({ arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer });
+    const openWindow = vi.spyOn(window, 'open').mockImplementation(() => null);
+    render(<ReceiptDocumentControl receiptId="receipt-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open PDF' }));
+    expect(await screen.findByRole('dialog', { name: 'GRN-1' })).toBeVisible();
+    expect(await screen.findByRole('region', { name: 'PDF content' })).toHaveTextContent('4 authorized bytes');
+    expect(previewMocks.download).toHaveBeenCalledExactlyOnceWith('/ProcurementReceiptDocuments/grn-1/download');
+    expect(screen.getByRole('region', { name: 'PDF content' })).toHaveAttribute('data-annotations', 'false');
+    expect(openWindow).not.toHaveBeenCalled();
+    expect(purchasingService.issueReceiptDocument).not.toHaveBeenCalled();
+    expect(purchasingService.reconcileReceiptDocuments).not.toHaveBeenCalled();
+    openWindow.mockRestore();
+  });
+
+  it('leaves a failed GRN preview visible with the protected download error', async () => {
+    const overview = fixture();
+    overview.documents[0].status = 'Issued';
+    overview.documents[0].allowedActions = ['download'];
+    vi.mocked(purchasingService.getReceiptDocumentControl).mockResolvedValue(overview);
+    previewMocks.download.mockRejectedValue(new Error('Issued document is unavailable. (404)'));
+    render(<ReceiptDocumentControl receiptId="receipt-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open PDF' }));
+    expect(await screen.findByText('Issued document is unavailable. (404)')).toBeVisible();
+    expect(screen.getByRole('dialog', { name: 'GRN-1' })).toBeVisible();
+    expect(screen.queryByRole('region', { name: 'PDF content' })).not.toBeInTheDocument();
+    expect(purchasingService.issueReceiptDocument).not.toHaveBeenCalled();
   });
 });

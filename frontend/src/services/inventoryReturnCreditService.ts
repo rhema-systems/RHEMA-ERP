@@ -1,5 +1,14 @@
 import { apiService } from './api.service';
 
+export interface InventoryReturnCreditCandidate {
+  returnId: string;
+  returnNumber: string;
+  supplierName: string;
+  shippedDate: string;
+  reason: string;
+  totalQuantity: number;
+}
+
 export interface InventoryReturnCreditSource {
   invoiceId: string;
   invoiceNumber: string;
@@ -33,6 +42,7 @@ export interface InventoryReturnCreditRequest {
 
 const base = '/ap/supplier-debit-notes';
 export const inventoryReturnCreditService = {
+  getCandidates: (search?: string) => apiService.get<InventoryReturnCreditCandidate[]>(`${base}/inventory-returns`, { search: search?.trim() || undefined }),
   getNotes: (returnId: string) => apiService.get<InventoryReturnCreditNote[]>(base, { inventoryPurchaseReturnId: returnId }),
   getSources: (returnId: string) => apiService.get<InventoryReturnCreditSource[]>(`${base}/inventory-returns/${encodeURIComponent(returnId)}/source-invoices`),
   create: (returnId: string, request: InventoryReturnCreditRequest) =>

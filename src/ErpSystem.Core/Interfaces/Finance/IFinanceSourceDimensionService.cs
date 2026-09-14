@@ -3,7 +3,7 @@ using ErpSystem.Core.Finance.Integration;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
-public sealed record FinanceSourceDocumentLineContext(Guid SourceLineId, Guid AccountId);
+public sealed record FinanceSourceDocumentLineContext(Guid SourceLineId, Guid AccountId, IReadOnlyList<Guid>? AdditionalAccountIds = null);
 
 /// <summary>
 /// Shared Finance-owned orchestration boundary used by certified source routes.  Producer

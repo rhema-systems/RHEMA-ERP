@@ -4,6 +4,34 @@ namespace ErpSystem.Core.Services.Estate;
 
 public sealed class PropertyManagementProcedureCatalogService : IPropertyManagementProcedureCatalogService
 {
+    private static readonly FacilitiesWorkspaceStage[] ListingApplicationManualStages =
+    [
+        new("Estate intake review", "Estate Manager / Property Manager",
+            "Estate verifies the customer, listing, and completed Sales transaction before taking the application forward.",
+            [
+                "Customer and property listing references are verified",
+                "Completed Sales opportunity and agreed transaction are recorded"
+            ]),
+        new("Commercial and availability review", "Estate Manager / Property Manager",
+            "Estate confirms the listing remains available and records the commercial and reservation position.",
+            [
+                "Availability and reservation position are confirmed",
+                "Commercial review outcome is recorded"
+            ]),
+        new("Estate decision and agreement", "Estate Manager / Property Manager",
+            "Estate records the management decision and completes the required agreement controls.",
+            [
+                "Management decision is recorded",
+                "Required agreement and approval references are recorded"
+            ]),
+        new("Estate completion", "Estate Manager / Property Manager",
+            "Estate records the customer outcome and closes the application after the handoff work is complete.",
+            [
+                "Customer outcome is recorded",
+                "Estate application closeout is complete"
+            ])
+    ];
+
     private static readonly FacilitiesWorkspaceField[] ListingApplicationFields =
     [
         new("applicationReference", "Property request reference", "text"),
@@ -72,7 +100,7 @@ public sealed class PropertyManagementProcedureCatalogService : IPropertyManagem
         new("Tenant / Occupant Operations", "EstatePropertyManagementTenantOccupant", "Source: Estate / Property Management - Property Management ERP BRS", "Tenant and occupant operations using existing CRM, Finance AR customer, business partner, or tenant administration sources routed through configured workflows.", "Users", 0, "cyan", "Register"),
         new("Billing / Service Charge Operations", "EstatePropertyManagementBillingServiceCharge", "Source: Estate / Property Management -> Finance AR", "Billing readiness and service-charge instruction operations routed through configured workflows and existing Finance AR.", "CreditCard", 0, "purple", "Operational Queue"),
         new("Ground Rent Administration", "EstatePropertyManagementGroundRent", "Source: Estate / Property Management - Ground Rent", "Land-only ground-rent account setup, assessment, review, billing readiness, and finance handoff routed through configured workflows.", "Banknote", 0, "emerald", "Operational Queue"),
-        new("Listing / Application Operations", "EstatePropertyManagementListingApplication", "Source: External Portal -> Estate / Property Management", "External portal rent/sale listing request intake, review, reservation, and decision operations routed through configured workflows.", "ClipboardList", 0, "blue", "Case Workflow"),
+        new("Listing / Application Operations", "EstatePropertyManagementListingApplication", "Source: External Portal -> Estate / Property Management", "External portal rent/sale listing request intake, review, reservation, and decision operations routed through a published workflow or the Estate manual-review stages.", "ClipboardList", 4, "blue", "Case Workflow"),
         new("Occupancy / Availability Operations", "EstatePropertyManagementOccupancyAvailability", "Source: Estate / Property Management - Occupancy Operations", "Availability, reservation, occupancy, move-in, move-out, sale, block, and portal visibility operations routed through configured workflows.", "Home", 0, "rose", "Operational Queue"),
         new("Move-in / Move-out / Handover Operations", "EstatePropertyManagementMoveInMoveOutHandover", "Source: Estate / Property Management - Handover", "Move-in, move-out, key/access, condition, snag, handover, handback, and linked billing/records operations routed through configured workflows.", "ClipboardCheck", 0, "orange", "Operational Queue"),
         new("Property Documents / Records Index", "EstatePropertyManagementDocumentRecordIndex", "Source: Estate / Property Management -> Central DMS", "Property Management document index, module metadata, access, retention, lifecycle, DMS reference, version, annotation, and comment readiness routed through configured workflows.", "FileText", 0, "lime", "Register")
@@ -90,13 +118,17 @@ public sealed class PropertyManagementProcedureCatalogService : IPropertyManagem
             return null;
         }
 
-        var fields = string.Equals(
+        var isListingApplication = string.Equals(
             entityType,
             "EstatePropertyManagementListingApplication",
-            StringComparison.OrdinalIgnoreCase)
+            StringComparison.OrdinalIgnoreCase);
+        IReadOnlyList<FacilitiesWorkspaceField> fields = isListingApplication
             ? ListingApplicationFields
             : [];
+        IReadOnlyList<FacilitiesWorkspaceStage> stages = isListingApplication
+            ? ListingApplicationManualStages
+            : [];
 
-        return new FacilitiesProcedureWorkspace(procedure, [], [], fields, [], []);
+        return new FacilitiesProcedureWorkspace(procedure, stages, [], fields, [], []);
     }
 }

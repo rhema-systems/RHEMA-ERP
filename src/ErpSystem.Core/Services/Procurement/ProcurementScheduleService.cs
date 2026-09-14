@@ -1,8 +1,10 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Procurement;
@@ -92,6 +94,7 @@ public class ProcurementScheduleService : IProcurementScheduleService
 
     public async Task<ProcurementScheduleDetailDto> CreateAsync(CreateProcurementScheduleDto dto)
     {
+        var organizationUnitId = await ResolveOrganizationUnitIdAsync(dto.ProcurementPlanId, dto.OrganizationUnitId);
         var scheduleCode = await _scheduleRepository.GenerateScheduleCodeAsync();
         var schedule = new ProcurementSchedule
         {
@@ -100,7 +103,8 @@ public class ProcurementScheduleService : IProcurementScheduleService
             Description = dto.Description,
             ProcurementPlanId = dto.ProcurementPlanId,
             ProcurementPlanItemId = dto.ProcurementPlanItemId,
-            DepartmentId = dto.DepartmentId,
+            DepartmentId = null,
+            OrganizationUnitId = organizationUnitId,
             ScheduleType = dto.ScheduleType,
             PlannedStartDate = dto.PlannedStartDate,
             PlannedEndDate = dto.PlannedEndDate,
@@ -126,11 +130,14 @@ public class ProcurementScheduleService : IProcurementScheduleService
         var schedule = await _scheduleRepository.GetByIdAsync(id);
         if (schedule == null) throw new KeyNotFoundException($"Schedule with ID {id} not found");
 
+        var organizationUnitId = await ResolveOrganizationUnitIdAsync(dto.ProcurementPlanId, dto.OrganizationUnitId);
+
         schedule.Title = dto.Title;
         schedule.Description = dto.Description;
         schedule.ProcurementPlanId = dto.ProcurementPlanId;
         schedule.ProcurementPlanItemId = dto.ProcurementPlanItemId;
-        schedule.DepartmentId = dto.DepartmentId;
+        schedule.DepartmentId = null;
+        schedule.OrganizationUnitId = organizationUnitId;
         schedule.ScheduleType = dto.ScheduleType;
         schedule.PlannedStartDate = dto.PlannedStartDate;
         schedule.PlannedEndDate = dto.PlannedEndDate;
@@ -237,7 +244,9 @@ public class ProcurementScheduleService : IProcurementScheduleService
             ProcurementPlanNumber = schedule.ProcurementPlan?.PlanNumber,
             ProcurementPlanItemId = schedule.ProcurementPlanItemId,
             DepartmentId = schedule.DepartmentId,
-            DepartmentName = schedule.Department?.Name,
+            DepartmentName = schedule.OrganizationUnit?.Name ?? schedule.Department?.Name,
+            OrganizationUnitId = schedule.OrganizationUnitId,
+            OrganizationUnitName = schedule.OrganizationUnit?.Name,
             ScheduleType = schedule.ScheduleType,
             PlannedStartDate = schedule.PlannedStartDate,
             PlannedEndDate = schedule.PlannedEndDate,
@@ -265,7 +274,9 @@ public class ProcurementScheduleService : IProcurementScheduleService
             ProcurementPlanNumber = schedule.ProcurementPlan?.PlanNumber,
             ProcurementPlanItemId = schedule.ProcurementPlanItemId,
             DepartmentId = schedule.DepartmentId,
-            DepartmentName = schedule.Department?.Name,
+            DepartmentName = schedule.OrganizationUnit?.Name ?? schedule.Department?.Name,
+            OrganizationUnitId = schedule.OrganizationUnitId,
+            OrganizationUnitName = schedule.OrganizationUnit?.Name,
             ScheduleType = schedule.ScheduleType,
             PlannedStartDate = schedule.PlannedStartDate,
             PlannedEndDate = schedule.PlannedEndDate,
@@ -280,6 +291,44 @@ public class ProcurementScheduleService : IProcurementScheduleService
             CreatedAt = schedule.CreatedAt,
             Notes = schedule.Notes
         };
+    }
+
+    private async Task<Guid?> ResolveOrganizationUnitIdAsync(
+        Guid? procurementPlanId,
+        Guid? requestedOrganizationUnitId)
+    {
+        if (procurementPlanId.HasValue && procurementPlanId.Value != Guid.Empty)
+        {
+            var plan = await _unitOfWork.Repository<ProcurementPlan>()
+                .GetQueryable(value => value.Id == procurementPlanId.Value &&
+                                       value.TenantId == _currentUserProvider.TenantId &&
+                                       !value.IsDeleted)
+                .AsNoTracking()
+                .SingleOrDefaultAsync();
+            if (plan == null)
+                throw new KeyNotFoundException("The selected procurement plan was not found in the current tenant.");
+            if (!plan.OrganizationUnitId.HasValue)
+                throw new InvalidOperationException("The selected procurement plan must be assigned to an HR organisation unit before a schedule can be created.");
+            if (requestedOrganizationUnitId.HasValue &&
+                requestedOrganizationUnitId.Value != plan.OrganizationUnitId.Value)
+                throw new InvalidOperationException("The schedule organisation unit must match its procurement plan.");
+
+            return plan.OrganizationUnitId.Value;
+        }
+
+        if (!requestedOrganizationUnitId.HasValue || requestedOrganizationUnitId.Value == Guid.Empty)
+            return null;
+
+        var active = await _unitOfWork.Repository<OrganizationUnit>()
+            .GetQueryable(unit => unit.Id == requestedOrganizationUnitId.Value &&
+                                  unit.TenantId == _currentUserProvider.TenantId &&
+                                  unit.IsActive &&
+                                  !unit.IsDeleted)
+            .AnyAsync();
+        if (!active)
+            throw new InvalidOperationException("The selected HR organisation unit is inactive or is not in the current tenant.");
+
+        return requestedOrganizationUnitId.Value;
     }
 
     #endregion

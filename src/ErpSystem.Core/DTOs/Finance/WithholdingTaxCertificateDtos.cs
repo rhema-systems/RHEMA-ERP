@@ -87,6 +87,8 @@ public sealed class WhtCalculationRequestDto
     public DateTime PaymentDate { get; set; }
     public decimal TaxableBase { get; set; }
     public Guid? ExcludeVendorPaymentId { get; set; }
+    // The server resolves the persisted transaction decision/rate; clients cannot supply a free-form payment override.
+    public List<Guid> VendorInvoiceIds { get; set; } = new();
 }
 
 public sealed class WhtCalculationResultDto

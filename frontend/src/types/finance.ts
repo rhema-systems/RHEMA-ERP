@@ -548,6 +548,8 @@ export interface FinanceSourceDimensionValue {
 export interface FinanceSourceLineDimension {
     sourceLineId: string;
     accountId: string;
+    additionalAccountIds?: string[];
+    requiredDimensionCodes?: string[];
     financeDimensionSetId?: string;
     combinationHash?: string;
     displayValue?: string;

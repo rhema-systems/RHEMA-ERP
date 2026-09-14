@@ -48,6 +48,7 @@ import {
 import printStyles from '@/components/finance/ap/ApInvoicePrintDocument.module.css';
 import { useTenant } from '@/contexts/TenantContext';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { InvoiceDistribution } from '@/components/finance/ap/InvoiceDistribution';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -169,12 +170,13 @@ export default function VendorInvoiceDetailsPage() {
     const hasBudgetLines = invoice.lineItems.some((line) => Boolean(line.budgetEntryId));
     const budgetReady = !hasBudgetLines || invoice.financeDimensions?.budgetEvidenceStatus === 'Current';
     const taxReviewPending = landedCostTaxReviewPending(invoice.lineItems);
+    const withholdingDecisionPending = Boolean(invoice.withholdingDecisionPending);
 
     return (
         <>
             <div className={`${printStyles.screenRoot} space-y-8 p-8 max-w-[1000px] mx-auto`}>
             {/* Header Actions */}
-            <div className="flex items-center justify-between no-print">
+            <div className="flex flex-wrap items-center justify-between gap-3 no-print">
                 <div className="flex items-center space-x-4">
                     <Button variant="ghost" size="icon" onClick={() => router.push('/finance/ap/invoices')}>
                         <ArrowLeft className="h-4 w-4" />
@@ -184,10 +186,11 @@ export default function VendorInvoiceDetailsPage() {
                         {getStatusBadge(invoice)}
                     </div>
                 </div>
-                <div className="flex space-x-2">
-                    {invoice.status === 'Draft' && invoice.lineItems.some(line => line.landedCostItemId) &&
+                <div className="flex flex-wrap gap-2">
+                    {invoice.status === 'Draft' &&
                         hasAnyPermission(['Finance.AP.Invoices.Edit', 'Finance.AP.Invoices.Write']) &&
                         <Button variant="outline" size="sm" onClick={() => router.push(`/finance/ap/invoices/${invoice.id}/edit`)}>Edit invoice</Button>}
+                    <InvoiceDistribution invoiceId={invoice.id} />
                     <Button variant="outline" size="sm" onClick={printApInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
@@ -211,8 +214,8 @@ export default function VendorInvoiceDetailsPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => submitInvoiceMutation.mutate(invoice.id)}
-                            disabled={!workflowVisibility.known || submitInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || !budgetReady || taxReviewPending}
-                            title={taxReviewPending ? 'Complete tax review in Edit invoice before submission.' : !mandatoryMatchReady
+                            disabled={!workflowVisibility.known || submitInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || !budgetReady || taxReviewPending || withholdingDecisionPending}
+                            title={withholdingDecisionPending ? 'Choose Yes or No for withholding in Edit invoice.' : taxReviewPending ? 'Complete tax review in Edit invoice before submission.' : !mandatoryMatchReady
                                 ? 'Resolve the mandatory three-way match before submission.'
                                 : !budgetReady
                                     ? 'Refresh dimension-aware budget evidence before submission.'
@@ -226,8 +229,8 @@ export default function VendorInvoiceDetailsPage() {
                         <Button
                             size="sm"
                             onClick={() => approveInvoiceMutation.mutate(invoice.id)}
-                            disabled={approveInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || taxReviewPending}
-                            title={taxReviewPending ? 'Tax review must be completed before approval.' : !mandatoryMatchReady ? 'Resolve the mandatory three-way match before approval.' : undefined}
+                            disabled={approveInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || taxReviewPending || withholdingDecisionPending}
+                            title={withholdingDecisionPending ? 'Choose Yes or No for withholding in Edit invoice.' : taxReviewPending ? 'Tax review must be completed before approval.' : !mandatoryMatchReady ? 'Resolve the mandatory three-way match before approval.' : undefined}
                         >
                             {approveInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                             Approve
@@ -269,6 +272,7 @@ export default function VendorInvoiceDetailsPage() {
                     <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                         Tax review pending. Open Edit invoice and select the tax treatment for each landed-cost line before continuing. The displayed total is before any unreviewed tax.
                     </div>}
+                {withholdingDecisionPending && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Withholding choice pending. Open Edit invoice and select Yes or No before continuing.</div>}
                 {!invoice.isOpeningBalance && <ActualLandedCostSummary invoiceId={invoice.id} purchaseOrderId={invoice.purchaseOrderId} />}
                 <SourceDocumentDimensionEvidence evidence={invoice.financeDimensions} />
             </div>

@@ -203,8 +203,12 @@ public class VendorInvoice : TenantEntity
 
     // ── Withholding Tax ─────────────────────────────────────────────────
 
-    [Column(TypeName = "decimal(5,2)")]
+    [Column(TypeName = "decimal(18,4)")]
     public decimal WithholdingTaxRate { get; set; }
+    public bool? ApplySupplierWithholdingDefaults { get; set; }
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? WithholdingTaxRateOverride { get; set; }
+    public bool WithholdingDecisionPending { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }

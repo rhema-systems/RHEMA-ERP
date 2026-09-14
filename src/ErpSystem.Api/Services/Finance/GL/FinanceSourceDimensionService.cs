@@ -122,7 +122,7 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
                 : Array.Empty<FinancePostingDimensionValueDto>();
             var resolution = await _dimensions.ResolveSourceLineAsync(
                 producer, line.AccountId, documentDate, storedValues, certification,
-                refreshPersistedFixedValues: true, cancellationToken);
+                refreshPersistedFixedValues: true, cancellationToken, line.AdditionalAccountIds);
             warnings.AddRange(resolution.ReadinessWarnings.Select(message => $"Line {line.SourceLineId}: {message}"));
             var newSetId = resolution.DimensionSet?.Id;
             if (assignment is null || assignment.FinanceDimensionSetId != newSetId)
@@ -171,7 +171,7 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
                 : Array.Empty<FinancePostingDimensionValueDto>();
             var resolution = await _dimensions.ResolveSourceLineAsync(
                 producer, line.AccountId, documentDate, values, certification,
-                refreshPersistedFixedValues: false, cancellationToken);
+                refreshPersistedFixedValues: false, cancellationToken, line.AdditionalAccountIds);
             var snapshot = resolution.DimensionSet is null
                 ? null
                 : await CreateSnapshotAsync(producer, resolution, cancellationToken);
@@ -347,7 +347,7 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
             if (!hasExplicit && shouldApplyDefault && values.Count > 0)
             {
                 var prohibitedCodes = (await _dimensions.GetSourceLineRulesAsync(
-                        producer, line.AccountId, documentDate, cancellationToken))
+                        producer, line.AccountId, documentDate, cancellationToken, line.AdditionalAccountIds))
                     .Where(rule => rule.RuleType == "Prohibited")
                     .Select(rule => rule.FinanceDimensionDefinition.Code)
                     .ToHashSet(StringComparer.Ordinal);
@@ -355,7 +355,7 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
             }
             var resolution = await _dimensions.ResolveSourceLineAsync(
                 producer, line.AccountId, documentDate, values, certification,
-                refreshPersistedFixedValues, cancellationToken);
+                refreshPersistedFixedValues, cancellationToken, line.AdditionalAccountIds);
             warnings.AddRange(resolution.ReadinessWarnings.Select(message => $"Line {line.SourceLineId}: {message}"));
             await _db.SaveChangesAsync(cancellationToken);
             var newSetId = resolution.DimensionSet?.Id;
@@ -574,7 +574,7 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
         }
 
         var route = producer.Definition;
-        var rulePayload = string.Join("|", resolution.AppliedRules.OrderBy(item => item.FinanceDimensionDefinitionId)
+        var rulePayload = string.Join("|", resolution.AppliedRules.OrderBy(item => item.FinanceDimensionDefinitionId).ThenBy(item => item.AccountId).ThenBy(item => item.Id)
             .Select(item => $"{item.Id:N}:{item.RuleFamilyId:N}:{item.RuleVersion}:{item.RuleType}"));
         var snapshot = new FinanceDimensionSnapshot
         {
@@ -595,9 +595,11 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
             CreatedBy = _currentUser.UserName,
             CreatedById = UserId
         };
+        var snapshotRules = FinanceDimensionAdministrationService.MergeSourceAccountRules(resolution.AppliedRules);
         foreach (var item in set.Items)
         {
-            var rule = resolution.AppliedRules.SingleOrDefault(candidate =>
+            // The item has one effective rule; the snapshot hash and evidence locks above include every contributing account rule.
+            var rule = snapshotRules.SingleOrDefault(candidate =>
                 candidate.FinanceDimensionDefinitionId == item.FinanceDimensionDefinitionId);
             snapshot.Items.Add(new FinanceDimensionSnapshotItem
             {
@@ -649,11 +651,20 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
             .Where(item => item.TenantId == TenantId && snapshotIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, cancellationToken);
         var accounts = authoritativeLines.ToDictionary(item => item.SourceLineId, item => item.AccountId);
+        var contexts = authoritativeLines.ToDictionary(item => item.SourceLineId);
         var ruleTypes = new Dictionary<Guid, IReadOnlyDictionary<string, string>>();
         foreach (var line in authoritativeLines)
         {
+            var assignment = assignments.SingleOrDefault(value => value.SourceLineId == line.SourceLineId);
+            if (assignment?.IsFrozen == true)
+            {
+                ruleTypes[line.SourceLineId] = snapshots.TryGetValue(assignment.FinanceDimensionSnapshotId ?? Guid.Empty, out var frozenSnapshot)
+                    ? frozenSnapshot.Items.ToDictionary(value => value.DimensionCodeSnapshot, value => value.RuleTypeSnapshot ?? "Optional", StringComparer.Ordinal)
+                    : new Dictionary<string, string>(StringComparer.Ordinal);
+                continue;
+            }
             var rules = await _dimensions.GetSourceLineRulesAsync(
-                producer, line.AccountId, documentDate, cancellationToken);
+                producer, line.AccountId, documentDate, cancellationToken, line.AdditionalAccountIds);
             ruleTypes[line.SourceLineId] = rules.ToDictionary(
                 rule => rule.FinanceDimensionDefinition.Code,
                 rule => rule.RuleType,
@@ -691,11 +702,17 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
                 {
                     SourceLineId = item.SourceLineId!.Value,
                     AccountId = accounts[item.SourceLineId.Value],
+                    AdditionalAccountIds = (contexts[item.SourceLineId.Value].AdditionalAccountIds ?? [])
+                        .Where(accountId => accountId != accounts[item.SourceLineId.Value]).Distinct().ToArray(),
+                    RequiredDimensionCodes = item.IsFrozen ? [] : ruleTypes[item.SourceLineId.Value].Where(rule => rule.Value == "Required").Select(rule => rule.Key).ToArray(),
                     FinanceDimensionSetId = item.FinanceDimensionSetId,
                     CombinationHash = snapshot?.CombinationHashSnapshot ?? set?.CombinationHash,
                     DisplayValue = snapshot?.DisplayValueSnapshot ?? set?.DisplayValue,
                     IsFrozen = item.IsFrozen,
-                    Values = values
+                    Values = values,
+                    ReadinessWarnings = item.IsFrozen ? [] : ruleTypes[item.SourceLineId.Value]
+                        .Where(rule => rule.Value == "Required" && !values.Any(value => value.DimensionCode == rule.Key))
+                        .Select(rule => $"Dimension {rule.Key} is required for this line's posting accounts.").ToArray()
                 };
             }).ToArray();
         var defaultValues = header?.FinanceDimensionSetId is Guid defaultId && sets.TryGetValue(defaultId, out var defaultSet)
@@ -715,6 +732,8 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
             DefaultFinanceDimensionSetId = header?.FinanceDimensionSetId,
             DefaultValues = defaultValues,
             Lines = lines,
+            ReadinessWarnings = lines.SelectMany(line => line.ReadinessWarnings.Select(warning => $"Line {line.SourceLineId}: {warning}"))
+                .Distinct(StringComparer.Ordinal).ToArray(),
             BudgetEvidenceStatus = header?.BudgetEvidenceStatus ?? BudgetNotApplicable,
             BudgetEvaluationHash = header?.BudgetEvaluationHash,
             BudgetEvidenceUpdatedAt = header?.BudgetEvidenceUpdatedAt
@@ -742,7 +761,8 @@ public sealed class FinanceSourceDimensionService : IFinanceSourceDimensionServi
 
     private static void ValidateAuthoritativeLines(IReadOnlyList<FinanceSourceDocumentLineContext> lines)
     {
-        if (lines.Any(item => item.SourceLineId == Guid.Empty || item.AccountId == Guid.Empty))
+        if (lines.Any(item => item.SourceLineId == Guid.Empty || item.AccountId == Guid.Empty ||
+            (item.AdditionalAccountIds?.Any(accountId => accountId == Guid.Empty) ?? false)))
             throw new InvalidOperationException("Every Finance source line requires a stable line ID and server-resolved account.");
         if (lines.Select(item => item.SourceLineId).Distinct().Count() != lines.Count)
             throw new InvalidOperationException("A Finance source document contains duplicate line identities.");

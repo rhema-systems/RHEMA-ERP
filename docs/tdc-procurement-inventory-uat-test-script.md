@@ -64,6 +64,34 @@ Status: prepared for UAT. The final authenticated browser/API acceptance for the
 6. As the authorised dispatch actor, dispatch the approved return. Expected: stock changes only at dispatch and the stock/audit/control-event history identifies the return and source GRN.
 7. Confirm that Finance/AP debit-note and invoice treatment remains under **Finance → AP**; the supplier-return screen governs the physical return and stock movement, not a parallel Finance ledger.
 
+## E. Posting defaults, distributions and withholding
+
+Candidate check — 13 September 2026: these additions are not yet deployed or browser-accepted. Backend tests: 249 passed (196 API, 53 Core). Frontend tests: 111 passed. Deployment and browser acceptance remain pending. Run these steps after deployment; do not treat them as completed UAT evidence.
+
+### E1. Supplier and item defaults
+
+1. Open **Procurement → Business Partners → Edit → Details**. Enable **Subject To Withholding Deduction**, select the purchase **WHT Configuration**, enter the supplier's default **WHT Rate**, and select **Tax** where applicable. Save.
+2. In **Options**, save payment terms, TIN, ChequeBook ID and credit limit. In **Accounts**, save the required posting accounts. Reopen and check the saved values.
+3. Open **Inventory → Items → Edit → Accounts**. Confirm an authorised internal user, including SuperAdmin, can load the current tenant's GL accounts and save a mapping. External users and other tenants' accounts must remain excluded.
+
+### E2. Receipt Distribution
+
+1. Open an unposted Purchase Receipt. Select **Distribution** beside the receipt tabs; the button remains available on every tab.
+2. Change an account using its searchable selector. Use **Split line** or **Add line** for additional rows; use the trash icon to remove a row.
+3. Keep the net amount for each item/posting type unchanged. Confirm total debits equal total credits, then select **Save**. Reopen to verify the changes.
+4. Use **Full page** and **Restore**. Test **Reset defaults** on the draft and confirm the reset; review and save any required overrides again.
+5. Post through the normal receipt process. Reopen **Distribution**: the original posted journal is read-only.
+6. Confirm the overrides affect this receipt only, not the item master. Later stock postings continue to use item defaults and existing original-journal clearing/reversal rules.
+
+### E3. Supplier invoice and WHT decision
+
+1. Create an invoice for the WHT-enabled supplier. At **Apply withholding to this invoice?**, select **Yes**. Check the selected configuration, supplier rate, WHT deduction and Net Payable.
+2. Change the invoice's **WHT Rate (%)** and save. Reopen the draft: the saved choice and rate must remain unchanged. A rate of zero is a valid explicit override.
+3. On a separate invoice, select **No**. Confirm **Subject to withholding** is off and no WHT is applied. The supplier master must remain unchanged. Use the invoice toggle to change that invoice's decision; changing supplier requires a fresh decision.
+4. For a draft automatically created by landed-cost posting, open **Edit invoice** and answer **Yes** or **No** before submitting/posting the invoice. Creating the draft does not apply WHT or block receipt/landed-cost inventory posting while this decision is pending.
+5. Open the saved invoice's **Distribution**. Check the proposed entries before posting and the original journal after posting. This view is read-only, including for landed-cost invoices; use **Edit invoice** to change permitted draft fields.
+6. Post the invoice and continue to payment. Confirm the invoice journal contains no WHT deduction: WHT GL recognition occurs at payment, once, using the saved invoice decision/rate and applicable payment rules.
+
 ## Evidence to capture
 
 For every scenario capture the record number, workflow/history screen, user role, date/time, correlation ID from any ProblemDetails response, and the relevant audit/control-event entries. Any 401/403/409/422 result must be recorded as an expected or unexpected outcome; do not work around it with direct database changes.

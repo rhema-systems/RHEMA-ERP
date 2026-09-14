@@ -1010,6 +1010,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EhcTicketFeedback> EhcTicketFeedbacks { get; set; }
     public DbSet<EhcTicketWatcher> EhcTicketWatchers { get; set; }
     public DbSet<EhcTicketLink> EhcTicketLinks { get; set; }
+    public DbSet<EhcCrmEngagementLink> EhcCrmEngagementLinks { get; set; }
     public DbSet<EhcProblem> EhcProblems { get; set; }
     public DbSet<EhcProblemTicketLink> EhcProblemTicketLinks { get; set; }
     public DbSet<EhcCapaTask> EhcCapaTasks { get; set; }
@@ -1176,6 +1177,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     {
         base.OnModelCreating(builder);
         ErpSystem.Data.Configurations.InventorySupplierReturnFinanceConfiguration.Configure(builder);
+        ErpSystem.Data.Configurations.BusinessPartnerPostingDefaultsConfiguration.Configure(builder);
 
         // Apply entity configurations
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
@@ -8379,12 +8381,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<EhcTicket>(entity =>
         {
+            entity.HasIndex(x => new { x.TenantId, x.RequesterUserId, x.ExternalSubmissionId })
+                .IsUnique().HasFilter("[ExternalSubmissionId] IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.TicketNumber }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Status });
             entity.HasIndex(x => new { x.TenantId, x.RequesterUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedToUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedDepartmentId });
             entity.HasIndex(x => new { x.TenantId, x.RootCauseId });
+            entity.HasIndex(x => new { x.TenantId, x.CrmOpportunityId });
+            entity.HasIndex(x => new { x.TenantId, x.EstateListingApplicationCaseId });
 
             entity.HasOne(x => x.Category)
                 .WithMany()
@@ -8404,6 +8410,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(x => x.AssignedDepartment)
                 .WithMany()
                 .HasForeignKey(x => x.AssignedDepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+
+            entity.HasOne(x => x.CrmLead)
+                .WithMany()
+                .HasForeignKey(x => x.CrmLeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.CrmOpportunity)
+                .WithMany()
+                .HasForeignKey(x => x.CrmOpportunityId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasMany(x => x.Messages)
@@ -8430,6 +8447,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithOne(w => w.Ticket)
                 .HasForeignKey(w => w.TicketId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.CrmEngagementLinks)
+                .WithOne(l => l.Ticket)
+                .HasForeignKey(l => l.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<EhcTicketMessage>(entity =>
@@ -8441,6 +8463,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(x => new { x.TenantId, x.TicketId });
             entity.HasIndex(x => new { x.TenantId, x.MessageId });
+        });
+
+        builder.Entity<EhcCrmEngagementLink>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.CrmActivityId });
+            entity.HasIndex(x => new { x.TenantId, x.SourceKey }).IsUnique();
+
+            entity.HasOne(x => x.CrmActivity)
+                .WithMany()
+                .HasForeignKey(x => x.CrmActivityId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         builder.Entity<EhcTicketStatusHistory>(entity =>
@@ -9876,6 +9910,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("ProcurementPlans", table => table.HasTrigger("TR_ProcurementPlans_ApprovalPolicy"));
             entity.HasIndex(p => p.PlanNumber).IsUnique();
             entity.HasIndex(p => p.DepartmentId);
+            entity.HasIndex(p => p.OrganizationUnitId);
             entity.HasIndex(p => p.FiscalYear);
             entity.HasIndex(p => p.PlanningCycle);
             entity.HasIndex(p => p.PlanningQuarter);
@@ -9886,6 +9921,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(p => p.Department)
                 .WithMany()
                 .HasForeignKey(p => p.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(p => p.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(p => p.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(p => p.Items)
@@ -9951,12 +9991,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("ProcurementBudgets", table => table.HasTrigger("TR_ProcurementBudgets_ApprovalPolicy"));
             entity.HasIndex(b => new { b.TenantId, b.BudgetCode }).IsUnique();
             entity.HasIndex(b => b.DepartmentId);
+            entity.HasIndex(b => b.OrganizationUnitId);
             entity.HasIndex(b => b.FiscalYear);
             entity.HasIndex(b => b.Status);
 
             entity.HasOne(b => b.Department)
                 .WithMany()
                 .HasForeignKey(b => b.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(b => b.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(b => b.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(b => b.Allocations)
@@ -10064,6 +10110,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(s => s.ProcurementPlanId);
             entity.HasIndex(s => s.DepartmentId);
+            entity.HasIndex(s => s.OrganizationUnitId);
             entity.HasIndex(s => s.PlannedStartDate);
             entity.HasIndex(s => s.Status);
 
@@ -10075,6 +10122,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(s => s.Department)
                 .WithMany()
                 .HasForeignKey(s => s.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(s => s.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(s => s.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -10392,6 +10444,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => new { item.TenantId, item.SourcePlanItemId });
             entity.HasIndex(item => new { item.TenantId, item.BudgetId });
             entity.HasIndex(item => new { item.TenantId, item.ProjectId });
+            entity.HasIndex(item => new { item.TenantId, item.OrganizationUnitId });
             entity.HasIndex(item => new { item.TenantId, item.ProcurementCategory });
             entity.HasIndex(item => new { item.TenantId, item.SpecificationTemplateId });
             entity.HasIndex(item => new { item.TenantId, item.ApprovedExceptionRuleId });
@@ -10412,6 +10465,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(item => item.SourcePlanId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.SourcePlanItem).WithMany()
                 .HasForeignKey(item => item.SourcePlanItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.OrganizationUnit).WithMany()
+                .HasForeignKey(item => item.OrganizationUnitId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Budget).WithMany()
                 .HasForeignKey(item => item.BudgetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ErpSystem.Core.Entities.Projects.Project>().WithMany()
@@ -10441,6 +10496,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // InventoryItem entity
         builder.Entity<InventoryItem>(entity =>
         {
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryOffsetAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.CostOfGoodsSoldAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.SalesAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.MarkdownsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.SalesReturnsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InUseAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InServiceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.DamagedAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.VarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.DropShipItemsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.PurchasePriceVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.UnrealisedPurchasePriceVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryReturnsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.AssemblyVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.StandardCostRevaluationAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("InventoryItems", table =>
             {
                 table.HasTrigger("TR_TDC0601_InventoryItems_IdentifierIntegrity");
@@ -11181,6 +11252,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(ir => ir.RequisitionNumber).IsUnique();
             entity.HasIndex(ir => ir.WarehouseId);
             entity.HasIndex(ir => ir.DepartmentId);
+            entity.HasIndex(ir => ir.OrganizationUnitId);
             entity.HasIndex(ir => ir.Status);
             entity.HasIndex(ir => ir.RequestDate);
             entity.HasIndex(ir => ir.RequiredDate);
@@ -11195,6 +11267,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(ir => ir.LocationId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(ir => ir.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(ir => ir.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(ir => ir.RequestedBy)
                 .WithMany()

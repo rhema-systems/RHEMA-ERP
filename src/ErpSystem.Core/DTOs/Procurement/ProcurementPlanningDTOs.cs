@@ -15,8 +15,10 @@ public class ProcurementPlanDto
     public string PlanNumber { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public int FiscalYear { get; set; }
     public string PlanningCycle { get; set; } = "Annual";
     public string? PlanningQuarter { get; set; }
@@ -79,8 +81,11 @@ public class CreateProcurementPlanDto
     [MaxLength(2000)]
     public string? Description { get; set; }
 
+    /// <summary>Legacy input retained for historical API clients; new requests select an HR unit.</summary>
+    public Guid? DepartmentId { get; set; }
+
     [Required]
-    public Guid DepartmentId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
 
     [Required]
     public int FiscalYear { get; set; }
@@ -128,8 +133,10 @@ public class UpdateProcurementPlanDto
     [MaxLength(2000)]
     public string? Description { get; set; }
 
+    public Guid? DepartmentId { get; set; }
+
     [Required]
-    public Guid DepartmentId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
 
     [Required]
     public int FiscalYear { get; set; }
@@ -270,8 +277,10 @@ public class ProcurementPlanConsolidationItemDto
     public Guid PlanId { get; set; }
     public string PlanNumber { get; set; } = string.Empty;
     public Guid PlanItemId { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public string ItemDescription { get; set; } = string.Empty;
     public decimal Quantity { get; set; }
     public decimal EstimatedTotalCost { get; set; }
@@ -364,7 +373,7 @@ public class ProcurementPlanningSupplierRiskSummaryDto
 
 public class ProcurementPlanningDepartmentSummaryDto
 {
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
     public int PlanCount { get; set; }
     public int ItemCount { get; set; }
@@ -712,8 +721,10 @@ public class ProcurementBudgetDto
     public string BudgetCode { get; set; } = string.Empty;
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public Guid? ProcurementPlanId { get; set; }
     public int FiscalYear { get; set; }
     public decimal AllocatedAmount { get; set; }
@@ -756,8 +767,10 @@ public class CreateProcurementBudgetDto
     [MaxLength(1000)]
     public string? Description { get; set; }
 
+    public Guid? DepartmentId { get; set; }
+
     [Required]
-    public Guid DepartmentId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
 
     public Guid? ProcurementPlanId { get; set; }
 
@@ -877,6 +890,8 @@ public class ProcurementScheduleDto
     public Guid? ProcurementPlanItemId { get; set; }
     public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public string ScheduleType { get; set; } = "Tender";
     public DateTime PlannedStartDate { get; set; }
     public DateTime PlannedEndDate { get; set; }
@@ -918,6 +933,7 @@ public class CreateProcurementScheduleDto
     public Guid? ProcurementPlanId { get; set; }
     public Guid? ProcurementPlanItemId { get; set; }
     public Guid? DepartmentId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
 
     [MaxLength(30)]
     public string ScheduleType { get; set; } = "Tender";

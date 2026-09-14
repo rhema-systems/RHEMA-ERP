@@ -304,14 +304,19 @@ namespace ErpSystem.Api.Services.Finance.AP
         private async Task<VendorInvoiceDto> CreateCoreAsync(
             VendorInvoiceCreateDto dto,
             FinancePostingProducerContext? producer,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            bool deferSupplierWithholdingDecision = false)
         {
             var supplier = await ResolveSupplierForInvoiceAsync(dto.SupplierId, cancellationToken);
             var acceptedSupply = await ResolveAcceptedSupplyForCreateAsync(
                 dto, supplier, cancellationToken);
 
+            var capturedPaymentTermsDays = await ApplyBusinessPartnerCreateDefaultsAsync(dto, supplier, cancellationToken);
+            var withholdingDecisionPending = await ApplySupplierWithholdingCreateDefaultAsync(
+                dto, deferSupplierWithholdingDecision, cancellationToken);
+
             var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? supplier.PaymentTermId, "Supplier", cancellationToken);
-            var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
+            var paymentTermsDays = capturedPaymentTermsDays ?? paymentTerm?.DueDays ?? dto.PaymentTermsDays;
             var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? dto.EarlyPaymentDiscountPercentage;
             var earlyPaymentDiscountDueDate = paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0
                 ? dto.InvoiceDate.AddDays(paymentTerm.DiscountDays)
@@ -332,7 +337,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 dto.WithholdingTaxRate,
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
-                cancellationToken);
+                cancellationToken,
+                dto.WithholdingTaxRateOverride);
             var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
                 ? await ResolveOpeningInvoiceExchangeRateAsync(
                     dto.CurrencyCode,
@@ -361,9 +367,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                 PaymentTermId = paymentTerm?.Id,
                 EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage,
                 EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate,
-                // Invoice WHT is an expected payment-time classification. The selected tenant tax
-                // owns the rate and account; request values cannot silently override statutory setup.
+                // Invoice WHT is an expected payment-time classification. The central rule owns
+                // its account; an explicit transaction rate override is retained separately.
                 WithholdingTaxRate = invoiceWht.Rate,
+                ApplySupplierWithholdingDefaults = dto.ApplySupplierWithholdingDefaults,
+                WithholdingTaxRateOverride = dto.WithholdingTaxRateOverride,
+                WithholdingDecisionPending = withholdingDecisionPending,
                 WithholdingTaxId = invoiceWht.TaxId,
                 WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId,
                 WithholdingCertificateNumber = dto.WithholdingCertificateNumber,
@@ -519,20 +528,21 @@ namespace ErpSystem.Api.Services.Finance.AP
             var previouslyBudgetRelevant = invoice.LineItems.Any(line =>
                 !line.IsDeleted && line.BudgetEntryId.HasValue);
 
-            var supplier = await _unitOfWork.Repository<Supplier>()
-                .FirstOrDefaultAsync(s => s.TenantId == TenantId && s.Id == invoice.SupplierId);
+            var supplier = await ResolveExistingSupplierForInvoiceAsync(invoice.SupplierId, cancellationToken);
             var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId ?? supplier?.PaymentTermId, "Supplier", cancellationToken);
             var paymentTermsDays = paymentTerm?.DueDays ?? dto.PaymentTermsDays;
             var earlyPaymentDiscountPercentage = paymentTerm?.DiscountPercent ?? dto.EarlyPaymentDiscountPercentage;
             var earlyPaymentDiscountDueDate = paymentTerm != null && paymentTerm.DiscountPercent > 0 && paymentTerm.DiscountDays > 0
                 ? dto.InvoiceDate.AddDays(paymentTerm.DiscountDays)
                 : dto.EarlyPaymentDiscountDueDate;
+            var withholdingDecisionPending = await ApplySupplierWithholdingUpdateDecisionAsync(invoice, dto, cancellationToken);
             var invoiceWht = await ResolveInvoiceWhtAsync(
                 dto.WithholdingTaxId,
                 dto.WithholdingTaxRate,
                 dto.InvoiceDate,
                 dto.IsOpeningBalance,
-                cancellationToken);
+                cancellationToken,
+                dto.WithholdingTaxRateOverride);
             var governedExchangeRate = dto.IsOpeningBalance || dto.ExchangeRateId.HasValue
                 ? await ResolveOpeningInvoiceExchangeRateAsync(
                     dto.CurrencyCode,
@@ -558,6 +568,9 @@ namespace ErpSystem.Api.Services.Finance.AP
             invoice.EarlyPaymentDiscountPercentage = earlyPaymentDiscountPercentage;
             invoice.EarlyPaymentDiscountDueDate = earlyPaymentDiscountDueDate;
             invoice.WithholdingTaxRate = invoiceWht.Rate;
+            invoice.ApplySupplierWithholdingDefaults = dto.ApplySupplierWithholdingDefaults;
+            invoice.WithholdingTaxRateOverride = dto.WithholdingTaxRateOverride;
+            invoice.WithholdingDecisionPending = withholdingDecisionPending;
             invoice.WithholdingTaxId = invoiceWht.TaxId;
             invoice.WithholdingTaxAccountId = invoiceWht.TaxPayableAccountId;
             invoice.WithholdingCertificateNumber = dto.WithholdingCertificateNumber;
@@ -2722,6 +2735,13 @@ namespace ErpSystem.Api.Services.Finance.AP
             var lines = invoice.LineItems.Where(line => !line.IsDeleted)
                 .OrderBy(line => line.CreatedAt).ThenBy(line => line.Id).ToList();
             if (lines.Count == 0) return Array.Empty<FinanceSourceDocumentLineContext>();
+            if (!invoice.IsOpeningBalance && IsProcurementGrvClearingInvoice(invoice))
+            {
+                var receiptAccounts = await ResolveProcurementAccrualAccountsAsync(invoice, cancellationToken);
+                return lines.Where(HasReceiptAccrualAmount).Select(line => new FinanceSourceDocumentLineContext(
+                    line.Id, receiptAccounts[line.Id][0].AccountId,
+                    receiptAccounts[line.Id].Skip(1).Select(value => value.AccountId).Distinct().ToArray())).ToArray();
+            }
             if (IsLandedCostInvoice(invoice))
             {
                 var accounts = await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken);
@@ -2792,6 +2812,20 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("AP invoice workflow approval is not complete.");
             }
 
+            return await BuildApInvoiceDistributionRequestAsync(invoice, budgetReservationIds, producer, cancellationToken);
+        }
+
+        // Pure line resolution shared by posting and the invoice Distribution read model.
+        // Only the guarded posting method above may submit this request to Finance.
+        private async Task<FinancePostingRequestDto> BuildApInvoiceDistributionRequestAsync(
+            VendorInvoice invoice,
+            IReadOnlyList<Guid> budgetReservationIds,
+            FinancePostingProducerContext? producer,
+            CancellationToken cancellationToken)
+        {
+            var tenantId = TenantId;
+            if (invoice.TenantId != tenantId)
+                throw new InvalidOperationException("Vendor invoice belongs to another tenant.");
             var activeLines = invoice.LineItems
                 .Where(l => !l.IsDeleted)
                 .OrderBy(l => l.CreatedAt)
@@ -2841,12 +2875,14 @@ namespace ErpSystem.Api.Services.Finance.AP
                 .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.VendorInvoiceId == invoice.Id && !r.IsDeleted);
             var clearsFinanceGrv = linkedFinanceReceipt != null;
             var clearsProcurementGrv = IsProcurementGrvClearingInvoice(invoice);
+            var procurementAccrualAccounts = clearsProcurementGrv
+                ? await ResolveProcurementAccrualAccountsAsync(invoice, cancellationToken) : null;
             var landedCostAccounts = IsLandedCostInvoice(invoice)
                 ? await ResolveLandedCostClearingAccountsAsync(invoice, cancellationToken)
                 : null;
             var clearsGrv = clearsFinanceGrv || clearsProcurementGrv;
             Guid? grvAccrualAccountId = null;
-            if (clearsGrv)
+            if (clearsFinanceGrv)
             {
                 grvAccrualAccountId = settings.ControlAccountGRVAccrualId
                     ?? throw new InvalidOperationException("GRV accrual control account is not configured for this tenant.");
@@ -2894,20 +2930,30 @@ namespace ErpSystem.Api.Services.Finance.AP
                         continue;
                     }
 
-                    var grvLine = BuildPostingLine(
-                        grvAccrualAccountId!.Value,
-                        $"Clear GRV accrual - {invoice.InvoiceNumber} - {line.Description}",
-                        debitForeignAmount: lineNetAmount,
-                        creditForeignAmount: 0m,
-                        invoiceCurrency,
-                        functionalCurrency,
-                        exchangeRate,
-                        invoice.InvoiceDate,
-                        invoice.InvoiceNumber,
-                        lineNumber++,
-                        "AP-GRV");
-                    ApplySourceDimensions(grvLine, line, sourceLineDimensions);
-                    postingLines.Add(grvLine);
+                    var shares = procurementAccrualAccounts?[line.Id] ?? new List<ReceiptAccrualShare> { new(grvAccrualAccountId!.Value, 1m) };
+                    var shareAmounts = MonetaryAllocation.Allocate(shares.Select(value => value.Weight).ToArray(), lineNetAmount);
+                    for (var shareIndex = 0; shareIndex < shares.Count; shareIndex++)
+                    {
+                        var share = shares[shareIndex];
+                        var shareAmount = shareAmounts[shareIndex];
+                        if (shareAmount == 0m) continue;
+                        await ResolvePostingAccountAsync(share.AccountId, "original receipt accrual account", accountCache,
+                            allowControlAccount: true, requireDirectPosting: false, cancellationToken);
+                        var grvLine = BuildPostingLine(
+                            share.AccountId,
+                            $"Clear GRV accrual - {invoice.InvoiceNumber} - {line.Description}",
+                            debitForeignAmount: shareAmount,
+                            creditForeignAmount: 0m,
+                            invoiceCurrency,
+                            functionalCurrency,
+                            exchangeRate,
+                            invoice.InvoiceDate,
+                            invoice.InvoiceNumber,
+                            lineNumber++,
+                            "AP-GRV");
+                        ApplySourceDimensions(grvLine, line, sourceLineDimensions);
+                        postingLines.Add(grvLine);
+                    }
                     continue;
                 }
 
@@ -3021,6 +3067,11 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (apFunctionalAmount != expectedFunctionalTotal)
             {
+                if (clearsProcurementGrv && !string.Equals(invoiceCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase) &&
+                    procurementAccrualAccounts!.Values.Any(value => value.Count > 1))
+                    throw new InvalidOperationException(string.Format(System.Globalization.CultureInfo.InvariantCulture,
+                        "Multi-account receipt clearing has an FX rounding difference of {0:0.00} {1}. A reviewed FX rounding policy is required before posting; receipt accounts and amounts have not been changed.",
+                        apFunctionalAmount - expectedFunctionalTotal, functionalCurrency));
                 throw new InvalidOperationException("AP invoice amount does not match posting line totals.");
             }
 
@@ -3307,8 +3358,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 string.Equals(line.LineItemType, "Inventory", StringComparison.OrdinalIgnoreCase) ||
                 string.Equals(line.LineItemType, "Product", StringComparison.OrdinalIgnoreCase);
 
+            var itemInventoryAccount = isInventoryLine ? await ResolveItemInventoryAccountAsync(line.InventoryItemId, cancellationToken) : null;
             var accountId = isInventoryLine
-                ? line.GLAccountId ?? settings.ControlAccountInventoryId
+                ? line.GLAccountId ?? itemInventoryAccount ?? settings.ControlAccountInventoryId
                     ?? throw new InvalidOperationException("Inventory or clearing account is not configured for AP invoice line posting.")
                 : line.GLAccountId ?? invoice.ExpenseAccountId ?? supplier.DefaultExpenseAccountId
                     ?? throw new InvalidOperationException($"No expense account specified for AP line '{line.Description}'.");
@@ -4094,7 +4146,11 @@ namespace ErpSystem.Api.Services.Finance.AP
             ApplyAcceptedSupply(invoice, accepted);
         }
 
-        private async Task<Supplier> ResolveSupplierForInvoiceAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken)
+        private Task<Supplier> ResolveSupplierForInvoiceAsync(Guid supplierOrBusinessPartnerId, CancellationToken cancellationToken) =>
+            ResolveSupplierIdentityForInvoiceAsync(supplierOrBusinessPartnerId, false, cancellationToken);
+
+        private async Task<Supplier> ResolveSupplierIdentityForInvoiceAsync(
+            Guid supplierOrBusinessPartnerId, bool allowLandedCostContractorOnboarding, CancellationToken cancellationToken)
         {
             var supplierRepository = _unitOfWork.Repository<Supplier>();
             var supplier = await supplierRepository
@@ -4106,8 +4162,7 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (supplier != null)
             {
-                if (!supplier.IsActive || supplier.Status != "Active")
-                    throw new InvalidOperationException("The selected supplier is not active for AP invoice entry.");
+                await ValidateCanonicalSupplierForInvoiceAsync(supplier, cancellationToken);
                 return supplier;
             }
 
@@ -4133,8 +4188,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException($"Business partner '{partner.PartnerName}' is blacklisted and cannot be used for AP supplier invoices.");
             }
 
-            if (!partner.IsActive || (partner.PartnerType is "Supplier" or "Vendor" or "Manufacturer" &&
-                partner.RegistrationStatus is not ("Active" or "Approved")))
+            if (!ApInvoiceSupplierEligibility.IsEligiblePartner(partner, true))
                 throw new InvalidOperationException("The Procurement supplier must be active and approved before AP invoice entry.");
 
             // Names are display values, not identity keys. Do not join distinct suppliers merely
@@ -4149,10 +4203,13 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             if (supplier != null)
             {
-                if (supplier.IsDeleted || !supplier.IsActive || supplier.Status != "Active")
-                    throw new InvalidOperationException("The linked Finance supplier is inactive or deleted. Resolve its status before invoice entry.");
+                await ValidateCanonicalSupplierForInvoiceAsync(supplier, cancellationToken);
                 return supplier;
             }
+
+            if (!ApInvoiceSupplierEligibility.CanOnboard(partner) &&
+                !(allowLandedCostContractorOnboarding && partner.PartnerType == "Contractor"))
+                throw new InvalidOperationException("The contractor must have an active linked Finance supplier before AP invoice entry. Complete its supplier handoff through Procurement first.");
 
             supplier = new Supplier
             {
@@ -4180,6 +4237,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                 TaxId = partner.TaxIdentificationNumber ?? partner.VATNumber,
                 PaymentTerms = partner.PaymentTerms ?? "Net 30",
                 PaymentTermId = partner.PaymentTermId,
+                DefaultApAccountId = partner.DefaultApAccountId,
+                DefaultExpenseAccountId = partner.DefaultExpenseAccountId,
                 IsActive = partner.IsActive,
                 IsPreferred = partner.IsPreferred,
                 Status = partner.IsActive ? "Active" : "Inactive",
@@ -4190,6 +4249,38 @@ namespace ErpSystem.Api.Services.Finance.AP
 
             await supplierRepository.AddAsync(supplier);
             return supplier;
+        }
+
+        private async Task<Supplier> ResolveExistingSupplierForInvoiceAsync(Guid supplierId, CancellationToken cancellationToken)
+        {
+            // An edit must not create a new master identity if the saved supplier is missing.
+            var supplier = await _unitOfWork.Repository<Supplier>().GetQueryableIncludingDeleted(s =>
+                s.TenantId == TenantId && s.Id == supplierId).SingleOrDefaultAsync(cancellationToken)
+                ?? throw new KeyNotFoundException("The saved invoice supplier was not found in this company.");
+            await ValidateCanonicalSupplierForInvoiceAsync(supplier, cancellationToken);
+            return supplier;
+        }
+
+        private async Task ValidateCanonicalSupplierForInvoiceAsync(Supplier supplier, CancellationToken cancellationToken)
+        {
+            if (supplier.TenantId != TenantId || !ApInvoiceSupplierEligibility.IsActiveSupplier(supplier))
+                throw new InvalidOperationException("The linked Finance supplier is inactive, deleted or blacklisted. Resolve its status before invoice entry.");
+            var partners = await _unitOfWork.Repository<BusinessPartner>().GetQueryableIncludingDeleted(p =>
+                p.TenantId == TenantId && (p.Id == supplier.Id ||
+                    (!string.IsNullOrWhiteSpace(supplier.SupplierCode) && p.PartnerCode == supplier.SupplierCode)))
+                .Take(2).ToListAsync(cancellationToken);
+            if (partners.Count > 1)
+                throw new InvalidOperationException("The Finance supplier maps to multiple Procurement identities. Resolve the supplier mapping before invoice entry.");
+            if (partners.Count == 0) return; // Standalone canonical suppliers retain their established identity.
+            var partner = partners[0];
+            if (!ApInvoiceSupplierEligibility.IsEligiblePartner(partner, true))
+                throw new InvalidOperationException("The linked Procurement supplier must be active, approved and not blacklisted before AP invoice entry.");
+            var identities = await _unitOfWork.Repository<Supplier>().GetQueryableIncludingDeleted(s =>
+                s.TenantId == TenantId && (s.Id == partner.Id ||
+                    (!string.IsNullOrWhiteSpace(partner.PartnerCode) && s.SupplierCode == partner.PartnerCode)))
+                .Take(2).ToListAsync(cancellationToken);
+            if (identities.Count != 1)
+                throw new InvalidOperationException("The Procurement supplier maps to multiple Finance identities. Resolve the supplier mapping before invoice entry.");
         }
 
         public async Task<bool> IsDuplicateAsync(Guid supplierId, string? supplierInvoiceNumber, DateTime invoiceDate, Guid? excludeId = null, CancellationToken cancellationToken = default)
@@ -4263,6 +4354,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 EarlyPaymentDiscountDueDate = invoice.EarlyPaymentDiscountDueDate,
                 EarlyPaymentDiscountAmount = invoice.EarlyPaymentDiscountAmount,
                 WithholdingTaxRate = invoice.WithholdingTaxRate,
+                ApplySupplierWithholdingDefaults = invoice.ApplySupplierWithholdingDefaults,
+                WithholdingTaxRateOverride = invoice.WithholdingTaxRateOverride,
+                WithholdingDecisionPending = invoice.WithholdingDecisionPending,
                 WithholdingTaxAmount = invoice.WithholdingTaxAmount,
                 WithholdingTaxId = invoice.WithholdingTaxId,
                 WithholdingTaxAccountId = invoice.WithholdingTaxAccountId,
@@ -4396,8 +4490,10 @@ namespace ErpSystem.Api.Services.Finance.AP
             decimal requestedRate,
             DateTime invoiceDate,
             bool isOpeningBalance,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            decimal? rateOverride = null)
         {
+            ValidateInvoiceWithholdingOverride(rateOverride);
             if (isOpeningBalance || !taxId.HasValue || taxId.Value == Guid.Empty)
             {
                 if (!isOpeningBalance && requestedRate > 0m)
@@ -4416,16 +4512,7 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException("The selected invoice tax is not an active purchase WHT configuration for this tenant.");
             }
 
-            var effectiveRate = tax.EffectiveFrom.Date <= invoiceDate.Date
-                ? tax.Rate
-                : await _unitOfWork.Repository<TaxRateHistory>()
-                    .GetQueryable(history =>
-                        history.TenantId == TenantId && !history.IsDeleted && history.TaxId == tax.Id
-                        && history.EffectiveFrom <= invoiceDate
-                        && (!history.EffectiveTo.HasValue || history.EffectiveTo.Value >= invoiceDate))
-                    .OrderByDescending(history => history.EffectiveFrom)
-                    .Select(history => (decimal?)history.Rate)
-                    .FirstOrDefaultAsync(cancellationToken);
+            var effectiveRate = await ResolveEffectiveInvoiceWhtRateAsync(tax, invoiceDate, cancellationToken);
             if (!effectiveRate.HasValue)
             {
                 throw new InvalidOperationException($"WHT tax {tax.Code} is not effective on {invoiceDate:yyyy-MM-dd}.");
@@ -4435,8 +4522,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                 throw new InvalidOperationException($"WHT tax {tax.Code} has no payable account configured.");
             }
 
-            return new InvoiceWhtResolution(tax.Id, effectiveRate.Value, tax.TaxPayableAccountId);
+            return new InvoiceWhtResolution(tax.Id, rateOverride ?? effectiveRate.Value, tax.TaxPayableAccountId);
         }
+
+        private async Task<decimal?> ResolveEffectiveInvoiceWhtRateAsync(Tax tax, DateTime invoiceDate, CancellationToken cancellationToken) =>
+            tax.EffectiveFrom.Date <= invoiceDate.Date
+                ? tax.Rate
+                : await _unitOfWork.Repository<TaxRateHistory>()
+                    .GetQueryable(history => history.TenantId == TenantId && !history.IsDeleted && history.TaxId == tax.Id &&
+                        history.EffectiveFrom <= invoiceDate && (!history.EffectiveTo.HasValue || history.EffectiveTo.Value >= invoiceDate))
+                    .OrderByDescending(history => history.EffectiveFrom)
+                    .Select(history => (decimal?)history.Rate).FirstOrDefaultAsync(cancellationToken);
 
         private sealed record OpeningInvoiceExchangeRateSnapshot(
             Guid? ExchangeRateId,

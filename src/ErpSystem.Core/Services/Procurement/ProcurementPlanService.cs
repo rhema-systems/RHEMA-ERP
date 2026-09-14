@@ -2,6 +2,7 @@ using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -124,6 +125,8 @@ public class ProcurementPlanService : IProcurementPlanService
 
     public async Task<ProcurementPlanDetailDto> CreateAsync(CreateProcurementPlanDto dto)
     {
+        await EnsureActiveOrganizationUnitAsync(dto.OrganizationUnitId);
+
         ProcurementBudget? selectedBudget = null;
         if (dto.BudgetId.HasValue)
         {
@@ -135,8 +138,8 @@ public class ProcurementPlanService : IProcurementPlanService
             if (!string.Equals(selectedBudget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(selectedBudget.Status, "Active", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Only an approved or active procurement budget can be selected for a plan.");
-            if (selectedBudget.DepartmentId != dto.DepartmentId || selectedBudget.FiscalYear != dto.FiscalYear)
-                throw new InvalidOperationException("The selected budget must belong to the plan department and fiscal year.");
+            if (selectedBudget.OrganizationUnitId != dto.OrganizationUnitId || selectedBudget.FiscalYear != dto.FiscalYear)
+                throw new InvalidOperationException("The selected budget must belong to the plan organisation unit and fiscal year.");
 
             await EnsureBudgetPlanningCapacityAsync(selectedBudget, dto.TotalEstimatedBudget);
         }
@@ -160,7 +163,8 @@ public class ProcurementPlanService : IProcurementPlanService
                 PlanNumber = planNumber,
                 Title = dto.Title,
                 Description = dto.Description,
-                DepartmentId = dto.DepartmentId,
+                DepartmentId = null,
+                OrganizationUnitId = dto.OrganizationUnitId,
                 FiscalYear = dto.FiscalYear,
                 PlanningCycle = dto.PlanningCycle,
                 PlanningQuarter = dto.PlanningQuarter,
@@ -193,7 +197,7 @@ public class ProcurementPlanService : IProcurementPlanService
             return newPlan;
         });
 
-        _logger.LogInformation("Created procurement plan {PlanNumber} for department {DepartmentId}", plan.PlanNumber, dto.DepartmentId);
+        _logger.LogInformation("Created procurement plan {PlanNumber} for organisation unit {OrganizationUnitId}", plan.PlanNumber, dto.OrganizationUnitId);
 
         return await GetByIdAsync(plan.Id) ?? throw new InvalidOperationException("Failed to retrieve created plan");
     }
@@ -206,6 +210,8 @@ public class ProcurementPlanService : IProcurementPlanService
 
         if (plan.Status != "Draft")
             throw new InvalidOperationException("Only draft plans can be updated");
+
+        await EnsureActiveOrganizationUnitAsync(dto.OrganizationUnitId);
 
         var linkedBudget = plan.BudgetId.HasValue
             ? await _budgetRepository.GetByIdAsync(plan.BudgetId.Value)
@@ -223,15 +229,15 @@ public class ProcurementPlanService : IProcurementPlanService
             if (!string.Equals(selectedBudget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
                 !string.Equals(selectedBudget.Status, "Active", StringComparison.OrdinalIgnoreCase))
                 throw new InvalidOperationException("Only an approved or active procurement budget can be selected for a plan.");
-            if (selectedBudget.DepartmentId != dto.DepartmentId || selectedBudget.FiscalYear != dto.FiscalYear)
-                throw new InvalidOperationException("The selected budget must belong to the plan department and fiscal year.");
+            if (selectedBudget.OrganizationUnitId != dto.OrganizationUnitId || selectedBudget.FiscalYear != dto.FiscalYear)
+                throw new InvalidOperationException("The selected budget must belong to the plan organisation unit and fiscal year.");
         }
 
         if (linkedBudget is not null &&
-            (linkedBudget.DepartmentId != dto.DepartmentId || linkedBudget.FiscalYear != dto.FiscalYear))
+            (linkedBudget.OrganizationUnitId != dto.OrganizationUnitId || linkedBudget.FiscalYear != dto.FiscalYear))
         {
             throw new InvalidOperationException(
-                "The plan department and fiscal year must continue to match its approved budget.");
+                "The plan organisation unit and fiscal year must continue to match its approved budget.");
         }
 
         if (selectedBudget is not null)
@@ -242,7 +248,8 @@ public class ProcurementPlanService : IProcurementPlanService
 
         plan.Title = dto.Title;
         plan.Description = dto.Description;
-        plan.DepartmentId = dto.DepartmentId;
+        plan.DepartmentId = null;
+        plan.OrganizationUnitId = dto.OrganizationUnitId;
         plan.FiscalYear = dto.FiscalYear;
         plan.PlanningCycle = dto.PlanningCycle;
         plan.PlanningQuarter = dto.PlanningQuarter;
@@ -424,7 +431,7 @@ public class ProcurementPlanService : IProcurementPlanService
                         Description = $"Auto-generated schedule for plan item from {plan.PlanNumber}",
                         ProcurementPlanId = plan.Id,
                         ProcurementPlanItemId = item.Id,
-                        DepartmentId = plan.DepartmentId,
+                        OrganizationUnitId = plan.OrganizationUnitId,
                         ScheduleType = item.ProcurementMethod ?? "Tender",
                         PlannedStartDate = DateTime.UtcNow,
                         PlannedEndDate = item.RequiredDate ?? plan.PlanEndDate,
@@ -463,8 +470,9 @@ public class ProcurementPlanService : IProcurementPlanService
                 "Select an approved procurement budget for this plan before final approval. The system will not auto-select a budget.");
         }
 
-        if (linkedBudget.DepartmentId != plan.DepartmentId || linkedBudget.FiscalYear != plan.FiscalYear)
-            throw new InvalidOperationException("The linked procurement budget does not match the plan department and fiscal year.");
+        if (!plan.OrganizationUnitId.HasValue || linkedBudget.OrganizationUnitId != plan.OrganizationUnitId ||
+            linkedBudget.FiscalYear != plan.FiscalYear)
+            throw new InvalidOperationException("The linked procurement budget does not match the plan organisation unit and fiscal year.");
 
         if (!string.Equals(linkedBudget.Currency, plan.Currency, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The procurement plan currency must match its linked approved budget.");
@@ -482,6 +490,21 @@ public class ProcurementPlanService : IProcurementPlanService
             throw new InvalidOperationException(
                 $"The selected budget has {availableForPlanning:N2} {budget.Currency} available for procurement planning, but this plan requires {requestedAmount:N2} {budget.Currency}.");
         }
+    }
+
+    private async Task EnsureActiveOrganizationUnitAsync(Guid organizationUnitId)
+    {
+        if (organizationUnitId == Guid.Empty)
+            throw new InvalidOperationException("Select an active HR organisation unit.");
+
+        var isActive = await _unitOfWork.Repository<OrganizationUnit>()
+            .GetQueryable(unit => unit.Id == organizationUnitId &&
+                                  unit.TenantId == _currentUserProvider.TenantId &&
+                                  unit.IsActive &&
+                                  !unit.IsDeleted)
+            .AnyAsync();
+        if (!isActive)
+            throw new InvalidOperationException("The selected HR organisation unit is inactive or is not in the current tenant.");
     }
 
     public async Task<ProcurementPlanDetailDto> PublishAsync(Guid id, PublishProcurementPlanDto dto)
@@ -541,6 +564,7 @@ public class ProcurementPlanService : IProcurementPlanService
                 Title = string.IsNullOrWhiteSpace(dto.Title) ? $"{sourcePlan.Title} - Amendment {sourcePlan.RevisionNumber + 1}" : dto.Title.Trim(),
                 Description = string.IsNullOrWhiteSpace(dto.Description) ? sourcePlan.Description : dto.Description,
                 DepartmentId = sourcePlan.DepartmentId,
+                OrganizationUnitId = sourcePlan.OrganizationUnitId,
                 FiscalYear = sourcePlan.FiscalYear,
                 PlanningCycle = sourcePlan.PlanningCycle,
                 PlanningQuarter = sourcePlan.PlanningQuarter,
@@ -690,8 +714,9 @@ public class ProcurementPlanService : IProcurementPlanService
             throw new KeyNotFoundException($"Procurement plan with ID {id} not found");
 
         var plans = await GetPlanningQuery()
-            .Where(p => p.DepartmentId == current.DepartmentId && p.FiscalYear == current.FiscalYear)
+            .Where(p => p.OrganizationUnitId == current.OrganizationUnitId && p.FiscalYear == current.FiscalYear)
             .Include(p => p.Department)
+            .Include(p => p.OrganizationUnit)
             .Include(p => p.Items.Where(i => !i.IsDeleted))
             .Include(p => p.PreparedBy)
             .Include(p => p.ApprovedBy)
@@ -735,8 +760,9 @@ public class ProcurementPlanService : IProcurementPlanService
         var plans = await GetPlanningQuery()
             .Where(p => p.Status == "Approved" || p.Status == "Active")
             .Where(p => !fiscalYear.HasValue || p.FiscalYear == fiscalYear.Value)
-            .Where(p => !departmentId.HasValue || p.DepartmentId == departmentId.Value)
+            .Where(p => !departmentId.HasValue || p.OrganizationUnitId == departmentId.Value)
             .Include(p => p.Department)
+            .Include(p => p.OrganizationUnit)
             .Include(p => p.Items.Where(i => !i.IsDeleted))
                 .ThenInclude(i => i.ItemSuppliers.Where(s => !s.IsDeleted))
                     .ThenInclude(s => s.BusinessPartner)
@@ -757,7 +783,7 @@ public class ProcurementPlanService : IProcurementPlanService
                 var first = items.First().item;
                 var totalCost = items.Sum(x => x.item.EstimatedTotalCost);
                 var totalQty = items.Sum(x => x.item.EstimatedQuantity);
-                var departmentCount = items.Select(x => x.plan.DepartmentId).Distinct().Count();
+                var departmentCount = items.Select(x => x.plan.OrganizationUnitId ?? x.plan.DepartmentId).Distinct().Count();
                 var planCount = items.Select(x => x.plan.Id).Distinct().Count();
                 var supplierName = items
                     .Select(x => x.item.PreferredSupplierName)
@@ -790,7 +816,9 @@ public class ProcurementPlanService : IProcurementPlanService
                         PlanNumber = x.plan.PlanNumber,
                         PlanItemId = x.item.Id,
                         DepartmentId = x.plan.DepartmentId,
-                        DepartmentName = x.plan.Department?.Name,
+                        DepartmentName = x.plan.OrganizationUnit?.Name ?? x.plan.Department?.Name,
+                        OrganizationUnitId = x.plan.OrganizationUnitId,
+                        OrganizationUnitName = x.plan.OrganizationUnit?.Name,
                         ItemDescription = x.item.ItemDescription,
                         Quantity = x.item.EstimatedQuantity,
                         EstimatedTotalCost = x.item.EstimatedTotalCost,
@@ -815,8 +843,9 @@ public class ProcurementPlanService : IProcurementPlanService
         var plans = await GetPlanningQuery()
             .Where(p => p.FiscalYear == effectiveFiscalYear)
             .Where(p => string.IsNullOrWhiteSpace(planningQuarter) || p.PlanningQuarter == planningQuarter || p.Items.Any(i => i.PlannedQuarter == planningQuarter && !i.IsDeleted))
-            .Where(p => !departmentId.HasValue || p.DepartmentId == departmentId.Value)
+            .Where(p => !departmentId.HasValue || p.OrganizationUnitId == departmentId.Value)
             .Include(p => p.Department)
+            .Include(p => p.OrganizationUnit)
             .Include(p => p.Items.Where(i => !i.IsDeleted))
             .ToListAsync();
 
@@ -844,7 +873,13 @@ public class ProcurementPlanService : IProcurementPlanService
             ConsolidationPotentialSavings = opportunities.Sum(o => o.PotentialSavings),
             Currency = plans.Select(p => p.Currency).FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)) ?? "USD",
             DepartmentSummaries = plans
-                .GroupBy(p => new { p.DepartmentId, DepartmentName = p.Department?.Name ?? "Unknown" })
+                .GroupBy(p => new
+                {
+                    DepartmentId = p.OrganizationUnitId ?? p.DepartmentId,
+                    DepartmentName = p.OrganizationUnit != null
+                        ? p.OrganizationUnit.Name
+                        : p.Department != null ? p.Department.Name : "Unknown"
+                })
                 .Select(g => new ProcurementPlanningDepartmentSummaryDto
                 {
                     DepartmentId = g.Key.DepartmentId,
@@ -1032,8 +1067,9 @@ public class ProcurementPlanService : IProcurementPlanService
         var plans = await GetPlanningQuery()
             .Where(p => !fiscalYear.HasValue || p.FiscalYear == fiscalYear.Value)
             .Where(p => string.IsNullOrWhiteSpace(planningQuarter) || p.PlanningQuarter == planningQuarter || p.Items.Any(i => i.PlannedQuarter == planningQuarter && !i.IsDeleted))
-            .Where(p => !departmentId.HasValue || p.DepartmentId == departmentId.Value)
+            .Where(p => !departmentId.HasValue || p.OrganizationUnitId == departmentId.Value)
             .Include(p => p.Department)
+            .Include(p => p.OrganizationUnit)
             .Include(p => p.PublishedBy)
             .Include(p => p.Items.Where(i => !i.IsDeleted))
             .OrderBy(p => p.FiscalYear)
@@ -1048,7 +1084,7 @@ public class ProcurementPlanService : IProcurementPlanService
                 {
                     PlanNumber = p.PlanNumber,
                     PlanTitle = p.Title,
-                    DepartmentName = p.Department?.Name,
+                    DepartmentName = p.OrganizationUnit?.Name ?? p.Department?.Name,
                     FiscalYear = p.FiscalYear,
                     PlanningCycle = p.PlanningCycle,
                     PlanningQuarter = p.PlanningQuarter,
@@ -1065,7 +1101,7 @@ public class ProcurementPlanService : IProcurementPlanService
                 {
                     PlanNumber = p.PlanNumber,
                     PlanTitle = p.Title,
-                    DepartmentName = p.Department?.Name,
+                    DepartmentName = p.OrganizationUnit?.Name ?? p.Department?.Name,
                     FiscalYear = p.FiscalYear,
                     PlanningCycle = p.PlanningCycle,
                     PlanningQuarter = i?.PlannedQuarter ?? p.PlanningQuarter,
@@ -1439,7 +1475,9 @@ public class ProcurementPlanService : IProcurementPlanService
             Title = plan.Title,
             Description = plan.Description,
             DepartmentId = plan.DepartmentId,
-            DepartmentName = plan.Department?.Name,
+            DepartmentName = plan.OrganizationUnit?.Name ?? plan.Department?.Name,
+            OrganizationUnitId = plan.OrganizationUnitId,
+            OrganizationUnitName = plan.OrganizationUnit?.Name,
             FiscalYear = plan.FiscalYear,
             PlanningCycle = plan.PlanningCycle,
             PlanningQuarter = plan.PlanningQuarter,
@@ -1474,7 +1512,9 @@ public class ProcurementPlanService : IProcurementPlanService
             Title = plan.Title,
             Description = plan.Description,
             DepartmentId = plan.DepartmentId,
-            DepartmentName = plan.Department?.Name,
+            DepartmentName = plan.OrganizationUnit?.Name ?? plan.Department?.Name,
+            OrganizationUnitId = plan.OrganizationUnitId,
+            OrganizationUnitName = plan.OrganizationUnit?.Name,
             FiscalYear = plan.FiscalYear,
             PlanningCycle = plan.PlanningCycle,
             PlanningQuarter = plan.PlanningQuarter,
@@ -1589,7 +1629,9 @@ public class ProcurementPlanService : IProcurementPlanService
             Title = budget.Title,
             Description = budget.Description,
             DepartmentId = budget.DepartmentId,
-            DepartmentName = budget.Department?.Name,
+            DepartmentName = budget.OrganizationUnit?.Name ?? budget.Department?.Name,
+            OrganizationUnitId = budget.OrganizationUnitId,
+            OrganizationUnitName = budget.OrganizationUnit?.Name,
             ProcurementPlanId = budget.ProcurementPlanId,
             FiscalYear = budget.FiscalYear,
             AllocatedAmount = budget.AllocatedAmount,
@@ -1623,7 +1665,9 @@ public class ProcurementPlanService : IProcurementPlanService
             ProcurementPlanNumber = schedule.ProcurementPlan?.PlanNumber,
             ProcurementPlanItemId = schedule.ProcurementPlanItemId,
             DepartmentId = schedule.DepartmentId,
-            DepartmentName = schedule.Department?.Name,
+            DepartmentName = schedule.OrganizationUnit?.Name ?? schedule.Department?.Name,
+            OrganizationUnitId = schedule.OrganizationUnitId,
+            OrganizationUnitName = schedule.OrganizationUnit?.Name,
             ScheduleType = schedule.ScheduleType,
             PlannedStartDate = schedule.PlannedStartDate,
             PlannedEndDate = schedule.PlannedEndDate,
@@ -1722,7 +1766,7 @@ public class ProcurementPlanService : IProcurementPlanService
                 Description = $"Auto-generated schedule for tender {tender.TenderNumber} from plan item",
                 ProcurementPlanId = plan.Id,
                 ProcurementPlanItemId = planItem.Id,
-                DepartmentId = plan.DepartmentId,
+                OrganizationUnitId = plan.OrganizationUnitId,
                 ScheduleType = "Tender",
                 PlannedStartDate = DateTime.UtcNow,
                 PlannedEndDate = dto.SubmissionDeadline ?? planItem.RequiredDate ?? DateTime.UtcNow.AddDays(30)
@@ -1917,7 +1961,7 @@ public class ProcurementPlanService : IProcurementPlanService
                 Description = $"Auto-generated schedule for purchase order {purchaseOrder.OrderNumber} from plan item",
                 ProcurementPlanId = plan.Id,
                 ProcurementPlanItemId = planItem.Id,
-                DepartmentId = plan.DepartmentId,
+                OrganizationUnitId = plan.OrganizationUnitId,
                 ScheduleType = "DirectPurchase",
                 PlannedStartDate = DateTime.UtcNow,
                 PlannedEndDate = purchaseOrder.RequiredDate ?? DateTime.UtcNow.AddDays(14)
@@ -2061,7 +2105,9 @@ public class ProcurementPlanService : IProcurementPlanService
         // If no plan-specific budget, check department budgets for the fiscal year
         if (budget == null)
         {
-            var departmentBudgets = await _budgetRepository.GetByDepartmentAsync(plan.DepartmentId);
+            var departmentBudgets = plan.OrganizationUnitId.HasValue
+                ? await _budgetRepository.GetByDepartmentAsync(plan.OrganizationUnitId.Value)
+                : [];
             budget = departmentBudgets
                 .Where(b => b.FiscalYear == plan.FiscalYear && (b.Status == "Active" || b.Status == "Approved"))
                 .FirstOrDefault();

@@ -2,6 +2,7 @@ import { apiService } from './api.service';
 import { DOCUMENT_TYPES, documentOutputService } from './document-output.service';
 import type {
     VendorInvoice,
+    VendorInvoiceDistribution,
     ApBudgetCell,
     VendorInvoiceCreateRequest,
     VendorInvoiceUpdateRequest,
@@ -43,6 +44,7 @@ import type {
     ApSupplierIdentity
 } from '../types/ap';
 import type { FinanceSourceDocumentDimension } from '../types/finance';
+import type { PurchaseOrderSupplierDefaultsDto } from './purchasingService';
 
 // Re-using the PagedResult structure from ar-service
 export interface PagedResult<T> {
@@ -109,7 +111,23 @@ export interface SupplierDebitNoteQuery {
     search?: string;
 }
 
+export interface InvoiceSupplierDefaults extends PurchaseOrderSupplierDefaultsDto {
+    withholdingDefault?: {
+        required: boolean;
+        taxId?: string | null;
+        rate: number;
+        taxPayableAccountId?: string | null;
+        message?: string | null;
+    };
+}
+
 class AccountsPayableService {
+    public async getInvoiceSupplierDefaults(supplierId: string, purchaseOrderId?: string, invoiceDate?: string): Promise<InvoiceSupplierDefaults | null> {
+        const query = new URLSearchParams({ supplierId });
+        if (purchaseOrderId) query.set('purchaseOrderId', purchaseOrderId);
+        if (invoiceDate) query.set('invoiceDate', invoiceDate);
+        return apiService.get<InvoiceSupplierDefaults | null>(`/ap/invoices/supplier-defaults?${query}`);
+    }
     private readonly baseUrl = '/ap';
 
     // --- Vendor Invoices ---
@@ -142,6 +160,10 @@ class AccountsPayableService {
     /** Returns canonical Supplier.Id values through a tenant-scoped Finance read model. */
     public async getInvoiceSuppliers(): Promise<ApInvoiceSupplier[]> {
         return apiService.get<ApInvoiceSupplier[]>(`${this.baseUrl}/invoices/suppliers`);
+    }
+
+    public async getInvoiceDistribution(id: string): Promise<VendorInvoiceDistribution> {
+        return apiService.get<VendorInvoiceDistribution>(`/ap/invoices/${id}/distribution`);
     }
 
     public async getInvoiceSupplierEntryOptions(): Promise<ApInvoiceSupplierEntry[]> {

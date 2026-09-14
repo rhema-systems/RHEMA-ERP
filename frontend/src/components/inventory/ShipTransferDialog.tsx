@@ -1,6 +1,7 @@
 'use client';
 import { formatInventoryMoney } from '@/lib/inventory-currency';
 
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -46,6 +47,7 @@ interface ShipQuantity {
 export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, currencyCode }: ShipTransferDialogProps) {
   const { toast } = useToast();
   const [loading, setLoading] = useState(false);
+  const [documentPreview, setDocumentPreview] = useState<CentralDocumentViewerFile | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingDraft, setSavingDraft] = useState(false);
   const [fullPage, setFullPage] = useState(false);
@@ -68,6 +70,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
 
   useEffect(() => {
     setFullPage(false);
+    setDocumentPreview(null);
     if (open && transferId) {
       loadTransferDetails();
     } else {
@@ -211,16 +214,15 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
     }
   };
 
-  const handlePrintShipmentNote = async () => {
-    if (!transferId || !transfer) return;
-    try {
-      const blob = await inventoryManagementService.getShipmentNotePdf(transferId);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating shipment note:', err);
-      toast({ title: 'Error', description: 'Failed to generate shipment note', variant: 'destructive' });
-    }
+  const handlePrintShipmentNote = () => {
+    if (!transfer || !transferId) return;
+    setDocumentPreview({
+      title: `Shipment Note ${transfer.transferNumber}`,
+      fileName: `ShipmentNote-${transferId}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(transferId)}/shipment-note`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
   const handleSaveDraft = async () => {
@@ -327,6 +329,7 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
     : 0;
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className={`flex w-[calc(100vw-32px)] min-w-0 flex-col overflow-hidden ${fullPage ? 'h-[calc(100dvh-32px)] max-h-[calc(100dvh-32px)] max-w-[calc(100vw-32px)]' : 'max-h-[90vh] max-w-[1100px]'}`}>
         <DialogHeader>
@@ -641,5 +644,8 @@ export function ShipTransferDialog({ open, onOpenChange, transferId, onSuccess, 
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <CentralDocumentViewerDialog file={documentPreview} open={open && Boolean(documentPreview)}
+      onOpenChange={(previewOpen) => { if (!previewOpen) setDocumentPreview(null); }} enableAnnotations={false} />
+    </>
   );
 }

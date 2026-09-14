@@ -35,7 +35,7 @@ import {
   type ExternalEstateListing,
 } from '@/services/external-estate-listings.service';
 
-const salesPublicEnquiryPath = '/sales/public-enquiries/new';
+const salesPublicEnquiryPath = '/external-portal/property-listings';
 
 function formatMoney(value?: number | null, currency = 'GHS') {
   if (value == null) return 'Price on request';

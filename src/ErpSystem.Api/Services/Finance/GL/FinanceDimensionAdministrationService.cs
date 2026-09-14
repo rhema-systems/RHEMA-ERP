@@ -425,20 +425,23 @@ public sealed class FinanceDimensionAdministrationService
         IReadOnlyList<FinancePostingDimensionValueDto>? supplied,
         FinanceDimensionCertificationState certificationState,
         bool refreshPersistedFixedValues = false,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? additionalAccountIds = null)
     {
         var tenantId = TenantId;
         var route = producer?.Definition ?? throw new ArgumentNullException(nameof(producer));
-        if (!await _context.Accounts.AsNoTracking().AnyAsync(item =>
-                item.Id == accountId && item.TenantId == tenantId && !item.IsDeleted
-                && item.Status == AccountStatus.Active,
-                cancellationToken))
+        var accountIds = new[] { accountId }.Concat(additionalAccountIds ?? []).Distinct().ToArray();
+        if (accountIds.Contains(Guid.Empty) || await _context.Accounts.AsNoTracking().CountAsync(item =>
+                accountIds.Contains(item.Id) && item.TenantId == tenantId && !item.IsDeleted
+                && item.Status == AccountStatus.Active, cancellationToken) != accountIds.Length)
             throw new KeyNotFoundException("The source-line account was not found for this tenant.");
         var inputs = NormalizeInputs(supplied);
         var userSuppliedCodes = inputs.Keys.ToHashSet(StringComparer.Ordinal);
-        var rules = await ApplicableRulesAsync(tenantId, accountId, postingDate, route, cancellationToken);
-        var warnings = ApplyRules(inputs, rules, certificationState, route, refreshPersistedFixedValues);
-        if (inputs.Count == 0)
+        var rules = await ApplicableRulesForAccountsAsync(tenantId, accountIds, postingDate, route, cancellationToken);
+        var effectiveRules = accountIds.Length == 1 ? rules : MergeSourceAccountRules(rules);
+        var warnings = ApplyRules(inputs, effectiveRules, certificationState, route, refreshPersistedFixedValues);
+        // A multi-account line still needs a snapshot of all participating rules when optional capture has no values.
+        if (inputs.Count == 0 && (accountIds.Length == 1 || rules.Count == 0))
             return new FinanceSourceLineResolution(
                 null, warnings, Array.Empty<string>(), rules);
 
@@ -513,10 +516,56 @@ public sealed class FinanceDimensionAdministrationService
         FinancePostingProducerContext producer,
         Guid accountId,
         DateTime documentDate,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<Guid>? additionalAccountIds = null)
     {
         var route = producer?.Definition ?? throw new ArgumentNullException(nameof(producer));
-        return await ApplicableRulesAsync(TenantId, accountId, documentDate, route, cancellationToken);
+        var accountIds = new[] { accountId }.Concat(additionalAccountIds ?? []).Distinct().ToArray();
+        var rules = await ApplicableRulesForAccountsAsync(TenantId, accountIds, documentDate, route, cancellationToken);
+        return accountIds.Length == 1 ? rules : MergeSourceAccountRules(rules);
+    }
+
+    private async Task<IReadOnlyList<FinanceDimensionAccountRule>> ApplicableRulesForAccountsAsync(Guid tenantId,
+        IReadOnlyList<Guid> accountIds, DateTime date, FinanceDimensionRouteDefinition route, CancellationToken ct)
+    {
+        var rules = new List<FinanceDimensionAccountRule>();
+        foreach (var accountId in accountIds)
+            rules.AddRange(await ApplicableRulesAsync(tenantId, accountId, date, route, ct));
+        return rules.DistinctBy(rule => rule.Id).ToArray();
+    }
+
+    internal static IReadOnlyList<FinanceDimensionAccountRule> MergeSourceAccountRules(IReadOnlyList<FinanceDimensionAccountRule> rules)
+    {
+        var merged = new List<FinanceDimensionAccountRule>();
+        foreach (var group in rules.GroupBy(rule => rule.FinanceDimensionDefinitionId))
+        {
+            var entries = group.OrderBy(rule => rule.AccountId).ThenBy(rule => rule.Id).ToArray();
+            var code = entries[0].FinanceDimensionDefinition.Code;
+            var fixedRules = entries.Where(rule => rule.RuleType == "Fixed").ToArray();
+            if ((entries.Any(rule => rule.RuleType == "Prohibited") && entries.Any(rule => rule.RuleType is "Required" or "Fixed")) ||
+                fixedRules.Select(rule => rule.DefaultDimensionValueId).Distinct().Count() > 1)
+                throw new InvalidOperationException($"FIN_DIMENSION_ACCOUNT_CONFLICT: {code} has contradictory rules across this line's posting accounts. Align the Finance account rules or separate the invoice line; one line cannot carry conflicting coding values.");
+            var selected = entries.OrderByDescending(rule => rule.RuleType switch
+                { "Prohibited" => 4, "Fixed" => 3, "Required" => 2, _ => 1 }).First();
+            if (entries.Length == 1 || selected.RuleType is "Fixed" or "Prohibited")
+            {
+                merged.Add(selected);
+                continue;
+            }
+            // Conflicting non-fixed defaults are left for the user; never choose an arbitrary account's value.
+            var defaults = entries.Where(rule => rule.DefaultDimensionValueId.HasValue)
+                .DistinctBy(rule => rule.DefaultDimensionValueId).ToArray();
+            var defaultRule = defaults.Length == 1 ? defaults[0] : null;
+            merged.Add(new FinanceDimensionAccountRule
+            {
+                Id = selected.Id, TenantId = selected.TenantId, AccountId = selected.AccountId,
+                FinanceDimensionDefinitionId = selected.FinanceDimensionDefinitionId, FinanceDimensionDefinition = selected.FinanceDimensionDefinition,
+                RuleType = selected.RuleType, DefaultDimensionValueId = defaultRule?.DefaultDimensionValueId,
+                DefaultDimensionValue = defaultRule?.DefaultDimensionValue, RuleFamilyId = selected.RuleFamilyId,
+                RuleVersion = selected.RuleVersion, EffectiveDate = selected.EffectiveDate, ExpiryDate = selected.ExpiryDate
+            });
+        }
+        return merged;
     }
 
     private async Task<List<FinanceDimensionAccountRule>> ApplicableRulesAsync(

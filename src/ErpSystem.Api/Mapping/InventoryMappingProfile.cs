@@ -1,6 +1,7 @@
 using AutoMapper;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Services.Inventory;
 
 namespace ErpSystem.Api.Mapping;
 
@@ -10,6 +11,7 @@ public class InventoryMappingProfile : Profile
     {
         // InventoryItem mappings
         CreateMap<InventoryItem, InventoryItemDto>()
+            .ForMember(dest => dest.PostingAccounts, opt => opt.MapFrom(src => InventoryItemPostingAccounts.Read(src)))
             .ForMember(dest => dest.AverageCost, opt => opt.MapFrom(src => src.AverageCost))
             .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.Status == ErpSystem.Core.Enums.ItemStatus.Active))
@@ -21,6 +23,7 @@ public class InventoryMappingProfile : Profile
             .ForMember(dest => dest.RowVersion, opt => opt.MapFrom(src => Convert.ToBase64String(src.RowVersion)));
 
         CreateMap<InventoryItem, InventoryItemDetailDto>()
+            .ForMember(dest => dest.PostingAccounts, opt => opt.MapFrom(src => InventoryItemPostingAccounts.Read(src)))
             .ForMember(dest => dest.AverageCost, opt => opt.MapFrom(src => src.AverageCost))
             .ForMember(dest => dest.CategoryName, opt => opt.MapFrom(src => src.Category != null ? src.Category.Name : string.Empty))
             .ForMember(dest => dest.IsActive, opt => opt.MapFrom(src => src.Status == ErpSystem.Core.Enums.ItemStatus.Active))
@@ -32,9 +35,43 @@ public class InventoryMappingProfile : Profile
             .ForMember(dest => dest.RecentMovements, opt => opt.Ignore());
 
         CreateMap<CreateInventoryItemDto, InventoryItem>()
+            .ForMember(dest => dest.InventoryAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InventoryOffsetAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.CostOfGoodsSoldAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.SalesAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.MarkdownsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.SalesReturnsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InUseAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InServiceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.DamagedAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.VarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.DropShipItemsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.PurchasePriceVarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.UnrealisedPurchasePriceVarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InventoryReturnsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.AssemblyVarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.StandardCostRevaluationAccountId, opt => opt.Ignore())
+            .AfterMap((src, dest) => InventoryItemPostingAccounts.Apply(src.PostingAccounts, dest))
             .ForMember(dest => dest.ShelfLifeDays, opt => opt.MapFrom(src => src.MinimumShelfLifeDays));
         
         CreateMap<UpdateInventoryItemDto, InventoryItem>()
+            .ForMember(dest => dest.InventoryAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InventoryOffsetAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.CostOfGoodsSoldAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.SalesAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.MarkdownsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.SalesReturnsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InUseAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InServiceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.DamagedAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.VarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.DropShipItemsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.PurchasePriceVarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.UnrealisedPurchasePriceVarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.InventoryReturnsAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.AssemblyVarianceAccountId, opt => opt.Ignore())
+            .ForMember(dest => dest.StandardCostRevaluationAccountId, opt => opt.Ignore())
+            .AfterMap((src, dest) => InventoryItemPostingAccounts.Apply(src.PostingAccounts, dest))
             .ForMember(dest => dest.Id, opt => opt.Ignore())
             .ForMember(dest => dest.TenantId, opt => opt.Ignore())
             .ForMember(dest => dest.CreatedAt, opt => opt.Ignore())

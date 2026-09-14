@@ -1,3 +1,5 @@
+using System.Net;
+using Microsoft.Extensions.Configuration;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.Entities;
@@ -15,6 +17,7 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
 {
     private static readonly Regex TokenRegex = new(@"\{\{\s*([A-Za-z0-9_.-]+)\s*\}\}", RegexOptions.Compiled);
 
+    private readonly IConfiguration? _configuration;
     private readonly IUnitOfWork _unitOfWork;
     private readonly UserManager<ApplicationUser> _userManager;
     private readonly IBusinessPartnerRepository _businessPartnerRepository;
@@ -26,13 +29,14 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
         UserManager<ApplicationUser> userManager,
         IBusinessPartnerRepository businessPartnerRepository,
         IBusinessPartnerUserRepository businessPartnerUserRepository,
-        ILogger<NotificationTopicPublisher> logger)
+        ILogger<NotificationTopicPublisher> logger, IConfiguration? configuration = null)
     {
         _unitOfWork = unitOfWork;
         _userManager = userManager;
         _businessPartnerRepository = businessPartnerRepository;
         _businessPartnerUserRepository = businessPartnerUserRepository;
         _logger = logger;
+        _configuration = configuration;
     }
 
     public async Task PublishAsync(NotificationTopicEvent evt, CancellationToken cancellationToken = default)
@@ -560,6 +564,16 @@ public class NotificationTopicPublisher : INotificationTopicPublisher
             if (!string.IsNullOrWhiteSpace(emailOptions?.TextBodyTemplateOverride))
             {
                 textBody = RenderTemplate(emailOptions.TextBodyTemplateOverride, data);
+            }
+
+            if (topic.Key.StartsWith("EhcTicket.PropertyEnquiry", StringComparison.Ordinal))
+            {
+                var frontend = _configuration?["FrontendUrl"];
+                if (!Uri.TryCreate(frontend, UriKind.Absolute, out var baseUri) || (baseUri.Scheme != "http" && baseUri.Scheme != "https"))
+                    throw new InvalidOperationException("FrontendUrl must be configured for property enquiry email links.");
+                var url = new Uri(baseUri, actionUrl ?? "/sales/property-enquiries").AbsoluteUri;
+                htmlBody = $"<p>{WebUtility.HtmlEncode(message)}</p><p><a href=\"{WebUtility.HtmlEncode(url)}\">Open property enquiry</a></p>";
+                textBody = message + Environment.NewLine + url;
             }
 
             var emailPayload = new

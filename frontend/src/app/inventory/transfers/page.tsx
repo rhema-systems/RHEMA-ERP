@@ -1,5 +1,6 @@
 'use client';
 
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -49,6 +50,7 @@ export default function InventoryTransfersPage() {
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [filteredTransfers, setFilteredTransfers] = useState<InventoryTransferDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [documentPreview, setDocumentPreview] = useState<CentralDocumentViewerFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -216,26 +218,28 @@ export default function InventoryTransfersPage() {
     return 'Spread to Item Cost';
   };
 
-  const handlePrintShipmentNote = async (id: string) => {
-    try {
-      const blob = await inventoryManagementService.getShipmentNotePdf(id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating shipment note:', err);
-      toast({ title: 'Error', description: 'Failed to generate shipment note', variant: 'destructive' });
-    }
+  const handlePrintShipmentNote = (id: string) => {
+    const transfer = transfers.find(item => item.id === id);
+    if (!transfer) return;
+    setDocumentPreview({
+      title: `Shipment Note ${transfer.transferNumber}`,
+      fileName: `ShipmentNote-${id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(id)}/shipment-note`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
-  const handlePrintGRN = async (id: string) => {
-    try {
-      const blob = await inventoryManagementService.getGoodsReceivedNotePdf(id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating GRN:', err);
-      toast({ title: 'Error', description: 'Failed to generate GRN', variant: 'destructive' });
-    }
+  const handlePrintGRN = (id: string) => {
+    const transfer = transfers.find(item => item.id === id);
+    if (!transfer) return;
+    setDocumentPreview({
+      title: `Goods Received Note ${transfer.transferNumber}`,
+      fileName: `GRN-${id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(id)}/grn`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
   const inTransitCount = transfers.filter(t => t.status === 'InTransit').length;
@@ -509,6 +513,8 @@ export default function InventoryTransfersPage() {
         transferId={receiveTransferId}
         onSuccess={fetchData}
       />
+    <CentralDocumentViewerDialog file={documentPreview} open={Boolean(documentPreview)}
+      onOpenChange={(previewOpen) => { if (!previewOpen) setDocumentPreview(null); }} enableAnnotations={false} />
     </div>
   );
 }

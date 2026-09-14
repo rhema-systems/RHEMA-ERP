@@ -139,6 +139,7 @@ public class EnterpriseDashboardModuleStatusDto
 {
     public string Module { get; set; } = string.Empty;
     public bool Available { get; set; }
+    public bool AccessRestricted { get; set; }
     public string? Error { get; set; }
 }
 

@@ -10,6 +10,7 @@ using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AP;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -53,6 +54,20 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+        [HttpGet("supplier-defaults")]
+        public async Task<ActionResult<PurchaseOrderSupplierDefaultsDto?>> GetSupplierDefaults(
+            [FromQuery] Guid supplierId, [FromQuery] Guid? purchaseOrderId, CancellationToken cancellationToken,
+            [FromQuery] DateTime? invoiceDate = null)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices))
+                return Forbid();
+            try { return Ok(await _invoiceService.GetSupplierDefaultsAsync(supplierId, purchaseOrderId, cancellationToken, invoiceDate)); }
+            catch (KeyNotFoundException exception)
+            { return NotFound(new ProblemDetails { Status = 404, Title = "Supplier defaults unavailable", Detail = exception.Message }); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(new ProblemDetails { Status = 422, Title = "Supplier defaults unavailable", Detail = exception.Message }); }
+        }
+
         private static readonly FinancePostingProducerContext DimensionProducer =
             new(FinanceDimensionRouteId.FinanceApVendorInvoice);
 
@@ -81,6 +96,18 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
             return invoice == null ? NotFound() : Ok(invoice);
+        }
+
+        /// <summary>Reads proposed invoice accounts or the original posted journal without changing the invoice.</summary>
+        [HttpGet("{id:guid}/distribution")]
+        public async Task<ActionResult<VendorInvoiceDistributionDto>> GetDistribution(Guid id, CancellationToken cancellationToken)
+        {
+            // Same invoice-read authorization as GetById; this is not a GL maintenance operation.
+            try { return Ok(await _invoiceService.GetDistributionAsync(id, cancellationToken)); }
+            catch (KeyNotFoundException exception)
+            { return NotFound(new ProblemDetails { Status = 404, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(new ProblemDetails { Status = 422, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
         }
 
         /// <summary>Retrieves a vendor invoice by its system-generated invoice number.</summary>
@@ -202,30 +229,22 @@ namespace ErpSystem.Api.Controllers.Finance
                 .Where(s => s.TenantId == tenantId).ToListAsync(cancellationToken);
             var partners = await _dbContext.BusinessPartners.IgnoreQueryFilters().AsNoTracking()
                 .Where(p => p.TenantId == tenantId).ToListAsync(cancellationToken);
-            static bool Linked(ErpSystem.Core.Entities.Procurement.Supplier supplier,
-                ErpSystem.Core.Entities.Procurement.BusinessPartner partner) =>
-                supplier.Id == partner.Id || (!string.IsNullOrWhiteSpace(partner.PartnerCode) &&
-                    string.Equals(supplier.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase));
-            static bool Eligible(ErpSystem.Core.Entities.Procurement.BusinessPartner partner) =>
-                !partner.IsDeleted && partner.IsActive && !partner.IsBlacklisted &&
-                (partner.PartnerType is "Supplier" or "Vendor" or "Manufacturer") &&
-                (partner.RegistrationStatus is "Active" or "Approved");
-
             var options = new List<ApInvoiceSupplierEntryDto>();
-            foreach (var supplier in suppliers.Where(s => !s.IsDeleted && s.IsActive && s.Status == "Active"))
+            foreach (var supplier in suppliers.Where(ApInvoiceSupplierEligibility.IsActiveSupplier))
             {
-                var linked = partners.Where(p => Linked(supplier, p)).ToList();
+                var linked = partners.Where(p => ApInvoiceSupplierEligibility.IsLinked(supplier, p)).ToList();
                 if (linked.Count > 1 || (linked.Count == 1 &&
-                    (!Eligible(linked[0]) || suppliers.Count(s => Linked(s, linked[0])) != 1))) continue;
+                    (!ApInvoiceSupplierEligibility.IsEligiblePartner(linked[0], true) ||
+                     suppliers.Count(s => ApInvoiceSupplierEligibility.IsLinked(s, linked[0])) != 1))) continue;
                 options.Add(new ApInvoiceSupplierEntryDto
                 {
                     Id = supplier.Id, BusinessPartnerId = linked.SingleOrDefault()?.Id,
                     Code = supplier.SupplierCode, Name = supplier.Name, PaymentTermId = supplier.PaymentTermId
                 });
             }
-            foreach (var partner in partners.Where(Eligible))
+            foreach (var partner in partners.Where(p => ApInvoiceSupplierEligibility.IsEligiblePartner(p, false)))
             {
-                if (suppliers.Any(s => Linked(s, partner))) continue;
+                if (suppliers.Any(s => ApInvoiceSupplierEligibility.IsLinked(s, partner))) continue;
                 options.Add(new ApInvoiceSupplierEntryDto
                 {
                     Id = partner.Id, BusinessPartnerId = partner.Id,

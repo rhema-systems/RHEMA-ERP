@@ -1534,7 +1534,15 @@ public class UnifiedNotificationService : INotificationService
 
             var now = DateTime.UtcNow;
 
-            var dueIds = await _dbContext.Notifications
+            var candidates = _dbContext.Notifications.AsQueryable();
+            if (_configuration.GetValue("Notifications:PropertyEnquiriesOnly", false))
+            {
+                candidates = candidates.Where(n => n.EntityType == "EhcTicket" && n.EntityId.HasValue
+                    && _dbContext.EhcTickets.Any(t => t.Id == n.EntityId.Value && t.TenantId == n.TenantId
+                        && !t.IsDeleted && t.PropertyListingContextJson != null));
+            }
+
+            var dueIds = await candidates
                 .AsNoTracking()
                 .Where(n =>
                     !n.IsDeleted &&

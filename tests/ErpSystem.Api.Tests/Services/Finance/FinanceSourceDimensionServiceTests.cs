@@ -18,6 +18,134 @@ public sealed class FinanceSourceDimensionServiceTests
     private static readonly DateTime DocumentDate = new(2026, 8, 15);
 
     [Fact]
+    public async Task Additional_account_required_dimension_uses_one_editable_line_and_readiness_union()
+    {
+        await using var fixture = await Fixture.CreateAsync(ruleType: null, defaultValue: false);
+        var (additional, rule) = await AddAccountRuleAsync(fixture, "Required");
+        var lines = new[] { new FinanceSourceDocumentLineContext(fixture.LineId, fixture.Account.Id, [additional.Id]) };
+        var result = await fixture.Service.SynchronizeDraftAsync(fixture.Producer, fixture.DocumentId, DocumentDate,
+            lines, null, true, null, "Capture multi-account source coding.");
+        result.Lines.Should().ContainSingle(line => line.SourceLineId == fixture.LineId);
+        result.Lines.Single().AdditionalAccountIds.Should().Equal(additional.Id);
+        result.Lines.Single().RequiredDimensionCodes.Should().Equal("DEPT");
+        result.Lines.Single().ReadinessWarnings.Should().ContainSingle(message => message.Contains("DEPT"));
+        fixture.Context.FinanceSourceDimensionAssignments.Should().HaveCount(2);
+
+        var frozen = await fixture.Service.ValidateAndFreezeAsync(fixture.Producer, fixture.DocumentId, DocumentDate, lines, false);
+        frozen.Lines.Single().IsFrozen.Should().BeTrue();
+        fixture.Context.FinanceDimensionSnapshots.Should().HaveCount(1);
+        rule.IsEvidenceLocked.Should().BeTrue("even empty optional-capture coding must freeze every actual account rule");
+    }
+
+    [Fact]
+    public async Task Secondary_fixed_value_satisfies_required_primary_and_hashes_and_locks_every_account_rule()
+    {
+        await using var fixture = await Fixture.CreateAsync("Required", defaultValue: false);
+        var (additional, _) = await AddAccountRuleAsync(fixture, "Fixed", "FIN");
+        var lines = new[] { new FinanceSourceDocumentLineContext(fixture.LineId, fixture.Account.Id, [additional.Id]) };
+        await fixture.Service.SynchronizeDraftAsync(fixture.Producer, fixture.DocumentId, DocumentDate, lines, null, true, null,
+            "Resolve all actual posting account rules.");
+        var result = await fixture.Service.ValidateAndFreezeAsync(fixture.Producer, fixture.DocumentId, DocumentDate, lines, false);
+        result.Lines.Single().Values.Should().ContainSingle(value => value.ValueCode == "FIN" && value.IsReadOnly && value.RuleType == "Fixed");
+        var rules = await fixture.Context.FinanceDimensionAccountRules.OrderBy(rule => rule.FinanceDimensionDefinitionId)
+            .ThenBy(rule => rule.AccountId).ThenBy(rule => rule.Id).ToListAsync();
+        rules.Should().HaveCount(2).And.OnlyContain(rule => rule.IsEvidenceLocked);
+        var evidence = string.Join("|", rules.Select(rule => $"{rule.Id:N}:{rule.RuleFamilyId:N}:{rule.RuleVersion}:{rule.RuleType}"));
+        fixture.Context.FinanceDimensionSnapshots.Single().RuleEvidenceHash.Should().Be(
+            Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(evidence))));
+        var posting = await fixture.Service.GetPostingDimensionsAsync(fixture.Producer, fixture.DocumentId);
+        posting.Should().HaveCount(1);
+        posting.Keys.Should().Equal(fixture.LineId);
+        posting[fixture.LineId].Should().ContainSingle(value => value.ValueCode == "FIN");
+    }
+
+    [Theory]
+    [InlineData("Required", false, "Prohibited", null)]
+    [InlineData("Fixed", true, "Prohibited", null)]
+    [InlineData("Fixed", true, "Fixed", "OPS")]
+    public async Task Contradictory_account_rules_fail_with_actionable_conflict(string primaryRule, bool primaryDefault, string secondaryRule, string? secondaryDefault)
+    {
+        await using var fixture = await Fixture.CreateAsync(primaryRule, primaryDefault);
+        var (additional, _) = await AddAccountRuleAsync(fixture, secondaryRule, secondaryDefault);
+        var action = () => fixture.Service.SynchronizeDraftAsync(fixture.Producer, fixture.DocumentId, DocumentDate,
+            [new FinanceSourceDocumentLineContext(fixture.LineId, fixture.Account.Id, [additional.Id])], null, true, null, "Try conflicting account coding.");
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("FIN_DIMENSION_ACCOUNT_CONFLICT:*DEPT*Align*separate*");
+        fixture.Context.FinanceDimensionSnapshots.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task Conflicting_nonfixed_defaults_are_not_arbitrarily_selected_and_explicit_coding_remains_editable()
+    {
+        await using var fixture = await Fixture.CreateAsync("Required", true);
+        var (additional, _) = await AddAccountRuleAsync(fixture, "Required", "OPS");
+        var lines = new[] { new FinanceSourceDocumentLineContext(fixture.LineId, fixture.Account.Id, [additional.Id]) };
+        var empty = await fixture.Service.SynchronizeDraftAsync(fixture.Producer, fixture.DocumentId, DocumentDate,
+            lines, null, true, null, "Capture ambiguous defaults for user selection.");
+        empty.Lines.Single().Values.Should().BeEmpty();
+        empty.Lines.Single().ReadinessWarnings.Should().ContainSingle();
+        var edited = await fixture.Service.SynchronizeDraftAsync(fixture.Producer, fixture.DocumentId, DocumentDate,
+            lines, fixture.Input("OPS"), true, null, "User selected common coding value.");
+        edited.Lines.Single().Values.Should().ContainSingle(value => value.ValueCode == "OPS" && !value.IsReadOnly);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Additional_account_cannot_be_foreign_or_inactive(bool foreign)
+    {
+        await using var fixture = await Fixture.CreateAsync(null, false);
+        var (additional, _) = await AddAccountRuleAsync(fixture, "Optional");
+        if (foreign) additional.TenantId = Guid.NewGuid(); else additional.Status = AccountStatus.Inactive;
+        await fixture.Context.SaveChangesAsync();
+        var action = () => fixture.Service.SynchronizeDraftAsync(fixture.Producer, fixture.DocumentId, DocumentDate,
+            [new FinanceSourceDocumentLineContext(fixture.LineId, fixture.Account.Id, [additional.Id])], null, true, null, "Try invalid posting account.");
+        await action.Should().ThrowAsync<KeyNotFoundException>().WithMessage("*account*tenant*");
+    }
+
+    [Fact]
+    public async Task Frozen_history_uses_original_snapshot_when_current_multiaccount_rules_become_conflicting()
+    {
+        await using var fixture = await Fixture.CreateAsync("Required", false);
+        var (additional, oldRule) = await AddAccountRuleAsync(fixture, "Optional");
+        oldRule.RouteId = null; oldRule.SourceModule = null; oldRule.SourceDocumentType = null; oldRule.PostingAction = null;
+        await fixture.Context.SaveChangesAsync();
+        var lines = new[] { new FinanceSourceDocumentLineContext(fixture.LineId, fixture.Account.Id, [additional.Id]) };
+        await fixture.Service.SynchronizeDraftAsync(fixture.Producer, fixture.DocumentId, DocumentDate, lines, fixture.Input("FIN"), true, null, "Capture original coding.");
+        var frozen = await fixture.Service.ValidateAndFreezeAsync(fixture.Producer, fixture.DocumentId, DocumentDate, lines, false);
+        var hash = fixture.Context.FinanceDimensionSnapshots.Single().RuleEvidenceHash;
+        fixture.Context.FinanceDimensionAccountRules.Add(new FinanceDimensionAccountRule
+        {
+            TenantId = fixture.TenantId, AccountId = additional.Id, FinanceDimensionDefinitionId = oldRule.FinanceDimensionDefinitionId,
+            RuleFamilyId = Guid.NewGuid(), RuleVersion = 1, RuleType = "Prohibited", IsActive = true,
+            RouteId = FinanceDimensionRouteId.FinanceApVendorInvoice, SourceModule = "AP", SourceDocumentType = "VendorInvoice",
+            PostingAction = "Post", EffectiveDate = DocumentDate
+        });
+        await fixture.Context.SaveChangesAsync();
+
+        var history = await fixture.Service.GetAsync(fixture.Producer, fixture.DocumentId, DocumentDate, lines);
+
+        history.Lines.Single().CombinationHash.Should().Be(frozen.Lines.Single().CombinationHash);
+        history.Lines.Single().Values.Should().ContainSingle(value => value.ValueCode == "FIN");
+        history.Lines.Single().ReadinessWarnings.Should().BeEmpty();
+        fixture.Context.FinanceDimensionSnapshots.Single().RuleEvidenceHash.Should().Be(hash);
+    }
+
+    private static async Task<(Account Account, FinanceDimensionAccountRule Rule)> AddAccountRuleAsync(Fixture fixture, string type, string? defaultCode = null)
+    {
+        var definition = await fixture.Context.FinanceDimensionDefinitions.SingleAsync();
+        var account = new Account { TenantId = fixture.TenantId, AccountCode = "6001", AccountNumber = "6001", AccountName = "Second posting account",
+            AccountType = AccountType.Expense, CurrencyCode = "GHS", Status = AccountStatus.Active, AllowDirectPosting = true };
+        var rule = new FinanceDimensionAccountRule { TenantId = fixture.TenantId, RuleFamilyId = Guid.NewGuid(), RuleVersion = 1,
+            AccountId = account.Id, FinanceDimensionDefinitionId = definition.Id, RuleType = type,
+            DefaultDimensionValueId = defaultCode == null ? null : (await fixture.Context.FinanceDimensionValues.SingleAsync(value => value.Code == defaultCode)).Id,
+            RouteId = FinanceDimensionRouteId.FinanceApVendorInvoice, SourceModule = "AP", SourceDocumentType = "VendorInvoice", PostingAction = "Post",
+            EffectiveDate = new DateTime(2025, 1, 1), IsActive = true };
+        fixture.Context.Accounts.Add(account); fixture.Context.FinanceDimensionAccountRules.Add(rule);
+        await fixture.Context.SaveChangesAsync();
+        return (account, rule);
+    }
+
+    [Fact]
     public async Task CaptureOptionalPersistsExplicitEmptyLineAndReadinessWarning()
     {
         await using var fixture = await Fixture.CreateAsync("Required", defaultValue: false);

@@ -27,6 +27,8 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 
 # Disable telemetry during the build
 ENV NEXT_TELEMETRY_DISABLED=1
+# Docker consumes .next/standalone. Local `npm start` deliberately uses the regular .next output.
+ENV NEXT_OUTPUT=standalone
 
 # Build the application
 RUN \

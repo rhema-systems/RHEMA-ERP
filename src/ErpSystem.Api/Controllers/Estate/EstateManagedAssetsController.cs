@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Models;
 using ErpSystem.Core.Services.Estate;
+using ErpSystem.Api.Services.Estate;
 using ErpSystem.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -28,6 +29,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
     private readonly IFileStorageService _fileStorageService;
     private readonly ApplicationDbContext _db;
     private readonly ICurrentUserService _currentUserService;
+    private readonly IEstateSalesListingApplicationHandoffService _salesListingApplicationHandoffService;
 
     public EstateManagedAssetsController(
         IEstateManagedAssetService managedAssetService,
@@ -35,7 +37,8 @@ public sealed class EstateManagedAssetsController : ControllerBase
         IProcedureCaseService procedureCaseService,
         IFileStorageService fileStorageService,
         ApplicationDbContext db,
-        ICurrentUserService currentUserService)
+        ICurrentUserService currentUserService,
+        IEstateSalesListingApplicationHandoffService salesListingApplicationHandoffService)
     {
         _managedAssetService = managedAssetService;
         _projectService = projectService;
@@ -43,6 +46,7 @@ public sealed class EstateManagedAssetsController : ControllerBase
         _fileStorageService = fileStorageService;
         _db = db;
         _currentUserService = currentUserService;
+        _salesListingApplicationHandoffService = salesListingApplicationHandoffService;
     }
 
     [HttpGet]
@@ -393,145 +397,34 @@ public sealed class EstateManagedAssetsController : ControllerBase
     }
 
     [HttpPost("sales-handoffs/listing-applications")]
-    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Sales Officer,Sales Manager")]
+    [Authorize(Roles = "admin,Admin,SystemAdmin,SuperAdmin,TenantAdmin,Estate Officer,Estate Manager,Property Manager,Sales User,Sales Officer,Sales Manager")]
     public async Task<IActionResult> CreateListingApplicationFromSales(
         [FromBody] CreateEstateSalesListingApplicationHandoffDto request,
         CancellationToken cancellationToken)
     {
-        var tenantId = GetTenantId();
-        if (request.ListingId == Guid.Empty)
-        {
-            return BadRequest(new { success = false, message = "Listing id is required." });
-        }
-
-        if (request.BusinessPartnerId == Guid.Empty)
-        {
-            return BadRequest(new { success = false, message = "Customer Business Partner id is required." });
-        }
-
-        var asset = await _db.EstateManagedAssets
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == request.ListingId
-                && item.TenantId == tenantId
-                && !item.IsDeleted, cancellationToken);
-        var demarcation = asset is null
-            ? await _db.EstateLandDemarcations
-                .AsNoTracking()
-                .Include(item => item.EstateManagedAsset)
-                .FirstOrDefaultAsync(item => item.Id == request.ListingId
-                    && item.TenantId == tenantId
-                    && !item.IsDeleted
-                    && item.EstateManagedAsset.TenantId == tenantId
-                    && !item.EstateManagedAsset.IsDeleted, cancellationToken)
-            : null;
-        asset ??= demarcation?.EstateManagedAsset;
-
-        if (asset is null)
-        {
-            return NotFound(new { success = false, message = "Estate listing was not found." });
-        }
-
-        var customer = await _db.BusinessPartners
-            .AsNoTracking()
-            .FirstOrDefaultAsync(item => item.Id == request.BusinessPartnerId
-                && item.TenantId == tenantId
-                && !item.IsDeleted, cancellationToken);
-        if (customer is null)
-        {
-            return BadRequest(new { success = false, message = "Customer Business Partner was not found." });
-        }
-
-        if (request.SalesOpportunityId.HasValue)
-        {
-            var existingCase = await _db.ProcedureCases
-                .AsNoTracking()
-                .Include(item => item.Fields.Where(field => !field.IsDeleted))
-                .FirstOrDefaultAsync(procedureCase => procedureCase.TenantId == tenantId
-                    && !procedureCase.IsDeleted
-                    && procedureCase.Module == "PropertyManagement"
-                    && procedureCase.EntityType == "EstatePropertyManagementListingApplication"
-                    && procedureCase.Fields.Any(field => !field.IsDeleted
-                        && field.Key == "salesOpportunityId"
-                        && field.Value == request.SalesOpportunityId.Value.ToString()), cancellationToken);
-
-            if (existingCase is not null)
-            {
-                return Ok(new { success = true, data = ToSalesHandoffCaseDto(existingCase), message = "Estate listing application already exists for this Sales opportunity." });
-            }
-        }
-
-        var listingReference = demarcation is null
-            ? asset.AssetCode
-            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcation.DemarcationNumber);
-        var listingName = demarcation is null
-            ? asset.Name
-            : $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}";
-        var requestType = NormalizeSalesHandoffRequestType(request.RequestType, demarcation?.ExternalListingType ?? asset.ExternalListingType);
-        var requestLabel = requestType == "Purchase" ? "Purchase enquiry" : "Lease enquiry";
-        var amount = request.AgreedAmount
-            ?? (requestType == "Purchase"
-                ? demarcation?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcation?.ExternalListingPrice ?? asset.ExternalListingPrice
-                : demarcation?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent ?? demarcation?.ExternalListingPrice ?? asset.ExternalListingPrice);
-        var currency = string.IsNullOrWhiteSpace(request.Currency)
-            ? demarcation?.ExternalListingCurrency ?? asset.ExternalListingCurrency ?? customer.Currency ?? "GHS"
-            : request.Currency.Trim().ToUpperInvariant();
-        var reference = BuildExternalReference("ESTATE");
-        var description = Truncate(
-            $"{requestLabel} accepted by Sales for {listingReference} - {listingName}. Customer: {customer.PartnerName} ({customer.CustomerAccountNumber}).",
-            1000);
-
-        var fieldValues = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["applicationReference"] = reference,
-            ["sourceWorkspace"] = "Sales - Estate Enquiry",
-            ["sourceReference"] = customer.Id.ToString(),
-            ["customerAccountReference"] = customer.CustomerAccountNumber,
-            ["customerName"] = customer.PartnerName,
-            ["propertyUnit"] = listingReference,
-            ["listingReference"] = listingReference,
-            ["listingType"] = demarcation?.ExternalListingType ?? asset.ExternalListingType,
-            ["requestType"] = requestLabel,
-            ["listingPrice"] = amount?.ToString("0.##"),
-            ["offerAmount"] = requestType == "Purchase" ? amount?.ToString("0.##") : null,
-            ["currency"] = currency,
-            ["requestMessage"] = request.Notes?.Trim(),
-            ["customerValidationStatus"] = "Validated by Sales",
-            ["listingValidationStatus"] = "Pending",
-            ["availabilityCheck"] = "Pending",
-            ["commercialReviewStatus"] = "Completed by Sales",
-            ["decisionStatus"] = "Pending Estate review",
-            ["reservationStatus"] = "Sales completed",
-            ["customerNotificationStatus"] = "Handled by Sales",
-            ["customerAcceptanceStatus"] = "Accepted in Sales",
-            ["customerAcceptanceDate"] = request.SalesCompletedAt?.ToString("yyyy-MM-dd"),
-            ["billingStartStatus"] = requestType == "Purchase"
-                ? "Sales payment handled"
-                : "Blocked - agreement pending",
-            ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
-            ["applicationStatus"] = "Submitted from Sales",
-            ["salesOpportunityId"] = request.SalesOpportunityId?.ToString(),
-            ["salesReference"] = request.SalesReference,
-            ["salesCompletedAt"] = request.SalesCompletedAt?.ToString("O"),
-            ["notes"] = string.IsNullOrWhiteSpace(request.Notes)
-                ? description
-                : $"{description} {request.Notes.Trim()}"
-        };
-
         try
         {
-            var created = await _procedureCaseService.CreateCaseAsync(new CreateProcedureCaseRequest(
-                "PropertyManagement",
-                "EstatePropertyManagementListingApplication",
-                $"{requestLabel} - {listingName}",
-                reference,
-                customer.PartnerName,
-                "Sales - Estate Enquiry",
-                DateTime.UtcNow,
-                description,
-                fieldValues));
-
-            return Ok(new { success = true, data = created, message = "Estate listing application created from Sales handoff." });
+            var result = await _salesListingApplicationHandoffService.CreateAsync(GetTenantId(), new(
+                request.ListingId,
+                request.BusinessPartnerId,
+                request.RequestType,
+                request.SalesOpportunityId ?? Guid.Empty,
+                request.SalesReference ?? string.Empty,
+                request.AgreedAmount,
+                request.Currency,
+                request.SalesCompletedAt,
+                request.Notes), cancellationToken);
+            return Ok(new
+            {
+                success = true,
+                data = result,
+                message = result.AlreadyExists
+                    ? "Estate listing application already exists for this Sales opportunity."
+                    : "Estate listing application created from Sales handoff."
+            });
         }
+        catch (KeyNotFoundException ex) { return NotFound(new { success = false, message = ex.Message }); }
+        catch (ArgumentException ex) { return BadRequest(new { success = false, message = ex.Message }); }
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { success = false, message = ex.Message });

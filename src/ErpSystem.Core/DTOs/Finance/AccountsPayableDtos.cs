@@ -49,6 +49,9 @@ public class VendorInvoiceDto
     public decimal EarlyPaymentDiscountAmount { get; set; }
 
     // Withholding tax
+    public bool? ApplySupplierWithholdingDefaults { get; set; }
+    public decimal? WithholdingTaxRateOverride { get; set; }
+    public bool WithholdingDecisionPending { get; set; }
     public decimal WithholdingTaxRate { get; set; }
     public decimal WithholdingTaxAmount { get; set; }
     public Guid? WithholdingTaxId { get; set; }
@@ -98,6 +101,8 @@ public class VendorInvoiceDto
 
 public class VendorInvoiceCreateDto
 {
+    /// <summary>Opt in only for a new draft; false preserves explicit No Tax and older-client behavior.</summary>
+    public bool? ApplyBusinessPartnerDefaults { get; set; }
     public string? SupplierInvoiceNumber { get; set; }
 
     [Required]
@@ -123,6 +128,9 @@ public class VendorInvoiceCreateDto
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
     // Withholding tax
+    public bool? ApplySupplierWithholdingDefaults { get; set; }
+    [Range(typeof(decimal), "0", "100")]
+    public decimal? WithholdingTaxRateOverride { get; set; }
     public decimal WithholdingTaxRate { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
@@ -179,6 +187,9 @@ public class VendorInvoiceUpdateDto
     public decimal EarlyPaymentDiscountPercentage { get; set; }
     public DateTime? EarlyPaymentDiscountDueDate { get; set; }
 
+    public bool? ApplySupplierWithholdingDefaults { get; set; }
+    [Range(typeof(decimal), "0", "100")]
+    public decimal? WithholdingTaxRateOverride { get; set; }
     public decimal WithholdingTaxRate { get; set; }
     public Guid? WithholdingTaxId { get; set; }
     public Guid? WithholdingTaxAccountId { get; set; }
@@ -866,6 +877,11 @@ public class VendorPaymentAllocationResultDto
 
 public class OutstandingVendorInvoiceDto
 {
+    public bool? ApplySupplierWithholdingDefaults { get; set; }
+    public Guid? WithholdingTaxId { get; set; }
+    public decimal WithholdingTaxRate { get; set; }
+    public decimal? WithholdingTaxRateOverride { get; set; }
+    public Guid? WithholdingTaxAccountId { get; set; }
     public Guid InvoiceId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public string? SupplierInvoiceNumber { get; set; }

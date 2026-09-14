@@ -44,7 +44,7 @@ public sealed class FleetDriverDirectoryService : IFleetDriverDirectoryService
 
         var employeeQuery = employeeRepository.GetQueryable(employee => employee.TenantId == tenantId && !employee.IsDeleted)
             .Include(employee => employee.Position)
-            .Include(employee => employee.Department)
+            .Include(employee => employee.OrganizationUnit)
             .Where(employee =>
                 employee.Position.Title.ToLower().Contains("driver") ||
                 licenseQuery.Any(card => card.EmployeeId == employee.Id) ||
@@ -138,7 +138,7 @@ public sealed class FleetDriverDirectoryService : IFleetDriverDirectoryService
                 EmailAddress = employee.EmailAddress,
                 PhoneNumber = employee.MobileNumber ?? employee.TelephoneNumber,
                 PositionTitle = employee.Position?.Title ?? string.Empty,
-                DepartmentName = employee.Department?.Name ?? string.Empty,
+                DepartmentName = employee.OrganizationUnit?.Name ?? string.Empty,
                 StaffStatus = employee.StaffStatus.ToString(),
                 IsActive = employee.IsActive,
                 DriverLicenseId = license?.Id,

@@ -277,7 +277,7 @@ export default function ProcurementBudgetDetailPage() {
             <CardHeader><CardTitle>Budget Information</CardTitle></CardHeader>
             <CardContent>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div><span className="text-sm text-muted-foreground">Department</span><p className="font-medium">{budget.departmentName || 'N/A'}</p></div>
+                <div><span className="text-sm text-muted-foreground">Organization Unit</span><p className="font-medium">{budget.organizationUnitName || budget.departmentName || 'N/A'}</p></div>
                 <div><span className="text-sm text-muted-foreground">Fiscal Year</span><p className="font-medium">{budget.fiscalYear}</p></div>
               </div>
               {budget.notes && <div className="mt-4"><span className="text-sm text-muted-foreground">Notes</span><p className="mt-1">{budget.notes}</p></div>}

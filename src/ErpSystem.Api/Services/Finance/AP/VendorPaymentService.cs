@@ -434,6 +434,7 @@ namespace ErpSystem.Api.Services.Finance.AP
             // total. The allocation still retains the invoice-native amount for aging.
             var allocationWhtFunctionalAmount = 0m;
             var allocationSettlementFunctionalBase = 0m;
+            var withholdingInvoices = new List<VendorInvoice>();
             if (dto.Allocations?.Any() == true)
             {
                 foreach (var requestedAllocation in dto.Allocations)
@@ -445,6 +446,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                             !candidate.IsDeleted);
                     if (invoice == null)
                         throw new KeyNotFoundException($"Vendor invoice with Id '{requestedAllocation.VendorInvoiceId}' not found.");
+                    if (invoice.SupplierId != supplier.Id)
+                        throw new InvalidOperationException("A selected invoice does not belong to this payment supplier.");
+                    withholdingInvoices.Add(invoice);
 
                     var invoiceCurrency = NormalizeCurrency(invoice.CurrencyCode, baseCurrencyCode);
                     var invoiceRate = await ResolveApprovedSettlementRateAsync(
@@ -466,6 +470,9 @@ namespace ErpSystem.Api.Services.Finance.AP
                 }
             }
             allocationWhtFunctionalAmount = RoundMoney(allocationWhtFunctionalAmount);
+            var invoiceWithholding = ApInvoiceWithholdingPolicy.Resolve(withholdingInvoices, dto.WithholdingTaxId);
+            if (invoiceWithholding != null)
+                dto.WithholdingTaxId = invoiceWithholding.TaxId;
             allocationSettlementFunctionalBase = RoundMoney(allocationSettlementFunctionalBase);
             var requestedWhtAmount = allocationWhtFunctionalAmount;
             // The header value is retained for API compatibility and functional-currency
@@ -499,7 +506,8 @@ namespace ErpSystem.Api.Services.Finance.AP
                     TaxId = dto.WithholdingTaxId.Value,
                     SupplierId = supplier.Id,
                     PaymentDate = dto.PaymentDate,
-                    TaxableBase = taxableBase
+                    TaxableBase = taxableBase,
+                    VendorInvoiceIds = withholdingInvoices.Select(invoice => invoice.Id).Distinct().ToList()
                 }, cancellationToken);
 
                 if (Math.Abs(RoundMoney(requestedWhtAmount - whtCalculation.WithholdingAmount)) > 0.01m)
@@ -1664,6 +1672,17 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .Include(p => p.PaymentBatch)
                     .SingleAsync(cancellationToken);
                 EnsureAllocationMutationAllowed(payment, batchProcessorScope);
+
+            var whtInvoiceIds = allocations.Select(item => item.VendorInvoiceId)
+                .Concat(payment.Allocations.Where(item => !item.IsDeleted && !item.IsReversal).Select(item => item.VendorInvoiceId))
+                .Distinct().ToList();
+            var whtInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.SupplierId == payment.SupplierId &&
+                whtInvoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
+            if (whtInvoices.Count != whtInvoiceIds.Count)
+                throw new InvalidOperationException("A selected WHT invoice does not belong to this payment supplier and tenant.");
+            var whtDecision = ApInvoiceWithholdingPolicy.Resolve(whtInvoices, payment.WithholdingTaxId);
+            if (whtDecision != null) payment.WithholdingTaxId = whtDecision.TaxId;
 
             var result = new VendorPaymentAllocationResultDto
             {
@@ -3264,6 +3283,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     TotalAmount = i.TotalAmount,
                     PaidAmount = i.PaidAmount,
                     BalanceAmount = unreservedBalance,
+                    ApplySupplierWithholdingDefaults = i.ApplySupplierWithholdingDefaults,
+                    WithholdingTaxId = i.WithholdingTaxId,
+                    WithholdingTaxRate = i.WithholdingTaxRate,
+                    WithholdingTaxRateOverride = i.WithholdingTaxRateOverride,
+                    WithholdingTaxAccountId = i.WithholdingTaxAccountId,
                     CurrencyCode = NormalizeCurrency(i.CurrencyCode, "GHS"),
                     DaysOverdue = i.DueDate.HasValue && i.DueDate.Value < now
                         ? (int)(now - i.DueDate.Value).TotalDays
@@ -5966,8 +5990,19 @@ namespace ErpSystem.Api.Services.Finance.AP
             CancellationToken cancellationToken)
         {
             var functionalWht = RoundMoney(allocations.Sum(item => item.WithholdingTaxFunctionalAmount));
+            var invoiceIds = allocations.Select(item => item.VendorInvoiceId).Distinct().ToList();
+            var withholdingInvoices = await _unitOfWork.Repository<VendorInvoice>().GetQueryable(invoice =>
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.SupplierId == payment.SupplierId &&
+                invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
+            if (withholdingInvoices.Count != invoiceIds.Count)
+                throw new InvalidOperationException("A selected WHT invoice does not belong to this payment supplier and tenant.");
+            var invoiceWithholding = ApInvoiceWithholdingPolicy.Resolve(withholdingInvoices, payment.WithholdingTaxId);
+            if (invoiceWithholding != null)
+                payment.WithholdingTaxId = invoiceWithholding.TaxId;
             payment.WithholdingTaxAmount = functionalWht;
-            if (functionalWht == 0m)
+            // A configured payment below its threshold must keep its taxable base: later
+            // payments use that evidence when evaluating the supplier's cumulative threshold.
+            if (!payment.WithholdingTaxId.HasValue && functionalWht == 0m)
             {
                 payment.WithholdingTaxBaseAmount = 0m;
                 payment.WithholdingTaxRate = 0m;
@@ -5991,7 +6026,11 @@ namespace ErpSystem.Api.Services.Finance.AP
                     TaxId = payment.WithholdingTaxId.Value,
                     SupplierId = payment.SupplierId,
                     PaymentDate = payment.PaymentDate,
-                    TaxableBase = taxableBase
+                    TaxableBase = taxableBase,
+                    // Allocation edits and posting revalidate an already persisted payment.
+                    // Its current base is added by the calculator, not counted twice as history.
+                    ExcludeVendorPaymentId = payment.Id,
+                    VendorInvoiceIds = invoiceIds
                 },
                 cancellationToken);
             if (Math.Abs(RoundMoney(functionalWht - calculation.WithholdingAmount)) > 0.01m)

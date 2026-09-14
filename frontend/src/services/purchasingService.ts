@@ -2,6 +2,7 @@
  * Purchasing Service
  * Handles Purchase Requisitions, Purchase Orders, and Purchase Receipts (GRN)
  */
+import type { BusinessPartnerPostingDefaults } from './businessPartnerService';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -749,7 +750,19 @@ export interface PurchaseOrderBudgetCommitmentDto {
   history: PurchaseOrderBudgetCommitmentHistoryDto[];
 }
 
+export interface PurchaseOrderSupplierDefaultsDto {
+  businessPartnerId: string;
+  paymentTermId?: string | null;
+  paymentTerms?: string | null;
+  paymentTermsDays?: number | null;
+  tin?: string | null;
+  creditLimit?: number | null;
+  currency?: string | null;
+  postingDefaults: BusinessPartnerPostingDefaults;
+}
+
 export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
+  supplierDefaults?: PurchaseOrderSupplierDefaultsDto | null;
   receivedDate?: string;
   approvedByName?: string;
   approvedAt?: string;

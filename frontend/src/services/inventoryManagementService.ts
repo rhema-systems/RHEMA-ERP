@@ -4,6 +4,10 @@
  */
 
 import axios from 'axios';
+import type { Account } from '@/types/finance';
+
+export type InventoryPostingAccountOptionDto = Pick<Account,
+  'id' | 'accountCode' | 'accountNumber' | 'accountName' | 'accountType' | 'status' | 'allowDirectPosting' | 'isControlAccount'>;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -128,7 +132,27 @@ export interface InventoryCategoryDto {
 }
 
 // Inventory Item
+export interface InventoryItemPostingAccountsDto {
+  inventoryAccountId?: string | null;
+  inventoryOffsetAccountId?: string | null;
+  costOfGoodsSoldAccountId?: string | null;
+  salesAccountId?: string | null;
+  markdownsAccountId?: string | null;
+  salesReturnsAccountId?: string | null;
+  inUseAccountId?: string | null;
+  inServiceAccountId?: string | null;
+  damagedAccountId?: string | null;
+  varianceAccountId?: string | null;
+  dropShipItemsAccountId?: string | null;
+  purchasePriceVarianceAccountId?: string | null;
+  unrealisedPurchasePriceVarianceAccountId?: string | null;
+  inventoryReturnsAccountId?: string | null;
+  assemblyVarianceAccountId?: string | null;
+  standardCostRevaluationAccountId?: string | null;
+}
+
 export interface InventoryItemDto {
+  postingAccounts?: InventoryItemPostingAccountsDto;
   id: string;
   itemCode: string;
   name: string;
@@ -227,6 +251,7 @@ export interface InventoryItemDto {
 }
 
 export interface CreateInventoryItemDto {
+  postingAccounts?: InventoryItemPostingAccountsDto;
   // Basic Info
   itemCode: string;
   name: string;
@@ -1365,6 +1390,11 @@ export interface BinStockDto {
 // ============================================================================
 
 class InventoryManagementService {
+  async getItemPostingAccounts(): Promise<InventoryPostingAccountOptionDto[]> {
+    const response = await axios.get(`${API_URL}/InventoryItems/posting-accounts`, { headers: this.getAuthHeaders() });
+    return response.data;
+  }
+
   private getAuthHeaders() {
     const token = localStorage.getItem('token') || localStorage.getItem('authToken');
     return {

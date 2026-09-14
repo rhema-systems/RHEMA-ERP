@@ -104,8 +104,8 @@ public class PurchaseRequisitionsController : ControllerBase
 
             NormalizePlanItemLineage(updateDto);
             var before = _linkageService.Map(requisition);
-            var departmentName = await ResolveDepartmentNameAsync(
-                updateDto.DepartmentId,
+            var organizationUnit = await ResolveOrganizationUnitAsync(
+                updateDto.OrganizationUnitId,
                 updateDto.Linkage.SourcePlanItemId,
                 requisition.TenantId,
                 cancellationToken);
@@ -121,7 +121,8 @@ public class PurchaseRequisitionsController : ControllerBase
 
             requisition.RequiredDate = updateDto.RequiredDate;
             requisition.Priority = updateDto.Priority.Trim();
-            requisition.Department = departmentName;
+            requisition.OrganizationUnitId = organizationUnit.Id;
+            requisition.Department = organizationUnit.Name;
             requisition.Justification = TrimOrNull(updateDto.Justification, 2000);
             requisition.Notes = TrimOrNull(updateDto.Notes, 2000);
             requisition.TotalAmount = updateDto.Items.Sum(item => item.Quantity * item.EstimatedUnitPrice);
@@ -558,8 +559,8 @@ public class PurchaseRequisitionsController : ControllerBase
 
             var tenantId = _tenantContext.GetCurrentTenantId();
             NormalizePlanItemLineage(createDto);
-            var departmentName = await ResolveDepartmentNameAsync(
-                createDto.DepartmentId,
+            var organizationUnit = await ResolveOrganizationUnitAsync(
+                createDto.OrganizationUnitId,
                 createDto.Linkage.SourcePlanItemId,
                 tenantId,
                 cancellationToken);
@@ -579,7 +580,8 @@ public class PurchaseRequisitionsController : ControllerBase
                 RequiredDate = createDto.RequiredDate,
                 Status = "Draft",
                 Priority = createDto.Priority,
-                Department = departmentName,
+                OrganizationUnitId = organizationUnit.Id,
+                Department = organizationUnit.Name,
                 Justification = createDto.Justification,
                 Notes = createDto.Notes,
                 TotalAmount = totalAmount,
@@ -1484,6 +1486,7 @@ public class PurchaseRequisitionsController : ControllerBase
         ApprovalRequired = requisition.ApprovalRequired,
         Priority = requisition.Priority,
         Department = requisition.Department,
+        OrganizationUnitId = requisition.OrganizationUnitId,
         TotalAmount = requisition.TotalAmount,
         Currency = requisition.Currency,
         ItemCount = requisition.Items?.Count ?? 0,
@@ -1522,6 +1525,7 @@ public class PurchaseRequisitionsController : ControllerBase
             ApprovalRequired = requisition.ApprovalRequired,
             Priority = requisition.Priority,
             Department = requisition.Department,
+            OrganizationUnitId = requisition.OrganizationUnitId,
             CostCenter = requisition.CostCenter,
             Justification = requisition.Justification,
             Notes = requisition.Notes,
@@ -1596,14 +1600,14 @@ public class PurchaseRequisitionsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Priority)) return "Priority is required.";
         if (!string.IsNullOrWhiteSpace(request.Currency) && request.Currency.Trim().Length != 3)
             return "Currency must be a three-letter Finance currency code.";
-        if ((!request.DepartmentId.HasValue || request.DepartmentId.Value == Guid.Empty) &&
+        if ((!request.OrganizationUnitId.HasValue || request.OrganizationUnitId.Value == Guid.Empty) &&
             (!request.Linkage.SourcePlanItemId.HasValue || request.Linkage.SourcePlanItemId.Value == Guid.Empty))
-            return "Select an active HR department.";
+            return "Select an active HR organization unit.";
         return null;
     }
 
-    private async Task<string> ResolveDepartmentNameAsync(
-        Guid? departmentId,
+    private async Task<OrganizationUnit> ResolveOrganizationUnitAsync(
+        Guid? organizationUnitId,
         Guid? sourcePlanItemId,
         Guid tenantId,
         CancellationToken cancellationToken)
@@ -1613,34 +1617,35 @@ public class PurchaseRequisitionsController : ControllerBase
             var sourcePlanItem = await _unitOfWork.Repository<ProcurementPlanItem>()
                 .GetQueryable(item => item.Id == sourcePlanItemId.Value && item.TenantId == tenantId && !item.IsDeleted)
                 .Include(item => item.ProcurementPlan)
-                .ThenInclude(plan => plan.Department)
+                .ThenInclude(plan => plan.OrganizationUnit)
                 .AsNoTracking()
                 .SingleOrDefaultAsync(cancellationToken);
             if (sourcePlanItem is null || sourcePlanItem.ProcurementPlan.IsDeleted ||
-                sourcePlanItem.ProcurementPlan.Department.IsDeleted || !sourcePlanItem.ProcurementPlan.Department.IsActive)
+                sourcePlanItem.ProcurementPlan.OrganizationUnit is null ||
+                sourcePlanItem.ProcurementPlan.OrganizationUnit.IsDeleted || !sourcePlanItem.ProcurementPlan.OrganizationUnit.IsActive)
                 throw new ProcurementRequisitionLinkageValidationException(
-                    "PR_PLAN_DEPARTMENT_INVALID",
-                    "The selected plan item does not have an active HR department in the current tenant.");
-            if (departmentId.HasValue && departmentId.Value != Guid.Empty &&
-                departmentId.Value != sourcePlanItem.ProcurementPlan.DepartmentId)
+                    "PR_PLAN_ORGANIZATION_UNIT_INVALID",
+                    "The selected plan item does not have an active HR organization unit in the current tenant.");
+            if (organizationUnitId.HasValue && organizationUnitId.Value != Guid.Empty &&
+                organizationUnitId.Value != sourcePlanItem.ProcurementPlan.OrganizationUnitId)
                 throw new ProcurementRequisitionLinkageValidationException(
-                    "PR_PLAN_DEPARTMENT_MISMATCH",
-                    "The posted department does not match the selected procurement plan item.");
-            return sourcePlanItem.ProcurementPlan.Department.Name;
+                    "PR_PLAN_ORGANIZATION_UNIT_MISMATCH",
+                    "The posted organization unit does not match the selected procurement plan item.");
+            return sourcePlanItem.ProcurementPlan.OrganizationUnit;
         }
 
-        if (!departmentId.HasValue || departmentId.Value == Guid.Empty)
+        if (!organizationUnitId.HasValue || organizationUnitId.Value == Guid.Empty)
             throw new ProcurementRequisitionLinkageValidationException(
-                "PR_DEPARTMENT_REQUIRED",
-                "Select an active HR department before saving the requisition.");
+                "PR_ORGANIZATION_UNIT_REQUIRED",
+                "Select an active HR organization unit before saving the requisition.");
 
-        var department = await _unitOfWork.Repository<Department>().GetByIdAsync(departmentId.Value);
-        if (department is null || department.TenantId != tenantId || department.IsDeleted || !department.IsActive)
+        var organizationUnit = await _unitOfWork.Repository<OrganizationUnit>().GetByIdAsync(organizationUnitId.Value);
+        if (organizationUnit is null || organizationUnit.TenantId != tenantId || organizationUnit.IsDeleted || !organizationUnit.IsActive)
             throw new ProcurementRequisitionLinkageValidationException(
-                "PR_DEPARTMENT_INVALID",
-                "The selected HR department is not available in the current tenant.");
+                "PR_ORGANIZATION_UNIT_INVALID",
+                "The selected HR organization unit is not available in the current tenant.");
 
-        return department.Name;
+        return organizationUnit;
     }
 
     private async Task<string> ResolveRequisitionCurrencyAsync(

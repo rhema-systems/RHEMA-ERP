@@ -5,6 +5,7 @@ namespace ErpSystem.Core.Interfaces.Ehc;
 
 public interface IEhcTicketService
 {
+    Task<EhcTicketDetailDto> CreateExternalPropertyEnquiryAsync(CreateEhcTicketRequestDto request, EhcPropertyListingContextDto property, Guid submissionId, CancellationToken cancellationToken = default);
     Task<EhcTicketDetailDto> CreateExternalTicketAsync(CreateEhcTicketRequestDto request, CancellationToken cancellationToken = default);
     Task<EhcTicketDetailDto> CreateInternalTicketAsync(CreateEhcTicketRequestDto request, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<EhcTicketListItemDto>> GetMyTicketsAsync(

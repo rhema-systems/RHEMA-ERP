@@ -62,6 +62,7 @@ public class BusinessPartnerDto
 /// </summary>
 public class BusinessPartnerDetailDto : BusinessPartnerDto
 {
+    public BusinessPartnerPostingDefaultsDto PostingDefaults { get; set; } = new();
     // User Account Link
     public Guid? UserId { get; set; }
     public string? UserEmail { get; set; }
@@ -198,6 +199,7 @@ public class BusinessPartnerBankAccountDto
 /// </summary>
 public class CreateBusinessPartnerDto
 {
+    public BusinessPartnerPostingDefaultsDto? PostingDefaults { get; set; }
     [Required]
     [MaxLength(200)]
     public string PartnerName { get; set; } = string.Empty;
@@ -300,6 +302,8 @@ public class CreateBusinessPartnerDto
 /// </summary>
 public class UpdateBusinessPartnerDto
 {
+    // Omitted by older clients: keep the saved defaults unchanged.
+    public BusinessPartnerPostingDefaultsDto? PostingDefaults { get; set; }
     [Required]
     [MaxLength(200)]
     public string PartnerName { get; set; } = string.Empty;

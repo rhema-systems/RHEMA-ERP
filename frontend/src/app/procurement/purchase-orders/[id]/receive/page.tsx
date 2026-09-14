@@ -66,6 +66,7 @@ import { formatProcurementMoney } from '@/lib/procurement-currency';
 import {
   buildReceiptItemCode,
   findNextPendingReceiptItemIndex,
+  formatReceiptQuantitySummary,
   hasControlledInventoryItem,
   ReceiptMissingItemDecision,
 } from '@/lib/procurement-receipt-item';
@@ -891,9 +892,7 @@ export default function ReceivePurchaseOrderPage() {
                         </CardTitle>
                         <CardDescription className="mt-0.5 text-xs">
                           UOM: {item.unitOfMeasure} •{' '}
-                          Ordered: {item.orderedQuantity} • 
-                          Previously Received: {item.previouslyReceived} • 
-                          Remaining: {item.remainingQuantity}
+                          {formatReceiptQuantitySummary(item.orderedQuantity, item.previouslyReceived, item.remainingQuantity)}
                         </CardDescription>
                       </div>
                       {item.missingItemDecision !== 'existing' && (

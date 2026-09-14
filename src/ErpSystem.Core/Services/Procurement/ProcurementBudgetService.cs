@@ -1,6 +1,7 @@
 using System.Data;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
@@ -95,6 +96,7 @@ public class ProcurementBudgetService : IProcurementBudgetService
         var tenantId = _currentUserProvider.TenantId;
         if (tenantId == Guid.Empty)
             throw new UnauthorizedAccessException("A tenant context is required to create a procurement budget.");
+        await EnsureActiveOrganizationUnitAsync(dto.OrganizationUnitId);
 
         async Task<ProcurementBudgetDetailDto> CreateUnderNumberLockAsync()
         {
@@ -108,7 +110,8 @@ public class ProcurementBudgetService : IProcurementBudgetService
                 BudgetCode = budgetCode,
                 Title = dto.Title,
                 Description = dto.Description,
-                DepartmentId = dto.DepartmentId,
+                DepartmentId = null,
+                OrganizationUnitId = dto.OrganizationUnitId,
                 ProcurementPlanId = dto.ProcurementPlanId,
                 FiscalYear = dto.FiscalYear,
                 AllocatedAmount = dto.AllocatedAmount,
@@ -175,10 +178,12 @@ public class ProcurementBudgetService : IProcurementBudgetService
         var budget = await _budgetRepository.GetByIdAsync(id);
         if (budget == null) throw new KeyNotFoundException($"Budget with ID {id} not found");
         if (budget.Status != "Draft") throw new InvalidOperationException("Only draft budgets can be updated");
+        await EnsureActiveOrganizationUnitAsync(dto.OrganizationUnitId);
 
         budget.Title = dto.Title;
         budget.Description = dto.Description;
-        budget.DepartmentId = dto.DepartmentId;
+        budget.DepartmentId = null;
+        budget.OrganizationUnitId = dto.OrganizationUnitId;
         budget.ProcurementPlanId = dto.ProcurementPlanId;
         budget.FiscalYear = dto.FiscalYear;
         budget.AllocatedAmount = dto.AllocatedAmount;
@@ -798,6 +803,21 @@ public class ProcurementBudgetService : IProcurementBudgetService
         budget.AllocatedAmount - budget.UtilizedAmount -
         budget.CommittedAmount - budget.ReservedAmount;
 
+    private async Task EnsureActiveOrganizationUnitAsync(Guid organizationUnitId)
+    {
+        if (organizationUnitId == Guid.Empty)
+            throw new InvalidOperationException("Select an active HR organisation unit.");
+
+        var isActive = await _unitOfWork.Repository<OrganizationUnit>()
+            .GetQueryable(unit => unit.Id == organizationUnitId &&
+                                  unit.TenantId == _currentUserProvider.TenantId &&
+                                  unit.IsActive &&
+                                  !unit.IsDeleted)
+            .AnyAsync();
+        if (!isActive)
+            throw new InvalidOperationException("The selected HR organisation unit is inactive or is not in the current tenant.");
+    }
+
     private static ProcurementBudgetDto MapToDto(ProcurementBudget budget)
     {
         return new ProcurementBudgetDto
@@ -808,7 +828,9 @@ public class ProcurementBudgetService : IProcurementBudgetService
             Title = budget.Title,
             Description = budget.Description,
             DepartmentId = budget.DepartmentId,
-            DepartmentName = budget.Department?.Name,
+            DepartmentName = budget.OrganizationUnit?.Name ?? budget.Department?.Name,
+            OrganizationUnitId = budget.OrganizationUnitId,
+            OrganizationUnitName = budget.OrganizationUnit?.Name,
             ProcurementPlanId = budget.ProcurementPlanId,
             FiscalYear = budget.FiscalYear,
             AllocatedAmount = budget.AllocatedAmount,
@@ -839,7 +861,9 @@ public class ProcurementBudgetService : IProcurementBudgetService
             Title = budget.Title,
             Description = budget.Description,
             DepartmentId = budget.DepartmentId,
-            DepartmentName = budget.Department?.Name,
+            DepartmentName = budget.OrganizationUnit?.Name ?? budget.Department?.Name,
+            OrganizationUnitId = budget.OrganizationUnitId,
+            OrganizationUnitName = budget.OrganizationUnit?.Name,
             ProcurementPlanId = budget.ProcurementPlanId,
             FiscalYear = budget.FiscalYear,
             AllocatedAmount = budget.AllocatedAmount,

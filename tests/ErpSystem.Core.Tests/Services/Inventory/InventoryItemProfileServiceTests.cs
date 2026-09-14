@@ -1,4 +1,7 @@
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.DTOs.Inventory;
+using System.Text.Json;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Services.Inventory;
@@ -159,6 +162,12 @@ public sealed class InventoryItemProfileServiceTests : IAsyncLifetime
         entity.FindProperty(nameof(InventoryItem.RowVersion))!.IsConcurrencyToken.Should().BeTrue();
         entity.FindProperty(nameof(InventoryItem.IsProjectApplicable)).Should().NotBeNull();
         entity.FindProperty(nameof(InventoryItem.IsCostCentreApplicable)).Should().NotBeNull();
+        foreach (var mapping in InventoryItemPostingAccounts.GetMappings(ValidItem()))
+        {
+            entity.FindProperty(mapping.Purpose)!.IsNullable.Should().BeTrue();
+            entity.GetForeignKeys().Should().Contain(key => key.Properties.Any(property => property.Name == mapping.Purpose) &&
+                key.PrincipalEntityType.ClrType == typeof(Account) && key.DeleteBehavior == DeleteBehavior.Restrict);
+        }
         entity.GetCheckConstraints().Select(value => value.Name).Should().Contain(new[]
         {
             "CK_InventoryItems_ProfileRequired",
@@ -166,6 +175,54 @@ public sealed class InventoryItemProfileServiceTests : IAsyncLifetime
             "CK_InventoryItems_ProfileEnums",
             "CK_InventoryItems_ProfileTracking"
         });
+    }
+
+    [Fact]
+    public async Task Posting_accounts_allow_defaults_and_active_inventory_control_accounts()
+    {
+        var item = ValidItem();
+        await _service.NormalizeAndValidateAsync(item, null);
+        var account = new Account { TenantId = _tenantId, AccountCode = "INV", AccountNumber = "1300", AccountName = "Inventory",
+            AccountType = AccountType.Asset, Status = AccountStatus.Active, IsControlAccount = true, AllowDirectPosting = false };
+        _context.Accounts.Add(account);
+        await _context.SaveChangesAsync();
+        item.InventoryAccountId = account.Id;
+        await _service.NormalizeAndValidateAsync(item, null);
+        InventoryItemPostingAccounts.Read(item).InventoryAccountId.Should().Be(account.Id);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, false)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, false, false, true)]
+    public async Task Rejects_foreign_inactive_nonposting_or_wrong_type_accounts(bool foreign, bool inactive, bool nonposting, bool wrongType)
+    {
+        var account = new Account { TenantId = foreign ? Guid.NewGuid() : _tenantId, AccountCode = "TEST", AccountNumber = "1300", AccountName = "Test",
+            AccountType = wrongType ? AccountType.Revenue : AccountType.Asset, Status = inactive ? AccountStatus.Inactive : AccountStatus.Active,
+            AllowDirectPosting = !nonposting, IsControlAccount = false };
+        _context.Accounts.Add(account);
+        await _context.SaveChangesAsync();
+        var item = ValidItem();
+        item.InventoryAccountId = account.Id;
+        var action = () => _service.NormalizeAndValidateAsync(item, null);
+        (await action.Should().ThrowAsync<InventoryItemProfileValidationException>()).Which.Code.Should().Be("ITEM_POSTING_ACCOUNT_INVALID");
+    }
+
+    [Fact]
+    public void Posting_account_updates_preserve_omitted_fields_and_clear_explicit_null()
+    {
+        var item = ValidItem();
+        item.InventoryAccountId = Guid.NewGuid();
+        item.SalesAccountId = Guid.NewGuid();
+        var originalSales = item.SalesAccountId;
+        var changes = JsonSerializer.Deserialize<InventoryItemPostingAccountsDto>("{\"InventoryAccountId\":null}");
+        InventoryItemPostingAccounts.Apply(changes, item);
+        item.InventoryAccountId.Should().BeNull();
+        item.SalesAccountId.Should().Be(originalSales);
+        InventoryItemPostingAccounts.Apply(null, item);
+        item.SalesAccountId.Should().Be(originalSales);
+        InventoryItemPostingAccounts.GetMappings(item).Should().HaveCount(16);
     }
 
     private InventoryItem ValidItem() => new()

@@ -41,7 +41,7 @@ import { useAuth } from '../../hooks/use-auth';
 import { getAuthenticatedHomePath, getExternalPortalPath, isCandidateUser, isConsultantClientUser, isExternalPortalUser } from '../../lib/auth-routing';
 import { cn } from '../../lib/utils';
 import { authService } from '../../services/auth';
-import { dashboardService } from '../../services/dashboard';
+import { dashboardService, getUnavailableDashboardModules } from '../../services/dashboard';
 import { inventoryWarehouseService } from '../../services/inventoryWarehouseService';
 
 interface SummaryCardDefinition {
@@ -243,7 +243,7 @@ export default function Dashboard() {
     );
   }
 
-  const unavailableModules = data.moduleStatus.filter((status) => !status.available);
+  const unavailableModules = getUnavailableDashboardModules(data.moduleStatus);
 
   const openPurchaseOrderValue = sumBy(data.openPurchaseOrders, (order) => order.totalAmount);
   const pendingPurchaseRequisitionValue = sumBy(data.pendingPurchaseRequisitions, (requisition) => requisition.totalAmount);

@@ -50,6 +50,7 @@ import { ReceiptDocumentControl } from '@/components/procurement/ReceiptDocument
 import { ReceiptSourceEvidenceControl } from '@/components/procurement/ReceiptSourceEvidenceControl';
 import { PurchaseOrderSodControl } from '@/components/procurement/PurchaseOrderSodControl';
 import { ReceiptLandedCostEntry } from '@/components/procurement/ReceiptLandedCostEntry';
+import { PurchaseReceiptDistribution } from '@/components/procurement/PurchaseReceiptDistribution';
 
 const GRNStatuses = [
   { value: 'Accepted', label: 'Accepted', color: 'border-green-200 bg-green-100 text-green-800', icon: CheckCircle },
@@ -360,7 +361,8 @@ export default function PurchaseReceiptDetailPage() {
 
       {/* Main Content Tabs */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList className="print:hidden">
+        <div className="flex flex-wrap items-center justify-between gap-2 print:hidden">
+        <TabsList>
           <TabsTrigger value="details">Receipt Details</TabsTrigger>
           <TabsTrigger value="items">Items Received</TabsTrigger>
           <TabsTrigger value="landed-cost">Landed Cost</TabsTrigger>
@@ -369,6 +371,8 @@ export default function PurchaseReceiptDetailPage() {
             <TabsTrigger value="inspection">Quality Inspection</TabsTrigger>
           )}
         </TabsList>
+        <PurchaseReceiptDistribution receiptId={id} />
+        </div>
 
         {/* Receipt Details Tab */}
         <TabsContent value="details" className="space-y-6">

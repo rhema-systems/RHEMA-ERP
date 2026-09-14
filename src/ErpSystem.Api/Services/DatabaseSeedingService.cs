@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Api.Configuration;
 using ErpSystem.Core.DTOs.Workflow;
@@ -407,6 +407,8 @@ namespace ErpSystem.Web.Services
             await EnsureFinancePermissionAssignmentsAsync();
             _logger.LogInformation("Ensuring EHC workflow is seeded...");
             await EnsureEhcWorkflowSeededAsync();
+            if (_context.Database.IsSqlServer())
+                await _context.Database.ExecuteSqlRawAsync(EhcPropertyEnquiryConfiguration.Sql);
             _logger.LogInformation("Ensuring finance workflows are seeded...");
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");

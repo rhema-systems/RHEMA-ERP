@@ -10,18 +10,20 @@ import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Save, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementBudgetService, commonService, type CreateProcurementBudgetDto, type CreateProcurementBudgetAllocationDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import { procurementBudgetService, type CreateProcurementBudgetDto, type CreateProcurementBudgetAllocationDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { FiscalYearSelect } from '../../components/FiscalYearSelect';
 
 export default function NewProcurementBudgetPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
-  const [loadingDepartments, setLoadingDepartments] = useState(true);
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
+  const [loadingOrganizationUnits, setLoadingOrganizationUnits] = useState(true);
   const [formData, setFormData] = useState<CreateProcurementBudgetDto>({
     title: '',
     description: '',
-    departmentId: '',
+    organizationUnitId: '',
     fiscalYear: new Date().getFullYear(),
     allocatedAmount: 0,
     currency: 'USD',
@@ -32,19 +34,19 @@ export default function NewProcurementBudgetPage() {
   });
 
   useEffect(() => {
-    const fetchDepartments = async () => {
+    const fetchOrganizationUnits = async () => {
       try {
-        setLoadingDepartments(true);
-        const data = await commonService.getDepartments();
-        setDepartments(data);
+        setLoadingOrganizationUnits(true);
+        const data = await organizationUnitService.getSummary();
+        setOrganizationUnits(data.filter((unit) => unit.isActive));
       } catch (error) {
-        console.error('Error fetching departments:', error);
-        toast.error('Failed to load departments');
+        console.error('Error fetching organization units:', error);
+        toast.error('Failed to load organization units');
       } finally {
-        setLoadingDepartments(false);
+        setLoadingOrganizationUnits(false);
       }
     };
-    fetchDepartments();
+    fetchOrganizationUnits();
   }, []);
 
   const handleInputChange = (field: keyof CreateProcurementBudgetDto, value: string | number) => {
@@ -75,7 +77,7 @@ export default function NewProcurementBudgetPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title.trim()) { toast.error('Title is required'); return; }
-    if (!formData.departmentId) { toast.error('Department is required'); return; }
+    if (!formData.organizationUnitId) { toast.error('Organization unit is required'); return; }
     if (formData.allocatedAmount <= 0) { toast.error('Allocated amount must be greater than 0'); return; }
 
     try {
@@ -99,7 +101,7 @@ export default function NewProcurementBudgetPage() {
         </Button>
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Create Procurement Budget</h1>
-          <p className="text-muted-foreground">Create a new departmental procurement budget</p>
+          <p className="text-muted-foreground">Create a new organization-unit procurement budget</p>
         </div>
       </div>
 
@@ -118,11 +120,11 @@ export default function NewProcurementBudgetPage() {
                   <Input id="title" value={formData.title} onChange={(e) => handleInputChange('title', e.target.value)} placeholder="Enter budget title" required />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="departmentId">Department *</Label>
-                  <Select value={formData.departmentId} onValueChange={(value) => handleInputChange('departmentId', value)} disabled={loadingDepartments}>
-                    <SelectTrigger><SelectValue placeholder={loadingDepartments ? "Loading..." : "Select department"} /></SelectTrigger>
+                  <Label htmlFor="organizationUnitId">Organization unit *</Label>
+                  <Select value={formData.organizationUnitId} onValueChange={(value) => handleInputChange('organizationUnitId', value)} disabled={loadingOrganizationUnits}>
+                    <SelectTrigger><SelectValue placeholder={loadingOrganizationUnits ? "Loading..." : "Select organization unit"} /></SelectTrigger>
                     <SelectContent>
-                      {departments.map((dept) => (<SelectItem key={dept.id} value={dept.id}>{dept.code ? `${dept.code} - ${dept.name}` : dept.name}</SelectItem>))}
+                      {organizationUnits.map((unit) => (<SelectItem key={unit.id} value={unit.id}>{unit.code ? `${unit.code} - ${unit.name}` : unit.name}</SelectItem>))}
                     </SelectContent>
                   </Select>
                 </div>

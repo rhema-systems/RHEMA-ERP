@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Card, CardContent } from '@/components/ui/card';
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
@@ -26,6 +27,7 @@ import {
 } from '@/services/inventoryRequisitionService';
 import { documentManagementService, CentralDocumentRecord } from '@/services/document-management.service';
 import { useToast } from '@/hooks/use-toast';
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import {
   InventoryTrackingExceptionSelect,
   useAvailableInventoryTrackingExceptions,
@@ -84,6 +86,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
   const [decisionComment, setDecisionComment] = useState('');
   const [actionError, setActionError] = useState('');
   const [reviewMode, setReviewMode] = useState(false);
+  const [voucherPreview, setVoucherPreview] = useState<CentralDocumentViewerFile | null>(null);
   const canRequestReturn = Boolean(user?.id && hasPermission('procurement.inventory.issue'));
   const isReviewing = reviewMode || !canRequestReturn;
   const canActOnVoucher = (voucher: InventoryReturnVoucherDto) => Boolean(
@@ -93,6 +96,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
   const trackingExceptions = useAvailableInventoryTrackingExceptions(open && Boolean(requisitionId));
 
   useEffect(() => {
+    setVoucherPreview(null);
     setDecision(null);
     setDecisionComment('');
     setActionError('');
@@ -189,19 +193,13 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
     }
   };
 
-  const downloadVoucher = async (voucher: InventoryReturnVoucherDto) => {
-    try {
-      const blob = await inventoryRequisitionService.downloadReturnVoucher(voucher.id);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `${voucher.voucherNumber}.pdf`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (error) {
-      toast({ title: 'Download blocked', description: error instanceof Error ? error.message : 'Unable to render the Store Return Voucher.', variant: 'destructive' });
-    }
-  };
+  const downloadVoucher = (voucher: InventoryReturnVoucherDto) => setVoucherPreview({
+    title: voucher.voucherNumber,
+    fileName: `${voucher.voucherNumber}.pdf`,
+    contentType: 'application/pdf',
+    repositoryPath: `/api/inventory/requisitions/return-vouchers/${encodeURIComponent(voucher.id)}/download`,
+    sourceLabel: 'Store Return Voucher',
+  });
 
   const addEvidence = async (recordId: string) => {
     try {
@@ -314,7 +312,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                   <div><span className="text-muted-foreground">Request Date:</span> <span className="font-medium">{requisition.requestDateFormatted || format(new Date(requisition.requestDate), 'dd/MM/yyyy')}</span></div>
                   <div><span className="text-muted-foreground">Issued Date:</span> <span className="font-medium">{requisition.issuedDate ? format(new Date(requisition.issuedDate), 'dd/MM/yyyy') : 'N/A'}</span></div>
                   <div><span className="text-muted-foreground">Project:</span> <span className="font-medium">{requisition.projectCode || 'Not linked'}</span></div>
-                  <div><span className="text-muted-foreground">Location:</span> <span className="font-medium">{requisition.locationName || 'Warehouse level'}</span></div>
+                  <div><span className="text-muted-foreground">Requested location:</span> <span className="font-medium">{requisition.locationName || 'Not specified'}</span></div>
                 </div>
               </CardContent>
             </Card>
@@ -357,8 +355,27 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                         disabled={item.issuedQuantity <= 0}
                       />
                     </TableCell>
-                    <TableCell>{item.locationName || requisition.locationName || 'Warehouse level'}</TableCell>
-                    <TableCell className="min-w-[360px]"><div className="grid grid-cols-3 gap-1"><Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} /><Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} /><Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} /><div className="col-span-3"><InventoryTrackingExceptionSelect value={item.inventoryTrackingExceptionId} onValueChange={inventoryTrackingExceptionId => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId } : value))} exceptions={trackingExceptions.exceptions} loading={trackingExceptions.loading} error={trackingExceptions.error} onRetry={trackingExceptions.refresh} context={{ inventoryItemId: item.inventoryItemId, warehouseId: requisition.warehouseId, locationId: item.locationId, referenceId: requisition.id, lotNumber: item.lotNumber, batchNumber: item.batchNumber, serialNumber: item.serialNumber }} /></div></div></TableCell>
+                    <TableCell>{item.locationName || requisition.locationName || 'Not recorded'}</TableCell>
+                    <TableCell className="min-w-[360px]"><div className="grid grid-cols-3 gap-1">
+                      <Input placeholder="Lot" value={item.lotNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, lotNumber: event.target.value || undefined } : value))} />
+                      <Input placeholder="Batch" value={item.batchNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, batchNumber: event.target.value || undefined } : value))} />
+                      <Input placeholder="Serial" value={item.serialNumber || ''} onChange={event => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, serialNumber: event.target.value || undefined } : value))} />
+                      <Accordion type="single" collapsible defaultValue={item.inventoryTrackingExceptionId ? 'exception' : undefined} className="col-span-3">
+                        <AccordionItem value="exception" className="border-0">
+                          <AccordionTrigger disabled={processing} className="gap-2 py-2 text-xs text-muted-foreground">
+                            <span>Advanced tracking options</span>
+                            {item.inventoryTrackingExceptionId && <Badge variant="outline" className="ml-auto text-xs">Exception selected</Badge>}
+                          </AccordionTrigger>
+                          <AccordionContent className="pb-0">
+                            <InventoryTrackingExceptionSelect value={item.inventoryTrackingExceptionId}
+                              onValueChange={inventoryTrackingExceptionId => setReturnItems(values => values.map(value => value.itemId === item.itemId ? { ...value, inventoryTrackingExceptionId } : value))}
+                              exceptions={trackingExceptions.exceptions} loading={trackingExceptions.loading} error={trackingExceptions.error}
+                              onRetry={trackingExceptions.refresh} disabled={processing}
+                              context={{ inventoryItemId: item.inventoryItemId, warehouseId: requisition.warehouseId, locationId: item.locationId, referenceId: requisition.id, lotNumber: item.lotNumber, batchNumber: item.batchNumber, serialNumber: item.serialNumber }} />
+                          </AccordionContent>
+                        </AccordionItem>
+                      </Accordion>
+                    </div></TableCell>
                     <TableCell>{item.unitOfMeasure}</TableCell>
                   </TableRow>
                 ))}
@@ -400,7 +417,7 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
                 <div key={voucher.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3 text-sm">
                   <div><div className="font-medium">{voucher.voucherNumber}</div><div className="text-muted-foreground">{voucher.reasonCode} · {voucher.lines.length} line(s) · {voucher.totalValue.toFixed(2)}</div></div>
                   <div className="flex items-center gap-2"><Badge variant="outline">{voucher.status}</Badge>
-                    <Button size="sm" variant="ghost" onClick={() => void downloadVoucher(voucher)} title="Download Store Return Voucher"><Download className="h-4 w-4" /></Button>
+                    <Button size="sm" variant="ghost" onClick={() => downloadVoucher(voucher)} aria-label={`Open PDF ${voucher.voucherNumber}`} title="Open Store Return Voucher PDF"><Download className="h-4 w-4" /></Button>
                     {canDecideInventoryRecord(voucher, user?.id, hasPermission('procurement.inventory.adjust.approve')) ? <><Button size="sm" onClick={() => openDecision(voucher, 'approve')} disabled={processing}>Approve</Button><Button size="sm" variant="destructive" onClick={() => openDecision(voucher, 'reject')} disabled={processing}>Reject</Button></> : null}
                     {voucher.approvalRequired !== false && voucher.status === 'PendingApproval' && !canActOnVoucher(voucher) ? <span className="text-muted-foreground">Awaiting independent approval</span> : null}
                     {canPostInventoryRecord(voucher, user?.id, hasPermission('procurement.inventory.adjust.approve')) ? <Button size="sm" onClick={() => void runVoucherAction(voucher, 'post')} disabled={processing}>Post</Button> : null}
@@ -447,6 +464,8 @@ export function ReturnRequisitionDialog({ open, onOpenChange, requisitionId, onS
         {actionError ? <p role="alert" className="text-sm text-destructive">{actionError}</p> : null}
       </div>
     </ConfirmationDialog>
+    <CentralDocumentViewerDialog file={voucherPreview} open={open && Boolean(voucherPreview)}
+      onOpenChange={(value) => { if (!value) setVoucherPreview(null); }} enableAnnotations={false} />
     </>
   );
 }

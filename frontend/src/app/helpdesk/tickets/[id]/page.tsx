@@ -1,5 +1,7 @@
 'use client';
 
+import { PropertyEnquiryDetails } from '@/components/estate/PropertyEnquiryDetails';
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -1117,7 +1119,8 @@ export default function HelpdeskTicketDetailPage() {
             </div>
           </div>
 
-          <div className="text-sm text-slate-900 whitespace-pre-wrap">{ticket.description}</div>
+          <PropertyEnquiryDetails property={ticket.propertyListing} />
+              <div className="text-sm text-slate-900 whitespace-pre-wrap">{ticket.description}</div>
 
           {attachments.length ? (
             <div className="space-y-2 pt-2">

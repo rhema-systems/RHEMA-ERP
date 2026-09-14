@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using FluentAssertions;
@@ -15,6 +16,48 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class E2E012InventoryAdjustmentFinancePostingTests
 {
+    [Theory]
+    [InlineData("DAMAGE", -2)]
+    [InlineData("CycleCount", -2)]
+    [InlineData("CycleCount", 2)]
+    public async Task Adjustment_uses_item_inventory_and_purpose_mapping_without_requiring_unset_global_accounts(string reason, int quantity)
+    {
+        var tenant = Guid.NewGuid();
+        await using var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"item-mapped-adjustment-{Guid.NewGuid():N}")
+            .ConfigureWarnings(value => value.Ignore(InMemoryEventId.TransactionIgnoredWarning)).Options);
+        var inventory = new Account { TenantId = tenant, AccountCode = "ITEM-INV", AccountNumber = "1301", AccountName = "Item inventory",
+            AccountType = AccountType.Asset, Status = AccountStatus.Active, IsControlAccount = true, AllowDirectPosting = false };
+        var variance = new Account { TenantId = tenant, AccountCode = "ITEM-VAR", AccountNumber = "6301", AccountName = "Item variance",
+            AccountType = AccountType.Expense, Status = AccountStatus.Active, AllowDirectPosting = true };
+        var damage = new Account { TenantId = tenant, AccountCode = "ITEM-DAMAGE", AccountNumber = "6302", AccountName = "Item damage",
+            AccountType = AccountType.Expense, Status = AccountStatus.Active, AllowDirectPosting = true };
+        var item = new InventoryItem { TenantId = tenant, ItemCode = "ITEM-MAPPED", Name = "Mapped item",
+            InventoryAccountId = inventory.Id, VarianceAccountId = variance.Id, DamagedAccountId = damage.Id };
+        context.Accounts.AddRange(inventory, variance, damage);
+        context.InventoryItems.Add(item);
+        context.FinanceSettings.Add(new FinanceSettings { TenantId = tenant, BaseCurrency = "GHS" });
+        await context.SaveChangesAsync();
+        var adjustment = new StockAdjustment { TenantId = tenant, AdjustmentNumber = "ADJ-ITEM-MAPPED", AdjustmentDate = DateTime.UtcNow.Date,
+            ReasonCode = reason, Status = "Approved", Items = [ new StockAdjustmentItem { TenantId = tenant, InventoryItemId = item.Id,
+                AdjustmentQuantity = quantity, UnitCost = 10m, AdjustmentValue = quantity * 10m } ] };
+        FinancePostingRequestDto? captured = null;
+        var engine = new Mock<IFinancePostingEngine>();
+        engine.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(new FinancePostingResultDto { PostingEventId = Guid.NewGuid(), JournalEntryId = Guid.NewGuid() });
+
+        await new InventoryAdjustmentFinancePostingService(context, engine.Object).PostAsync(adjustment);
+
+        var expenseTarget = reason == StockAdjustmentReasonCodes.Damage ? damage.Id : variance.Id;
+        captured!.Lines.Should().HaveCount(2);
+        captured.Lines.Should().ContainSingle(line => line.AccountId == inventory.Id &&
+            (quantity < 0 ? line.CreditAmount == 20m : line.DebitAmount == 20m));
+        captured.Lines.Should().ContainSingle(line => line.AccountId == expenseTarget &&
+            (quantity < 0 ? line.DebitAmount == 20m : line.CreditAmount == 20m));
+        captured.Lines.Sum(line => line.DebitAmount - line.CreditAmount).Should().Be(0m);
+    }
+
     [Fact]
     public async Task Opening_stock_posts_approved_inventory_evidence_to_control_and_migration_clearing_in_one_book()
     {
@@ -196,7 +239,7 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
             .PostAsync(adjustment);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*approved, immutable INITIAL_STOCK evidence*");
+            .WithMessage("*immutable INITIAL_STOCK evidence*approved*approval recorded as not required*");
         engine.VerifyNoOtherCalls();
     }
 

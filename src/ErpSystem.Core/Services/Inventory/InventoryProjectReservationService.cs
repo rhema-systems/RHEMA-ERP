@@ -72,7 +72,7 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
         take = Math.Clamp(take, 1, 500);
         var query = FullQuery().Where(value => value.TenantId == _currentUser.TenantId);
         if (projectId.HasValue) query = query.Where(value => value.ProjectId == projectId.Value);
-        if (departmentId.HasValue) query = query.Where(value => value.DepartmentId == departmentId.Value);
+        if (departmentId.HasValue) query = query.Where(value => value.OrganizationUnitId == departmentId.Value);
         if (status.HasValue)
         {
             var statuses = AllocationStatuses(status.Value);
@@ -161,6 +161,9 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             if (!requisition.ProjectId.HasValue || requisition.ProjectId.Value == Guid.Empty)
                 throw Error("INV_PROJECT_RESERVATION_PROJECT_REQUIRED",
                     "A project reservation requires an approved requisition linked to a project.");
+            if (!requisition.OrganizationUnitId.HasValue || requisition.OrganizationUnitId.Value == Guid.Empty)
+                throw Error("INV_PROJECT_RESERVATION_ORGANIZATION_UNIT_REQUIRED",
+                    "The approved requisition must have an HR organization unit before project stock can be reserved.");
             if (requisition.Status is not (RequisitionStatus.Approved or RequisitionStatus.InProgress or RequisitionStatus.PartiallyIssued))
                 throw Error("INV_PROJECT_RESERVATION_APPROVED_SOURCE_REQUIRED",
                     "Only an approved or partially issued project requisition can reserve stock.");
@@ -196,6 +199,7 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
                 InventoryRequisitionItemId = requisitionLine.Id,
                 ProjectId = requisition.ProjectId.Value,
                 DepartmentId = requisition.DepartmentId,
+                OrganizationUnitId = requisition.OrganizationUnitId,
                 AllocatedQuantity = request.Quantity,
                 ConsumedQuantity = 0,
                 RemainingQuantity = request.Quantity,
@@ -217,7 +221,7 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
                 null, InventoryProjectReservationStatus.Reserved, request.Quantity, key, payloadHash,
                 correlation, allocation.Notes, _currentUser.UserId, cancellationToken);
             await AddAuditAsync(tenantId, _currentUser.UserId, "InventoryProjectReservation.Reserved",
-                allocation, new { request.Quantity, expiresAt, requisition.ProjectId, requisition.DepartmentId }, correlation);
+                allocation, new { request.Quantity, expiresAt, requisition.ProjectId, requisition.OrganizationUnitId }, correlation);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             await NotifyAsync(allocation, requisition, "Reserved", request.Quantity, _currentUser.UserId,
                 $"Project stock reserved until {expiresAt:u}.", correlation, cancellationToken);
@@ -377,6 +381,7 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
                 InventoryRequisitionItemId = allocation.InventoryRequisitionItemId,
                 ProjectId = allocation.ProjectId,
                 DepartmentId = allocation.DepartmentId,
+                OrganizationUnitId = allocation.OrganizationUnitId,
                 SubstitutedFromAllocationId = allocation.Id,
                 AllocatedQuantity = quantity,
                 ConsumedQuantity = 0,
@@ -800,10 +805,10 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
                 !value.IsDeleted && value.IsActive)
             .Select(value => value.UserId).ToListAsync(cancellationToken);
         recipients.UnionWith(memberIds);
-        var departmentHeadEmployeeId = await _unitOfWork.Repository<Department>().GetQueryable(value =>
-                value.Id == allocation.DepartmentId && value.TenantId == allocation.TenantId &&
+        var departmentHeadEmployeeId = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable(value =>
+                value.Id == allocation.OrganizationUnitId && value.TenantId == allocation.TenantId &&
                 !value.IsDeleted && value.IsActive)
-            .Select(value => value.DepartmentHeadId).SingleOrDefaultAsync(cancellationToken);
+            .Select(value => value.HeadEmployeeId).SingleOrDefaultAsync(cancellationToken);
         if (departmentHeadEmployeeId.HasValue)
         {
             var headUserId = await _userManager.Users.Where(value =>
@@ -830,7 +835,7 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
                 Metadata = new Dictionary<string, object>
                 {
                     ["projectId"] = allocation.ProjectId!.Value,
-                    ["departmentId"] = allocation.DepartmentId!.Value,
+                    ["organizationUnitId"] = allocation.OrganizationUnitId ?? Guid.Empty,
                     ["requisitionId"] = allocation.InventoryRequisitionId!.Value,
                     ["event"] = eventName,
                     ["correlationId"] = Correlation(correlation)
@@ -871,7 +876,7 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             SourceId = allocation.InventoryRequisitionId,
             SourceReference = allocation.ReferenceNumber ?? allocation.Id.ToString("N"),
             Reason = reason,
-            InputValues = new { allocation.ProjectId, allocation.DepartmentId,
+            InputValues = new { allocation.ProjectId, allocation.OrganizationUnitId,
                 allocation.InventoryItemId, allocation.WarehouseId, allocation.LocationId },
             ResultValues = new { allocation.Id, allocation.Status, allocation.AllocatedQuantity,
                 allocation.ConsumedQuantity, allocation.RemainingQuantity },
@@ -943,8 +948,10 @@ public sealed class InventoryProjectReservationService : IInventoryProjectReserv
             ProjectId = value.ProjectId!.Value,
             ProjectCode = value.Project?.ProjectCode ?? value.InventoryRequisition?.ProjectCode ?? string.Empty,
             ProjectTitle = value.Project?.Title ?? string.Empty,
-            DepartmentId = value.DepartmentId!.Value,
+            DepartmentId = value.DepartmentId,
             DepartmentName = value.InventoryRequisition?.DepartmentName ?? string.Empty,
+            OrganizationUnitId = value.OrganizationUnitId,
+            OrganizationUnitName = value.InventoryRequisition?.DepartmentName ?? string.Empty,
             WarehouseId = value.WarehouseId,
             WarehouseName = value.Warehouse?.Name ?? string.Empty,
             LocationId = value.LocationId!.Value,

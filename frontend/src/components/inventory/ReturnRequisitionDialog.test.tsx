@@ -4,6 +4,10 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ReturnRequisitionDialog } from './ReturnRequisitionDialog';
 import { inventoryRequisitionService as service } from '@/services/inventoryRequisitionService';
 import { documentManagementService } from '@/services/document-management.service';
+import { apiService } from '@/services/api.service';
+
+vi.mock('next/dynamic', () => ({ default: () => (props: { fileData?: Uint8Array }) => <div data-testid="voucher-pdf">{Array.from(props.fileData || []).join(',')}</div> }));
+vi.mock('@/services/api.service', () => ({ apiService: { downloadBlob: vi.fn() } }));
 
 const state = vi.hoisted(() => ({ actor: 'manager', canApprove: true, canRequest: true, toast: vi.fn() }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({
@@ -11,7 +15,7 @@ vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({
 }) }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: state.toast }) }));
 vi.mock('@/components/inventory/InventoryTrackingExceptionSelect', () => ({
-  InventoryTrackingExceptionSelect: () => null,
+  InventoryTrackingExceptionSelect: () => <span>No approved exception</span>,
   useAvailableInventoryTrackingExceptions: () => ({ exceptions: [], loading: false, refresh: vi.fn() }),
 }));
 vi.mock('@/services/document-management.service', () => ({ documentManagementService: { getRecords: vi.fn() } }));
@@ -50,6 +54,35 @@ beforeEach(() => {
 });
 
 describe('return details and independent approval', () => {
+  it('distinguishes unspecified requested location and collapses unused tracking options', async () => {
+    open();
+    await screen.findByText('SRV-TEST');
+    expect(screen.getByText('Requested location:')).toBeInTheDocument();
+    expect(screen.getByText('Not specified')).toBeInTheDocument();
+    expect(screen.queryByText('Warehouse level')).not.toBeInTheDocument();
+    expect(screen.queryByText('No approved exception')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced tracking options' }));
+    expect(await screen.findByText('No approved exception')).toBeVisible();
+  });
+  it('previews the existing return voucher through its protected route without posting', async () => {
+    vi.mocked(apiService.downloadBlob).mockResolvedValue({ arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer } as Blob);
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open PDF SRV-TEST' }));
+    expect(await screen.findByTestId('voucher-pdf')).toHaveTextContent('37,80,68,70');
+    expect(screen.getByRole('dialog', { name: 'SRV-TEST' })).toBeInTheDocument();
+    expect(apiService.downloadBlob).toHaveBeenCalledWith('/inventory/requisitions/return-vouchers/return-1/download');
+    expect(service.postReturnVoucher).not.toHaveBeenCalled();
+    expect(service.returnItems).not.toHaveBeenCalled();
+  });
+  it('shows protected return PDF failure in the open preview', async () => {
+    vi.mocked(apiService.downloadBlob).mockRejectedValue(new Error('Return voucher access denied.'));
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'Open PDF SRV-TEST' }));
+    expect(await screen.findByText('Return voucher access denied.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'SRV-TEST' })).toBeInTheDocument();
+    expect(screen.queryByTestId('voucher-pdf')).not.toBeInTheDocument();
+    expect(service.postReturnVoucher).not.toHaveBeenCalled();
+  });
   it('allows the authorized posting operator to post a no-approval return without asking for an approver', async () => {
     const ready = { ...voucher, approvalRequired: false, status: 'ReadyToPost' };
     vi.mocked(service.getReturnVouchers).mockResolvedValue([ready] as never);

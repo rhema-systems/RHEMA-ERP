@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Maintenance;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.Maintenance;
@@ -98,7 +99,7 @@ public class TechnicianService : ITechnicianService
 
             if (!string.IsNullOrEmpty(filter.Department))
             {
-                filtered = filtered.Where(t => string.Equals(t.Department?.Name, filter.Department, StringComparison.OrdinalIgnoreCase));
+                filtered = filtered.Where(t => string.Equals(t.OrganizationUnit?.Name, filter.Department, StringComparison.OrdinalIgnoreCase));
             }
 
             if (!string.IsNullOrEmpty(filter.JobTitle))
@@ -378,7 +379,7 @@ public class TechnicianService : ITechnicianService
                 TechniciansWithSkills = assignments.Select(a => a.TechnicianId).Distinct().Count(),
                 AverageSkillsPerTechnician = technicians.Any() ?
                     (decimal)assignments.GroupBy(a => a.TechnicianId).Average(g => g.Count()) : 0,
-                DepartmentBreakdown = technicians.GroupBy(t => t.Department?.Name ?? "Unknown")
+                DepartmentBreakdown = technicians.GroupBy(t => t.OrganizationUnit?.Name ?? "Unassigned")
                     .ToDictionary(g => g.Key, g => g.Count()),
                 SpecializationBreakdown = technicians.GroupBy(t => t.Specialization ?? "Unspecified")
                     .ToDictionary(g => g.Key, g => g.Count()),
@@ -424,7 +425,7 @@ public class TechnicianService : ITechnicianService
             Phone = employee.Phone,
             PhoneNumber = employee.Phone ?? string.Empty,
             MobileNumber = employee.MobileNumber,
-            Department = employee.Department?.Name ?? "",
+            Department = employee.OrganizationUnit?.Name ?? "",
             Position = employee.Position?.Title ?? "",
             PositionTitle = employee.Position?.Title ?? "",
             JobTitle = employee.Position?.Title,
@@ -490,31 +491,32 @@ public class TechnicianService : ITechnicianService
         {
             _logger.LogInformation("Creating technician: {EmployeeId}", createDto.EmployeeId);
 
-            // Create Employee entity with maintenance-specific properties
-            var employee = new Employee
-            {
-                Id = Guid.NewGuid(),
-                EmployeeNumber = createDto.EmployeeNumber,
-                FirstName = createDto.FirstName,
-                LastName = createDto.LastName,
-                EmailAddress = createDto.Email,
-                MobileNumber = createDto.Phone,
-                // Note: Department and Position should be set by ID in a real implementation
-                // For now, we'll leave these as required fields that need to be set
-                DepartmentId = Guid.NewGuid(), // This should come from a lookup by department name
-                PositionId = Guid.NewGuid(),   // This should come from a lookup by position title
-                Specialization = createDto.Specialization,
-                CertificationLevel = createDto.CertificationLevel,
-                ExperienceLevel = createDto.ExperienceLevel,
-                DateEmployed = createDto.HireDate.HasValue ? DateOnly.FromDateTime(createDto.HireDate.Value) : DateOnly.FromDateTime(DateTime.UtcNow),
-                IsActive = createDto.IsActive,
-                MaxWorkload = createDto.MaxWorkload > 0 ? createDto.MaxWorkload : 100m,
-                Notes = createDto.Notes,
-                CreatedById = _currentUserProvider.UserId,
-                TenantId = _currentUserProvider.TenantId
-            };
+            if (createDto.EmployeeId == Guid.Empty)
+                throw new ArgumentException("Select an existing HR employee before creating a technician profile.", nameof(createDto.EmployeeId));
 
-            await _technicianRepository.AddAsync(employee);
+            var employee = await _unitOfWork.Repository<Employee>().GetQueryable(value =>
+                    value.Id == createDto.EmployeeId &&
+                    value.TenantId == _currentUserProvider.TenantId &&
+                    !value.IsDeleted)
+                .Include(value => value.OrganizationUnit)
+                .Include(value => value.Position)
+                .Include(value => value.Location)
+                .SingleOrDefaultAsync()
+                ?? throw new ArgumentException("The selected HR employee was not found in the current tenant.", nameof(createDto.EmployeeId));
+
+            if (employee.OrganizationUnit is null ||
+                !employee.OrganizationUnit.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The selected HR employee must belong to an active Maintenance organization unit.");
+
+            employee.CanBeAssignedToMaintenance = true;
+            employee.Specialization = createDto.Specialization ?? employee.Specialization;
+            employee.CertificationLevel = createDto.CertificationLevel ?? employee.CertificationLevel;
+            employee.ExperienceLevel = createDto.ExperienceLevel ?? employee.ExperienceLevel;
+            employee.MaxWorkload = createDto.MaxWorkload > 0 ? createDto.MaxWorkload : employee.MaxWorkload;
+            employee.Notes = createDto.Notes ?? employee.Notes;
+            employee.UpdatedAt = DateTime.UtcNow;
+            await _technicianRepository.UpdateAsync(employee);
+            await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation("Created technician {TechnicianId} successfully", employee.Id);
 

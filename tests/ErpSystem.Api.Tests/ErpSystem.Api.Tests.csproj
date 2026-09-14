@@ -56,6 +56,7 @@
     <Compile Include="Controllers\Procurement\ProcurementLegacyRoleAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\CrossModuleLegacyAuthorizationSecurityTests.cs" />
     <Compile Include="Controllers\Estate\EstateGisControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Estate\PropertyListingEnquiryTests.cs" />
     <Compile Include="Controllers\Finance\FinanceControllerSecurityTests.cs" />
     <Compile Include="Controllers\Finance\FinancePurchasingOptionalApprovalTests.cs" />
     <!-- Supplier-return ownership is shared with Procurement/Inventory, but Finance must keep
@@ -127,6 +128,7 @@
     <Compile Include="Controllers\Inventory\InventoryMobileScanningControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryDisposalsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\InventoryItemsProfileControllerSecurityTests.cs" />
+    <Compile Include="Controllers\Inventory\InventoryItemPostingAccountLookupTests.cs" />
     <Compile Include="Controllers\Inventory\WarehouseItemsControllerSecurityTests.cs" />
     <Compile Include="Controllers\Inventory\WarehouseInventoryCostTests.cs" />
     <Compile Include="Controllers\Inventory\WarehouseDefaultLocationControllerTests.cs" />
@@ -195,10 +197,13 @@
     <Compile Include="Services\Finance\SupplierReturnFinanceAdapterTests.cs" />
     <Compile Include="Services\Finance\ProcurementFinanceReconciliationTests.cs" />
     <Compile Include="Services\Finance\InventoryValuationFinancePostingTests.cs" />
+    <Compile Include="Services\Finance\PurchaseReceiptDistributionTests.cs" />
+    <Compile Include="Services\Finance\ApReceiptAccountResolutionTests.cs" />
     <Compile Include="Services\Finance\E2E012InventoryAdjustmentFinancePostingTests.cs" />
     <Compile Include="Services\Finance\InventoryValuationReconciliationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryAnalyticsServiceTests.cs" />
     <Compile Include="Services\ProcurementInventoryManagementDashboardServiceTests.cs" />
+    <Compile Include="Services\EnterpriseDashboardAccessStatusTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDisposalOptionalApprovalMigrationTests.cs" />
     <Compile Include="Services\Inventory\E2E013InventoryDisposalLifecycleTests.cs" />
@@ -224,6 +229,7 @@
     <Compile Include="Services\Finance\SubledgerReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ManagementReportDocumentBuilderTests.cs" />
     <Compile Include="Services\Finance\ApInvoiceSupplierProjectionTests.cs" />
+    <Compile Include="Services\Finance\ApInvoicePartnerDefaultsTests.cs" />
     <Compile Include="Services\Finance\FinanceCloseTemplateBaselineSeederTests.cs" />
     <Compile Include="Services\Finance\CoreFinancialReportingFoundationTests.cs" />
     <Compile Include="Services\Finance\GhanaStatutoryTaxEngineTests.cs" />

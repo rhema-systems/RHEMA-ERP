@@ -975,7 +975,7 @@ public class InventoryRequisitionRepository : GenericRepository<InventoryRequisi
     {
         if (departmentId == Guid.Empty) return new List<InventoryRequisition>();
         return await _dbSet
-            .Where(r => r.DepartmentId == departmentId && !r.IsDeleted)
+            .Where(r => r.OrganizationUnitId == departmentId && !r.IsDeleted)
             .Include(r => r.Items)
             .Include(r => r.Warehouse)
             .OrderByDescending(r => r.RequestDate)

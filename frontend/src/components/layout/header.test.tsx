@@ -1,5 +1,7 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Header } from './header';
@@ -9,13 +11,14 @@ const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
   roles: ['SuperAdmin'],
   permissions: ['*'],
+  userAvailable: true,
 }));
 
 vi.stubGlobal('React', React);
 
 vi.mock('../../hooks/use-auth', () => ({
   useAuth: () => ({
-    user: {
+    user: mocks.userAvailable ? {
       firstName: 'Demo',
       lastName: 'User',
       username: 'demo.user',
@@ -24,7 +27,7 @@ vi.mock('../../hooks/use-auth', () => ({
       isActive: true,
       roles: mocks.roles,
       permissions: mocks.permissions,
-    },
+    } : undefined,
     logout: mocks.logout,
     isLoggingOut: false,
     hasAnyRole: (roles: string[]) => roles.some(role =>
@@ -73,6 +76,50 @@ describe('Header layout', () => {
     mocks.setTheme.mockReset();
     mocks.roles = ['SuperAdmin'];
     mocks.permissions = ['*'];
+    mocks.userAvailable = true;
+  });
+
+  it('hydrates the signed-out server header before revealing stored-user settings permissions', async () => {
+    mocks.roles = [];
+    mocks.permissions = [];
+    mocks.userAvailable = false;
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(<Header />);
+    document.body.appendChild(container);
+    expect(container.querySelector('[aria-label="Open settings"]')).toBeNull();
+
+    // The first browser render can read permissions from localStorage before
+    // the current-user query finishes; the server cannot read that storage.
+    mocks.roles = ['ProcurementOfficer'];
+    mocks.permissions = ['procurement.supplier.manage'];
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, <Header />, { onRecoverableError });
+    try {
+      await waitFor(() => expect(container.querySelector('[aria-label="Open settings"]')).not.toBeNull());
+      expect(onRecoverableError).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('hydrates placeholder account text before showing a cached client user', async () => {
+    mocks.roles = [];
+    mocks.permissions = [];
+    mocks.userAvailable = false;
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(<Header />);
+    document.body.appendChild(container);
+    mocks.userAvailable = true;
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, <Header />, { onRecoverableError });
+    try {
+      await waitFor(() => expect(container.querySelector('[aria-label="Open account sidebar"]')).toHaveTextContent('Demo User'));
+      expect(onRecoverableError).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it('keeps search at the left and pins tenant and user content to the full-width right edge', () => {

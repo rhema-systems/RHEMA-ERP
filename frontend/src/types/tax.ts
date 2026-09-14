@@ -253,6 +253,7 @@ export interface WhtCalculationRequest {
     paymentDate: string;
     taxableBase: number;
     excludeVendorPaymentId?: string;
+    vendorInvoiceIds?: string[];
 }
 
 export interface WhtCalculationResult {

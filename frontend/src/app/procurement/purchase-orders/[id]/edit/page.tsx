@@ -5,6 +5,7 @@ import { buildPlannedCostPayload, PlannedCostLine } from '@/lib/purchase-order-l
 import { PurchaseOrderLineTypeSelect } from '@/components/procurement/PurchaseOrderLineTypeSelect';
 import { purchaseOrderLineType, requiresPurchaseOrderStock, type PurchaseOrderLineType } from '@/lib/purchase-order-line-types';
 import { getPurchaseOrderItemMappingError } from '@/lib/purchase-order-item-mapping';
+import { PurchaseOrderSupplierDefaults } from '@/components/procurement/PurchaseOrderSupplierDefaults';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter, useParams } from 'next/navigation';
@@ -82,6 +83,7 @@ export default function EditPurchaseOrderPage() {
   const [orderDate, setOrderDate] = useState('');
   const [supplierId, setSupplierId] = useState('');
   const [supplierName, setSupplierName] = useState('');
+  const [supplierDefaults, setSupplierDefaults] = useState<PurchaseOrderDetailDto['supplierDefaults']>(null);
   const [sourceType, setSourceType] =
     useState<ProcurementPurchaseOrderSourceType>('HistoricalMigration');
   const [sourceId, setSourceId] = useState('');
@@ -177,6 +179,7 @@ export default function EditPurchaseOrderPage() {
         setOrderNumber(po.orderNumber);
         setOrderDate(po.orderDate);
         setSupplierId(po.supplierId);
+        setSupplierDefaults(po.supplierDefaults);
         setSupplierName(po.supplierName);
         setSourceType(po.procurementSourceType || 'HistoricalMigration');
         setSourceId(po.procurementSourceId || '');
@@ -941,6 +944,7 @@ export default function EditPurchaseOrderPage() {
             </div>
           </div>
           
+          <PurchaseOrderSupplierDefaults defaults={supplierDefaults} paymentTerms={paymentTerms} />
           <Separator />
           
           {/* Delivery and Additional Info - 2x2 Grid */}

@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { getAuthenticatedHomePath, isCandidateUser, isConsultantClientUser, isExternalPortalUser } from '@/lib/auth-routing';
 import { authService } from '@/services/auth';
+import { buildLoginRedirectUrl, getCurrentRelativeUrl } from '@/lib/auth-redirect';
 
 // External portal is auth-dependent and uses browser-only storage; disable static generation.
 export const dynamic = 'force-dynamic';
@@ -25,7 +26,7 @@ export default function ExternalPortalLayout({
     const user = authService.getStoredUser();
 
     if (!user) {
-      router.push('/login');
+      router.push(buildLoginRedirectUrl(getCurrentRelativeUrl()));
       setIsValidating(false);
       return;
     }

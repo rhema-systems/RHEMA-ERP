@@ -3,6 +3,11 @@ const calls = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }));
 vi.mock('./api.service', () => ({ apiService: calls }));
 import { inventoryReturnCreditService } from './inventoryReturnCreditService';
 beforeEach(() => vi.clearAllMocks());
+it('discovers dispatched returns using Finance only, with a trimmed supplier or return search', async () => {
+  await inventoryReturnCreditService.getCandidates('  Harbourline  ');
+  expect(calls.get).toHaveBeenCalledExactlyOnceWith('/ap/supplier-debit-notes/inventory-returns', { search: 'Harbourline' });
+  expect(calls.post).not.toHaveBeenCalled();
+});
 it('scopes both credit reads to this Inventory return through the canonical Finance API', async () => {
   await inventoryReturnCreditService.getNotes('return-id');
   expect(calls.get).toHaveBeenCalledWith('/ap/supplier-debit-notes', { inventoryPurchaseReturnId: 'return-id' });

@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Inventory;
@@ -1208,9 +1209,11 @@ public class InventoryRequisition : TenantEntity
     [MaxLength(200)]
     public string? Description { get; set; }
 
-    // Requesting Department/Cost Center
-    [Required]
-    public Guid DepartmentId { get; set; }
+    // Legacy department retained for existing requisitions.
+    public Guid? DepartmentId { get; set; }
+
+    // Current requesting owner from HR's Organisation Structure → Level → Unit hierarchy.
+    public Guid? OrganizationUnitId { get; set; }
 
     [MaxLength(100)]
     public string? DepartmentName { get; set; }
@@ -1276,6 +1279,7 @@ public class InventoryRequisition : TenantEntity
     // Navigation Properties
     public virtual Warehouse Warehouse { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
     public virtual ApplicationUser? RequestedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ApplicationUser? IssuedBy { get; set; }

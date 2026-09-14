@@ -44,14 +44,20 @@ interface MenuItem {
   comingSoon?: boolean;
 }
 
-const menuItems: MenuItem[] = [
+interface MenuGroup {
+  title: string;
+  icon: React.ComponentType<{ className?: string }>;
+  items: MenuItem[];
+}
+
+const portalMenuItems: MenuItem[] = [
   {
     title: 'Dashboard',
     href: '/external-portal',
     icon: Home,
   },
   {
-    title: 'Business Partner Registration',
+    title: 'Business Partner',
     href: '/external-portal/business-partner',
     icon: Building2,
   },
@@ -138,6 +144,56 @@ const menuItems: MenuItem[] = [
   },
 ];
 
+const externalMenuGroups: MenuGroup[] = [
+  {
+    title: 'Procurement',
+    icon: Briefcase,
+    items: portalMenuItems.filter((item) => [
+      '/external-portal/business-partner',
+      '/external-portal/tenders',
+      '/external-portal/my-bids',
+      '/external-portal/rfqs',
+      '/external-portal/purchase-order-amendments',
+      '/external-portal/receipt-inspections',
+    ].includes(item.href)),
+  },
+  {
+    title: 'Estate',
+    icon: Home,
+    items: portalMenuItems.filter((item) => [
+      '/external-portal/property-listings',
+      '/external-portal/my-properties',
+      '/external-portal/estate-services',
+      '/external-portal/estate-documents',
+    ].includes(item.href)),
+  },
+  {
+    title: 'Workspace',
+    icon: ClipboardList,
+    items: portalMenuItems.filter((item) => [
+      '/external-portal/task-list',
+      '/external-portal/projects',
+      '/external-portal/user-management',
+    ].includes(item.href)),
+  },
+  {
+    title: 'Support',
+    icon: LifeBuoy,
+    items: portalMenuItems.filter((item) => [
+      '/support/tickets',
+      '/support/requests',
+    ].includes(item.href)),
+  },
+  {
+    title: 'Account',
+    icon: User,
+    items: portalMenuItems.filter((item) => [
+      '/external-portal/profile',
+      '/external-portal/notifications',
+    ].includes(item.href)),
+  },
+];
+
 // The careers candidate's menu (Candidate role). Candidates share this shell but
 // never see the partner sections — the server's CandidateAccessMiddleware would 403 every one
 // of them, and a menu of dead links is worse than a short menu.
@@ -189,6 +245,7 @@ export function ExternalSidebar() {
   const pathname = usePathname() ?? '';
   const router = useRouter();
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
   const user = authService.getStoredUser();
   const [tenant, setTenant] = useState<Tenant | null>(() => authService.getCurrentTenant());
   const isCandidate = isCandidateUser(user);
@@ -197,7 +254,59 @@ export function ExternalSidebar() {
     ? candidateMenuItems
     : isConsultantClient
       ? consultantClientMenuItems
-      : menuItems;
+      : portalMenuItems;
+
+  const isActiveItem = (item: MenuItem) =>
+    item.href === '/support/tickets'
+      ? pathname === '/support/tickets' ||
+        pathname.startsWith('/support/tickets/') ||
+        pathname === '/external-portal/support/tickets' ||
+        pathname.startsWith('/external-portal/support/tickets/')
+      : item.href === '/support/requests'
+        ? pathname === '/support/requests' ||
+          pathname.startsWith('/support/requests/') ||
+          pathname === '/external-portal/support/requests' ||
+          pathname.startsWith('/external-portal/support/requests/')
+        : pathname === item.href || pathname.startsWith(item.href + '/');
+
+  const renderItem = (item: MenuItem, nested = false) => {
+    const Icon = item.icon;
+    const isActive = isActiveItem(item);
+
+    return (
+      <Link
+        key={item.href}
+        href={item.comingSoon ? '#' : item.href}
+        className={cn(
+          'flex items-center gap-3 rounded-md px-3 py-1.5 text-sm transition-colors relative',
+          nested && 'ml-3 pl-4',
+          isActive
+            ? 'bg-blue-600 text-white'
+            : 'text-slate-300 hover:bg-slate-800 hover:text-white',
+          item.comingSoon && 'opacity-50 cursor-not-allowed'
+        )}
+        onClick={(event) => item.comingSoon && event.preventDefault()}
+        title={isCollapsed ? item.title : undefined}
+      >
+        <Icon className={cn('h-4 w-4 shrink-0', isCollapsed ? 'mx-auto' : '')} />
+        {!isCollapsed && (
+          <>
+            <span className="flex-1 leading-5">{item.title}</span>
+            {item.badge && (
+              <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
+                {item.badge}
+              </span>
+            )}
+            {item.comingSoon && (
+              <span className="bg-yellow-500 text-xs px-2 py-0.5 rounded-full text-black">
+                Soon
+              </span>
+            )}
+          </>
+        )}
+      </Link>
+    );
+  };
 
   useEffect(() => {
     const handler = (e: any) => setTenant(e?.detail || authService.getCurrentTenant());
@@ -226,7 +335,7 @@ export function ExternalSidebar() {
             ) : (
               <Building2 className="h-6 w-6 text-blue-400" />
             )}
-            <span className="font-semibold text-lg">{tenant?.name || 'External Portal'}</span>
+            <span className="font-semibold text-base">{tenant?.name || 'External Portal'}</span>
           </div>
         )}
         <Button
@@ -242,54 +351,37 @@ export function ExternalSidebar() {
 
 
       {/* Navigation */}
-      <nav className="flex-1 overflow-y-auto p-4 space-y-2">
-        {items.map((item) => {
-          const Icon = item.icon;
-          const isActive =
-            item.href === '/support/tickets'
-              ? pathname === '/support/tickets' ||
-                pathname?.startsWith('/support/tickets/') ||
-                pathname === '/external-portal/support/tickets' ||
-                pathname?.startsWith('/external-portal/support/tickets/')
-              : item.href === '/support/requests'
-                ? pathname === '/support/requests' ||
-                  pathname?.startsWith('/support/requests/') ||
-                  pathname === '/external-portal/support/requests' ||
-                  pathname?.startsWith('/external-portal/support/requests/')
-                : pathname === item.href || pathname?.startsWith(item.href + '/');
-
-          return (
-            <Link
-              key={item.href}
-              href={item.comingSoon ? '#' : item.href}
-              className={cn(
-                'flex items-center space-x-3 px-3 py-2 rounded-lg transition-colors relative',
-                isActive
-                  ? 'bg-blue-600 text-white'
-                  : 'text-slate-300 hover:bg-slate-800 hover:text-white',
-                item.comingSoon && 'opacity-50 cursor-not-allowed'
-              )}
-              onClick={(e) => item.comingSoon && e.preventDefault()}
-            >
-              <Icon className={cn('h-5 w-5', isCollapsed ? 'mx-auto' : '')} />
-              {!isCollapsed && (
-                <>
-                  <span className="flex-1">{item.title}</span>
-                  {item.badge && (
-                    <span className="bg-red-500 text-white text-xs px-2 py-0.5 rounded-full">
-                      {item.badge}
-                    </span>
-                  )}
-                  {item.comingSoon && (
-                    <span className="bg-yellow-500 text-xs px-2 py-0.5 rounded-full text-black">
-                      Soon
-                    </span>
-                  )}
-                </>
-              )}
-            </Link>
-          );
-        })}
+      <nav className="flex-1 overflow-y-auto p-3 space-y-1">
+        {isCandidate || isConsultantClient || isCollapsed ? (
+          items.map((item) => renderItem(item))
+        ) : (
+          <>
+            {renderItem(portalMenuItems[0])}
+            {externalMenuGroups.map((group) => {
+              const GroupIcon = group.icon;
+              const containsActiveItem = group.items.some(isActiveItem);
+              const isOpen = openGroups[group.title] ?? containsActiveItem;
+              return (
+                <div key={group.title} className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setOpenGroups((current) => ({ ...current, [group.title]: !isOpen }))}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-md px-3 py-1.5 text-left text-sm transition-colors',
+                      containsActiveItem ? 'text-white' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
+                    )}
+                    aria-expanded={isOpen}
+                  >
+                    <GroupIcon className="h-4 w-4 shrink-0" />
+                    <span className="flex-1 font-medium">{group.title}</span>
+                    <ChevronDown className={cn('h-4 w-4 transition-transform', !isOpen && '-rotate-90')} />
+                  </button>
+                  {isOpen && <div className="mt-0.5 space-y-0.5">{group.items.map((item) => renderItem(item, true))}</div>}
+                </div>
+              );
+            })}
+          </>
+        )}
       </nav>
 
       {/* Footer */}

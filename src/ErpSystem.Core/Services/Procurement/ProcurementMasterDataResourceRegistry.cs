@@ -31,7 +31,9 @@ public static class ProcurementMasterDataResourceRegistry
                     "PrimaryContactName", "PrimaryContactTitle", "PrimaryEmail", "PrimaryPhone", "SecondaryPhone", "Website",
                     "PhysicalAddress", "PhysicalCity", "PhysicalState", "PhysicalCountry", "PhysicalPostalCode",
                     "MailingAddress", "MailingCity", "MailingState", "MailingCountry", "MailingPostalCode",
-                    "IndustryClassification", "CompanySize", "GeographicCoverage", "IsPreferred", "PaymentTermId", "Currency", "Notes"),
+                    "IndustryClassification", "CompanySize", "GeographicCoverage", "IsPreferred", "PaymentTermId", "Currency", "Notes",
+                    "CreditLimit", "DefaultApAccountId", "DefaultExpenseAccountId",
+                    "DefaultTermsDiscountsAvailableAccountId", "DefaultTermsDiscountsTakenAccountId", "DefaultFinanceChargesAccountId", "DefaultTradeDiscountAccountId", "DefaultMiscellaneousAccountId", "DefaultFreightAccountId", "DefaultWriteoffAccountId", "DefaultAccruedPurchasesAccountId", "DefaultPurchasePriceVarianceAccountId"),
                 [ProcurementMasterDataTargetKind.LegacySupplier] = Fields(
                     "Name", "Description", "SupplierType", "Address", "City", "State", "ZipCode", "Country", "Phone", "Email", "Website",
                     "PrimaryContactName", "PrimaryContactTitle", "PrimaryContactPhone", "PrimaryContactEmail", "PaymentTerms", "ShippingTerms",
@@ -45,7 +47,8 @@ public static class ProcurementMasterDataResourceRegistry
             "Controlled supplier settlement-account attributes; raw bank values remain within tenant-authorized responses.",
             new Dictionary<ProcurementMasterDataTargetKind, IReadOnlySet<string>>
             {
-                [ProcurementMasterDataTargetKind.BusinessPartner] = Fields("BankName", "BankAccountNumber", "BankAccountName", "BankBranch", "BankSwiftCode", "BankIBAN")
+                [ProcurementMasterDataTargetKind.BusinessPartner] = Fields("BankName", "BankAccountNumber", "BankAccountName", "BankBranch", "BankSwiftCode", "BankIBAN",
+                    "DefaultBankAccountId", "CashAccountSource", "DefaultCashAccountId")
             }, source: "SUP-010; E2E-017"),
         Define(
             ProcurementMasterDataResourceType.SupplierTaxDetails,
@@ -54,7 +57,8 @@ public static class ProcurementMasterDataResourceRegistry
             "Controlled supplier tax-registration and exemption attributes.",
             new Dictionary<ProcurementMasterDataTargetKind, IReadOnlySet<string>>
             {
-                [ProcurementMasterDataTargetKind.BusinessPartner] = Fields("TaxIdentificationNumber", "VATNumber", "IsTaxExempt", "TaxExemptionNumber", "TaxExemptionExpiry"),
+                [ProcurementMasterDataTargetKind.BusinessPartner] = Fields("TaxIdentificationNumber", "VATNumber", "IsTaxExempt", "TaxExemptionNumber", "TaxExemptionExpiry",
+                    "SubjectToWithholdingDeduction", "WithholdingTaxRate", "DefaultWithholdingTaxId", "DefaultTaxGroupId", "DefaultTaxAccountId"),
                 [ProcurementMasterDataTargetKind.LegacySupplier] = Fields("TaxId")
             }, source: "SUP-010; E2E-017"),
         Define(
@@ -93,7 +97,8 @@ public static class ProcurementMasterDataResourceRegistry
                 "ValuationMethod", "IsValuationLocked", "IsProjectApplicable", "IsCostCentreApplicable", "DailyRentalRate", "StandardCost", "SalePrice", "MinimumLevel", "MaximumLevel", "ReorderLevel",
                 "ReorderQuantity", "SafetyStock", "LeadTimeDays", "SafetyLeadTimeDays", "ItemType", "ABCClass", "Status", "DefaultTaxGroupId",
                 "ShippingWeight", "Weight", "Length", "Width", "Height", "Volume", "IsSerialTracked", "IsLotTracked", "IsBatchTracked", "IsManufactureDateTracked", "IsExpirationTracked",
-                "IsLocationTracked", "RequiresInspection", "ShelfLifeDays", "PrimarySupplier", "SupplierItemCode", "CustomFields"))),
+                "IsLocationTracked", "RequiresInspection", "ShelfLifeDays", "PrimarySupplier", "SupplierItemCode", "CustomFields",
+                "InventoryAccountId", "InventoryOffsetAccountId", "CostOfGoodsSoldAccountId", "SalesAccountId", "MarkdownsAccountId", "SalesReturnsAccountId", "InUseAccountId", "InServiceAccountId", "DamagedAccountId", "VarianceAccountId", "DropShipItemsAccountId", "PurchasePriceVarianceAccountId", "UnrealisedPurchasePriceVarianceAccountId", "InventoryReturnsAccountId", "AssemblyVarianceAccountId", "StandardCostRevaluationAccountId"))),
         Define(
             ProcurementMasterDataResourceType.InventoryCategory,
             "INVENTORY_CATEGORY",

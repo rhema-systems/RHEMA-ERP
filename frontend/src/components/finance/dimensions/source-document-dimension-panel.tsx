@@ -20,6 +20,8 @@ import type {
 export interface SourceDimensionEditableLine {
   id: string;
   accountId?: string;
+  additionalAccountIds?: string[];
+  requiredDimensionCodes?: string[];
   accountLabel?: string;
 }
 
@@ -30,9 +32,7 @@ export interface SourceDocumentDimensionPanelProps {
   defaultValues: Record<string, string>;
   lineValues: Record<string, Record<string, string>>;
   onDefaultValuesChange: (values: Record<string, string>) => void;
-  onLineValuesChange: (
-    values: Record<string, Record<string, string>>,
-  ) => void;
+  onLineValuesChange: (values: Record<string, Record<string, string>>) => void;
   onApplyDefaultToAll?: () => void;
   certificationState?: FinanceDimensionCertificationState;
   disabled?: boolean;
@@ -70,6 +70,7 @@ export function SourceDocumentDimensionPanel({
         effectiveDate,
         context,
         defaultValues,
+        line.additionalAccountIds
       );
     }
     onLineValuesChange(next);
@@ -99,7 +100,8 @@ export function SourceDocumentDimensionPanel({
           <div key={line.id} className="rounded-lg border p-3">
             <div className="mb-2 flex items-center justify-between gap-2">
               <span className="truncate text-sm font-medium">
-                Line {index + 1}{line.accountLabel ? ` · ${line.accountLabel}` : ''}
+                Line {index + 1}
+                {line.accountLabel ? ` · ${line.accountLabel}` : ''}
               </span>
               {!line.accountId && (
                 <Badge variant="secondary">Server-resolved</Badge>
@@ -113,6 +115,8 @@ export function SourceDocumentDimensionPanel({
                 effectiveDate={effectiveDate}
                 lineNumber={index + 1}
                 accountId={line.accountId}
+                additionalAccountIds={line.additionalAccountIds}
+                requiredDimensionCodes={line.requiredDimensionCodes}
                 accountLabel={line.accountLabel}
                 values={lineValues[line.id] || {}}
                 defaults={defaultValues}
@@ -168,21 +172,25 @@ export function SourceDocumentDimensionEvidence({
         )}
       </div>
       {evidence.lines.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No line coding captured.</p>
+        <p className="text-sm text-muted-foreground">
+          No line coding captured.
+        </p>
       ) : (
         <div className="space-y-2">
           {evidence.lines.map((line, index) => (
             <div key={line.sourceLineId} className="rounded-md bg-muted/40 p-3">
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="text-sm font-medium">Line {index + 1}</span>
-                {line.isFrozen && <Badge variant="secondary">Frozen evidence</Badge>}
+                {line.isFrozen && (
+                  <Badge variant="secondary">Frozen evidence</Badge>
+                )}
               </div>
               <p className="mt-1 text-sm">
                 {line.values.length
                   ? line.values
                       .map(
                         (value) =>
-                          `${value.dimensionCode}: ${value.valueCode} — ${value.valueName}`,
+                          `${value.dimensionCode}: ${value.valueCode} — ${value.valueName}`
                       )
                       .join(' · ')
                   : 'No dimensions assigned'}

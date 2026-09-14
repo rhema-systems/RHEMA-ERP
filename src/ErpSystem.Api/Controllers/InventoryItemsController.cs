@@ -95,6 +95,31 @@ public class InventoryItemsController : ControllerBase
     }
 
     /// <summary>
+    /// Minimal GL identities for the existing internal, tenant-scoped item editor, without Finance-wide access.
+    /// </summary>
+    [HttpGet("posting-accounts")]
+    public async Task<ActionResult<IReadOnlyList<BusinessPartnerPostingAccountOptionDto>>> GetPostingAccounts()
+    {
+        // This is an item-editor lookup, not a governed master-data mutation. Requiring the
+        // Stores Manager mutation privilege here denied both ordinary stores users and the
+        // administrator while the existing item editor and partner lookup remained available.
+        // Saving still uses the existing maker/checker and posting-account validation paths.
+        if (_currentUserProvider.IsExternalUser || User.Identity?.IsAuthenticated != true ||
+            !Guid.TryParse(User.FindFirst("tenant_id")?.Value, out var tenantId) || tenantId == Guid.Empty ||
+            _currentUserProvider.TenantId != tenantId)
+            return Forbid();
+        if (_unitOfWork is null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        var accounts = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.Account>()
+            .GetQueryable(account => account.TenantId == tenantId && !account.IsDeleted &&
+                account.Status == AccountStatus.Active && (account.AllowDirectPosting || account.IsControlAccount))
+            .AsNoTracking().OrderBy(account => account.AccountNumber).ThenBy(account => account.AccountName)
+            .Select(account => new BusinessPartnerPostingAccountOptionDto(account.Id, account.AccountCode, account.AccountNumber,
+                account.AccountName, account.AccountType, account.Status, account.AllowDirectPosting, account.IsControlAccount))
+            .ToListAsync(HttpContext.RequestAborted);
+        return Ok(accounts);
+    }
+
+    /// <summary>
     /// Get all active inventory items, optionally filtered by item type
     /// </summary>
     /// <param name="itemType">Optional item type filter (1=StockItem, 2=Service, 3=NonStock, 4=FixedAsset)</param>
@@ -329,6 +354,7 @@ public class InventoryItemsController : ControllerBase
             }
             else
             {
+                await ValidatePostingAccountsWithoutProfileServiceAsync(inventoryItem);
                 NormalizeIdentifiers(inventoryItem);
                 if (_identifierService is not null)
                 {
@@ -449,6 +475,7 @@ public class InventoryItemsController : ControllerBase
             }
             else
             {
+                await ValidatePostingAccountsWithoutProfileServiceAsync(existingItem);
                 NormalizeIdentifiers(existingItem);
                 if (_identifierService is not null)
                 {
@@ -1494,8 +1521,16 @@ public class InventoryItemsController : ControllerBase
         }
     };
 
+    private async Task ValidatePostingAccountsWithoutProfileServiceAsync(InventoryItem item)
+    {
+        if (!InventoryItemPostingAccounts.GetMappings(item).Any(mapping => mapping.AccountId.HasValue)) return;
+        if (_unitOfWork is null) throw new InvalidOperationException("Inventory posting-account validation is unavailable.");
+        await InventoryItemPostingAccounts.ValidateAsync(_unitOfWork, item, HttpContext.RequestAborted);
+    }
+
     private static object SnapshotProfile(InventoryItem item) => new
     {
+        PostingAccounts = InventoryItemPostingAccounts.Read(item),
         item.ItemCode,
         item.Name,
         item.Description,

@@ -191,6 +191,7 @@ public class PurchaseOrderSummaryDto
 /// </summary>
 public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
 {
+    public PurchaseOrderSupplierDefaultsDto? SupplierDefaults { get; set; }
     public DateTime? ReceivedDate { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAt { get; set; }
@@ -545,6 +546,7 @@ public class PurchaseRequisitionSummaryDto
     public string Status { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string? Department { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
     public decimal TotalAmount { get; set; }
     public string Currency { get; set; } = string.Empty;
     public int ItemCount { get; set; }
@@ -619,6 +621,9 @@ public class CreatePurchaseRequisitionDto
     /// retained as the display snapshot for legacy reporting only.
     /// </summary>
     public Guid? DepartmentId { get; set; }
+
+    /// <summary>Current HR Organisation Structure → Level → Unit selection.</summary>
+    public Guid? OrganizationUnitId { get; set; }
 
     /// <summary>
     /// Requested transaction currency for an unlinked requisition. When a
@@ -720,6 +725,8 @@ public sealed class PurchaseRequisitionLinkageOptionDto
     public string? BudgetCode { get; set; }
     public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public Guid? InventoryItemId { get; set; }
     public decimal? Quantity { get; set; }
     public string? UnitOfMeasure { get; set; }

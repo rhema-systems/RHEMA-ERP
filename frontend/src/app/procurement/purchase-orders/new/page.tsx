@@ -71,6 +71,7 @@ import {
   supportsApprovedPurchaseOrderUnit,
 } from '@/lib/purchase-order-approved-lines';
 import { ApprovedPurchaseOrderUnit } from '@/components/procurement/ApprovedPurchaseOrderUnit';
+import { useSupplierPurchaseOrderDefaults } from '@/hooks/use-supplier-purchase-order-defaults';
 
 interface POItemFormData extends CreatePurchaseOrderItemDto {
   tempId: string;
@@ -110,6 +111,14 @@ function NewPurchaseOrderPageContent() {
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [deliveryInstructions, setDeliveryInstructions] = useState('');
   const [referenceNumber, setReferenceNumber] = useState('');
+  const { loadSupplierDetails, markPaymentTermsEdited } = useSupplierPurchaseOrderDefaults(
+    supplier => {
+      setSelectedSupplier(supplier);
+      if (supplier?.physicalAddress) setDeliveryAddress(`${supplier.physicalAddress}${supplier.city ? ', ' + supplier.city : ''}${supplier.country ? ', ' + supplier.country : ''}`);
+    },
+    setPaymentTerms,
+    () => toast.error('Could not load supplier defaults. Your entered values are unchanged.'),
+  );
   const [items, setItems] = useState<POItemFormData[]>([]);
   
   // Financial fields
@@ -304,29 +313,9 @@ function NewPurchaseOrderPageContent() {
     }
   }, [fromRequisitionId]);
 
-  // Load supplier details when selected
-  const loadSupplierDetails = async (supplierId: string) => {
-    try {
-      const supplier = await businessPartnerService.getPartnerById(supplierId);
-      setSelectedSupplier(supplier);
-      
-      // Pre-fill supplier-related fields
-      if (supplier.paymentTerms) setPaymentTerms(supplier.paymentTerms);
-      if (supplier.physicalAddress) {
-        setDeliveryAddress(`${supplier.physicalAddress}${supplier.city ? ', ' + supplier.city : ''}${supplier.country ? ', ' + supplier.country : ''}`);
-      }
-    } catch (error) {
-      console.error('Error loading supplier details:', error);
-    }
-  };
-
   const handleSupplierChange = (supplierId: string) => {
     setSelectedSupplierId(supplierId);
-    if (supplierId) {
-      loadSupplierDetails(supplierId);
-    } else {
-      setSelectedSupplier(null);
-    }
+    void loadSupplierDetails(supplierId);
   };
 
   // Calculate totals
@@ -1240,7 +1229,7 @@ function NewPurchaseOrderPageContent() {
               <Input
                 id="paymentTerms"
                 value={paymentTerms}
-                onChange={(e) => setPaymentTerms(e.target.value)}
+                onChange={(e) => { markPaymentTermsEdited(); setPaymentTerms(e.target.value); }}
                 placeholder="e.g., Net 30"
               />
             </div>
