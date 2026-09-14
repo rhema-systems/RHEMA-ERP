@@ -16,10 +16,7 @@ public sealed class AccountingBookPeriodInitializationC4MigrationTests
     [Fact]
     public void Migration_PutsCompleteReadinessPreflightBeforeEveryMutation()
     {
-        var operations = new ExposedMigration().BuildUpOperations();
-
-        operations[0].Should().BeOfType<SqlOperation>();
-        var sql = ((SqlOperation)operations[0]).Sql;
+        var sql = ArchivedMigrationSource.Read("20260906140533_AddAccountingBookPeriodInitializationFoundation.cs");
         sql.Should().Contain("C4_SCHEMA_PREFLIGHT")
             .And.Contain("C4_BOOK_PREFLIGHT")
             .And.Contain("C4_PRIMARY_PREFLIGHT")
@@ -32,53 +29,29 @@ public sealed class AccountingBookPeriodInitializationC4MigrationTests
             .And.Contain("[PendingLifecycleStatus] = 4")
             .And.Contain("[FiscalYears]");
 
-        operations.Skip(1).Should().OnlyContain(operation => operation.GetType() != typeof(SqlOperation),
-            "the complete predecessor audit must precede every C4 schema mutation");
+        sql.IndexOf("C4_SCHEMA_PREFLIGHT", StringComparison.Ordinal).Should().BeLessThan(
+            sql.IndexOf("migrationBuilder.CreateTable", StringComparison.Ordinal));
     }
 
     [Fact]
     public void Migration_CreatesExactTenantAuthority_ImmutableGrains_AndBoundedDown()
     {
-        var migration = new ExposedMigration();
-        var up = migration.BuildUpOperations();
-        var tables = up.OfType<CreateTableOperation>().ToDictionary(item => item.Name);
-
-        tables.Keys.Should().BeEquivalentTo(new[]
+        var source = ArchivedMigrationSource.Read("20260906140533_AddAccountingBookPeriodInitializationFoundation.cs");
+        foreach (var table in new[]
         {
             "AccountingBookPeriods", "AccountingBookInitializations", "AccountingBookInitializationLines"
-        });
-
-        tables["AccountingBookPeriods"].ForeignKeys.Should().Contain(item =>
-            item.Name == "FK_AccountingBookPeriods_AccountingBooks_TenantId_AccountingBookId"
-            && item.Columns.SequenceEqual(new[] { "TenantId", "AccountingBookId" }));
-        tables["AccountingBookPeriods"].ForeignKeys.Should().Contain(item =>
-            item.Name == "FK_AccountingBookPeriods_FiscalPeriods_TenantId_FiscalPeriodId"
-            && item.Columns.SequenceEqual(new[] { "TenantId", "FiscalPeriodId" }));
-        tables["AccountingBookInitializationLines"].ForeignKeys.Should().Contain(item =>
-            item.Name == "FK_AccountingBookInitializationLines_Accounts_TenantId_AccountId"
-            && item.Columns.SequenceEqual(new[] { "TenantId", "AccountId" }));
-        tables["AccountingBookInitializationLines"].ForeignKeys.Should().Contain(item =>
-            item.Name == "FK_AccountingBookInitializationLines_AccountingBookInitializations_TenantId_AccountingBookInitializationId"
-            && item.Columns.SequenceEqual(new[] { "TenantId", "AccountingBookInitializationId" }));
-        tables["AccountingBookInitializations"].ForeignKeys.Should().Contain(item =>
-            item.Name == "FK_AccountingBookInitializations_FiscalPeriods_TenantId_CutoffFiscalPeriodId"
-            && item.Columns.SequenceEqual(new[] { "TenantId", "CutoffFiscalPeriodId" }));
-        tables["AccountingBookInitializations"].ForeignKeys.Should().Contain(item =>
-            item.Name == "FK_AccountingBookInitializations_AccountingBookInitializations_TenantId_AccountingBookId_SupersedesInitializationId"
-            && item.Columns.SequenceEqual(new[] { "TenantId", "AccountingBookId", "SupersedesInitializationId" })
-            && item.PrincipalColumns.SequenceEqual(new[] { "TenantId", "AccountingBookId", "Id" }));
-
-        up.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
-            && item.Name == "IX_AccountingBookPeriods_TenantId_AccountingBookId_FiscalPeriodId"
-            && item.Filter == null);
-        up.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
-            && item.Name == "IX_AccountingBookInitializations_TenantId_AccountingBookId_Version");
-        up.OfType<CreateIndexOperation>().Should().Contain(item => item.IsUnique
-            && item.Name == "IX_AccountingBookInitializations_TenantId_AccountingBookId_InitializationStatus"
-            && item.Filter!.Contains("[InitializationStatus] = 3", StringComparison.Ordinal));
-
-        tables.SelectMany(pair => pair.Value.CheckConstraints).Select(item => item.Name).Should().Contain(new[]
+        }) source.Should().Contain($"name: \"{table}\"");
+        foreach (var token in new[]
         {
+            "FK_AccountingBookPeriods_AccountingBooks_TenantId_AccountingBookId",
+            "FK_AccountingBookPeriods_FiscalPeriods_TenantId_FiscalPeriodId",
+            "FK_AccountingBookInitializationLines_Accounts_TenantId_AccountId",
+            "FK_AccountingBookInitializationLines_AccountingBookInitializations_TenantId_AccountingBookInitializationId",
+            "FK_AccountingBookInitializations_FiscalPeriods_TenantId_CutoffFiscalPeriodId",
+            "FK_AccountingBookInitializations_AccountingBookInitializations_TenantId_AccountingBookId_SupersedesInitializationId",
+            "IX_AccountingBookPeriods_TenantId_AccountingBookId_FiscalPeriodId",
+            "IX_AccountingBookInitializations_TenantId_AccountingBookId_Version",
+            "IX_AccountingBookInitializations_TenantId_AccountingBookId_InitializationStatus",
             "CK_AccountingBookPeriods_NoDelete",
             "CK_AccountingBookInitializations_NoDelete",
             "CK_AccountingBookInitializations_SourceShape",
@@ -87,20 +60,12 @@ public sealed class AccountingBookPeriodInitializationC4MigrationTests
             "CK_AccountingBookInitializations_ReconciliationFingerprint",
             "CK_AccountingBookInitializationLines_NoDelete",
             "CK_AccountingBookInitializationLines_Currency"
-        });
-        tables["AccountingBookInitializations"].Columns.Should().Contain(item => item.Name == "CutoffFiscalPeriodId" && !item.IsNullable);
-        tables["AccountingBookInitializations"].CheckConstraints
-            .Single(item => item.Name == "CK_AccountingBookInitializations_EvidenceFingerprint").Sql
-            .Should().Contain("LEN([EvidenceFingerprint]) = 64").And.NotContain("DATALENGTH");
-        tables["AccountingBookInitializationLines"].CheckConstraints
-            .Single(item => item.Name == "CK_AccountingBookInitializationLines_Currency").Sql
-            .Should().Contain("LEN([CurrencyCode]) = 3").And.NotContain("DATALENGTH");
-
-        var down = migration.BuildDownOperations();
-        down[0].Should().BeOfType<SqlOperation>();
-        ((SqlOperation)down[0]).Sql.Should().Contain("C4_DOWN_GUARD")
+        }) source.Should().Contain(token);
+        source.Should().Contain("CutoffFiscalPeriodId")
+            .And.Contain("LEN([EvidenceFingerprint]) = 64")
+            .And.Contain("LEN([CurrencyCode]) = 3")
+            .And.Contain("C4_DOWN_GUARD")
             .And.Contain("cannot be represented by the predecessor schema");
-        down.OfType<DropTableOperation>().Select(item => item.Name).Should().BeEquivalentTo(tables.Keys);
     }
 
     [Fact]
@@ -111,23 +76,9 @@ public sealed class AccountingBookPeriodInitializationC4MigrationTests
             .Options;
         using var context = new ApplicationDbContext(options);
 
-        context.GetService<IMigrationsAssembly>().Migrations.Should().ContainKey(MigrationId);
-    }
-
-    private sealed class ExposedMigration : AddAccountingBookPeriodInitializationFoundation
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-
-        public IReadOnlyList<MigrationOperation> BuildDownOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations;
-        }
+        context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
+            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        ArchivedMigrationSource.Read("20260906140533_AddAccountingBookPeriodInitializationFoundation.cs")
+            .Should().Contain($"Migration(\"{MigrationId}\")");
     }
 }

@@ -147,6 +147,18 @@
     <Compile Include="Services\Finance\FinancePostingEngineTests.cs" />
     <Compile Include="Services\Finance\FinancePostingAuthorityFixture.cs" />
     <Compile Include="Services\Finance\AccountingBookClassificationAuthorityTests.cs" />
+    <Compile Include="Services\Finance\ArchivedMigrationSource.cs" />
+    <Compile Include="Services\Finance\ArchivedMigrationSourceTests.cs" />
+    <!-- Test-only retained migration bodies keep the original disposable predecessor rehearsals
+         executable without returning the legacy chain to ErpSystem.Data/runtime discovery. -->
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260905151918_AddStablePostingAccountingBookIdentity.cs" Link="LegacyMigrationBodies\20260905151918_AddStablePostingAccountingBookIdentity.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260905182403_AddBookAwareBalanceFoundation.cs" Link="LegacyMigrationBodies\20260905182403_AddBookAwareBalanceFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260905213000_AddGovernedAccountingBookLifecycle.cs" Link="LegacyMigrationBodies\20260905213000_AddGovernedAccountingBookLifecycle.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906140533_AddAccountingBookPeriodInitializationFoundation.cs" Link="LegacyMigrationBodies\20260906140533_AddAccountingBookPeriodInitializationFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906190846_AddAccountingBookApplicabilityFoundation.cs" Link="LegacyMigrationBodies\20260906190846_AddAccountingBookApplicabilityFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260907071922_AddAccountingEventOrchestrationFoundation.cs" Link="LegacyMigrationBodies\20260907071922_AddAccountingEventOrchestrationFoundation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260907190000_AddProducerIntentStagingC7.cs" Link="LegacyMigrationBodies\20260907190000_AddProducerIntentStagingC7.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260908120000_AddProducerIntentGroupsC8.cs" Link="LegacyMigrationBodies\20260908120000_AddProducerIntentGroupsC8.cs" />
     <Compile Include="Services\HR\PayrollFinanceAccountProvisioningTests.cs" />
     <Compile Include="Services\Finance\MigrationRehearsalCorrectionTests.cs" />
     <Compile Include="Services\Finance\MigrationCompatibilitySqlServerTests.cs" />

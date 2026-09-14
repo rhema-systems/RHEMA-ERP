@@ -38,27 +38,11 @@ public sealed class ApInvoicePostingMigrationTests
     [Trait("Category", "AccountsPayable")]
     public void BudgetEvidenceMigration_ShouldAddOnlyTheNullableApLineReferenceAndReverseCleanly()
     {
-        var migration = new AddApVendorInvoiceBudgetEvidence();
-        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, new object[] { up });
-
-        up.Operations.OfType<AddColumnOperation>().Should().ContainSingle(column =>
-            column.Table == "VendorInvoiceLineItem" &&
-            column.Name == "BudgetEntryId" &&
-            column.IsNullable);
-        up.Operations.OfType<CreateIndexOperation>().Select(index => index.Name).Should().BeEquivalentTo(
-            "IX_VendorInvoiceLineItem_BudgetEntryId",
-            "IX_VendorInvoiceLineItem_TenantId_BudgetEntryId");
-        up.Operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(foreignKey =>
-            foreignKey.PrincipalTable == "BudgetEntries" &&
-            foreignKey.OnDelete == ReferentialAction.Restrict);
-
-        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        migration.GetType().GetMethod("Down", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, new object[] { down });
-        down.Operations.OfType<DropColumnOperation>().Should().ContainSingle(column =>
-            column.Table == "VendorInvoiceLineItem" && column.Name == "BudgetEntryId");
+        var source = ArchivedMigrationSource.Read("20260826013000_AddApVendorInvoiceBudgetEvidence.cs");
+        foreach (var token in new[] { "VendorInvoiceLineItem", "BudgetEntryId",
+            "IX_VendorInvoiceLineItem_BudgetEntryId", "IX_VendorInvoiceLineItem_TenantId_BudgetEntryId",
+            "BudgetEntries", "onDelete: ReferentialAction.Restrict", "migrationBuilder.DropColumn" })
+            source.Should().Contain(token);
     }
 
     [Fact]

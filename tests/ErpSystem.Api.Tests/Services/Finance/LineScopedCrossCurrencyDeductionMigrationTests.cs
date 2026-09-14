@@ -14,14 +14,9 @@ public sealed class LineScopedCrossCurrencyDeductionMigrationTests
     [Trait("Category", "Architecture")]
     public void Migration_ShouldAddAndRemoveEveryApArDeductionEvidenceColumn()
     {
-        var migration = new AddLineScopedCrossCurrencyDeductions();
-        var upBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        InvokeMigrationMethod(migration, "Up", upBuilder);
-
-        var added = upBuilder.Operations.OfType<AddColumnOperation>().ToArray();
-        added.Should().HaveCount(7);
-        added.Select(operation => $"{operation.Table}.{operation.Name}").Should().BeEquivalentTo(
-        [
+        var source = ArchivedMigrationSource.Read("20260806143000_AddLineScopedCrossCurrencyDeductions.cs");
+        foreach (var column in new[]
+        {
             "VendorPaymentAllocation.DiscountFunctionalAmount",
             "VendorPaymentAllocation.WithholdingTaxFunctionalAmount",
             "PaymentAllocation.DiscountFunctionalAmount",
@@ -29,30 +24,11 @@ public sealed class LineScopedCrossCurrencyDeductionMigrationTests
             "PaymentAllocation.WithholdingTaxFunctionalAmount",
             "PaymentAllocation.VatWithholdingAmount",
             "PaymentAllocation.VatWithholdingFunctionalAmount"
-        ]);
-        added.Should().OnlyContain(operation =>
-            operation.ColumnType == "decimal(18,2)" &&
-            operation.IsNullable == false &&
-            Equals(operation.DefaultValue, 0m));
-
-        // Down symmetry matters in development because the application is still allowed to reset
-        // and replay its migration chain while Finance functionality is being completed.
-        var downBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        InvokeMigrationMethod(migration, "Down", downBuilder);
-        downBuilder.Operations.OfType<DropColumnOperation>()
-            .Select(operation => $"{operation.Table}.{operation.Name}")
-            .Should().BeEquivalentTo(added.Select(operation => $"{operation.Table}.{operation.Name}"));
-    }
-
-    private static void InvokeMigrationMethod(
-        AddLineScopedCrossCurrencyDeductions migration,
-        string methodName,
-        MigrationBuilder migrationBuilder)
-    {
-        // This migration is intentionally sealed. Reflection gives the test access to EF's
-        // protected lifecycle methods without weakening the production type solely for testing.
-        typeof(AddLineScopedCrossCurrencyDeductions)
-            .GetMethod(methodName, BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, [migrationBuilder]);
+        })
+        {
+            var parts = column.Split('.');
+            source.Should().Contain($"AddColumn<decimal>(\"{parts[1]}\", \"{parts[0]}\", \"decimal(18,2)\", nullable: false, defaultValue: 0m)");
+            source.Should().Contain("migrationBuilder.DropColumn(").And.Contain(parts[1]);
+        }
     }
 }

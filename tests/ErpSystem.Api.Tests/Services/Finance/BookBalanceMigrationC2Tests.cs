@@ -22,9 +22,7 @@ public sealed class BookBalanceMigrationC2Tests
     [Fact]
     public void Migration_UsesExactPreflight_Backfill_AndBoundedDown()
     {
-        var migration = new AddBookAwareBalanceFoundation();
-        var up = Operations(migration, "Up");
-        var sql = string.Join("\n", up.OfType<SqlOperation>().Select(item => item.Sql));
+        var sql = ArchivedMigrationSource.Read("20260905182403_AddBookAwareBalanceFoundation.cs");
         sql.Should().Contain("C2_ACCOUNT_BALANCE_PREFLIGHT")
             .And.Contain("C2_BOOK_AUTHORITY_PREFLIGHT")
             .And.Contain("C2_FUNCTIONAL_CURRENCY_AUTHORITY_PREFLIGHT")
@@ -39,20 +37,10 @@ public sealed class BookBalanceMigrationC2Tests
             .And.Contain("FinanceSettings")
             .And.Contain("UPDATE ab")
             .And.Contain("UPDATE a");
-        var downSql = string.Join("\n", Operations(migration, "Down")
-            .OfType<SqlOperation>().Select(item => item.Sql));
-        downSql.Should().Contain("allEvidence").And.Contain("AccountTransactions");
-        up.OfType<CreateTableOperation>().Select(item => item.Name)
-            .Should().Contain(new[] { "AccountCurrencyExposures", "FinanceBalanceRebuildRuns" });
-        Operations(migration, "Down").OfType<DropTableOperation>().Select(item => item.Name)
-            .Should().Contain(new[] { "AccountCurrencyExposures", "FinanceBalanceRebuildRuns" });
-    }
-
-    private static IReadOnlyList<MigrationOperation> Operations(Migration migration, string method)
-    {
-        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        typeof(AddBookAwareBalanceFoundation).GetMethod(method, BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, new object[] { builder });
-        return builder.Operations;
+        sql.Should().Contain("allEvidence").And.Contain("AccountTransactions")
+            .And.Contain("name: \"AccountCurrencyExposures\"")
+            .And.Contain("name: \"FinanceBalanceRebuildRuns\"")
+            .And.Contain("migrationBuilder.DropTable(\n                name: \"AccountCurrencyExposures\"")
+            .And.Contain("migrationBuilder.DropTable(\n                name: \"FinanceBalanceRebuildRuns\"");
     }
 }

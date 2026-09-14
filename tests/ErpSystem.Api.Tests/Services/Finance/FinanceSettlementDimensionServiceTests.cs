@@ -383,27 +383,11 @@ public sealed class FinanceSettlementDimensionServiceTests
     [Fact]
     public void MigrationCreatesOnlyTheGenericSettlementEvidenceStore()
     {
-        var migration = new AddFinanceSettlementDimensions();
-        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, [up]);
-
-        up.Operations.OfType<CreateTableOperation>().Should().ContainSingle(table =>
-            table.Name == "FinanceSettlementDimensionComponents");
-        up.Operations.OfType<CreateTableOperation>().Should().NotContain(table =>
-            new[] { "VendorPayments", "CustomerPayments", "CashTransactions", "AccountTransactions" }
-                .Contains(table.Name));
-        up.Operations.OfType<AlterColumnOperation>().Should().BeEmpty();
-        var table = up.Operations.OfType<CreateTableOperation>().Single();
-        table.ForeignKeys.Should().OnlyContain(key => key.OnDelete == ReferentialAction.Restrict);
-        table.Columns.Should().Contain(column => column.Name == "SettlementSourceLineId");
-        table.Columns.Should().Contain(column => column.Name == "OriginatingSourceLineId");
-        table.Columns.Should().Contain(column => column.Name == "FinanceDimensionSnapshotId");
-        table.Columns.Should().Contain(column => column.Name == "RoundingResidualFunctionalAmount");
-        table.Columns.Should().Contain(column => column.Name == "ComparisonExchangeRateId");
-        table.Columns.Should().Contain(column => column.Name == "ComparisonExchangeRate");
-        typeof(AddFinanceSettlementDimensions).GetCustomAttribute<MigrationAttribute>()?.Id
-            .Should().Be("20260831231434_AddFinanceSettlementDimensions");
+        var source = ArchivedMigrationSource.Read("20260831231434_AddFinanceSettlementDimensions.cs");
+        foreach (var token in new[] { "FinanceSettlementDimensionComponents", "SettlementSourceLineId",
+            "OriginatingSourceLineId", "FinanceDimensionSnapshotId", "RoundingResidualFunctionalAmount",
+            "ComparisonExchangeRateId", "ComparisonExchangeRate", "onDelete: ReferentialAction.Restrict",
+            "Migration(\"20260831231434_AddFinanceSettlementDimensions\")" }) source.Should().Contain(token);
     }
 
     private static FinanceSettlementComponentAmountInput Component(

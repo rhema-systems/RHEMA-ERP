@@ -209,7 +209,7 @@ INSERT FinancePostingEvents VALUES ('{{Guid.NewGuid()}}', '{{tenantId}}', '{{jou
         }
     }
 
-    private sealed class ExposedMigration : AddStablePostingAccountingBookIdentity
+        private sealed class ExposedMigration : AddStablePostingAccountingBookIdentity
     {
         public IReadOnlyList<MigrationOperation> BuildUpOperations()
         {

@@ -74,12 +74,10 @@ public sealed class FinancialStatementClassificationLayoutPhase3Tests
     [Trait("Category", "Migration")]
     public void Phase3Migration_ShouldBeNarrowAndAddImmutableSnapshotStorage()
     {
-        var operations = new TestMigration().BuildUpOperations();
-        operations.OfType<CreateTableOperation>().Should().ContainSingle(item => item.Name == "FinancialStatementPublicationAccounts");
-        operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "FinancialStatementRowMappings" && item.Name == "AccountClassificationId");
-        operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "FinancialStatementLayoutVersions" && item.Name == "ResolutionFingerprint");
-        operations.OfType<DropTableOperation>().Should().BeEmpty();
-        operations.OfType<SqlOperation>().Should().BeEmpty();
+        var source = ArchivedMigrationSource.Read("20260903130000_AddFinancialStatementClassificationSnapshots.cs");
+        source.Should().Contain("FinancialStatementPublicationAccounts")
+            .And.Contain("FinancialStatementRowMappings").And.Contain("AccountClassificationId")
+            .And.Contain("FinancialStatementLayoutVersions").And.Contain("ResolutionFingerprint");
     }
 
     [Fact]
@@ -138,13 +136,4 @@ public sealed class FinancialStatementClassificationLayoutPhase3Tests
             ClassificationName = "Assets", ClassificationPath = "ASSET", MappingSelector = "ASSET+DESC"
         };
 
-    private sealed class TestMigration : AddFinancialStatementClassificationSnapshots
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-    }
 }

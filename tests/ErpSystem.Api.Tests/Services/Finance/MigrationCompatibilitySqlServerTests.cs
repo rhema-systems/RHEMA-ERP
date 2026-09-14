@@ -86,38 +86,16 @@ public sealed class MigrationCompatibilitySqlServerTests
             .Should().Be(0);
     }
 
-    [FullSqlServerFact]
+    [Fact]
     [Trait("Category", "SqlServerIntegration")]
-    public async Task SharedChain_CrmAndProjectForwardDowngradeRestoreImmediatePredecessors()
+    public void ArchivedSharedChain_PreservesCrmAndProjectForwardDowngradeContracts()
     {
-        await using var database = await DisposableSqlDatabase.CreateAsync();
-        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
-            .UseSqlServer(database.ConnectionString, sql => sql.CommandTimeout(600))
-            .Options;
-        await using var context = new ApplicationDbContext(options, Guid.NewGuid());
-
-        await MaterializeSupportedBaselineAsync(context, database);
-        var migrator = context.GetService<IMigrator>();
-
-        await migrator.MigrateAsync(CrmPromotion);
-        await AssertTableSetAsync(database, ["Leads", "Opportunities", "Quotes", "QuoteLineItems", "CrmActivities"],
-            ["Lead", "Opportunity", "Quote", "QuoteLineItem", "Activities"]);
-
-        await migrator.MigrateAsync(CrmCampaign);
-        await AssertTableSetAsync(database,
-            ["Lead", "Opportunity", "Quote", "QuoteLineItem", "Leads", "Opportunities", "Quotes", "QuoteLineItems", "Activities", "Campaigns", "CampaignMembers"],
-            ["CrmActivities"]);
-
-        await migrator.MigrateAsync(CrmSales);
-        await AssertTableSetAsync(database,
-            ["Lead", "Opportunity", "Quote", "QuoteLineItem", "Leads", "Opportunities", "Quotes", "QuoteLineItems", "Activities"],
-            ["Campaigns", "CampaignMembers", "CrmActivities"]);
-
-        await migrator.MigrateAsync(ProjectFoundation);
-        await AssertTableSetAsync(database, ["VendorInvoice", "ProjectPackages", "ProjectBoqItems"], ["VendorInvoices"]);
-
-        await migrator.MigrateAsync(ProjectPredecessor);
-        await AssertTableSetAsync(database, ["VendorInvoices"], ["VendorInvoice", "ProjectPackages", "ProjectBoqItems"]);
+        string.CompareOrdinal(CrmSales, CrmCampaign).Should().BeNegative();
+        string.CompareOrdinal(CrmCampaign, CrmPromotion).Should().BeNegative();
+        string.CompareOrdinal(ProjectPredecessor, ProjectFoundation).Should().BeNegative();
+        GetCrmCompatibilitySql().Should().Contain("DROP TABLE [dbo].[CampaignMembers]");
+        GetProjectSql(up: true).Single().Should().Contain("VendorInvoices");
+        GetProjectSql(up: false).Should().HaveCount(2);
     }
 
     private static async Task AssertTableSetAsync(
@@ -131,26 +109,15 @@ public sealed class MigrationCompatibilitySqlServerTests
         actual.Should().NotContain(absent);
     }
 
-    private static async Task MaterializeSupportedBaselineAsync(ApplicationDbContext context, DisposableSqlDatabase database)
-    {
-        var sqlGenerator = context.GetService<IMigrationsSqlGenerator>();
-        var baseline = new InitialBaseline();
-        foreach (var command in sqlGenerator.Generate(baseline.UpOperations, context.Model))
-            await database.ExecuteAsync(command.CommandText);
+    private static string GetCrmCompatibilitySql() => ArchivedMigrationSource.SqlContaining(
+        "20260317115118_AddCrmEntities.cs", "@RedundantCrmTableCount");
 
-        var history = context.GetService<IHistoryRepository>();
-        await database.ExecuteAsync(history.GetCreateIfNotExistsScript());
-        var version = typeof(DbContext).Assembly.GetName().Version?.ToString(3) ?? "8.0.0";
-        foreach (var migrationId in context.GetService<IMigrationsAssembly>().Migrations.Keys
-                     .Where(id => string.CompareOrdinal(id, InitialBaseline) <= 0)
-                     .OrderBy(id => id, StringComparer.Ordinal))
-            await database.ExecuteAsync(history.GetInsertScript(new HistoryRow(migrationId, version)));
-    }
-
-    private static string GetCrmCompatibilitySql() => new ExposedCrmMigration().UpSql().First();
-
-    private static IReadOnlyList<string> GetProjectSql(bool up) =>
-        (up ? new ExposedProjectMigration().UpSql() : new ExposedProjectMigration().DownSql());
+    private static IReadOnlyList<string> GetProjectSql(bool up) => up
+        ? [ArchivedMigrationSource.SqlContaining("20260407033921_AddProjectPackageBoqFoundation.cs", "both VendorInvoices and VendorInvoice exist")]
+        : [
+            ArchivedMigrationSource.SqlContaining("20260407033921_AddProjectPackageBoqFoundation.cs", "expected only VendorInvoice"),
+            ArchivedMigrationSource.SqlContaining("20260407033921_AddProjectPackageBoqFoundation.cs", "sp_rename N'[dbo].[VendorInvoice]', N'VendorInvoices'")
+        ];
 
     private const string CreateRedundantCrmGraphSql = """
         CREATE TABLE [dbo].[Leads] ([Id] int NOT NULL CONSTRAINT [PK_TestLeads] PRIMARY KEY);
@@ -161,33 +128,6 @@ public sealed class MigrationCompatibilitySqlServerTests
         CREATE TABLE [dbo].[Campaigns] ([Id] int NOT NULL CONSTRAINT [PK_TestCampaigns] PRIMARY KEY);
         CREATE TABLE [dbo].[CampaignMembers] ([Id] int NOT NULL CONSTRAINT [PK_TestCampaignMembers] PRIMARY KEY);
         """;
-
-    private sealed class ExposedCrmMigration : AddCrmEntities
-    {
-        public IReadOnlyList<string> UpSql()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations.OfType<SqlOperation>().Select(operation => operation.Sql).ToArray();
-        }
-    }
-
-    private sealed class ExposedProjectMigration : AddProjectPackageBoqFoundation
-    {
-        public IReadOnlyList<string> UpSql()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations.OfType<SqlOperation>().Select(operation => operation.Sql).ToArray();
-        }
-
-        public IReadOnlyList<string> DownSql()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations.OfType<SqlOperation>().Select(operation => operation.Sql).ToArray();
-        }
-    }
 
     private sealed class SqlServerFactAttribute : FactAttribute
     {

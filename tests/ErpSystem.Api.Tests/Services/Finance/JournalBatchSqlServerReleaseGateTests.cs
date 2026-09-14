@@ -97,15 +97,12 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         });
         await context.SaveChangesAsync();
 
-        var migration = new AddFinanceDimensionSourceInfrastructure();
-        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, [builder]);
-        var permissionSql = builder.Operations.OfType<SqlOperation>().Single(operation =>
-            operation.Sql.Contains("Finance.Dimensions.Certification.Manage", StringComparison.Ordinal));
+        var permissionSql = ArchivedMigrationSource.SqlContaining(
+            "20260830193635_AddFinanceDimensionSourceInfrastructure.cs",
+            "Finance.Dimensions.Certification.Manage");
 
-        await context.Database.ExecuteSqlRawAsync(permissionSql.Sql);
-        await context.Database.ExecuteSqlRawAsync(permissionSql.Sql);
+        await context.Database.ExecuteSqlRawAsync(permissionSql);
+        await context.Database.ExecuteSqlRawAsync(permissionSql);
 
         var permission = await context.Permissions.AsNoTracking().SingleAsync(item =>
             item.Name == FinancePermissions.ManageDimensionCertification && !item.IsDeleted);

@@ -157,22 +157,12 @@ public sealed class AccountSegmentIdentityPhase5Tests
     [Fact]
     public void Migration_RemovesOptionalityAndAddsLifecycleConcurrencyAndExactSetIndexes()
     {
-        var operations = new PhaseFiveMigration().BuildUpOperations();
-        operations.OfType<DropColumnOperation>().Should().Contain(item => item.Table == "AccountSegmentStructures" && item.Name == "IsMandatory");
-        operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "AccountSegmentStructures" && item.Name == "RowVersion");
-        operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "AccountSegmentStructures" && item.Name == "LifecycleStatus");
-        operations.OfType<AddCheckConstraintOperation>().Should().ContainSingle(item =>
-            item.Table == "AccountSegmentStructures" && item.Name == "CK_AccountSegmentStructures_LifecycleActive");
-        operations.OfType<SqlOperation>().Should().Contain(item => item.Sql.Contains("Phase 5 preflight failed"));
-        operations.OfType<SqlOperation>().Should().Contain(item => item.Sql.Contains("cross-tenant account/segment lineage"));
-        operations.OfType<SqlOperation>().Should().Contain(item => item.Sql.Contains("wrong-segment lookup lineage"));
-        operations.OfType<AddUniqueConstraintOperation>().Count(item =>
-            item.Name is "AK_Accounts_TenantId_Id" or "AK_AccountSegmentStructures_TenantId_Id" or "AK_SegmentLookupValues_TenantId_Id")
-            .Should().Be(3);
-        operations.OfType<AddForeignKeyOperation>().Count(item =>
-            item.Table == "AccountSegmentValues" && item.Columns.First() == "TenantId")
-            .Should().Be(3);
-        operations.OfType<CreateIndexOperation>().Count(item => item.Table == "AccountSegmentValues" && item.IsUnique).Should().Be(2);
+        var source = ArchivedMigrationSource.Read("20260904003118_AddGovernedAccountSegmentIdentity.cs");
+        foreach (var token in new[] { "IsMandatory", "RowVersion", "LifecycleStatus",
+            "CK_AccountSegmentStructures_LifecycleActive", "Phase 5 preflight failed",
+            "cross-tenant account/segment lineage", "wrong-segment lookup lineage",
+            "AK_Accounts_TenantId_Id", "AK_AccountSegmentStructures_TenantId_Id",
+            "AK_SegmentLookupValues_TenantId_Id", "AccountSegmentValues" }) source.Should().Contain(token);
     }
 
     [Fact]
@@ -183,8 +173,10 @@ public sealed class AccountSegmentIdentityPhase5Tests
             .Options;
         using var context = new ApplicationDbContext(options);
 
-        context.GetService<IMigrationsAssembly>().Migrations.Should()
-            .ContainKey("20260904003118_AddGovernedAccountSegmentIdentity");
+        context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
+            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        ArchivedMigrationSource.Read("20260904003118_AddGovernedAccountSegmentIdentity.cs")
+            .Should().Contain("AddGovernedAccountSegmentIdentity");
     }
 
     [Fact]
@@ -760,11 +752,4 @@ public sealed class AccountSegmentIdentityPhase5Tests
         new() { SegmentStructureId = natural.Id, SegmentPosition = 2, SegmentValue = "6100" }
     ];
 
-    private sealed class PhaseFiveMigration : AddGovernedAccountSegmentIdentity
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Up(builder); return builder.Operations;
-        }
-    }
 }

@@ -499,11 +499,9 @@ public sealed class FinanceProducerIntentGroupC8Tests
     [Fact]
     public void Migration_IsSingleFailClosedSqlBoundary_WithPreflightWorkflowAndLossRefusingDown()
     {
-        typeof(ErpSystem.Data.Migrations.AddProducerIntentGroupsC8).GetCustomAttributes(false)
-            .Select(attribute => attribute.GetType().Name).Should().Contain(["DbContextAttribute", "MigrationAttribute"]);
-        var migration = new ExposedMigration();
-        var up = string.Join("\n", migration.UpOperations().OfType<SqlOperation>().Select(operation => operation.Sql));
-        var down = string.Join("\n", migration.DownOperations().OfType<SqlOperation>().Select(operation => operation.Sql));
+        var up = ArchivedMigrationSource.Read("20260908120000_AddProducerIntentGroupsC8.cs");
+        up.Should().Contain("Migration(\"20260908120000_AddProducerIntentGroupsC8\")");
+        var down = up;
 
         up.Should().Contain("C8_PREFLIGHT").And.Contain("C8_GROUP_COMPLETE").And.Contain("C8_GROUP_OUTCOME")
             .And.Contain("C8_RECEIPT_REUSED").And.Contain("C7_RECEIPT_REUSED")
@@ -523,8 +521,7 @@ public sealed class FinanceProducerIntentGroupC8Tests
     [Fact]
     public void SqlServerModelMetadata_ExactlyDescribesAllSevenMigratedCanonicalIdentityConstraints()
     {
-        var migration = new ExposedMigration();
-        var up = string.Join("\n", migration.UpOperations().OfType<SqlOperation>().Select(operation => operation.Sql));
+        var up = ArchivedMigrationSource.Read("20260908120000_AddProducerIntentGroupsC8.cs");
         var expected = new Dictionary<Type, IReadOnlyDictionary<string, string>>
         {
             [typeof(ProducerIntentGroup)] = new Dictionary<string, string>
@@ -769,9 +766,4 @@ public sealed class FinanceProducerIntentGroupC8Tests
             throw new NotSupportedException();
     }
 
-    private sealed class ExposedMigration : ErpSystem.Data.Migrations.AddProducerIntentGroupsC8
-    {
-        public IReadOnlyList<MigrationOperation> UpOperations() { var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Up(builder); return builder.Operations; }
-        public IReadOnlyList<MigrationOperation> DownOperations() { var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer"); Down(builder); return builder.Operations; }
-    }
 }

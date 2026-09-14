@@ -12,9 +12,7 @@ public sealed class MigrationRehearsalCorrectionTests
     [Trait("Category", "Migration")]
     public void CrmMigration_ReconcilesOnlyACompleteEmptyRedundantGraph()
     {
-        var compatibilitySql = new ExposedCrmMigration().Operations()
-            .OfType<SqlOperation>()
-            .First().Sql;
+        var compatibilitySql = ArchivedMigrationSource.Read("20260317115118_AddCrmEntities.cs");
 
         compatibilitySql.Should().Contain("@RedundantCrmTableCount NOT IN (0, 7)");
         compatibilitySql.Should().Contain("the redundant plural CRM graph contains data");
@@ -28,31 +26,22 @@ public sealed class MigrationRehearsalCorrectionTests
             .Should().BeLessThan(
                 compatibilitySql.IndexOf("DROP TABLE [dbo].[Quotes]", StringComparison.Ordinal));
 
-        var restoredTables = new ExposedCrmMigration().BuildDownOperations()
-            .OfType<CreateTableOperation>()
-            .Select(operation => operation.Name)
-            .ToArray();
-        restoredTables.Should().Contain(["Leads", "QuoteLineItems", "Campaigns", "CampaignMembers"]);
+        foreach (var table in new[] { "Leads", "QuoteLineItems", "Campaigns", "CampaignMembers" })
+            compatibilitySql.Should().Contain(table);
     }
 
     [Fact]
     [Trait("Category", "Migration")]
     public void ProjectFoundationMigration_PreservesVendorInvoicesThroughTheMissingRename()
     {
-        var compatibilitySql = new ExposedProjectFoundationMigration().Operations()
-            .OfType<SqlOperation>()
-            .First().Sql;
+        var compatibilitySql = ArchivedMigrationSource.Read("20260407033921_AddProjectPackageBoqFoundation.cs");
 
         compatibilitySql.Should().Contain("both VendorInvoices and VendorInvoice exist");
         compatibilitySql.Should().Contain(
             "EXEC sys.sp_rename N'[dbo].[VendorInvoices]', N'VendorInvoice'");
 
-        var downSql = new ExposedProjectFoundationMigration().BuildDownOperations()
-            .OfType<SqlOperation>()
-            .Select(operation => operation.Sql)
-            .ToArray();
-        downSql.First().Should().Contain("expected only VendorInvoice");
-        downSql.Last().Should().Contain(
+        compatibilitySql.Should().Contain("expected only VendorInvoice");
+        compatibilitySql.Should().Contain(
             "EXEC sys.sp_rename N'[dbo].[VendorInvoice]', N'VendorInvoices'");
     }
 
@@ -60,19 +49,15 @@ public sealed class MigrationRehearsalCorrectionTests
     [Trait("Category", "Migration")]
     public void CurrentArInvoiceCompatibility_AddsBusinessPartnerColumnInSeparateSqlBatch()
     {
-        var operations = new ExposedCurrentArInvoiceMigration().Operations()
-            .OfType<SqlOperation>()
-            .ToList();
-
-        operations.Should().HaveCountGreaterThan(1);
-        operations[0].Sql.Should().Contain(
+        var source = ArchivedMigrationSource.Read("20260710100000_EnsureCurrentArInvoiceTables.cs");
+        source.Should().Contain(
             "ALTER TABLE [dbo].[Invoices] ADD [BusinessPartnerId] uniqueidentifier NULL");
-        operations[1].Sql.Should().Contain("CREATE TABLE [dbo].[Invoices]");
-        operations[1].Sql.Should().NotContain("[ReferenceNumber],\n                            [Status]");
-        operations[1].Sql.IndexOf(
+        source.Should().Contain("CREATE TABLE [dbo].[Invoices]");
+        source.Should().NotContain("[ReferenceNumber],\n                            [Status]");
+        source.IndexOf(
                 "ALTER TABLE [dbo].[Invoices] ALTER COLUMN [BusinessPartnerId]",
                 StringComparison.Ordinal)
-            .Should().BeLessThan(operations[1].Sql.LastIndexOf(
+            .Should().BeLessThan(source.LastIndexOf(
                 "CREATE INDEX [IX_Invoices_BusinessPartnerId]",
                 StringComparison.Ordinal));
     }
@@ -81,9 +66,7 @@ public sealed class MigrationRehearsalCorrectionTests
     [Trait("Category", "Migration")]
     public void CustomerPaymentCompatibility_UsesOnlyBusinessPartnerModelColumns()
     {
-        var sql = new ExposedCustomerPaymentMigration().Operations()
-            .OfType<SqlOperation>()
-            .Single().Sql;
+        var sql = ArchivedMigrationSource.Read("20260720110000_AlignCustomerPaymentsToBusinessPartners.cs");
 
         sql.Should().Contain("INSERT INTO [dbo].[BusinessPartners]");
         sql.Should().NotContain("[DeletedBy], [ReferenceNumber]");
@@ -110,60 +93,6 @@ public sealed class MigrationRehearsalCorrectionTests
 
         source.Should().Contain("new[] { \"ASSETS\", \"LIABILITIES\", \"EQUITY_ROOT\" }");
         source.Should().NotContain("\"ASSET_ROOT\", \"LIABILITY_ROOT\"");
-    }
-
-    private sealed class ExposedCrmMigration : AddCrmEntities
-    {
-        public IReadOnlyList<MigrationOperation> Operations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-
-        public IReadOnlyList<MigrationOperation> BuildDownOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations;
-        }
-    }
-
-    private sealed class ExposedProjectFoundationMigration : AddProjectPackageBoqFoundation
-    {
-        public IReadOnlyList<MigrationOperation> Operations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-
-        public IReadOnlyList<MigrationOperation> BuildDownOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations;
-        }
-    }
-
-    private sealed class ExposedCurrentArInvoiceMigration : EnsureCurrentArInvoiceTables
-    {
-        public IReadOnlyList<MigrationOperation> Operations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-    }
-
-    private sealed class ExposedCustomerPaymentMigration : AlignCustomerPaymentsToBusinessPartners
-    {
-        public IReadOnlyList<MigrationOperation> Operations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
     }
 
     private static string FindRepositoryFile(params string[] segments)

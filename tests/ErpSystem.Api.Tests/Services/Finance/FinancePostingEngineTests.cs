@@ -1342,9 +1342,7 @@ public sealed class FinancePostingEngineTests
     [Trait("Category", "MultiBookIdentityC1")]
     public void StableBookIdentityMigration_ShouldPreflightBackfillAndCreateBookQualifiedConstraints()
     {
-        var migration = new TestStablePostingAccountingBookIdentityMigration();
-        var operations = migration.BuildUpOperations();
-        var sql = string.Join("\n", operations.OfType<SqlOperation>().Select(operation => operation.Sql));
+        var sql = ArchivedMigrationSource.Read("20260905151918_AddStablePostingAccountingBookIdentity.cs");
 
         sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_JOURNAL");
         sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_TRANSACTION");
@@ -1355,59 +1353,33 @@ public sealed class FinancePostingEngineTests
         sql.Should().Contain("j.TenantId <> t.TenantId");
         sql.Should().Contain("Latin1_General_100_BIN2");
         sql.Should().Contain("DATALENGTH(j.BookClassification)");
-        operations.OfType<AddColumnOperation>().Should().Contain(operation =>
-            operation.Table == "JournalEntries" && operation.Name == "AccountingBookId" && operation.IsNullable);
-        operations.OfType<AddColumnOperation>().Should().Contain(operation =>
-            operation.Table == "FinancePostingEvents" && operation.Name == "RequestFingerprint" && operation.IsNullable);
-        operations.OfType<AlterColumnOperation>().Should().Contain(operation =>
-            operation.Table == "JournalEntries" && operation.Name == "AccountingBookId" && !operation.IsNullable);
-        operations.OfType<CreateIndexOperation>().Should().Contain(operation =>
-            operation.Table == "FinancePostingEvents" && operation.IsUnique
-            && operation.Columns.SequenceEqual(new[] { "TenantId", "AccountingBookId", "IdempotencyKey" }));
-        operations.OfType<AddForeignKeyOperation>().Should().Contain(operation =>
-            operation.Table == "AccountTransactions"
-            && operation.PrincipalTable == "JournalEntries"
-            && operation.Columns.SequenceEqual(new[] { "TenantId", "JournalEntryId", "AccountingBookId" }));
-
-        var downSql = string.Join("\n", migration.BuildDownOperations().OfType<SqlOperation>().Select(operation => operation.Sql));
-        downSql.Should().Contain("C1_BOOK_ID_DOWN_BLOCKED");
-        migration.BuildDownOperations().OfType<CreateIndexOperation>().Should().Contain(operation =>
-            operation.Table == "FinancePostingEvents"
-            && operation.Columns.SequenceEqual(new[] { "TenantId", "IdempotencyKey" }));
+        foreach (var token in new[] { "JournalEntries", "AccountingBookId", "FinancePostingEvents",
+            "RequestFingerprint", "TenantId", "IdempotencyKey", "AccountTransactions", "JournalEntryId",
+            "C1_BOOK_ID_DOWN_BLOCKED" }) sql.Should().Contain(token);
 
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=C1MigrationDiscovery;Trusted_Connection=True")
             .Options;
         using var discoveryContext = new ApplicationDbContext(options);
-        discoveryContext.GetService<IMigrationsAssembly>().Migrations.Should()
-            .ContainKey("20260905151918_AddStablePostingAccountingBookIdentity");
+        discoveryContext.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
+            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
     }
 
     [Fact]
     [Trait("Category", "FinanceDimensions")]
     public void Migration_ShouldAddDimensionFoundationAndNullablePostedLineLinkage()
     {
-        var migration = new TestFinanceDimensionsMigration();
-        var operations = migration.BuildUpOperations();
-
-        operations.OfType<CreateTableOperation>().Select(x => x.Name).Should().BeEquivalentTo(new[]
+        var source = ArchivedMigrationSource.Read("20260824190000_AddFinanceTransactionDimensions.cs");
+        foreach (var token in new[]
         {
             "FinanceDimensionDefinitions",
             "FinanceDimensionValues",
             "FinanceDimensionSets",
             "FinanceDimensionSetItems",
-            "FinanceDimensionAccountRules"
-        });
-        operations.OfType<AddColumnOperation>().Should().ContainSingle(x =>
-            x.Table == "AccountTransactions" && x.Name == "FinanceDimensionSetId" && x.IsNullable);
-        operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(x =>
-            x.Table == "AccountTransactions"
-            && x.PrincipalTable == "FinanceDimensionSets"
-            && x.OnDelete == ReferentialAction.Restrict);
-
-        var down = migration.BuildDownOperations();
-        down.OfType<DropColumnOperation>().Should().ContainSingle(x =>
-            x.Table == "AccountTransactions" && x.Name == "FinanceDimensionSetId");
+            "FinanceDimensionAccountRules",
+            "AccountTransactions", "FinanceDimensionSetId", "FinanceDimensionSets",
+            "onDelete: ReferentialAction.Restrict", "migrationBuilder.DropColumn"
+        }) source.Should().Contain(token);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -1420,39 +1392,6 @@ public sealed class FinancePostingEngineTests
         return new ApplicationDbContext(options);
     }
 
-    private sealed class TestFinanceDimensionsMigration : AddFinanceTransactionDimensions
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-
-        public IReadOnlyList<MigrationOperation> BuildDownOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations;
-        }
-    }
-
-    private sealed class TestStablePostingAccountingBookIdentityMigration : AddStablePostingAccountingBookIdentity
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-
-        public IReadOnlyList<MigrationOperation> BuildDownOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations;
-        }
-    }
 
     private static FinancePostingEngine CreateService(
         ApplicationDbContext db,

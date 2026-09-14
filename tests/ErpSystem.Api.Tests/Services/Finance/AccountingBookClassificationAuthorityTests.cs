@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance.Settings;
+using System.Reflection;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
@@ -942,16 +943,22 @@ public sealed class AccountingBookClassificationAuthorityTests
     [Fact]
     public void Migration_ContainsOnlyPhase1ABookClassificationOperations()
     {
-        var operations = new TestMigration().BuildUpOperations();
+        var source = ArchivedMigrationSource.Read("20260903044911_FinanceBookClassificationFoundation.cs");
 
-        operations.OfType<CreateTableOperation>().Should().ContainSingle(item => item.Name == "AccountClassifications");
-        operations.OfType<AddColumnOperation>().Select(item => $"{item.Table}.{item.Name}").Should().BeEquivalentTo(
-            "AccountAccountingBooks.AccountClassificationId",
-            "AccountAccountingBooks.RowVersion");
-        operations.OfType<AddColumnOperation>().Should().NotContain(column =>
-            column.Table == "AssetDisposals"
-            || column.Table == "AssetDepreciationSchedules"
-            || column.Table == "FinanceSourceDimensionAssignments");
+        source.Should().Contain("migrationBuilder.CreateTable(").And.Contain("name: \"AccountClassifications\"");
+        source.Should().Contain("name: \"AccountClassificationId\",\n                table: \"AccountAccountingBooks\"");
+        source.Should().Contain("name: \"RowVersion\",\n                table: \"AccountAccountingBooks\"");
+        source.Should().NotContain("AssetDisposals");
+        source.Should().NotContain("AssetDepreciationSchedules");
+        source.Should().NotContain("FinanceSourceDimensionAssignments");
+
+        var baseline = new DisposableDevelopmentCurrentModelBaseline();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        typeof(DisposableDevelopmentCurrentModelBaseline)
+            .GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(baseline, [builder]);
+        builder.Operations.OfType<CreateTableOperation>()
+            .Should().ContainSingle(item => item.Name == "AccountClassifications");
     }
 
     private static ApplicationDbContext CreateContext() => new(
@@ -1046,30 +1053,22 @@ public sealed class AccountingBookClassificationAuthorityTests
         return classification;
     }
 
-    private sealed class TestMigration : FinanceBookClassificationFoundation
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-    }
-
-    private sealed class CardinalityMigration : EnforceFinanceClassificationSystemRoleCardinality
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-    }
-
     [Fact]
     public void CardinalityMigration_AddsFilteredSingletonRoleConstraint()
     {
-        var index = new CardinalityMigration().BuildUpOperations().OfType<CreateIndexOperation>().Single();
+        var source = ArchivedMigrationSource.Read(
+            "20260903120000_EnforceFinanceClassificationSystemRoleCardinality.cs");
+        source.Should().Contain("IX_AccountClassifications_TenantId_AccountingBookId_SystemRole");
+        source.Should().Contain(
+            "[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
+
+        var baseline = new DisposableDevelopmentCurrentModelBaseline();
+        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
+        typeof(DisposableDevelopmentCurrentModelBaseline)
+            .GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .Invoke(baseline, [builder]);
+        var index = builder.Operations.OfType<CreateIndexOperation>().Single(item =>
+            item.Name == "IX_AccountClassifications_TenantId_AccountingBookId_SystemRole");
         index.IsUnique.Should().BeTrue();
         index.Filter.Should().Be(
             "[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");

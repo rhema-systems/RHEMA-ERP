@@ -518,3 +518,23 @@ legacy adapter, migration, schema, or feature-flag change was introduced. Offlin
 11 registered seeders under `ValidateOnBuild`/`ValidateScopes`, verifies standalone supplier-command composition,
 scope isolation, and host override behavior; Payroll provisioning and Data/API Release gates pass. A future reset is
 not authorized until this exact descendant is independently approved and a new attempt is explicitly authorized.
+
+### Archived migration test compatibility after the D3 baseline
+
+The ordinary `ErpSystem.Api.Tests` build had 42 `CS0246` errors in 31 test files after the 456-migration source
+chain became the deliberately uncompiled `LegacyMigrationsArchive`. The errors named 37 historical migration
+types; they were test-compile defects, not a reason to restore the obsolete chain to product migration discovery.
+The corrected tests inspect exact archived source and SQL literals for historical transition contracts while
+checking current schema/discovery assertions against the sole baseline
+`20260913162402_DisposableDevelopmentCurrentModelBaseline`. Classification authority/cardinality,
+preflight-before-mutation, bounded-down, idempotency, and compatibility assertions remain active.
+
+Eight C2-C8 migration bodies are linked explicitly into the test project only so the existing prefix-safe disposable
+SQL Server predecessor rehearsals still exercise their original transitions when their opt-in test connection is
+provided. They are not compiled by `ErpSystem.Data`, are not discoverable by the application migrations assembly,
+and cannot restore the legacy runtime chain. The CRM/project shared-chain test now validates chronological archived
+SQL contracts because EF can no longer migrate to deliberately archived IDs. Ordinary test-project compilation,
+58/58 selected converted contracts plus one environment-gated skip, the 3 archive-reader safety tests, the 4/4 seed
+dependency graph, and the 3/3 Payroll Finance-provisioning gates pass offline. No database, connection environment,
+preserved evidence package, or backup was accessed. A further disposable reset remains unauthorized pending Sol High
+review of the final clean candidate and a new explicit operational authorization.

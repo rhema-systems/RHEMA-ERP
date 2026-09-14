@@ -11,13 +11,12 @@ public sealed class FinanceProducerIntentC7MigrationTests
     [Fact]
     public void UpIsFailClosedAndAddsDecisionAndReceiptEvidence()
     {
-        var operations = Migration().UpOperations();
-        operations.First().Should().BeOfType<SqlOperation>().Which.Sql.Should().Contain("C7_PREFLIGHT");
-        operations.OfType<AddColumnOperation>().Select(item => item.Name).Should().BeEquivalentTo(
-            "ProducerDecisionStatus", "ProducerParticipantIdentity", "ProducerDecidedByUserId",
-            "ProducerDecidedAtUtc", "ProducerDecisionReason", "ProducerIntentSnapshotJson", "ProducerIntentSnapshotHash");
-        var sql = string.Join('\n', operations.OfType<SqlOperation>().Select(item => item.Sql));
-        operations.OfType<CreateTableOperation>().Should().ContainSingle(item => item.Name == "AccountingEventProducerReceipts");
+        var sql = Source();
+        sql.Should().Contain("C7_PREFLIGHT");
+        foreach (var column in new[] { "ProducerDecisionStatus", "ProducerParticipantIdentity", "ProducerDecidedByUserId",
+            "ProducerDecidedAtUtc", "ProducerDecisionReason", "ProducerIntentSnapshotJson", "ProducerIntentSnapshotHash" })
+            sql.Should().Contain($"name: \"{column}\"");
+        sql.Should().Contain("name: \"AccountingEventProducerReceipts\"");
         sql.Should().Contain("TR_AccountingEvents_C7ProducerDecision")
             .And.Contain("C7_MAKER_CHECKER").And.Contain("C7_DECISION_IMMUTABLE")
             .And.Contain("C7_EXECUTION_GATE").And.Contain("C7_INSERT_STATE")
@@ -28,35 +27,22 @@ public sealed class FinanceProducerIntentC7MigrationTests
     [Fact]
     public void DownRefusesEvidenceLossBeforeColumnsAreRemoved()
     {
-        var operations = Migration().DownOperations();
-        operations.First().Should().BeOfType<SqlOperation>().Which.Sql.Should().Contain("C7_DOWN_REFUSED");
-        operations.OfType<DropColumnOperation>().Should().HaveCount(7);
-        operations.OfType<DropTableOperation>().Should().ContainSingle(item => item.Name == "AccountingEventProducerReceipts");
+        var source = Source();
+        source.Should().Contain("C7_DOWN_REFUSED")
+            .And.Contain("migrationBuilder.DropTable(")
+            .And.Contain("AccountingEventProducerReceipts");
+        foreach (var column in new[] { "ProducerDecisionStatus", "ProducerParticipantIdentity", "ProducerDecidedByUserId",
+            "ProducerDecidedAtUtc", "ProducerDecisionReason", "ProducerIntentSnapshotJson", "ProducerIntentSnapshotHash" })
+            source.Should().Contain(column);
     }
 
     [Fact]
     public void MigrationHasExecutableDiscoveryMetadata()
     {
-        typeof(AddProducerIntentStagingC7).GetCustomAttributes(false).Select(item => item.GetType().Name)
+        Source().Should().Contain("Migration(\"20260907190000_AddProducerIntentStagingC7\")");
+        typeof(DisposableDevelopmentCurrentModelBaseline).GetCustomAttributes(false).Select(item => item.GetType().Name)
             .Should().Contain(["DbContextAttribute", "MigrationAttribute"]);
     }
 
-    private static ExposedMigration Migration() => new();
-
-    private sealed class ExposedMigration : AddProducerIntentStagingC7
-    {
-        public IReadOnlyList<MigrationOperation> UpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-
-        public IReadOnlyList<MigrationOperation> DownOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations;
-        }
-    }
+    private static string Source() => ArchivedMigrationSource.Read("20260907190000_AddProducerIntentStagingC7.cs");
 }

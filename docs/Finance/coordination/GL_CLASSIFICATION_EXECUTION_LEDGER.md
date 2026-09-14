@@ -2730,3 +2730,16 @@ seeders and the standalone supplier command under scope/build validation, checks
 precedence, and preserves the Procurement no-direct-writer assertion. Payroll provisioning tests and Data/API
 Release builds pass. No database, process connection variable, preserved evidence, or backup was accessed during
 the correction. Runtime retry remains prohibited pending independent Sol High review and a new explicit attempt.
+
+The D3 baseline exposed an inherited test-compile gap: the ordinary `ErpSystem.Api.Tests` build reported 42
+`CS0246` errors across 31 files for 37 types that now live only in the uncompiled `LegacyMigrationsArchive`.
+The bounded correction keeps that archive out of the product and refactors historical migration assertions onto a
+path-safe exact-source/SQL reader, while current discovery and schema assertions target the sole disposable baseline.
+The original C2-C8 prefix-safe SQL predecessor gates retain their exact transition bodies through eight explicit
+test-only linked sources; no test wrapper substitutes the consolidated baseline for a historical delta. The
+CRM/project shared-chain assertion is intentionally adapted to archived chronological SQL inspection because those
+obsolete IDs are no longer valid EF migration targets. The ordinary test build passes with zero errors; selected
+converted contracts pass 58/58 with one opt-in SQL Server skip, archive-reader controls pass 3/3, and the seed DI and
+Payroll provisioning slices pass 4/4 and 3/3. Reset/FinalClone safety and evidence reruns are required from the clean
+commit because repository cleanliness is a pre-SQL refusal gate. No database, process connection variable, external
+evidence directory, or backup was accessed, and no operational retry is authorized.

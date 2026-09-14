@@ -311,28 +311,12 @@ public sealed class AccountBookCurrencyPolicyServiceTests
     [Fact]
     public void Migration_CreatesBookScopedPolicyEvidenceAndRetiresLegacyBoolean()
     {
-        var operations = new PhaseFourMigration().BuildUpOperations();
-
-        operations.OfType<CreateTableOperation>().Should().ContainSingle(item => item.Name == "AccountBookCurrencyPolicies");
-        operations.OfType<CreateTableOperation>().Should().ContainSingle(item => item.Name == "FxRevaluationRateUsages");
-        operations.OfType<DropColumnOperation>().Should().ContainSingle(item =>
-            item.Table == "AccountCurrencyLinks" && item.Name == "RevaluationRequired");
-        operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "FxRevaluationBatches" && item.Name == "AccountingBookId");
-        operations.OfType<AddColumnOperation>().Should().Contain(item => item.Table == "FxRevaluationLines" && item.Name == "AccountClassificationCode");
-        operations.OfType<CreateIndexOperation>().Should().Contain(item =>
-            item.Table == "AccountBookCurrencyPolicies" && item.IsUnique && item.Filter!.Contains("[IsDeleted] = 0"));
-        operations.OfType<CreateIndexOperation>().Should().Contain(item =>
-            item.Table == "FxRevaluationRateUsages" && item.IsUnique
-            && item.Columns.Contains("PostingEventId") && item.Columns.Contains("ExchangeRateId")
-            && item.Filter == null);
-        operations.OfType<AddColumnOperation>().Should().Contain(item =>
-            item.Table == "AuditLogs" && item.Name == "IdempotencyKey" && item.MaxLength == 450);
-        operations.OfType<CreateIndexOperation>().Should().Contain(item =>
-            item.Table == "AuditLogs" && item.IsUnique && item.Columns.Contains("IdempotencyKey")
-            && item.Filter == "[IdempotencyKey] IS NOT NULL");
-        operations.OfType<SqlOperation>().Select(item => item.Sql).Should().Contain(item =>
-            item.Contains("Phase 4 preflight failed", StringComparison.Ordinal)
-            && item.Contains("RevaluationRequired", StringComparison.Ordinal));
+        var source = ArchivedMigrationSource.Read("20260903190453_AddBookScopedFxRevaluationPolicy.cs");
+        foreach (var token in new[] { "AccountBookCurrencyPolicies", "FxRevaluationRateUsages",
+            "RevaluationRequired", "FxRevaluationBatches", "AccountingBookId",
+            "FxRevaluationLines", "AccountClassificationCode", "PostingEventId", "ExchangeRateId",
+            "AuditLogs", "IdempotencyKey", "maxLength: 450", "[IdempotencyKey] IS NOT NULL",
+            "Phase 4 preflight failed" }) source.Should().Contain(token);
     }
 
     [Fact]
@@ -343,7 +327,9 @@ public sealed class AccountBookCurrencyPolicyServiceTests
             .Options);
 
         db.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Contain("20260903190453_AddBookScopedFxRevaluationPolicy");
+            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        ArchivedMigrationSource.Read("20260903190453_AddBookScopedFxRevaluationPolicy.cs")
+            .Should().Contain("class AddBookScopedFxRevaluationPolicy");
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -516,13 +502,4 @@ public sealed class AccountBookCurrencyPolicyServiceTests
         }
     }
 
-    private sealed class PhaseFourMigration : AddBookScopedFxRevaluationPolicy
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-    }
 }
