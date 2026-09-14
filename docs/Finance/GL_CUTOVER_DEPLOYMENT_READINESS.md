@@ -10,15 +10,20 @@ definitions, five active functions, and one active view. C6/C7/C8 remain false. 
 did not access a database or any preserved evidence/backup. Independent Sol High review of the resulting merge
 commit is required before it can replace the reviewed attempt-11 execution commit or authorize any new operation.
 
-D3 status: authorized attempt 11 executed exact Sol-High-approved commit
+D3 historical status: authorized attempt 11 executed exact Sol-High-approved commit
 `008e29ee0427620f62a21d89b24a98d2af43ddc4`, tree
 `4fa31991cadb4a55ea143f036b45410279d52cc2`, and completed `PASS` / `COMPLETE`. The current local disposable
-`RhemaERP` has the exact one-row current-model baseline, two successful seed passes, byte-identical canonical
+`RhemaERP` has that candidate's exact one-row baseline, two successful seed passes, byte-identical canonical
 Finance invariants, DBCC PASS, GLF003 zero, and the complete 459-trigger plus function/view governance surface.
-Its C6/C7/C8 process flags remain false. External attempt evidence and verified recovery backups from attempts
-01-11 remain preserved and must not be changed. The next checkpoint is independent Sol High review of the final
-attempt-11 evidence/readiness record; enabling any Finance feature flag or performing another database mutation
-requires separate explicit authorization.
+Its C6/C7/C8 process flags remain false. That local database does **not** contain the later merged baseline body:
+the merged repository deliberately retains the same migration identity while its regenerated baseline now represents
+1,629 tables and 493 triggers. EF's no-pending-model check compares the current model with the current compiled
+snapshot; it cannot prove that an already-applied row bearing the same migration ID executed this newer baseline
+content. The local database is therefore not accepted as the merged integration model or activation-ready. A newly
+authorized disposable reset from the exact independently approved merged candidate must prove the 1,629-table /
+493-trigger surface and all reset, seed, invariant, DBCC, and evidence gates before staged activation can proceed.
+External attempt evidence and verified recovery backups from attempts 01-11 remain preserved and must not be changed.
+Enabling any Finance feature flag or performing another database mutation requires separate explicit authorization.
 
 Historical Stage B5 frozen integrated candidate: `cbc0d3c91142c63c4ea40f08f11d633752268367`
 

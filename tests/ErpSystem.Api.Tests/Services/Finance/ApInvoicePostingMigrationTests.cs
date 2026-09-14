@@ -925,7 +925,76 @@ public sealed class ApInvoicePostingMigrationTests
 
         retried.JournalEntryId.Should().Be(first.JournalEntryId);
         (await db.FinanceBudgetReservations.CountAsync()).Should().Be(1);
+        (await db.FinancePostingEvents.CountAsync(posting =>
+            posting.SourceDocumentType == "VendorInvoice" &&
+            posting.SourceDocumentId == fixture.Invoice.Id &&
+            posting.PostingAction == "Post")).Should().Be(1);
+        (await db.AuditLogs.CountAsync(audit =>
+            audit.Action == FinanceAuditEvents.ApInvoiceDuplicatePostingAttempt)).Should().Be(1);
         retryCommitments.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("extra")]
+    [InlineData("wrong-event")]
+    [InlineData("wrong-journal")]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task BudgetControlledPostingRetry_ShouldRejectInconsistentConsumedEvidence(string defect)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var budgetEntry = await SeedBudgetEntryAsync(db, fixture);
+        var postingEventId = Guid.NewGuid();
+        var journalEntryId = Guid.NewGuid();
+        var bookId = await db.AccountingBooks.Where(book => book.TenantId == tenantId)
+            .Select(book => book.Id).SingleAsync();
+        db.FinancePostingEvents.Add(new FinancePostingEvent
+        {
+            Id = postingEventId,
+            TenantId = tenantId,
+            SourceModule = "AP",
+            SourceDocumentType = "VendorInvoice",
+            SourceDocumentId = fixture.Invoice.Id,
+            PostingAction = "Post",
+            PostingStatus = "Posted",
+            JournalEntryId = journalEntryId,
+            PostingDate = fixture.Invoice.InvoiceDate,
+            AccountingBookId = bookId,
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = "GHS"
+        });
+
+        if (defect != "missing")
+        {
+            db.FinanceBudgetReservations.Add(ConsumedReservation(
+                tenantId,
+                fixture.Invoice.Id,
+                budgetEntry.Id,
+                defect == "wrong-event" ? Guid.NewGuid() : postingEventId,
+                defect == "wrong-journal" ? Guid.NewGuid() : journalEntryId));
+        }
+        if (defect == "extra")
+        {
+            db.FinanceBudgetReservations.Add(ConsumedReservation(
+                tenantId,
+                fixture.Invoice.Id,
+                Guid.NewGuid(),
+                postingEventId,
+                journalEntryId));
+        }
+        await db.SaveChangesAsync();
+        var commitments = new Mock<IFinanceBudgetCommitmentService>(MockBehavior.Strict);
+        var (service, _) = CreateService(db, tenantId, budgetCommitments: commitments.Object);
+
+        var action = () => service.PostAsync(fixture.Invoice.Id);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*missing or has inconsistent consumed Finance budget evidence*");
+        commitments.VerifyNoOtherCalls();
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -1407,6 +1476,30 @@ public sealed class ApInvoicePostingMigrationTests
         await db.SaveChangesAsync();
         return budgetEntry;
     }
+
+    private static FinanceBudgetReservation ConsumedReservation(
+        Guid tenantId,
+        Guid invoiceId,
+        Guid budgetEntryId,
+        Guid postingEventId,
+        Guid journalEntryId) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = tenantId,
+        BudgetEntryId = budgetEntryId,
+        SourceDocumentType = "VendorInvoice",
+        SourceDocumentId = invoiceId,
+        Status = "Consumed",
+        ReservationVersion = 2,
+        EvaluationHash = new string('C', 64),
+        CurrencyCode = "GHS",
+        TransactionCurrencyCode = "GHS",
+        ReservedByUserId = Guid.NewGuid(),
+        ReservedAt = DateTime.UtcNow,
+        ConsumedAt = DateTime.UtcNow,
+        JournalEntryId = journalEntryId,
+        PostingEventId = postingEventId
+    };
 
     private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")
     {

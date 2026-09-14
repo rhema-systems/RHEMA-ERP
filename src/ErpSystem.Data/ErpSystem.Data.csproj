@@ -30,10 +30,11 @@
 
   <ItemGroup>
     <!--
-      The pre-reset 456-migration chain is retained byte-for-byte for audit and
-      recovery analysis, but it is intentionally not part of the compiled EF
-      migration assembly. Only the current-model baseline under Migrations is
-      executable. Future migrations are scaffolded normally after that baseline.
+      The merged pre-baseline archive retains 596 exact historical migration
+      identities for audit and recovery analysis, but it is intentionally not part
+      of the compiled EF migration assembly. Only the true merged current-model
+      baseline under Migrations is executable. Future migrations are scaffolded
+      normally after that baseline.
     -->
     <Compile Remove="LegacyMigrationsArchive\**\*.cs" />
   </ItemGroup>

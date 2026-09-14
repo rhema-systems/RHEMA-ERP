@@ -5,6 +5,10 @@ integrated with exact latest-master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954` a
 Its regenerated single baseline represents the merged model and retains 596 archived migration identities,
 493 active triggers, five functions, and one view. This integration did not access a database and does not authorize
 production/final cutover or C6/C7/C8 activation; independent review and separate operator gates remain mandatory.
+The local database proven by attempt 11 still contains the older 1,557-table / 459-trigger baseline body under the
+same migration ID. EF no-pending-model cannot detect that applied-body mismatch, so a newly authorized disposable
+reset from the independently approved merged candidate must prove the merged 1,629-table / 493-trigger model before
+staged activation.
 
 Stage A.1 exact base: `7bc24b22c0624aec9acae580ba8049d5f5a83425`
 

@@ -2453,18 +2453,31 @@ namespace ErpSystem.Api.Services.Finance.AP
                     .GetQueryable(row => row.TenantId == TenantId && !row.IsDeleted
                         && row.SourceDocumentType == VendorInvoiceBudgetSource
                         && row.SourceDocumentId == invoice.Id
-                        && row.Status == "Consumed"
-                        && row.JournalEntryId == durablePosting.JournalEntryId
-                        && row.PostingEventId == durablePosting.Id)
+                        && row.Status == "Consumed")
                     .AsNoTracking()
-                    .Select(row => row.BudgetEntryId)
-                    .Distinct()
-                    .OrderBy(id => id)
+                    .Select(row => new
+                    {
+                        row.Id,
+                        row.BudgetEntryId,
+                        row.JournalEntryId,
+                        row.PostingEventId
+                    })
                     .ToArrayAsync(cancellationToken);
-                if (!consumed.SequenceEqual(expectedBudgetEntryIds))
+                var orderedConsumed = consumed
+                    .OrderBy(row => row.BudgetEntryId)
+                    .ThenBy(row => row.Id)
+                    .ToArray();
+                if (orderedConsumed.Length != expectedBudgetEntryIds.Length ||
+                    !orderedConsumed.Select(row => row.BudgetEntryId).SequenceEqual(expectedBudgetEntryIds) ||
+                    orderedConsumed.Any(row => row.JournalEntryId != durablePosting.JournalEntryId ||
+                                               row.PostingEventId != durablePosting.Id))
                     throw new InvalidOperationException(
-                        "The posted AP invoice is missing its consumed Finance budget evidence.");
-                return Array.Empty<Guid>();
+                        "The posted AP invoice is missing or has inconsistent consumed Finance budget evidence.");
+
+                // A duplicate posting request must carry the same Finance-owned reservation identity
+                // and source type as the first request. The posting engine can then prove exact
+                // fingerprint equivalence before returning the durable event without re-consuming.
+                return orderedConsumed.Select(row => row.Id).OrderBy(id => id).ToArray();
             }
 
             if (invoice.JournalEntryId.HasValue)

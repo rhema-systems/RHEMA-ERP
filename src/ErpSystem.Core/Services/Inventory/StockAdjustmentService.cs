@@ -1405,7 +1405,9 @@ public class StockAdjustmentService : IStockAdjustmentService
         if (adjustment.ReasonCode == StockAdjustmentReasonCodes.InitialStock && warehouse.IsConsignmentWarehouse)
             throw new InvalidOperationException("Opening stock can be loaded only into an owned, non-consignment warehouse.");
         var fifoPlans = new Dictionary<(Guid ItemId, Guid WarehouseId, Guid LocationId), StockAdjustmentFifoDraftPlan>();
-        var firstLineTime = deterministicCreatedAtUtc ?? DateTime.UtcNow;
+        var firstLineTime = deterministicCreatedAtUtc.HasValue
+            ? EnsureUtc(deterministicCreatedAtUtc.Value)
+            : DateTime.UtcNow;
         var lineIndex = 0;
         foreach (var input in requests)
         {
@@ -1472,7 +1474,7 @@ public class StockAdjustmentService : IStockAdjustmentService
                     : $"A server-derived inventory cost is required for {inventoryItem.ItemCode}.");
             var line = new StockAdjustmentItem
             {
-                Id = preassignedItemIds?[lineIndex++] ?? Guid.NewGuid(),
+                Id = preassignedItemIds?[lineIndex] ?? Guid.NewGuid(),
                 TenantId = adjustment.TenantId,
                 CreatedAt = lineTime,
                 AdjustmentId = adjustment.Id,
@@ -1495,8 +1497,6 @@ public class StockAdjustmentService : IStockAdjustmentService
                 InventoryItem = inventoryItem,
                 Location = location
             };
-            if (deterministicCreatedAtUtc.HasValue)
-                line.CreatedAt = EnsureUtc(deterministicCreatedAtUtc.Value);
             adjustment.Items.Add(line);
             adjustment.TotalAdjustmentValue += line.AdjustmentValue;
             lineIndex++;

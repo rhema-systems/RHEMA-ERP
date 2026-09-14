@@ -25,11 +25,28 @@ operator authorization gates.
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
 | Review status | Semantic merge candidate is under offline gate reconciliation; independent Sol High approval is required; deployment and C6/C7/C8 activation remain `NO-GO` |
 | Connectivity state | No database, environment connection, preserved evidence, or backup was accessed during latest-master integration; attempt-11 runtime facts remain historical and unchanged |
+| Applied-baseline state | Attempt 11 proved the older 1,557-table / 459-trigger baseline body under the same migration ID; it does not prove the merged 1,629-table / 493-trigger baseline body |
 
 The merged baseline now represents the latest-master model while retaining 596 exact archived migration identities,
 386 current-model plus 92 active non-model triggers, the separate 15-trigger C5-C8 set (493 unique total), 108
 chronological patches, five functions, and one view. The exact reviewed D3 snapshot blob remains in the archive and
 only the regenerated merged snapshot is compiled. C6/C7/C8 remain false.
+
+The unchanged migration identity is not evidence that the local attempt-11 database contains the regenerated merged
+baseline body. EF no-pending-model compares the repository model and compiled snapshot; it cannot inspect which SQL
+body was previously applied for an existing history ID. Staged activation therefore remains `NO-GO` until a newly
+authorized disposable reset from the exact independently approved merged candidate proves 1,629 user tables, 493
+active triggers, the complete merged governance surface, seed-pass identity, Finance invariants, DBCC, and the bound
+evidence package. The attempt-11 database, evidence, logs, and backups remain preserved historical artifacts.
+
+The bounded post-merge correction removes the disposal Stock Adjustment preassigned-ID double increment and proves
+two FIFO lines retain their exact caller-assigned IDs, order, valuation, and deterministic timestamps. It also makes
+an AP duplicate post carry the exact Finance-consumed reservation IDs from the durable posting event and journal,
+preserving the original `VendorInvoice` budget source and canonical posting fingerprint without re-reserving or
+re-consuming. Missing, extra, wrong-event, and wrong-journal consumed evidence fails closed. Focused gates passed
+27 Stock Adjustment valuation tests, 44 Inventory disposal/posting tests, 33 AP invoice posting tests, and 62 posting
+engine tests; the ordinary API-test build completed with zero errors. No database, connection environment, preserved
+evidence, or activation flag was accessed.
 
 ## Authoritative inputs
 

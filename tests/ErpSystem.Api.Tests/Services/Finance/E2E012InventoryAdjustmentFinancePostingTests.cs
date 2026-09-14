@@ -195,7 +195,7 @@ public sealed class E2E012InventoryAdjustmentFinancePostingTests
         var action = () => Service(context, engine.Object).PostAsync(adjustment);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("*approved, immutable INITIAL_STOCK evidence*");
+            .WithMessage("*immutable INITIAL_STOCK evidence*approved*");
         engine.VerifyNoOtherCalls();
     }
 
