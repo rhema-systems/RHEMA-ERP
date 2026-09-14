@@ -28,7 +28,12 @@ declares them in the current model. All 675 are present within 835 current-model
 Only isolated final trigger-patch fragments are emitted from mixed operations, eliminating predecessor constraint
 drops, warehouse backfill, redundant Stock Adjustment column changes, and Physical Count constraint downgrade.
 Generated zero-to-current SQL passes TSql160 grammar and preserves the exact 493-trigger/five-function/one-view/108-
-patch authority. This correction awaits independent Sol High review. Activation and any operational retry remain
+patch authority. Follow-up fail-closed audit implementation `9d78e942cefa67bb2a16a0cdf4bd4717b01dd732`, tree
+`3647cd72df1143969cad7ba96fccfa36b531a5b2`, now binds all 870 exact ordered check-lifecycle events and rejects
+malformed, removed, duplicated, reordered, ambiguous, or unclassified check authority. Every retained trigger patch
+also binds the full normalized source-operation hash, exact transformation marker/boundary, and retained-fragment
+hash; source-prefix, marker, boundary, and fragment tampering all refuse deterministic verification. This correction
+awaits independent Sol High review. Activation and any operational retry remain
 `NO-GO`; another reset requires fresh explicit authorization after review, followed by independent merged-model and
 smoke verification before any separately gated sequential feature activation.
 

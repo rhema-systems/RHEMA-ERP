@@ -3,8 +3,9 @@
 Status: **attempt-13 zero-to-current lifecycle correction — independent review required; reset retry, deployment,
 and feature activation are not authorized**
 
-Current correction implementation: `6995b944aa27e68094b4e35f92afa52d8242d2cc`, tree
-`b66d0dfe4dc2e95ab576b4e725e4e6ca7b3891e7`, atop the exact attempt-13 operational base
+Current correction implementation: `9d78e942cefa67bb2a16a0cdf4bd4717b01dd732`, tree
+`3647cd72df1143969cad7ba96fccfa36b531a5b2`, atop lifecycle implementation
+`6995b944aa27e68094b4e35f92afa52d8242d2cc` and the exact attempt-13 operational base
 `22789f39e550f24bd1ed6197821de4ebc0541bdd`. The merged model retains one true zero-to-current baseline, 596
 archived migration identities, 493 active trigger definitions, five active functions, one active view, and 675
 exact archived-final check constraints within 835 current-model checks. C6/C7/C8 remain false. This correction did
@@ -23,7 +24,11 @@ EF model and emits only the exact trigger-definition fragment from each selected
 675/675 archived-final check name/definition set is present with zero missing and zero drift; generated SQL contains
 no predecessor-dependent top-level constraint drop, warehouse backfill, redundant Stock Adjustment column alter,
 or Physical Count constraint downgrade. Offline zero-to-current SQL passes TSql160 grammar and retains exactly 493
-triggers, five functions, one view, and 108 ordered patches.
+triggers, five functions, one view, and 108 ordered patches. The inspector now records 870 exact ordered lifecycle
+events and refuses malformed, removed, duplicated, reordered, ambiguous, or otherwise unclassified check authority.
+Patch provenance binds the full normalized source operation plus the exact retained fragment, marker, transformation,
+and deterministic boundary; mutation self-tests prove that source-prefix, marker, boundary, and fragment tampering
+cannot pass generation or deterministic verification.
 
 D3 historical status: authorized attempt 11 executed exact Sol-High-approved commit
 `008e29ee0427620f62a21d89b24a98d2af43ddc4`, tree

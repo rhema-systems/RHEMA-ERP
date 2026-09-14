@@ -13,7 +13,7 @@ operator authorization gates.
 | Field | Value |
 |---|---|
 | Phase | Attempt-13 zero-to-current lifecycle correction review |
-| Status | Attempt 13 stopped fail-closed at `APPLY_MIGRATIONS`; correction implementation `6995b944aa27e68094b4e35f92afa52d8242d2cc`, tree `b66d0dfe4dc2e95ab576b4e725e4e6ca7b3891e7`, awaits Sol High review; reset retry, deployment, and feature activation remain `NO-GO` |
+| Status | Attempt 13 stopped fail-closed at `APPLY_MIGRATIONS`; fail-closed lifecycle/provenance correction `9d78e942cefa67bb2a16a0cdf4bd4717b01dd732`, tree `3647cd72df1143969cad7ba96fccfa36b531a5b2`, awaits Sol High review; reset retry, deployment, and feature activation remain `NO-GO` |
 | Implementing task | `rehearsal_harness` |
 | Integration parents | latest master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`; reviewed cutover `eeaf2c71abc801a5bf661ff7e817e847c624d2c4` |
 | Branch | `codex/finance-gl-cutover-master-integration` |
@@ -23,14 +23,15 @@ operator authorization gates.
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — deleted after code-cutover completion |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Sol High approved exact attempt-13 operational base `22789f39e550f24bd1ed6197821de4ebc0541bdd` / `939466a58866654ecfc359a45234a0b09ee2b5e8`; the exhaustive lifecycle correction now requires independent Sol High review. Frontend production build, deployment, reset retry, and C6/C7/C8 activation remain gated |
+| Review status | Sol High approved exact attempt-13 operational base `22789f39e550f24bd1ed6197821de4ebc0541bdd` / `939466a58866654ecfc359a45234a0b09ee2b5e8`; exact lifecycle/provenance correction `9d78e942cefa67bb2a16a0cdf4bd4717b01dd732` now requires independent Sol High review. Frontend production build, deployment, reset retry, and C6/C7/C8 activation remain gated |
 | Connectivity state | Attempt 13 performed only its explicitly authorized guarded backup/recreate/migration attempt. The subsequent correction used source and preserved logs read-only; it did not query a database, inspect connection environment, mutate evidence/backups, change flags, restore, retry, clean up, access a remote, or touch the primary worktree |
 | Applied-baseline state | Attempt-13 terminal evidence reports exact local `RhemaERP` recreated with zero target migration-history rows after the failed merged-baseline transaction; the merged 1,629-table / 493-trigger / 835-check baseline is not yet operationally proven |
 
 The merged baseline now represents the latest-master model while retaining 596 exact archived migration identities,
 386 current-model plus 92 active non-model triggers, the separate 15-trigger C5-C8 set (493 unique total), 108
 chronological patches, five functions, one view, and all 675 archived-final check constraints within 835
-current-model checks. The exact reviewed D3 snapshot blob remains in the archive and only the regenerated merged
+current-model checks. Its 870 exact ordered check-lifecycle events and each patch's full-source plus retained-fragment
+provenance are deterministic and tamper-refusing. The exact reviewed D3 snapshot blob remains in the archive and only the regenerated merged
 snapshot is compiled. C6/C7/C8 remain false.
 
 The semantic integration is independently approved. Merge commit
@@ -3044,3 +3045,22 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   and FinalClone evidence suites pass offline.
 - Disposition: the correction requires independent Sol High review. Reset retry, deployment, and C6/C7/C8 activation
   remain `NO-GO`; any future operation requires a new exact authorization and fresh external evidence package.
+
+### Attempt-13 lifecycle parser and patch-provenance correction
+
+- Exact implementation `9d78e942cefa67bb2a16a0cdf4bd4717b01dd732`, tree
+  `3647cd72df1143969cad7ba96fccfa36b531a5b2`, makes potential raw check-constraint authority fail closed unless
+  ScriptDom parses it or an exact hash-bound dynamic-patch allowlist entry parses under the closed shape contract.
+- The inspector now binds 870 exact ordered lifecycle events. Actual archived-source mutation tests refuse malformed,
+  removed, duplicated, and reordered authority; the three approved dynamic patches refuse hash or structure drift.
+- All 108 chronological patches bind their full normalized source-operation SHA-256 and length plus exact retained
+  fragment SHA-256, offset/length, marker, and transformation discriminator. The four mixed operations additionally
+  prove unique marker and suffix-boundary reconstruction; prefix, marker, boundary, and retained-fragment mutations
+  invalidate deterministic generation/verification.
+- Regenerated authority remains exactly 675 archived-final checks within 835 current-model checks, 493 triggers,
+  108 patches, five functions, and one view. Inspector generation/verify, Data/API Release builds, EF one-baseline and
+  no-pending-model checks, fresh zero-to-current TSql160 grammar (1,502 THROW statements), reset safety/evidence,
+  rehearsal safety, and FinalClone evidence suites pass offline.
+- No database, connection environment, operational evidence, backup, feature flag, remote, or primary worktree was
+  accessed or changed. Reset retry and C6/C7/C8 activation remain `NO-GO` pending independent Sol High review and a
+  separately authorized operation.
