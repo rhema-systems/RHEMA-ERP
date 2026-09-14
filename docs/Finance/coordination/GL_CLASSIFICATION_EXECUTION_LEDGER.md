@@ -2880,3 +2880,28 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
 - Offline results: classification authority 39/39, production-order full seed 1/1, provisioning/DI/Payroll 26/26,
   and ordinary API-test build with zero errors. No database, environment connection, preserved evidence, or reset
   was accessed; runtime remains unauthorized pending Sol High approval and a new explicit attempt.
+
+### Disposable reset attempt 11 / terminal PASS
+
+- Approved identity: `008e29ee0427620f62a21d89b24a98d2af43ddc4`, tree
+  `4fa31991cadb4a55ea143f036b45410279d52cc2`; clean and executed exactly once.
+- Outcome: `PASS`, durable phase `COMPLETE`; source/final fingerprint
+  `1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`; exact one-row baseline history, zero orphans,
+  seed passes 1/2 complete, invariant SHA-256
+  `7F5BE0778FAD94C74A2C9E7836AA0B061B0DDFF612054BDEE0CF68766A607D29` equal across both passes, DBCC PASS, and
+  C6/C7/C8 false.
+- Preserved recovery media: media `200133be1fb445d3ab328d1ca0170b01`, file
+  `RhemaERP_DISPOSABLE_RESET_COPYONLY_200133be1fb445d3ab328d1ca0170b01.bak`, 103,800,832 bytes, verified/current
+  SHA-256 `332E61F0A309F511596A399AFFDD51E369B96B4033D0436BBEAC1F483A94AAD7`, path SHA-256
+  `875DB16E5607512C70131C1647983DE824956C6151A3C75FB43CBF5A66F0DE4A`. COPY_ONLY/CHECKSUM and VERIFYONLY
+  evidence passed.
+- Evidence: package validation PASS; 39-entry manifest-file SHA-256
+  `6073783A3F67316F1F5D8216F118770593B07BB3E2A1FA8E3C7446EA19D88868`; operator-log SHA-256
+  `7458540AFD36319F990EF13B1C54D24C8C294D9647B81FD55AB052FA97F81DFA`.
+- Independent read-only result: 1,557 user tables; 459 enabled triggers with ordered name-set SHA-256
+  `0351569ED92F0C2657193E1F4A57A06811616D0E2C14F723E1D58437E6B49926`; exact RFQ identity function and receipt
+  reconciliation view present; GLF003 zero. Accounts `1040`, `2210`, and `4930` exist exactly once with two segment
+  values and three exact classification mappings each. All mappings remain disabled across the three inactive,
+  non-posting Configuring books, preserving no-auto-approval.
+- Disposition: external evidence, log, and backup remain preserved and were not copied into the repository. No
+  retry, restore, drop, cleanup, or post-PASS database mutation occurred.

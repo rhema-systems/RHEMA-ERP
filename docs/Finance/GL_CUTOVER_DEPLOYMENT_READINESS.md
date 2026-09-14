@@ -702,3 +702,33 @@ exact untouched `System (FIN-CLASSIFICATION-1.0)`, `2.0`, or `3.0` row. An admin
 then fails closed instead of being rewritten. Exact V1 system-owned repair remains supported. Classification tests
 pass 39/39, production-order seed coverage passes 1/1, and provisioning/DI/Payroll tests pass 26/26. No database,
 connection environment, preserved evidence, or reset operation was accessed.
+
+### Disposable reset attempt 11 PASS
+
+The separately authorized attempt 11 executed exact Sol-High-approved commit
+`008e29ee0427620f62a21d89b24a98d2af43ddc4`, tree
+`4fa31991cadb4a55ea143f036b45410279d52cc2`, exactly once and reached terminal `PASS` / `COMPLETE`. The source and
+final database fingerprint is
+`1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`. The exact sole baseline migration was applied
+with zero orphans, seed passes 1 and 2 completed, their canonical invariant files are byte-identical at SHA-256
+`7F5BE0778FAD94C74A2C9E7836AA0B061B0DDFF612054BDEE0CF68766A607D29`, DBCC passed, and all C6/C7/C8 process flags
+remained false.
+
+Attempt-owned recovery media is preserved outside the repository: media
+`200133be1fb445d3ab328d1ca0170b01`, file
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_200133be1fb445d3ab328d1ca0170b01.bak`, 103,800,832 bytes, verified/current
+SHA-256 `332E61F0A309F511596A399AFFDD51E369B96B4033D0436BBEAC1F483A94AAD7`, and bound path SHA-256
+`875DB16E5607512C70131C1647983DE824956C6151A3C75FB43CBF5A66F0DE4A`. COPY_ONLY/CHECKSUM creation and
+RESTORE VERIFYONLY evidence passed. The package validator passed and wrote a 39-entry manifest whose file SHA-256
+is `6073783A3F67316F1F5D8216F118770593B07BB3E2A1FA8E3C7446EA19D88868`; the separate operator-log SHA-256 is
+`7458540AFD36319F990EF13B1C54D24C8C294D9647B81FD55AB052FA97F81DFA`.
+
+Independent read-only verification found 1,557 user tables, exactly 459 enabled database triggers (ordered name-set
+SHA-256 `0351569ED92F0C2657193E1F4A57A06811616D0E2C14F723E1D58437E6B49926`), the sole required scalar function
+`fn_ProcurementRfqSourceLineIdentity`, and the sole required view
+`vw_ProcurementReceiptDocumentReconciliation`. GLF003 is zero. Provisioned accounts `1040`, `2210`, and `4930`
+exist exactly once, with six total segment values and nine mappings: three each to the exact `ASSET_OTHER`,
+`OUTPUT_TAX`, and `OTHER_INCOME` classifications across the three Configuring books. All nine mappings remain
+disabled because those books are inactive and do not allow posting; no automatic book approval occurred. The
+external attempt-11 evidence, backup, and log remain preserved and were not copied into the repository. No retry,
+restore, drop, cleanup, or post-PASS database mutation followed.
