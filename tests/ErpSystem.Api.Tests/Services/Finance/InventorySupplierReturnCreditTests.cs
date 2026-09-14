@@ -15,6 +15,88 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class InventorySupplierReturnCreditTests
 {
+    [Fact]
+    public void Dispatch_carrying_allocation_does_not_push_a_negative_cent_to_the_last_return_line()
+    {
+        var lines = Enumerable.Range(1, 3).Select(index => new PurchaseReturnItem
+        {
+            Id = Guid.Parse($"00000000-0000-0000-0000-{index:000000000000}"), ReturnQuantity = index == 3 ? 1m : 6m
+        }).ToArray();
+        var result = SupplierDebitNoteService.AllocateDispatchCarryingByLine(lines, 0.01m);
+        result.Values.Should().OnlyContain(value => value >= 0m);
+        result.Values.Sum().Should().Be(0.01m);
+        result[lines[0].Id].Should().Be(0.01m);
+        result[lines[2].Id].Should().Be(0m);
+    }
+
+    [Theory]
+    [InlineData(false, 3)]
+    [InlineData(true, 2)]
+    public void Dispatch_groups_each_returned_items_mapped_inventory_account_and_balances(bool sameAccount, int expectedLines)
+    {
+        var clearing = Guid.NewGuid();
+        var firstAccount = Guid.NewGuid();
+        var secondAccount = sameAccount ? firstAccount : Guid.NewGuid();
+        var first = new PurchaseReturnItem { Id = Guid.NewGuid(), InventoryItemId = Guid.NewGuid() };
+        var second = new PurchaseReturnItem { Id = Guid.NewGuid(), InventoryItemId = Guid.NewGuid() };
+        var source = new PurchaseReturn { ReturnNumber = "RTV-ITEM-GL" };
+        source.Items.Add(first);
+        source.Items.Add(second);
+        var result = SupplierDebitNoteService.BuildReturnDispatchLines(source, clearing,
+            new Dictionary<Guid, Guid> { [first.Id] = firstAccount, [second.Id] = secondAccount },
+            new Dictionary<Guid, decimal> { [first.Id] = 123.45m, [second.Id] = 50m }, "GHS", new DateTime(2026, 9, 13));
+
+        result.Should().HaveCount(expectedLines);
+        result.Single(line => line.AccountId == clearing).DebitAmount.Should().Be(173.45m);
+        result.Where(line => line.AccountId == firstAccount).Sum(line => line.CreditAmount)
+            .Should().Be(sameAccount ? 173.45m : 123.45m);
+        if (!sameAccount)
+            result.Single(line => line.AccountId == secondAccount).CreditAmount.Should().Be(50m);
+        result.Where(line => line.CreditAmount > 0).Should().OnlyContain(line => line.TransactionTag == "RTV-Dispatch-Inventory");
+        result.Sum(line => line.DebitAmount - line.CreditAmount).Should().Be(0m);
+    }
+
+    [Fact]
+    public void Return_variance_guard_rejects_a_nonrepresentative_inventory_target_from_the_original_journal()
+    {
+        var representativeAccount = Guid.NewGuid();
+        var secondInventoryAccount = Guid.NewGuid();
+        var clearing = Guid.NewGuid();
+        var originalTargets = new HashSet<Guid> { representativeAccount, secondInventoryAccount };
+        Action rejected = () => SupplierDebitNoteService.RequireReturnVarianceAccount(secondInventoryAccount, clearing, originalTargets);
+        rejected.Should().Throw<InvalidOperationException>().WithMessage("RTV_ACCOUNTS_MUST_DIFFER*");
+        Action valid = () => SupplierDebitNoteService.RequireReturnVarianceAccount(Guid.NewGuid(), clearing, originalTargets);
+        valid.Should().NotThrow();
+    }
+
+    [Fact]
+    public void Dispatch_keeps_positive_total_when_a_small_allocated_line_rounds_to_zero()
+    {
+        var first = new PurchaseReturnItem { Id = Guid.NewGuid() };
+        var second = new PurchaseReturnItem { Id = Guid.NewGuid() };
+        var source = new PurchaseReturn { ReturnNumber = "RTV-ROUNDING", Items = [first, second] };
+        var zeroAccount = Guid.NewGuid();
+        var valuedAccount = Guid.NewGuid();
+        var result = SupplierDebitNoteService.BuildReturnDispatchLines(source, Guid.NewGuid(),
+            new Dictionary<Guid, Guid> { [first.Id] = zeroAccount, [second.Id] = valuedAccount },
+            new Dictionary<Guid, decimal> { [first.Id] = 0m, [second.Id] = 0.01m }, "GHS", DateTime.UtcNow);
+        result.Should().HaveCount(2);
+        result.Should().NotContain(line => line.AccountId == zeroAccount);
+        result.Single(line => line.AccountId == valuedAccount).CreditAmount.Should().Be(0.01m);
+        result.Sum(line => line.DebitAmount - line.CreditAmount).Should().Be(0m);
+    }
+
+    [Fact]
+    public void Dispatch_rejects_missing_mapping_before_building_any_journal_lines()
+    {
+        var source = new PurchaseReturn { ReturnNumber = "RTV-INVALID" };
+        var item = new PurchaseReturnItem { Id = Guid.NewGuid() };
+        source.Items.Add(item);
+        Action action = () => SupplierDebitNoteService.BuildReturnDispatchLines(source, Guid.NewGuid(),
+            new Dictionary<Guid, Guid>(), new Dictionary<Guid, decimal> { [item.Id] = 50m }, "GHS", DateTime.UtcNow);
+        action.Should().Throw<InvalidOperationException>().WithMessage("RTV_DISPATCH_MAPPING_INVALID*");
+    }
+
     [Theory]
     [InlineData(706.87, 700, 0, 6.87, 0)]
     [InlineData(690, 700, 0, 0, 10)]

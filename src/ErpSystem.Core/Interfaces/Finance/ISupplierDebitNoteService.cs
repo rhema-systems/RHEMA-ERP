@@ -9,6 +9,7 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface ISupplierDebitNoteService
 {
+    Task<IReadOnlyList<InventoryReturnCreditCandidateDto>> GetInventoryReturnCreditCandidatesAsync(string? search = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<InventoryReturnCreditSourceDto>> GetInventoryReturnCreditSourcesAsync(Guid returnId, CancellationToken cancellationToken = default);
     Task<SupplierDebitNoteDto> CreateInventoryReturnCreditAsync(Guid returnId, CreateInventoryReturnCreditDto dto,
         FinancePostingProducerContext producer, CancellationToken cancellationToken = default);

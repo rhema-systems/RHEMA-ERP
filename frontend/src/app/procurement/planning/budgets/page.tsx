@@ -103,7 +103,7 @@ export default function ProcurementBudgetsPage() {
       const exportData = budgets.map(budget => ({
         'Budget Code': budget.budgetCode,
         'Title': budget.title,
-        'Department': budget.departmentName || '',
+        'Organization Unit': budget.organizationUnitName || budget.departmentName || '',
         'Fiscal Year': budget.fiscalYear,
         'Status': budget.status,
         'Allocated': budget.allocatedAmount,
@@ -150,7 +150,7 @@ export default function ProcurementBudgetsPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Procurement Budgets</h1>
-          <p className="text-muted-foreground">Manage departmental procurement budgets and allocations</p>
+          <p className="text-muted-foreground">Manage organization-unit procurement budgets and allocations</p>
         </div>
         <Button onClick={handleCreateNew} className="gap-2">
           <Plus className="h-4 w-4" />
@@ -205,7 +205,7 @@ export default function ProcurementBudgetsPage() {
                   <TableRow>
                     <TableHead>Budget Code</TableHead>
                     <TableHead>Title</TableHead>
-                    <TableHead>Department</TableHead>
+                    <TableHead>Organization Unit</TableHead>
                     <TableHead>Fiscal Year</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Allocated</TableHead>
@@ -218,7 +218,7 @@ export default function ProcurementBudgetsPage() {
                     <TableRow key={budget.id}>
                       <TableCell className="font-medium">{budget.budgetCode}</TableCell>
                       <TableCell>{budget.title}</TableCell>
-                      <TableCell>{budget.departmentName || 'N/A'}</TableCell>
+                      <TableCell>{budget.organizationUnitName || budget.departmentName || 'N/A'}</TableCell>
                       <TableCell>{budget.fiscalYear}</TableCell>
                       <TableCell>{getStatusBadge(budget.status)}</TableCell>
                       <TableCell>{formatCurrency(budget.allocatedAmount, budget.currency)}</TableCell>

@@ -30,6 +30,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { formatCurrency } from '@/lib/utils';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import type { SupplierDebitNoteStatus } from '@/types/ap';
+import { InventoryReturnCreditEntry } from './InventoryReturnCreditEntry';
 
 const statuses: SupplierDebitNoteStatus[] = [
   'Draft',
@@ -59,6 +60,7 @@ export default function SupplierDebitNotesPage() {
   const { hasPermission } = useAuth();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<'all' | SupplierDebitNoteStatus>('all');
+  const [returnCreditOpen, setReturnCreditOpen] = useState(false);
   const canManage = hasPermission('Finance.AP.SupplierDebitNotes.Manage');
 
   const {
@@ -99,11 +101,11 @@ export default function SupplierDebitNotesPage() {
             <FileMinus2 className="h-8 w-8 text-primary" /> Supplier Debit Notes
           </h1>
           <p className="mt-2 text-muted-foreground">
-            Record supplier credits, approve and post them independently, then
-            apply them to specific invoices through a vendor payment.
+            Record supplier credits and apply returned-goods credits to their original invoices.
           </p>
         </div>
-        {canManage && (
+        {canManage && <div className="flex shrink-0 gap-2">
+          {hasPermission('Finance.Read') && <Button variant="outline" onClick={() => setReturnCreditOpen(true)}>Credit from supplier return</Button>}
           <Button
             onClick={() =>
               router.push('/finance/ap/supplier-debit-notes/create')
@@ -111,7 +113,7 @@ export default function SupplierDebitNotesPage() {
           >
             <Plus className="mr-2 h-4 w-4" /> New debit note
           </Button>
-        )}
+        </div>}
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -247,6 +249,7 @@ export default function SupplierDebitNotesPage() {
           </div>
         </CardContent>
       </Card>
+      {returnCreditOpen && <InventoryReturnCreditEntry open={returnCreditOpen} onOpenChange={setReturnCreditOpen} />}
     </div>
   );
 }

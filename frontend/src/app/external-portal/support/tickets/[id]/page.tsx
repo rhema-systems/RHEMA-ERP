@@ -1,5 +1,7 @@
 'use client';
 
+import { PropertyEnquiryDetails } from '@/components/estate/PropertyEnquiryDetails';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
@@ -457,6 +459,7 @@ export default function ExternalPortalSupportTicketDetailPage() {
                 </div>
               </div>
 
+              <PropertyEnquiryDetails property={ticket.propertyListing} />
               <div className="rounded-lg border bg-white p-4 text-sm text-slate-900 whitespace-pre-wrap">{ticket.description}</div>
 
               {attachments.length ? (

@@ -7,7 +7,7 @@ import type {
 } from '@/types/finance';
 
 export const toFinancePostingDimensionValues = (
-  values: Record<string, string>,
+  values: Record<string, string>
 ): FinancePostingDimensionValue[] =>
   Object.entries(values)
     .filter(([dimensionCode, valueCode]) => Boolean(dimensionCode && valueCode))
@@ -15,23 +15,23 @@ export const toFinancePostingDimensionValues = (
     .map(([dimensionCode, valueCode]) => ({ dimensionCode, valueCode }));
 
 export const toFinanceDimensionValueRecord = (
-  values: FinanceSourceDimensionValue[],
+  values: FinanceSourceDimensionValue[]
 ): Record<string, string> =>
   Object.fromEntries(
     values
       .filter((value) => Boolean(value.dimensionCode && value.valueCode))
-      .map((value) => [value.dimensionCode, value.valueCode]),
+      .map((value) => [value.dimensionCode, value.valueCode])
   );
 
 export const toFinanceSourceDimensionFormState = (
-  evidence?: FinanceSourceDocumentDimension,
+  evidence?: FinanceSourceDocumentDimension
 ) => ({
   defaultValues: toFinanceDimensionValueRecord(evidence?.defaultValues ?? []),
   lineValues: Object.fromEntries(
     (evidence?.lines ?? []).map((line) => [
       line.sourceLineId,
       toFinanceDimensionValueRecord(line.values),
-    ]),
+    ])
   ),
 });
 
@@ -97,22 +97,145 @@ export const getActiveDimensionValues = (
       (!value.expiryDate || value.expiryDate.slice(0, 10) >= effectiveDate)
   );
 
+export interface FinanceSourceLineDimensionConflict {
+  dimensionDefinitionId: string;
+  dimensionCode: string;
+  message: string;
+}
+
+/** Resolve specificity per account before combining the accounts of one posting line. */
+export const getSourceLineDimensionRuleResolution = (
+  rules: FinanceDimensionAccountRule[],
+  accountId: string,
+  effectiveDate: string,
+  context: FinanceDimensionRuleContext,
+  additionalAccountIds: readonly string[] = []
+): {
+  rules: FinanceDimensionAccountRule[];
+  conflicts: FinanceSourceLineDimensionConflict[];
+} => {
+  const accountIds = [
+    ...new Set([accountId, ...additionalAccountIds].filter(Boolean)),
+  ];
+  if (accountIds.length <= 1) {
+    return {
+      rules: getApplicableDimensionRules(
+        rules,
+        accountId,
+        effectiveDate,
+        context
+      ),
+      conflicts: [],
+    };
+  }
+  const byDimension = new Map<string, FinanceDimensionAccountRule[]>();
+  for (const id of accountIds) {
+    for (const rule of getApplicableDimensionRules(
+      rules,
+      id,
+      effectiveDate,
+      context
+    )) {
+      const group = byDimension.get(rule.financeDimensionDefinitionId) ?? [];
+      group.push(rule);
+      byDimension.set(rule.financeDimensionDefinitionId, group);
+    }
+  }
+  const merged: FinanceDimensionAccountRule[] = [];
+  const conflicts: FinanceSourceLineDimensionConflict[] = [];
+  for (const [definitionId, group] of byDimension) {
+    const fixed = group.filter((rule) => rule.ruleType === 'Fixed');
+    const required = group.find((rule) => rule.ruleType === 'Required');
+    const prohibited = group.find((rule) => rule.ruleType === 'Prohibited');
+    const selected = prohibited ?? fixed[0] ?? required ?? group[0];
+    const fixedCodes = [
+      ...new Set(fixed.map((rule) => rule.defaultValueCode).filter(Boolean)),
+    ];
+    const conflictingProhibition = Boolean(
+      prohibited && (fixed.length || required)
+    );
+    const conflictingFixed = fixedCodes.length > 1;
+    const defaults = [
+      ...new Set(group.map((rule) => rule.defaultValueCode).filter(Boolean)),
+    ];
+    const defaultCode =
+      conflictingProhibition || conflictingFixed || prohibited
+        ? undefined
+        : fixed.length
+          ? fixedCodes[0]
+          : defaults.length === 1
+            ? defaults[0]
+            : undefined;
+    merged.push({
+      ...selected,
+      defaultValueCode: defaultCode,
+      defaultDimensionValueId: defaultCode
+        ? group.find((rule) => rule.defaultValueCode === defaultCode)
+            ?.defaultDimensionValueId
+        : undefined,
+    });
+    if (conflictingProhibition || conflictingFixed) {
+      const accounts = group
+        .map((rule) => rule.accountNumber || rule.accountName || rule.accountId)
+        .join(', ');
+      conflicts.push({
+        dimensionDefinitionId: definitionId,
+        dimensionCode: selected.dimensionCode,
+        message: `${selected.dimensionName}: accounts ${accounts} ${
+          conflictingProhibition
+            ? 'both require and prohibit this dimension'
+            : 'require different Fixed values'
+        }. Ask Finance to align their dimension rules.`,
+      });
+    }
+  }
+  return { rules: merged, conflicts };
+};
+
+/** Existing source evidence owns server-resolved posting accounts; never infer them. */
+export const getSourceLineDimensionAccounts = (
+  evidence: FinanceSourceDocumentDimension | undefined,
+  sourceLineId: string,
+  editableAccountId?: string
+) => {
+  const line = evidence?.lines.find(
+    (item) => item.sourceLineId === sourceLineId
+  );
+  const accountId = editableAccountId || line?.accountId || undefined;
+  return {
+    accountId,
+    additionalAccountIds: [...new Set(line?.additionalAccountIds ?? [])].filter(
+      (id) => id && id !== accountId
+    ),
+    requiredDimensionCodes: line?.requiredDimensionCodes ?? [],
+  };
+};
+
 export const resolveSourceDimensionValues = (
   definitions: FinanceDimensionDefinition[],
   rules: FinanceDimensionAccountRule[],
   accountId: string,
   effectiveDate: string,
   context: FinanceDimensionRuleContext,
-  preferredValues: Record<string, string>
+  preferredValues: Record<string, string>,
+  additionalAccountIds: readonly string[] = []
 ) => {
-  const applicableRules = getApplicableDimensionRules(
+  const resolution = getSourceLineDimensionRuleResolution(
     rules,
     accountId,
     effectiveDate,
-    context
+    context,
+    additionalAccountIds
   );
+  const applicableRules = resolution.rules;
   const resolved: Record<string, string> = {};
   for (const definition of definitions) {
+    if (
+      resolution.conflicts.some(
+        (conflict) => conflict.dimensionDefinitionId === definition.id
+      )
+    )
+      continue;
     const rule = applicableRules.find(
       (item) => item.financeDimensionDefinitionId === definition.id
     );
@@ -137,9 +260,16 @@ export const getMissingRequiredDimensions = (
   accountId: string,
   effectiveDate: string,
   context: FinanceDimensionRuleContext,
-  values: Record<string, string>
+  values: Record<string, string>,
+  additionalAccountIds: readonly string[] = []
 ) =>
-  getApplicableDimensionRules(rules, accountId, effectiveDate, context).filter(
+  getSourceLineDimensionRuleResolution(
+    rules,
+    accountId,
+    effectiveDate,
+    context,
+    additionalAccountIds
+  ).rules.filter(
     (rule) =>
       rule.ruleType === 'Required' &&
       !rule.defaultValueCode &&

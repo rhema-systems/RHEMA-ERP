@@ -16,7 +16,9 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { ArrowLeft, Save, Loader2, Plus, Trash2, Search, Package, Pencil, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type ProcurementBudgetDto, type ProcurementBudgetDetailDto, type DepartmentDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
+import { procurementBudgetService, procurementPlanService, commonService, marketAnalysisService, type UpdateProcurementPlanDto, type ProcurementPlanDetailDto, type ProcurementBudgetDto, type ProcurementBudgetDetailDto, type InventoryItemDto, type CreateProcurementPlanItemDto, type UpdateProcurementPlanItemDto, type ProcurementPlanItemDto, type CreateProcurementPlanItemSupplierDto, type ProcurementPlanItemSupplierDto, type MarketAnalysisDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { inventoryManagementService, type UnitOfMeasureDto } from '@/services/inventoryManagementService';
 import { FiscalYearSelect } from '../../../components/FiscalYearSelect';
@@ -92,8 +94,8 @@ export default function EditProcurementPlanPage() {
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
-  const [loadingDepartments, setLoadingDepartments] = useState(true);
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
+  const [loadingOrganizationUnits, setLoadingOrganizationUnits] = useState(true);
   const [plan, setPlan] = useState<ProcurementPlanDetailDto | null>(null);
   const [budgetOptions, setBudgetOptions] = useState<ProcurementBudgetDto[]>([]);
   const [loadingBudgets, setLoadingBudgets] = useState(false);
@@ -102,7 +104,7 @@ export default function EditProcurementPlanPage() {
   const [formData, setFormData] = useState<UpdateProcurementPlanDto>({
     title: '',
     description: '',
-    departmentId: '',
+    organizationUnitId: '',
     fiscalYear: new Date().getFullYear(),
     planningCycle: 'Annual',
     planningQuarter: '',
@@ -146,22 +148,22 @@ export default function EditProcurementPlanPage() {
     const fetchData = async () => {
       try {
         setLoading(true);
-        setLoadingDepartments(true);
+        setLoadingOrganizationUnits(true);
 
-        // Fetch both plan and departments in parallel
-        const [planData, deptData] = await Promise.all([
+        // Fetch both plan and organization units in parallel
+        const [planData, units] = await Promise.all([
           procurementPlanService.getPlanById(planId),
-          commonService.getDepartments()
+          organizationUnitService.getSummary()
         ]);
 
         setPlan(planData);
-        setDepartments(deptData);
+        setOrganizationUnits(units.filter((unit) => unit.isActive));
 
         // Populate form data
         setFormData({
           title: planData.title,
           description: planData.description || '',
-          departmentId: planData.departmentId,
+          organizationUnitId: planData.organizationUnitId || '',
           fiscalYear: planData.fiscalYear,
           planningCycle: planData.planningCycle || 'Annual',
           planningQuarter: planData.planningQuarter || '',
@@ -179,7 +181,7 @@ export default function EditProcurementPlanPage() {
         router.push('/procurement/planning/plans');
       } finally {
         setLoading(false);
-        setLoadingDepartments(false);
+        setLoadingOrganizationUnits(false);
       }
     };
 
@@ -189,7 +191,7 @@ export default function EditProcurementPlanPage() {
   }, [planId, router]);
 
   useEffect(() => {
-    if (!formData.departmentId || !formData.fiscalYear) {
+    if (!formData.organizationUnitId || !formData.fiscalYear) {
       setBudgetOptions([]);
       return;
     }
@@ -199,7 +201,7 @@ export default function EditProcurementPlanPage() {
       try {
         setLoadingBudgets(true);
         const values = await procurementBudgetService.getAvailableBudgetsForLinking(
-          formData.departmentId,
+          formData.organizationUnitId,
           formData.fiscalYear,
           true,
         );
@@ -217,7 +219,7 @@ export default function EditProcurementPlanPage() {
 
     void loadBudgets();
     return () => { active = false; };
-  }, [formData.departmentId, formData.fiscalYear]);
+  }, [formData.organizationUnitId, formData.fiscalYear]);
 
   useEffect(() => {
     if (!formData.budgetId) {
@@ -251,7 +253,7 @@ export default function EditProcurementPlanPage() {
     setFormData((prev) => ({
       ...prev,
       [field]: value,
-      ...(!plan?.budgetId && (field === 'departmentId' || field === 'fiscalYear')
+      ...(!plan?.budgetId && (field === 'organizationUnitId' || field === 'fiscalYear')
         ? { budgetId: undefined }
         : {}),
     }));
@@ -264,8 +266,8 @@ export default function EditProcurementPlanPage() {
       toast.error('Title is required');
       return;
     }
-    if (!formData.departmentId) {
-      toast.error('Department is required');
+    if (!formData.organizationUnitId) {
+      toast.error('Organization unit is required');
       return;
     }
 
@@ -794,19 +796,19 @@ export default function EditProcurementPlanPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="departmentId">Department *</Label>
+                  <Label htmlFor="organizationUnitId">Organization unit *</Label>
                   <Select
-                    value={formData.departmentId}
-                    onValueChange={(value) => handleInputChange('departmentId', value)}
-                    disabled={loadingDepartments || Boolean(plan?.budgetId)}
+                    value={formData.organizationUnitId}
+                    onValueChange={(value) => handleInputChange('organizationUnitId', value)}
+                    disabled={loadingOrganizationUnits || Boolean(plan?.budgetId)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder={loadingDepartments ? "Loading departments..." : "Select department"} />
+                      <SelectValue placeholder={loadingOrganizationUnits ? "Loading organization units..." : "Select organization unit"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
-                          {dept.code ? `${dept.code} - ${dept.name}` : dept.name}
+                      {organizationUnits.map((unit) => (
+                        <SelectItem key={unit.id} value={unit.id}>
+                          {unit.code ? `${unit.code} - ${unit.name}` : unit.name}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -935,12 +937,12 @@ export default function EditProcurementPlanPage() {
                       setFormData((previous) =>
                         applyProcurementPlanBudgetSelection(previous, budgetOptions, value));
                     }}
-                    disabled={!formData.departmentId || loadingBudgets}
+                    disabled={!formData.organizationUnitId || loadingBudgets}
                   >
                     <SelectTrigger id="budgetId">
                       <SelectValue placeholder={
-                        !formData.departmentId
-                          ? 'Select a department first'
+                        !formData.organizationUnitId
+                          ? 'Select an organization unit first'
                           : loadingBudgets
                             ? 'Loading approved budgets...'
                             : 'Select approved budget'

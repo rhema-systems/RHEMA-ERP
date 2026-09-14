@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
 
@@ -20,9 +21,12 @@ public sealed class InventoryIssueVoucherConfiguration : IEntityTypeConfiguratio
         });
         builder.Property(item => item.RowVersion).IsRowVersion();
         builder.HasIndex(item => new { item.TenantId, item.VoucherNumber }).IsUnique();
+        builder.HasIndex(item => new { item.TenantId, item.OrganizationUnitId });
         builder.HasIndex(item => new { item.TenantId, item.InventoryRequisitionId, item.IdempotencyKey }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.InventoryRequisitionId, item.IssuedAtUtc });
         builder.HasIndex(item => new { item.TenantId, item.ReceiverUserId, item.Status });
+        builder.HasOne<OrganizationUnit>().WithMany().HasForeignKey(item => item.OrganizationUnitId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.InventoryRequisition).WithMany().HasForeignKey(item => item.InventoryRequisitionId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.Warehouse).WithMany().HasForeignKey(item => item.WarehouseId).OnDelete(DeleteBehavior.Restrict);
         builder.HasOne(item => item.Location).WithMany().HasForeignKey(item => item.LocationId).OnDelete(DeleteBehavior.Restrict);

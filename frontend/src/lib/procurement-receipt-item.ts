@@ -6,6 +6,18 @@ export type ReceiptMissingItemDecision =
 
 const EMPTY_GUID = '00000000-0000-0000-0000-000000000000';
 
+export function formatReceiptQuantitySummary(
+  orderedQuantity: number,
+  previouslyReceived: number,
+  maximumReceivable: number,
+): string {
+  const remaining = Number(Math.max(0, orderedQuantity - previouslyReceived).toFixed(4));
+  const summary = `Ordered: ${orderedQuantity} • Previously Received: ${previouslyReceived} • Remaining: ${remaining}`;
+  return maximumReceivable > remaining
+    ? `${summary} • Max. incl. tolerance: ${maximumReceivable}`
+    : summary;
+}
+
 export function hasControlledInventoryItem(value?: string | null): boolean {
   const normalized = (value || '').trim().toLowerCase();
   return Boolean(normalized && normalized !== EMPTY_GUID);

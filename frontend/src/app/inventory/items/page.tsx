@@ -31,6 +31,17 @@ import { toast } from 'sonner';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { InventoryCostValue } from '@/components/inventory/InventoryCostValue';
 import { useInventoryCostCurrency } from '@/hooks/useInventoryCostCurrency';
+import { InventoryItemAccountsTab } from '@/components/inventory/InventoryItemAccountsTab';
+import axios from 'axios';
+
+function itemSaveError(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError(error)) return fallback;
+  const problem = error.response?.data;
+  if (typeof problem === 'string') return problem;
+  const detail = problem?.detail || problem?.message;
+  const code = problem?.code || problem?.extensions?.code;
+  return detail ? code ? `${detail} (${code})` : detail : fallback;
+}
 
 const ItemTypes = [
   { value: 1, label: 'Stock Item' },
@@ -114,6 +125,7 @@ export default function InventoryItemsPage() {
   const [loadingPriceLines, setLoadingPriceLines] = useState(false);
   
   const [formData, setFormData] = useState<CreateInventoryItemDto>({
+    postingAccounts: {},
     // Basic Info
     itemCode: '', name: '', description: '', categoryId: '', unitOfMeasure: 'EA',
     unitOfMeasureScheduleId: undefined,
@@ -213,7 +225,7 @@ export default function InventoryItemsPage() {
       resetForm();
     } catch (err) {
       console.error('Error creating item:', err);
-      toast.error('Failed to create inventory item');
+      toast.error(itemSaveError(err, 'Failed to create inventory item'));
     }
   };
 
@@ -272,6 +284,7 @@ export default function InventoryItemsPage() {
     }
     
     setFormData({
+      postingAccounts: item.postingAccounts,
       // Basic Info
       itemCode: item.itemCode, name: item.name, description: item.description || '',
       shortDescription: item.shortDescription, genericDescription: item.genericDescription,
@@ -353,7 +366,7 @@ export default function InventoryItemsPage() {
       resetForm();
     } catch (err) {
       console.error('Error updating item:', err);
-      toast.error('Failed to update inventory item');
+      toast.error(itemSaveError(err, 'Failed to update inventory item'));
     }
   };
 
@@ -421,6 +434,7 @@ export default function InventoryItemsPage() {
 
   const resetForm = () => {
     setFormData({
+      postingAccounts: {},
       // Basic Info
       itemCode: '', name: '', description: '', categoryId: '', unitOfMeasure: 'EA',
       unitOfMeasureScheduleId: undefined,
@@ -477,12 +491,13 @@ export default function InventoryItemsPage() {
               <DialogDescription>Create a new inventory item.</DialogDescription>
             </DialogHeader>
             <Tabs defaultValue="basic" className="flex-1 flex flex-col min-h-0">
-              <TabsList className="grid w-full grid-cols-5 shrink-0">
+              <TabsList className="grid w-full grid-cols-6 shrink-0">
                 <TabsTrigger value="basic">Basic Info</TabsTrigger>
                 <TabsTrigger value="costs">Costs & Pricing</TabsTrigger>
                 <TabsTrigger value="stock">Stock Settings</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
                 <TabsTrigger value="tracking">Tracking</TabsTrigger>
+                <TabsTrigger value="accounts">Accounts</TabsTrigger>
               </TabsList>
               {/* BASIC INFO TAB - REDESIGNED */}
               <TabsContent value="basic" className="flex-1 overflow-y-auto pt-4">
@@ -1069,6 +1084,9 @@ export default function InventoryItemsPage() {
                   </div>
                 )}
               </TabsContent>
+              <TabsContent value="accounts" className="flex-1 min-h-0 overflow-y-auto pt-4">
+                <InventoryItemAccountsTab value={formData.postingAccounts} onChange={postingAccounts => setFormData(current => ({ ...current, postingAccounts }))} />
+              </TabsContent>
             </Tabs>
             <DialogFooter className="shrink-0 pt-4">
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>Cancel</Button>
@@ -1211,13 +1229,14 @@ export default function InventoryItemsPage() {
             <DialogDescription>Editing: {selectedItem?.itemCode} - {selectedItem?.name}</DialogDescription>
           </DialogHeader>
           <Tabs defaultValue="basic" className="flex-1 flex flex-col min-h-0">
-            <TabsList className="grid w-full grid-cols-6 shrink-0">
+            <TabsList className="grid w-full grid-cols-7 shrink-0">
               <TabsTrigger value="basic">Basic Info</TabsTrigger>
               <TabsTrigger value="costs">Costs & Pricing</TabsTrigger>
               <TabsTrigger value="stock">Stock Settings</TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="tracking">Tracking</TabsTrigger>
               <TabsTrigger value="pricelists">Price Lists</TabsTrigger>
+              <TabsTrigger value="accounts">Accounts</TabsTrigger>
             </TabsList>
             <TabsContent value="basic" className="flex-1 overflow-y-auto pt-4">
               <div className="max-w-5xl mx-auto space-y-6 pb-4">
@@ -1818,6 +1837,9 @@ export default function InventoryItemsPage() {
                   </Table>
                 </div>
               )}
+            </TabsContent>
+            <TabsContent value="accounts" className="flex-1 min-h-0 overflow-y-auto pt-4">
+              <InventoryItemAccountsTab value={formData.postingAccounts} onChange={postingAccounts => setFormData(current => ({ ...current, postingAccounts }))} />
             </TabsContent>
           </Tabs>
           <DialogFooter className="shrink-0 pt-4">

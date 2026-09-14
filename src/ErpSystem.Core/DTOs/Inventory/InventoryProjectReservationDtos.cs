@@ -11,8 +11,10 @@ public sealed class InventoryProjectReservationDto
     public Guid ProjectId { get; set; }
     public string ProjectCode { get; set; } = string.Empty;
     public string ProjectTitle { get; set; } = string.Empty;
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string DepartmentName { get; set; } = string.Empty;
+    public Guid? OrganizationUnitId { get; set; }
+    public string OrganizationUnitName { get; set; } = string.Empty;
     public Guid WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
     public Guid LocationId { get; set; }

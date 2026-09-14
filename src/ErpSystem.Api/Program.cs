@@ -502,6 +502,7 @@ builder.Host.ConfigureServices((context, services) =>
     services.Configure<HostOptions>(opts =>
     {
         opts.ShutdownTimeout = TimeSpan.FromSeconds(60);
+
     });
 });
 
@@ -595,6 +596,14 @@ builder.Services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IAwardLetterSer
 
 // Add Price List Lookup Service for procurement pricing
 builder.Services.AddScoped<ErpSystem.Core.Services.Pricing.PriceListLookupService>();
+
+// Local property enquiry verification can dispatch only this feature's queue
+// while unrelated schedulers remain disabled.
+if (!builder.Configuration.GetValue("BackgroundServices:Enabled", true)
+    && builder.Configuration.GetValue("Notifications:PropertyEnquiriesOnly", false))
+{
+    builder.Services.AddHostedService<ErpSystem.Api.Services.NotificationDispatcherBackgroundService>();
+}
 
 var app = builder.Build();
 

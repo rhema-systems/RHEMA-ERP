@@ -111,7 +111,15 @@ export interface EhcTicketAuditEvent {
   createdAt: string;
 }
 
+export interface PropertyListingContext {
+  source: string; listingId: string; listingReference: string; listingName: string;
+  listingType: string; currency: string; location?: string | null; price?: number | null;
+  parentAssetId: string; demarcationId?: string | null; businessPartnerId?: string | null;
+  businessPartnerName: string; contactName?: string | null; contactEmail?: string | null; contactPhone?: string | null;
+}
+
 export interface EhcTicketDetail {
+  propertyListing?: PropertyListingContext | null;
   id: string;
   ticketNumber: string;
   ticketType: EhcTicketType;

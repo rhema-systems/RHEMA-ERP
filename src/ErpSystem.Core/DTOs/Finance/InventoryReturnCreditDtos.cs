@@ -2,6 +2,16 @@ using System.ComponentModel.DataAnnotations;
 
 namespace ErpSystem.Core.DTOs.Finance;
 
+public sealed class InventoryReturnCreditCandidateDto
+{
+    public Guid ReturnId { get; set; }
+    public string ReturnNumber { get; set; } = string.Empty;
+    public string SupplierName { get; set; } = string.Empty;
+    public DateTime ShippedDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public decimal TotalQuantity { get; set; }
+}
+
 public sealed class CreateInventoryReturnCreditDto
 {
     public Guid OriginalVendorInvoiceId { get; set; }

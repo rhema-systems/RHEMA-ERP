@@ -11,7 +11,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Search, Eye, Edit, Plus, Download, RefreshCw, Filter, Trash2, Calendar, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { commonService, procurementScheduleService, type DepartmentDto, type ProcurementScheduleDto } from '@/services/procurementPlanningService';
+import { procurementScheduleService, type ProcurementScheduleDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -22,7 +24,7 @@ export default function ProcurementSchedulesPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
   const [departmentFilter, setDepartmentFilter] = useState('all');
   const [startDateFilter, setStartDateFilter] = useState('');
   const [endDateFilter, setEndDateFilter] = useState('');
@@ -31,9 +33,9 @@ export default function ProcurementSchedulesPage() {
   const [deleteDialog, setDeleteDialog] = useState<{ open: boolean; id: string | null; deleting: boolean }>({ open: false, id: null, deleting: false });
 
   useEffect(() => {
-    commonService.getDepartments()
-      .then((data) => setDepartments(data.filter((department) => department.isActive !== false)))
-      .catch(() => setDepartments([]));
+    organizationUnitService.getSummary()
+      .then((data) => setOrganizationUnits(data.filter((unit) => unit.isActive)))
+      .catch(() => setOrganizationUnits([]));
   }, []);
 
   useEffect(() => { loadSchedules(); }, [page, statusFilter, departmentFilter, startDateFilter, endDateFilter]);
@@ -89,7 +91,7 @@ export default function ProcurementSchedulesPage() {
     try {
       if (schedules.length === 0) { toast.error('No data to export'); return; }
       const exportData = schedules.map(s => ({
-        'Schedule #': s.scheduleCode, 'Title': s.title, 'Department': s.departmentName || '',
+        'Schedule #': s.scheduleCode, 'Title': s.title, 'Organization Unit': s.organizationUnitName || s.departmentName || '',
         'Status': s.status, 'Type': s.scheduleType,
         'Start Date': format(new Date(s.plannedStartDate), 'yyyy-MM-dd'),
         'End Date': format(new Date(s.plannedEndDate), 'yyyy-MM-dd'),
@@ -148,12 +150,12 @@ export default function ProcurementSchedulesPage() {
               </SelectContent>
             </Select>
             <Select value={departmentFilter} onValueChange={(value) => { setDepartmentFilter(value); setPage(1); }}>
-              <SelectTrigger><SelectValue placeholder="All Departments" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="All Organization Units" /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department.id} value={department.id}>
-                    {department.code ? `${department.code} - ${department.name}` : department.name}
+                <SelectItem value="all">All Organization Units</SelectItem>
+                {organizationUnits.map((unit) => (
+                  <SelectItem key={unit.id} value={unit.id}>
+                    {unit.code ? `${unit.code} - ${unit.name}` : unit.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -175,14 +177,14 @@ export default function ProcurementSchedulesPage() {
           {loading ? (<div className="text-center py-8">Loading schedules...</div>) : schedules.length === 0 ? (<div className="text-center py-8 text-gray-500">No schedules found</div>) : (
             <div className="overflow-x-auto">
               <Table>
-                <TableHeader><TableRow><TableHead>Schedule #</TableHead><TableHead>Title</TableHead><TableHead>Plan #</TableHead><TableHead>Department</TableHead><TableHead>Status</TableHead><TableHead>Timeline</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Schedule #</TableHead><TableHead>Title</TableHead><TableHead>Plan #</TableHead><TableHead>Organization Unit</TableHead><TableHead>Status</TableHead><TableHead>Timeline</TableHead><TableHead>Actions</TableHead></TableRow></TableHeader>
                 <TableBody>
                   {schedules.map((s) => (
                     <TableRow key={s.id}>
                       <TableCell className="font-medium">{s.scheduleCode}</TableCell>
                       <TableCell><div className="font-medium">{s.title}</div></TableCell>
                       <TableCell>{s.procurementPlanNumber || 'N/A'}</TableCell>
-                      <TableCell>{s.departmentName || 'N/A'}</TableCell>
+                      <TableCell>{s.organizationUnitName || s.departmentName || 'N/A'}</TableCell>
                       <TableCell>{getStatusBadge(s.status)}</TableCell>
                       <TableCell><div className="text-sm"><div>{format(new Date(s.plannedStartDate), 'MMM dd, yyyy')}</div><div className="text-gray-500">to {format(new Date(s.plannedEndDate), 'MMM dd, yyyy')}</div></div></TableCell>
                       <TableCell>

@@ -57,8 +57,11 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
     closeAccountSidebar();
   };
 
-  const userDisplayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.username || 'User';
-  const canOpenSettings = hasAnyAccessibleSettings(settingsNavigationItems, {
+  // Local storage and a warm query cache are unavailable to the server. Keep
+  // the first browser render identical, then reveal the authenticated header.
+  const visibleUser = mounted ? user : undefined;
+  const userDisplayName = [visibleUser?.firstName, visibleUser?.lastName].filter(Boolean).join(' ').trim() || visibleUser?.username || 'User';
+  const canOpenSettings = mounted && hasAnyAccessibleSettings(settingsNavigationItems, {
     hasAnyRole,
     hasAnyPermission,
   });
@@ -226,15 +229,15 @@ export function Header({ className, accountSidebarContainer }: HeaderProps) {
             >
               {/* Avatar */}
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-xs font-semibold text-white">
-                {getInitials(userDisplayName) || user?.username?.[0]?.toUpperCase() || 'U'}
+                {getInitials(userDisplayName) || visibleUser?.username?.[0]?.toUpperCase() || 'U'}
               </div>
               
               {/* User Info */}
               <div className="hidden sm:block text-left">
                 <div className="text-sm font-medium text-slate-900 dark:text-white">
-                  {user?.firstName && user?.lastName 
-                    ? `${user.firstName} ${user.lastName}` 
-                    : user?.username || 'User'}
+                  {visibleUser?.firstName && visibleUser?.lastName
+                    ? `${visibleUser.firstName} ${visibleUser.lastName}`
+                    : visibleUser?.username || 'User'}
                 </div>
               </div>
 

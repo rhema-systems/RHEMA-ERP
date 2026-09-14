@@ -1,6 +1,7 @@
 'use client';
 import { ActualLandedCostSummary } from '@/components/procurement/ActualLandedCostSummary';
 import { ReceiptInspectionBadge } from '@/components/procurement/ReceiptInspectionBadge';
+import { PurchaseOrderSupplierDefaults } from '@/components/procurement/PurchaseOrderSupplierDefaults';
 
 import { purchaseOrderLineTypeLabel } from '@/lib/purchase-order-line-types';
 import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
@@ -36,8 +37,6 @@ import {
   Clock,
   Send,
   TruckIcon,
-  Printer,
-  Download,
   AlertCircle,
   Loader2,
   Edit,
@@ -65,7 +64,7 @@ import Link from 'next/link';
 import { formatProcurementMoney } from '@/lib/procurement-currency';
 import { useAuth } from '@/hooks/use-auth';
 import { resolvePurchaseOrderActionAccess } from '@/lib/purchase-order-actions';
-import { downloadPurchaseOrderPdf, openPurchaseOrderPrintPdf } from '@/lib/purchase-order-document';
+import { PurchaseOrderDocumentActions } from '@/components/procurement/PurchaseOrderDocumentActions';
 import { useTenant } from '@/contexts/TenantContext';
 import { apiService } from '@/services/api.service';
 import {
@@ -120,7 +119,6 @@ export default function PurchaseOrderDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState('overview');
   const [amendmentEditorRequest, setAmendmentEditorRequest] = useState(0);
-  const [documentAction, setDocumentAction] = useState<'print' | 'pdf' | null>(null);
   
   // Submit/approve/reject UX is centralized in <WorkflowApprovalActions />.
 
@@ -232,35 +230,6 @@ export default function PurchaseOrderDetailPage() {
     return apiService.getTenantByCode(currentTenant.code);
   };
 
-  const handlePrint = async () => {
-    if (!order) return;
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) { toast.error('Allow pop-ups to open the purchase order print document.'); return; }
-    printWindow.opener = null;
-    try {
-      setDocumentAction('print');
-      openPurchaseOrderPrintPdf(order, await getDocumentCompany(), printWindow);
-      toast.success('Purchase order document opened. Use the PDF viewer\'s Print button.');
-    } catch (printError: any) {
-      printWindow.close();
-      toast.error(printError?.message || 'Failed to open the purchase order print view');
-    } finally {
-      setDocumentAction(null);
-    }
-  };
-
-  const handleExportPdf = async () => {
-    if (!order) return;
-    try {
-      setDocumentAction('pdf');
-      downloadPurchaseOrderPdf(order, await getDocumentCompany());
-      toast.success('Purchase order PDF downloaded');
-    } catch (exportError: any) {
-      toast.error(exportError?.message || 'Failed to export the purchase order PDF');
-    } finally {
-      setDocumentAction(null);
-    }
-  };
 
   if (loading) {
     return (
@@ -369,15 +338,7 @@ export default function PurchaseOrderDetailPage() {
             </Button>
           )}
           
-          <Button variant="outline" onClick={handlePrint} disabled={documentAction !== null}>
-            {documentAction === 'print' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Printer className="h-4 w-4 mr-2" />}
-            Print
-          </Button>
-          
-          <Button variant="outline" onClick={() => void handleExportPdf()} disabled={documentAction !== null}>
-            {documentAction === 'pdf' ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Download className="h-4 w-4 mr-2" />}
-            Export PDF
-          </Button>
+          <PurchaseOrderDocumentActions order={order} getCompany={getDocumentCompany} />
         </div>
       </div>
 
@@ -611,6 +572,7 @@ export default function PurchaseOrderDetailPage() {
                     <p className="font-medium mt-1">{order.shippingTerms}</p>
                   </div>
                 )}
+                <PurchaseOrderSupplierDefaults defaults={order.supplierDefaults} paymentTerms={order.paymentTerms} />
               </CardContent>
             </Card>
           </div>

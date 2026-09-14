@@ -14,6 +14,9 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IVendorInvoiceService
 {
+    Task<VendorInvoiceDistributionDto> GetDistributionAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ErpSystem.Core.DTOs.Procurement.PurchaseOrderSupplierDefaultsDto?> GetSupplierDefaultsAsync(
+        Guid supplierId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null);
     Task<PostLandedCostResultDto> PostLandedCostAsync(Guid landedCostId,
         PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
     Task<List<VendorInvoiceDto>> CreateFromLandedCostAsync(Guid landedCostId,

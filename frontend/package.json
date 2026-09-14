@@ -6,7 +6,7 @@
     "dev": "next dev",
     "postinstall": "node scripts/copy-syncfusion-pdfviewer-assets.js",
     "prebuild": "node scripts/copy-syncfusion-pdfviewer-assets.js",
-    "build": "next build",
+    "build": "node scripts/run-next-build.js",
     "start": "next start",
     "lint": "eslint . --ext .ts,.tsx --fix",
     "lint:check": "eslint . --ext .ts,.tsx",

@@ -2,11 +2,23 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -28,13 +40,35 @@ import {
   Percent,
   ShoppingCart,
   Calendar,
-  Award
+  Award,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { businessPartnerService, type CreateBusinessPartnerDto, type BusinessPartnerDto } from '@/services/businessPartnerService';
-import { paymentTermService, procurementCurrencyService } from '@/services/financeCommonService';
-import type { PaymentTermListDto, CurrencyListDto } from '@/services/financeCommonService';
-import { priceListService, PriceListDto, PriceListType } from '@/services/priceListService';
+import {
+  businessPartnerService,
+  type CreateBusinessPartnerDto,
+  type BusinessPartnerDto,
+} from '@/services/businessPartnerService';
+import {
+  paymentTermService,
+  procurementCurrencyService,
+} from '@/services/financeCommonService';
+import type {
+  PaymentTermListDto,
+  CurrencyListDto,
+} from '@/services/financeCommonService';
+import {
+  priceListService,
+  PriceListDto,
+  PriceListType,
+} from '@/services/priceListService';
+import {
+  emptyBusinessPartnerPostingDefaults,
+  PartnerAccountsFields,
+  PartnerCatalogueNotice,
+  PartnerOptionsFields,
+  PartnerTaxDefaultsFields,
+  useBusinessPartnerPostingCatalogues,
+} from '@/components/procurement/BusinessPartnerPostingFields';
 
 type PartnerType = 'Supplier' | 'Contractor' | 'Customer' | 'Both' | '';
 
@@ -112,10 +146,30 @@ const initialFormData: FormData = {
 };
 
 const partnerTypeOptions = [
-  { value: 'Supplier', label: 'Supplier', icon: Truck, description: 'Vendors who supply goods and materials' },
-  { value: 'Contractor', label: 'Contractor', icon: HardHat, description: 'Service providers and contractors' },
-  { value: 'Customer', label: 'Customer', icon: Users, description: 'Customers/Debtors for sales transactions' },
-  { value: 'Both', label: 'Supplier & Contractor', icon: Building2, description: 'Partners who are both suppliers and contractors' },
+  {
+    value: 'Supplier',
+    label: 'Supplier',
+    icon: Truck,
+    description: 'Vendors who supply goods and materials',
+  },
+  {
+    value: 'Contractor',
+    label: 'Contractor',
+    icon: HardHat,
+    description: 'Service providers and contractors',
+  },
+  {
+    value: 'Customer',
+    label: 'Customer',
+    icon: Users,
+    description: 'Customers/Debtors for sales transactions',
+  },
+  {
+    value: 'Both',
+    label: 'Supplier & Contractor',
+    icon: Building2,
+    description: 'Partners who are both suppliers and contractors',
+  },
 ];
 
 const customerTypeOptions = [
@@ -162,43 +216,37 @@ export default function NewBusinessPartnerPage() {
   const [priceLists, setPriceLists] = useState<PriceListDto[]>([]);
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [postingDefaults, setPostingDefaults] = useState(
+    emptyBusinessPartnerPostingDefaults
+  );
+  const catalogues = useBusinessPartnerPostingCatalogues(formData.partnerType);
 
   // Load payment terms, currencies, price lists, and partners from API
   useEffect(() => {
-    console.log('Business Partner New Page: useEffect triggered, loading data...');
     const loadData = async () => {
       try {
-        console.log('Business Partner New Page: Starting to load reference data...');
-        
         // Load price lists separately to debug
-        console.log('Business Partner New Page: Calling priceListService.getActivePriceLists()...');
         let priceListsData: PriceListDto[] = [];
         try {
           priceListsData = await priceListService.getActivePriceLists();
-          console.log('Business Partner New Page: Price lists loaded:', priceListsData);
         } catch (priceListError) {
-          console.error('Business Partner New Page: Error loading price lists:', priceListError);
+          console.error(
+            'Business Partner New Page: Error loading price lists:',
+            priceListError
+          );
         }
-        
+
         const [terms, currs, partnersData] = await Promise.all([
-          paymentTermService.getActive(),
-          procurementCurrencyService.getActive(),
-          businessPartnerService.getAllPartnersForDropdown().catch(() => [])
+          paymentTermService.getActive().catch(() => []),
+          procurementCurrencyService.getActive().catch(() => []),
+          businessPartnerService.getAllPartnersForDropdown().catch(() => []),
         ]);
-        console.log('Business Partner New Page: Other data loaded - terms:', terms?.length, 'currencies:', currs?.length, 'partners:', partnersData?.length);
-        
+
         setPaymentTerms(terms || []);
-        const defaultTerm = (terms || []).find((term) => term.isDefault);
-        if (defaultTerm) {
-          setFormData((current) => current.paymentTermId
-            ? current
-            : { ...current, paymentTermId: defaultTerm.id });
-        }
         setCurrencies(currs || []);
         // Show all active price lists
         setPriceLists(priceListsData || []);
         setAllPartners(partnersData || []);
-        console.log('Business Partner New Page: State updated with price lists:', priceListsData?.length || 0);
       } catch (error) {
         console.error('Error loading reference data:', error);
         toast.error('Failed to load reference data');
@@ -215,8 +263,11 @@ export default function NewBusinessPartnerPage() {
     loadData();
   }, []);
 
-  const handleInputChange = (field: keyof FormData, value: string | boolean) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  const handleInputChange = (
+    field: keyof FormData,
+    value: string | boolean
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const handleSubmit = async () => {
@@ -254,20 +305,30 @@ export default function NewBusinessPartnerPage() {
         currency: formData.currency || undefined,
         // Procurement/Finance boundary: submit the structured FK; the backend owns the legacy descriptor dual-write.
         paymentTermId: formData.paymentTermId || undefined,
+        creditLimit:
+          formData.creditLimit === ''
+            ? undefined
+            : Number(formData.creditLimit),
+        postingDefaults,
       };
 
       // Add customer-specific fields if partner type is Customer
       if (formData.partnerType === 'Customer') {
         createData.customerType = formData.customerType || undefined;
-        createData.creditLimit = formData.creditLimit ? parseFloat(formData.creditLimit) : undefined;
-        createData.defaultDiscount = formData.defaultDiscount ? parseFloat(formData.defaultDiscount) : undefined;
+        createData.defaultDiscount = formData.defaultDiscount
+          ? parseFloat(formData.defaultDiscount)
+          : undefined;
         createData.priceList = formData.priceList || undefined;
         createData.salesTerritory = formData.salesTerritory || undefined;
         createData.isTaxExempt = formData.isTaxExempt;
-        createData.taxExemptionNumber = formData.taxExemptionNumber || undefined;
-        createData.taxExemptionExpiry = formData.taxExemptionExpiry || undefined;
-        createData.preferredShippingMethod = formData.preferredShippingMethod || undefined;
-        createData.deliveryInstructions = formData.deliveryInstructions || undefined;
+        createData.taxExemptionNumber =
+          formData.taxExemptionNumber || undefined;
+        createData.taxExemptionExpiry =
+          formData.taxExemptionExpiry || undefined;
+        createData.preferredShippingMethod =
+          formData.preferredShippingMethod || undefined;
+        createData.deliveryInstructions =
+          formData.deliveryInstructions || undefined;
         createData.customerSince = formData.customerSince || undefined;
         createData.loyaltyTier = formData.loyaltyTier || undefined;
       }
@@ -286,20 +347,28 @@ export default function NewBusinessPartnerPage() {
   const isCustomer = formData.partnerType === 'Customer';
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto w-full max-w-5xl space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={() => router.push('/procurement/business-partners')}>
+          <Button
+            variant="outline"
+            onClick={() => router.push('/procurement/business-partners')}
+          >
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
           <div>
             <h1 className="text-3xl font-bold">Add Business Partner</h1>
-            <p className="text-gray-600 mt-1">Create a new supplier, contractor, or customer</p>
+            <p className="text-gray-600 mt-1">
+              Create a new supplier, contractor, or customer
+            </p>
           </div>
         </div>
-        <Button onClick={handleSubmit} disabled={saving || !formData.partnerType}>
+        <Button
+          onClick={handleSubmit}
+          disabled={saving || !formData.partnerType}
+        >
           {saving ? (
             <>
               <Loader2 className="w-4 h-4 mr-2 animate-spin" />
@@ -318,7 +387,6 @@ export default function NewBusinessPartnerPage() {
       <Card>
         <CardHeader>
           <CardTitle>Select Partner Type</CardTitle>
-          <CardDescription>Choose the type of business partner you want to create</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -326,30 +394,42 @@ export default function NewBusinessPartnerPage() {
               const Icon = option.icon;
               const isSelected = formData.partnerType === option.value;
               return (
-                <div
+                <button
                   key={option.value}
-                  onClick={() => handleInputChange('partnerType', option.value as PartnerType)}
+                  type="button"
+                  aria-pressed={isSelected}
+                  disabled={saving}
+                  onClick={() =>
+                    handleInputChange(
+                      'partnerType',
+                      option.value as PartnerType
+                    )
+                  }
                   className={`
-                    cursor-pointer rounded-lg border-2 p-4 transition-all
-                    ${isSelected 
-                      ? 'border-blue-500 bg-blue-50 shadow-md' 
-                      : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
+                    cursor-pointer rounded-lg border-2 p-3 transition-all
+                    ${
+                      isSelected
+                        ? 'border-blue-500 bg-blue-50 shadow-md'
+                        : 'border-gray-200 hover:border-gray-300 hover:bg-gray-50'
                     }
                   `}
                 >
-                  <div className="flex flex-col items-center text-center">
-                    <div className={`
-                      p-3 rounded-full mb-3
+                  <div className="flex items-center gap-2">
+                    <div
+                      className={`
+                      p-2 rounded-full
                       ${isSelected ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-600'}
-                    `}>
-                      <Icon className="w-6 h-6" />
+                    `}
+                    >
+                      <Icon className="w-4 h-4" />
                     </div>
-                    <h3 className={`font-semibold ${isSelected ? 'text-blue-700' : 'text-gray-900'}`}>
+                    <h3
+                      className={`font-semibold ${isSelected ? 'text-blue-700' : 'text-gray-900'}`}
+                    >
                       {option.label}
                     </h3>
-                    <p className="text-sm text-gray-500 mt-1">{option.description}</p>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -357,474 +437,606 @@ export default function NewBusinessPartnerPage() {
       </Card>
 
       {/* Form Tabs */}
+      <PartnerCatalogueNotice unavailable={catalogues.unavailable} />
       {formData.partnerType && (
         <Card>
           <CardContent className="pt-6">
             <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="basic">Basic Info</TabsTrigger>
-                <TabsTrigger value="contact">Contact & Address</TabsTrigger>
+              <TabsList
+                className={
+                  isCustomer
+                    ? 'grid w-full grid-cols-6'
+                    : 'grid w-full grid-cols-5'
+                }
+              >
+                <TabsTrigger value="basic">Details</TabsTrigger>
+                <TabsTrigger value="contact">Contact</TabsTrigger>
                 <TabsTrigger value="banking">Banking</TabsTrigger>
-                {isCustomer && <TabsTrigger value="customer">Customer Details</TabsTrigger>}
+                <TabsTrigger value="options">Options</TabsTrigger>
+                <TabsTrigger value="accounts">Accounts</TabsTrigger>
+                {isCustomer && (
+                  <TabsTrigger value="customer">Customer Details</TabsTrigger>
+                )}
               </TabsList>
 
-              {/* Basic Information Tab */}
-              <TabsContent value="basic" className="space-y-6 mt-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="partnerName">Partner Name *</Label>
-                    <Input
-                      id="partnerName"
-                      value={formData.partnerName}
-                      onChange={(e) => handleInputChange('partnerName', e.target.value)}
-                      placeholder="Enter company/partner name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="tradingName">Trading Name</Label>
-                    <Input
-                      id="tradingName"
-                      value={formData.tradingName}
-                      onChange={(e) => handleInputChange('tradingName', e.target.value)}
-                      placeholder="Enter trading name (if different)"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="registrationNumber">Registration Number</Label>
-                    <Input
-                      id="registrationNumber"
-                      value={formData.registrationNumber}
-                      onChange={(e) => handleInputChange('registrationNumber', e.target.value)}
-                      placeholder="Business registration number"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="taxNumber">Tax Number</Label>
-                    <Input
-                      id="taxNumber"
-                      value={formData.taxNumber}
-                      onChange={(e) => handleInputChange('taxNumber', e.target.value)}
-                      placeholder="Tax identification number"
-                    />
-                  </div>
-                  <div className="space-y-2 md:col-span-2">
-                    <Label htmlFor="parentId" className="flex items-center gap-2">
-                      <Building2 className="w-4 h-4" />
-                      Parent Business Partner
-                    </Label>
-                    <Select
-                      value={formData.parentId || "__none__"}
-                      onValueChange={(value) => handleInputChange('parentId', value === "__none__" ? "" : value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select parent business partner (optional)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None (Top Level)</SelectItem>
-                        {(allPartners || []).map((partner) => (
-                          <SelectItem key={partner.id} value={partner.id}>
-                            {partner.partnerCode} - {partner.partnerName}
+              <div className="h-[min(620px,calc(100vh-350px))] min-h-80 overflow-y-auto px-1">
+                {/* Basic Information Tab */}
+                <TabsContent value="basic" className="space-y-6 mt-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="partnerName">Partner Name *</Label>
+                      <Input
+                        id="partnerName"
+                        value={formData.partnerName}
+                        onChange={(e) =>
+                          handleInputChange('partnerName', e.target.value)
+                        }
+                        placeholder="Enter company/partner name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="tradingName">Trading Name</Label>
+                      <Input
+                        id="tradingName"
+                        value={formData.tradingName}
+                        onChange={(e) =>
+                          handleInputChange('tradingName', e.target.value)
+                        }
+                        placeholder="Enter trading name (if different)"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="registrationNumber">
+                        Registration Number
+                      </Label>
+                      <Input
+                        id="registrationNumber"
+                        value={formData.registrationNumber}
+                        onChange={(e) =>
+                          handleInputChange(
+                            'registrationNumber',
+                            e.target.value
+                          )
+                        }
+                        placeholder="Business registration number"
+                      />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                      <Label
+                        htmlFor="parentId"
+                        className="flex items-center gap-2"
+                      >
+                        <Building2 className="w-4 h-4" />
+                        Parent Business Partner
+                      </Label>
+                      <Select
+                        value={formData.parentId || '__none__'}
+                        onValueChange={(value) =>
+                          handleInputChange(
+                            'parentId',
+                            value === '__none__' ? '' : value
+                          )
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select parent business partner (optional)" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">
+                            None (Top Level)
                           </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-sm text-muted-foreground">
-                      Select a parent to create a hierarchy of business partners
-                    </p>
+                          {(allPartners || []).map((partner) => (
+                            <SelectItem key={partner.id} value={partner.id}>
+                              {partner.partnerCode} - {partner.partnerName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-sm text-muted-foreground">
+                        Select a parent to create a hierarchy of business
+                        partners
+                      </p>
+                    </div>
                   </div>
-                </div>
 
-                <Separator />
-
-                <div className="space-y-2">
-                  <Label htmlFor="notes">Notes</Label>
-                  <Textarea
-                    id="notes"
-                    value={formData.notes}
-                    onChange={(e) => handleInputChange('notes', e.target.value)}
-                    placeholder="Additional notes about this partner..."
-                    rows={4}
+                  <PartnerTaxDefaultsFields
+                    value={postingDefaults}
+                    onChange={setPostingDefaults}
+                    taxGroups={catalogues.taxGroups}
+                    withholdingTaxes={catalogues.withholdingTaxes}
+                    disabled={saving}
                   />
-                </div>
-              </TabsContent>
 
-              {/* Contact & Address Tab */}
-              <TabsContent value="contact" className="space-y-6 mt-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="email" className="flex items-center gap-2">
-                      <Mail className="w-4 h-4" />
-                      Email
-                    </Label>
-                    <Input
-                      id="email"
-                      type="email"
-                      value={formData.email}
-                      onChange={(e) => handleInputChange('email', e.target.value)}
-                      placeholder="email@company.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="phone" className="flex items-center gap-2">
-                      <Phone className="w-4 h-4" />
-                      Phone
-                    </Label>
-                    <Input
-                      id="phone"
-                      value={formData.phone}
-                      onChange={(e) => handleInputChange('phone', e.target.value)}
-                      placeholder="+1 234 567 8900"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="website" className="flex items-center gap-2">
-                      <Globe className="w-4 h-4" />
-                      Website
-                    </Label>
-                    <Input
-                      id="website"
-                      value={formData.website}
-                      onChange={(e) => handleInputChange('website', e.target.value)}
-                      placeholder="https://www.company.com"
-                    />
-                  </div>
-                </div>
+                  <Separator />
 
-                <Separator />
+                  <div className="space-y-2">
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea
+                      id="notes"
+                      value={formData.notes}
+                      onChange={(e) =>
+                        handleInputChange('notes', e.target.value)
+                      }
+                      placeholder="Additional notes about this partner..."
+                      rows={4}
+                    />
+                  </div>
+                </TabsContent>
 
-                <h3 className="text-lg font-semibold flex items-center gap-2">
-                  <MapPin className="w-5 h-5" />
-                  Physical Address
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="md:col-span-2 space-y-2">
-                    <Label htmlFor="physicalAddress">Street Address</Label>
-                    <Input
-                      id="physicalAddress"
-                      value={formData.physicalAddress}
-                      onChange={(e) => handleInputChange('physicalAddress', e.target.value)}
-                      placeholder="123 Main Street"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="city">City</Label>
-                    <Input
-                      id="city"
-                      value={formData.city}
-                      onChange={(e) => handleInputChange('city', e.target.value)}
-                      placeholder="City"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="postalCode">Postal Code</Label>
-                    <Input
-                      id="postalCode"
-                      value={formData.postalCode}
-                      onChange={(e) => handleInputChange('postalCode', e.target.value)}
-                      placeholder="12345"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="country">Country</Label>
-                    <Input
-                      id="country"
-                      value={formData.country}
-                      onChange={(e) => handleInputChange('country', e.target.value)}
-                      placeholder="Country"
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-
-              {/* Banking Tab */}
-              <TabsContent value="banking" className="space-y-6 mt-6">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="space-y-2">
-                    <Label htmlFor="currency">Default Currency</Label>
-                    <Select
-                      value={formData.currency}
-                      onValueChange={(value) => handleInputChange('currency', value)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select currency" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(currencies || []).map((curr) => (
-                          <SelectItem key={curr.id} value={curr.code}>
-                            {curr.code} - {curr.name} ({curr.symbol})
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="bankName" className="flex items-center gap-2">
-                      <CreditCard className="w-4 h-4" />
-                      Bank Name
-                    </Label>
-                    <Input
-                      id="bankName"
-                      value={formData.bankName}
-                      onChange={(e) => handleInputChange('bankName', e.target.value)}
-                      placeholder="Bank name"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="paymentTermId">Default Payment Terms</Label>
-                    <Select
-                      value={formData.paymentTermId}
-                      onValueChange={(value) => handleInputChange('paymentTermId', value)}
-                      disabled={paymentTerms.length === 0}
-                    >
-                      <SelectTrigger>
-                        <SelectValue
-                          placeholder={paymentTerms.length > 0
-                            ? 'Select payment terms'
-                            : 'No active payment terms available'}
-                        />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(paymentTerms || []).map((term) => (
-                          <SelectItem key={term.id} value={term.id}>
-                            {term.code} - {term.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="bankBranchCode">Branch Code</Label>
-                    <Input
-                      id="bankBranchCode"
-                      value={formData.bankBranchCode}
-                      onChange={(e) => handleInputChange('bankBranchCode', e.target.value)}
-                      placeholder="Branch code"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="bankAccountNumber">Account Number</Label>
-                    <Input
-                      id="bankAccountNumber"
-                      value={formData.bankAccountNumber}
-                      onChange={(e) => handleInputChange('bankAccountNumber', e.target.value)}
-                      placeholder="Account number"
-                    />
-                  </div>
-                </div>
-              </TabsContent>
-
-              {/* Customer Details Tab */}
-              {isCustomer && (
-                <TabsContent value="customer" className="space-y-6 mt-6">
-                  {/* Customer Classification */}
-                  <div>
-                    <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                      <Users className="w-5 h-5" />
-                      Customer Classification
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="customerType">Customer Type</Label>
-                        <Select
-                          value={formData.customerType}
-                          onValueChange={(value) => handleInputChange('customerType', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select customer type" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {customerTypeOptions.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="salesTerritory">Sales Territory</Label>
-                        <Input
-                          id="salesTerritory"
-                          value={formData.salesTerritory}
-                          onChange={(e) => handleInputChange('salesTerritory', e.target.value)}
-                          placeholder="e.g., North Region, West Coast"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="customerSince" className="flex items-center gap-2">
-                          <Calendar className="w-4 h-4" />
-                          Customer Since
-                        </Label>
-                        <Input
-                          id="customerSince"
-                          type="date"
-                          value={formData.customerSince}
-                          onChange={(e) => handleInputChange('customerSince', e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="loyaltyTier" className="flex items-center gap-2">
-                          <Award className="w-4 h-4" />
-                          Loyalty Tier
-                        </Label>
-                        <Select
-                          value={formData.loyaltyTier}
-                          onValueChange={(value) => handleInputChange('loyaltyTier', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select loyalty tier" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {loyaltyTierOptions.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                {/* Contact & Address Tab */}
+                <TabsContent value="contact" className="space-y-6 mt-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="email"
+                        className="flex items-center gap-2"
+                      >
+                        <Mail className="w-4 h-4" />
+                        Email
+                      </Label>
+                      <Input
+                        id="email"
+                        type="email"
+                        value={formData.email}
+                        onChange={(e) =>
+                          handleInputChange('email', e.target.value)
+                        }
+                        placeholder="email@company.com"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="phone"
+                        className="flex items-center gap-2"
+                      >
+                        <Phone className="w-4 h-4" />
+                        Phone
+                      </Label>
+                      <Input
+                        id="phone"
+                        value={formData.phone}
+                        onChange={(e) =>
+                          handleInputChange('phone', e.target.value)
+                        }
+                        placeholder="+1 234 567 8900"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="website"
+                        className="flex items-center gap-2"
+                      >
+                        <Globe className="w-4 h-4" />
+                        Website
+                      </Label>
+                      <Input
+                        id="website"
+                        value={formData.website}
+                        onChange={(e) =>
+                          handleInputChange('website', e.target.value)
+                        }
+                        placeholder="https://www.company.com"
+                      />
                     </div>
                   </div>
 
                   <Separator />
 
-                  {/* Credit & Payment Terms */}
-                  <div>
-                    <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                      <DollarSign className="w-5 h-5" />
-                      Credit & Payment Terms
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="creditLimit" className="flex items-center gap-2">
-                          <CreditCard className="w-4 h-4" />
-                          Credit Limit
-                        </Label>
-                        <Input
-                          id="creditLimit"
-                          type="number"
-                          value={formData.creditLimit}
-                          onChange={(e) => handleInputChange('creditLimit', e.target.value)}
-                          placeholder="0.00"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="defaultDiscount" className="flex items-center gap-2">
-                          <Percent className="w-4 h-4" />
-                          Default Discount (%)
-                        </Label>
-                        <Input
-                          id="defaultDiscount"
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          max="100"
-                          value={formData.defaultDiscount}
-                          onChange={(e) => handleInputChange('defaultDiscount', e.target.value)}
-                          placeholder="0.00"
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label htmlFor="priceList">Price List</Label>
-                        <Select
-                          value={formData.priceList}
-                          onValueChange={(value) => handleInputChange('priceList', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select price list" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {(priceLists || []).map((pl) => (
-                              <SelectItem key={pl.id} value={pl.id}>
-                                {pl.priceListCode} - {pl.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                  <h3 className="text-lg font-semibold flex items-center gap-2">
+                    <MapPin className="w-5 h-5" />
+                    Physical Address
+                  </h3>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="md:col-span-2 space-y-2">
+                      <Label htmlFor="physicalAddress">Street Address</Label>
+                      <Input
+                        id="physicalAddress"
+                        value={formData.physicalAddress}
+                        onChange={(e) =>
+                          handleInputChange('physicalAddress', e.target.value)
+                        }
+                        placeholder="123 Main Street"
+                      />
                     </div>
-                  </div>
-
-                  <Separator />
-
-                  {/* Tax Exemption */}
-                  <div>
-                    <h3 className="text-lg font-semibold mb-4">Tax Exemption</h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="flex items-center space-x-2">
-                        <Switch
-                          id="isTaxExempt"
-                          checked={formData.isTaxExempt}
-                          onCheckedChange={(checked) => handleInputChange('isTaxExempt', checked)}
-                        />
-                        <Label htmlFor="isTaxExempt">Tax Exempt</Label>
-                      </div>
-                      {formData.isTaxExempt && (
-                        <>
-                          <div className="space-y-2">
-                            <Label htmlFor="taxExemptionNumber">Tax Exemption Number</Label>
-                            <Input
-                              id="taxExemptionNumber"
-                              value={formData.taxExemptionNumber}
-                              onChange={(e) => handleInputChange('taxExemptionNumber', e.target.value)}
-                              placeholder="Exemption certificate number"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label htmlFor="taxExemptionExpiry">Exemption Expiry Date</Label>
-                            <Input
-                              id="taxExemptionExpiry"
-                              type="date"
-                              value={formData.taxExemptionExpiry}
-                              onChange={(e) => handleInputChange('taxExemptionExpiry', e.target.value)}
-                            />
-                          </div>
-                        </>
-                      )}
+                    <div className="space-y-2">
+                      <Label htmlFor="city">City</Label>
+                      <Input
+                        id="city"
+                        value={formData.city}
+                        onChange={(e) =>
+                          handleInputChange('city', e.target.value)
+                        }
+                        placeholder="City"
+                      />
                     </div>
-                  </div>
-
-                  <Separator />
-
-                  {/* Shipping & Delivery */}
-                  <div>
-                    <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
-                      <ShoppingCart className="w-5 h-5" />
-                      Shipping & Delivery
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="space-y-2">
-                        <Label htmlFor="preferredShippingMethod">Preferred Shipping Method</Label>
-                        <Select
-                          value={formData.preferredShippingMethod}
-                          onValueChange={(value) => handleInputChange('preferredShippingMethod', value)}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select shipping method" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {shippingMethodOptions.map((option) => (
-                              <SelectItem key={option.value} value={option.value}>
-                                {option.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="md:col-span-2 space-y-2">
-                        <Label htmlFor="deliveryInstructions">Delivery Instructions</Label>
-                        <Textarea
-                          id="deliveryInstructions"
-                          value={formData.deliveryInstructions}
-                          onChange={(e) => handleInputChange('deliveryInstructions', e.target.value)}
-                          placeholder="Special delivery instructions, gate codes, contact person, etc."
-                          rows={3}
-                        />
-                      </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="postalCode">Postal Code</Label>
+                      <Input
+                        id="postalCode"
+                        value={formData.postalCode}
+                        onChange={(e) =>
+                          handleInputChange('postalCode', e.target.value)
+                        }
+                        placeholder="12345"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="country">Country</Label>
+                      <Input
+                        id="country"
+                        value={formData.country}
+                        onChange={(e) =>
+                          handleInputChange('country', e.target.value)
+                        }
+                        placeholder="Country"
+                      />
                     </div>
                   </div>
                 </TabsContent>
-              )}
+
+                {/* Banking Tab */}
+                <TabsContent value="banking" className="space-y-6 mt-6">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                      <Label htmlFor="currency">Default Currency</Label>
+                      <Select
+                        value={formData.currency}
+                        onValueChange={(value) =>
+                          handleInputChange('currency', value)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select currency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(currencies || []).map((curr) => (
+                            <SelectItem key={curr.id} value={curr.code}>
+                              {curr.code} - {curr.name} ({curr.symbol})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label
+                        htmlFor="bankName"
+                        className="flex items-center gap-2"
+                      >
+                        <CreditCard className="w-4 h-4" />
+                        Bank Name
+                      </Label>
+                      <Input
+                        id="bankName"
+                        value={formData.bankName}
+                        onChange={(e) =>
+                          handleInputChange('bankName', e.target.value)
+                        }
+                        placeholder="Bank name"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="bankBranchCode">Branch Code</Label>
+                      <Input
+                        id="bankBranchCode"
+                        value={formData.bankBranchCode}
+                        onChange={(e) =>
+                          handleInputChange('bankBranchCode', e.target.value)
+                        }
+                        placeholder="Branch code"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="bankAccountNumber">Account Number</Label>
+                      <Input
+                        id="bankAccountNumber"
+                        value={formData.bankAccountNumber}
+                        onChange={(e) =>
+                          handleInputChange('bankAccountNumber', e.target.value)
+                        }
+                        placeholder="Account number"
+                      />
+                    </div>
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="options" className="py-4">
+                  <PartnerOptionsFields
+                    value={postingDefaults}
+                    onChange={setPostingDefaults}
+                    options={{
+                      paymentTermId: formData.paymentTermId,
+                      taxNumber: formData.taxNumber,
+                      creditLimit: formData.creditLimit,
+                    }}
+                    onOptionsChange={(patch) =>
+                      setFormData((previous) => ({ ...previous, ...patch }))
+                    }
+                    paymentTerms={paymentTerms}
+                    partnerType={formData.partnerType}
+                    bankAccounts={catalogues.bankAccounts}
+                    disabled={saving}
+                  />
+                </TabsContent>
+                <TabsContent value="accounts" className="py-4">
+                  <PartnerAccountsFields
+                    value={postingDefaults}
+                    onChange={setPostingDefaults}
+                    accounts={catalogues.accounts}
+                    bankAccounts={catalogues.bankAccounts}
+                    disabled={saving}
+                  />
+                </TabsContent>
+
+                {/* Customer Details Tab */}
+                {isCustomer && (
+                  <TabsContent value="customer" className="space-y-6 mt-6">
+                    {/* Customer Classification */}
+                    <div>
+                      <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                        <Users className="w-5 h-5" />
+                        Customer Classification
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <Label htmlFor="customerType">Customer Type</Label>
+                          <Select
+                            value={formData.customerType}
+                            onValueChange={(value) =>
+                              handleInputChange('customerType', value)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select customer type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {customerTypeOptions.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="salesTerritory">
+                            Sales Territory
+                          </Label>
+                          <Input
+                            id="salesTerritory"
+                            value={formData.salesTerritory}
+                            onChange={(e) =>
+                              handleInputChange(
+                                'salesTerritory',
+                                e.target.value
+                              )
+                            }
+                            placeholder="e.g., North Region, West Coast"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label
+                            htmlFor="customerSince"
+                            className="flex items-center gap-2"
+                          >
+                            <Calendar className="w-4 h-4" />
+                            Customer Since
+                          </Label>
+                          <Input
+                            id="customerSince"
+                            type="date"
+                            value={formData.customerSince}
+                            onChange={(e) =>
+                              handleInputChange('customerSince', e.target.value)
+                            }
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label
+                            htmlFor="loyaltyTier"
+                            className="flex items-center gap-2"
+                          >
+                            <Award className="w-4 h-4" />
+                            Loyalty Tier
+                          </Label>
+                          <Select
+                            value={formData.loyaltyTier}
+                            onValueChange={(value) =>
+                              handleInputChange('loyaltyTier', value)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select loyalty tier" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {loyaltyTierOptions.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Credit & Payment Terms */}
+                    <div>
+                      <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                        <DollarSign className="w-5 h-5" />
+                        Credit & Payment Terms
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <Label
+                            htmlFor="defaultDiscount"
+                            className="flex items-center gap-2"
+                          >
+                            <Percent className="w-4 h-4" />
+                            Default Discount (%)
+                          </Label>
+                          <Input
+                            id="defaultDiscount"
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            max="100"
+                            value={formData.defaultDiscount}
+                            onChange={(e) =>
+                              handleInputChange(
+                                'defaultDiscount',
+                                e.target.value
+                              )
+                            }
+                            placeholder="0.00"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="priceList">Price List</Label>
+                          <Select
+                            value={formData.priceList}
+                            onValueChange={(value) =>
+                              handleInputChange('priceList', value)
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select price list" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(priceLists || []).map((pl) => (
+                                <SelectItem key={pl.id} value={pl.id}>
+                                  {pl.priceListCode} - {pl.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Tax Exemption */}
+                    <div>
+                      <h3 className="text-lg font-semibold mb-4">
+                        Tax Exemption
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="flex items-center space-x-2">
+                          <Switch
+                            id="isTaxExempt"
+                            checked={formData.isTaxExempt}
+                            onCheckedChange={(checked) =>
+                              handleInputChange('isTaxExempt', checked)
+                            }
+                          />
+                          <Label htmlFor="isTaxExempt">Tax Exempt</Label>
+                        </div>
+                        {formData.isTaxExempt && (
+                          <>
+                            <div className="space-y-2">
+                              <Label htmlFor="taxExemptionNumber">
+                                Tax Exemption Number
+                              </Label>
+                              <Input
+                                id="taxExemptionNumber"
+                                value={formData.taxExemptionNumber}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    'taxExemptionNumber',
+                                    e.target.value
+                                  )
+                                }
+                                placeholder="Exemption certificate number"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label htmlFor="taxExemptionExpiry">
+                                Exemption Expiry Date
+                              </Label>
+                              <Input
+                                id="taxExemptionExpiry"
+                                type="date"
+                                value={formData.taxExemptionExpiry}
+                                onChange={(e) =>
+                                  handleInputChange(
+                                    'taxExemptionExpiry',
+                                    e.target.value
+                                  )
+                                }
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+
+                    <Separator />
+
+                    {/* Shipping & Delivery */}
+                    <div>
+                      <h3 className="text-lg font-semibold flex items-center gap-2 mb-4">
+                        <ShoppingCart className="w-5 h-5" />
+                        Shipping & Delivery
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div className="space-y-2">
+                          <Label htmlFor="preferredShippingMethod">
+                            Preferred Shipping Method
+                          </Label>
+                          <Select
+                            value={formData.preferredShippingMethod}
+                            onValueChange={(value) =>
+                              handleInputChange(
+                                'preferredShippingMethod',
+                                value
+                              )
+                            }
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Select shipping method" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {shippingMethodOptions.map((option) => (
+                                <SelectItem
+                                  key={option.value}
+                                  value={option.value}
+                                >
+                                  {option.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="md:col-span-2 space-y-2">
+                          <Label htmlFor="deliveryInstructions">
+                            Delivery Instructions
+                          </Label>
+                          <Textarea
+                            id="deliveryInstructions"
+                            value={formData.deliveryInstructions}
+                            onChange={(e) =>
+                              handleInputChange(
+                                'deliveryInstructions',
+                                e.target.value
+                              )
+                            }
+                            placeholder="Special delivery instructions, gate codes, contact person, etc."
+                            rows={3}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </TabsContent>
+                )}
+              </div>
             </Tabs>
           </CardContent>
         </Card>
@@ -833,7 +1045,10 @@ export default function NewBusinessPartnerPage() {
       {/* Action Buttons */}
       {formData.partnerType && (
         <div className="flex justify-end gap-4">
-          <Button variant="outline" onClick={() => router.push('/procurement/business-partners')}>
+          <Button
+            variant="outline"
+            onClick={() => router.push('/procurement/business-partners')}
+          >
             Cancel
           </Button>
           <Button onClick={handleSubmit} disabled={saving}>

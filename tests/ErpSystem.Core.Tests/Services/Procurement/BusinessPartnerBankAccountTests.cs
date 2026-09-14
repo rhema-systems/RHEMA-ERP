@@ -115,7 +115,8 @@ public sealed class BusinessPartnerBankAccountTests
             Mock.Of<IWorkflowIntegrationService>(),
             Mock.Of<IWorkflowStatusAdapterRegistry>(),
             Mock.Of<IPaymentTermRepository>(),
-            NullLogger<BusinessPartnerService>.Instance);
+            NullLogger<BusinessPartnerService>.Instance,
+            Mock.Of<IUnitOfWork>());
 
         return (service, repository);
     }

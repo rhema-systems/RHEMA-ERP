@@ -37,6 +37,18 @@ export interface ApGoodsInvoiceEntry {
     lines: { purchaseOrderItemId: string; acceptedQuantity: number; invoicedQuantity: number; availableQuantity: number }[];
 }
 
+export interface VendorInvoiceDistribution {
+    invoiceId: string;
+    status: 'Proposed' | 'Posted';
+    currency: string;
+    basis: string;
+    journalEntryId?: string | null;
+    journalEntryNumber?: string | null;
+    totalDebit: number;
+    totalCredit: number;
+    lines: Array<{ lineId: string; sourceDocumentLineId?: string | null; accountId: string; accountCode: string; accountName: string; type: string; source: string; description: string; debit: number; credit: number }>;
+}
+
 export interface VendorInvoice {
     id: string;
     invoiceNumber: string;
@@ -65,6 +77,9 @@ export interface VendorInvoice {
     earlyPaymentDiscountAmount: number;
     withholdingTaxRate: number;
     withholdingTaxAmount: number;
+    applySupplierWithholdingDefaults?: boolean | null;
+    withholdingTaxRateOverride?: number | null;
+    withholdingDecisionPending?: boolean;
     withholdingTaxId?: string;
     withholdingTaxAccountId?: string;
     withholdingCertificateNumber?: string;
@@ -296,6 +311,9 @@ export interface VendorInvoiceMatchExceptionReport {
 }
 
 export interface VendorInvoiceCreateRequest {
+    applyBusinessPartnerDefaults?: boolean;
+    applySupplierWithholdingDefaults?: boolean | null;
+    withholdingTaxRateOverride?: number | null;
     supplierInvoiceNumber?: string;
     supplierId: string;
     purchaseOrderId?: string;
@@ -1134,6 +1152,11 @@ export interface ProcurementFinanceReconciliationIssue {
 }
 
 export interface OutstandingVendorInvoice {
+    applySupplierWithholdingDefaults?: boolean | null;
+    withholdingTaxId?: string | null;
+    withholdingTaxRate?: number;
+    withholdingTaxRateOverride?: number | null;
+    withholdingTaxAccountId?: string | null;
     invoiceId: string;
     invoiceNumber: string;
     supplierInvoiceNumber?: string;

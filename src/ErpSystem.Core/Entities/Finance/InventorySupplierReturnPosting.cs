@@ -10,6 +10,7 @@ public sealed class InventorySupplierReturnPosting : TenantEntity
     public Guid PostingEventId { get; set; }
     public Guid JournalEntryId { get; set; }
     public Guid ClearingAccountId { get; set; }
+    /// <summary>Legacy representative target. The posted journal contains the authoritative complete Inventory account distribution.</summary>
     public Guid InventoryAccountId { get; set; }
     [Column(TypeName = "decimal(18,2)")] public decimal CarryingAmount { get; set; }
     public DateTime PostingDate { get; set; }

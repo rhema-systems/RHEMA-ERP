@@ -19,6 +19,12 @@ public sealed class SupplierDebitNotesController : ControllerBase
 
     public SupplierDebitNotesController(ISupplierDebitNoteService service) => _service = service;
 
+    [HttpGet("inventory-returns")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<ActionResult<IReadOnlyList<InventoryReturnCreditCandidateDto>>> ReturnCandidates(
+        [FromQuery] string? search, CancellationToken cancellationToken) =>
+        Ok(await _service.GetInventoryReturnCreditCandidatesAsync(search, cancellationToken));
+
     [HttpGet("inventory-returns/{returnId:guid}/source-invoices")]
     [Authorize(Policy = FinancePermissions.ViewFinance)]
     public async Task<ActionResult<IReadOnlyList<InventoryReturnCreditSourceDto>>> ReturnSources(Guid returnId, CancellationToken cancellationToken)

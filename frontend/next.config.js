@@ -1,7 +1,10 @@
 /** @type {import('next').NextConfig} */
+const isStandaloneBuild = process.env.NEXT_OUTPUT === 'standalone';
+
 const nextConfig = {
-  // Enable standalone output for Docker containers
-  output: 'standalone',
+  // `next start` is used for local UAT and needs the regular .next output. Docker opts into
+  // standalone explicitly through NEXT_OUTPUT=standalone (see Dockerfile).
+  output: isStandaloneBuild ? 'standalone' : undefined,
   
   // ESLint configuration
   eslint: {
@@ -22,7 +25,8 @@ const nextConfig = {
   
   // Experimental features
   experimental: {
-    // Add any experimental features here if needed
+    // Reduces peak Webpack memory while compiling the large App Router route tree.
+    webpackMemoryOptimizations: true,
   },
   
   // Turbopack configuration

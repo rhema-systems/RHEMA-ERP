@@ -5,15 +5,44 @@ import { useSearchParams } from 'next/navigation';
 import { useEffect, useMemo, useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Textarea } from '@/components/ui/textarea';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
+import {
+  businessPartnerService,
+  type BusinessPartnerDto,
+} from '@/services/businessPartnerService';
 import {
   crmService,
   type CreateCrmActivityDto,
@@ -38,7 +67,12 @@ import {
 } from 'lucide-react';
 import { toast } from 'sonner';
 
-const ACTIVITY_STATUS_OPTIONS = ['Planned', 'In Progress', 'Completed', 'Cancelled'];
+const ACTIVITY_STATUS_OPTIONS = [
+  'Planned',
+  'In Progress',
+  'Completed',
+  'Cancelled',
+];
 const ACTIVITY_TYPE_OPTIONS = ['Call', 'Meeting', 'Email', 'Task', 'Note'];
 const PRIORITY_OPTIONS = [
   { value: 1, label: 'High' },
@@ -50,7 +84,7 @@ const PRIORITY_OPTIONS = [
 const createEmptyActivityForm = (
   businessPartnerId?: string,
   leadId?: string,
-  opportunityId?: string,
+  opportunityId?: string
 ): CreateCrmActivityDto => ({
   subject: '',
   activityType: 'Call',
@@ -72,15 +106,22 @@ const createEmptyActivityForm = (
   nextFollowUpDate: '',
 });
 
-const formatDate = (value?: string) => value ? new Date(value).toLocaleDateString() : 'None';
-const formatDateTime = (value?: string) => value ? new Date(value).toLocaleString() : 'None';
-const getMessage = (error: unknown, fallback: string) => error instanceof Error ? error.message : fallback;
-const toOptionalString = (value?: string) => value?.trim() ? value.trim() : undefined;
+const formatDate = (value?: string) =>
+  value ? new Date(value).toLocaleDateString() : 'None';
+const formatDateTime = (value?: string) =>
+  value ? new Date(value).toLocaleString() : 'None';
+const getMessage = (error: unknown, fallback: string) =>
+  error instanceof Error ? error.message : fallback;
+const toOptionalString = (value?: string) =>
+  value?.trim() ? value.trim() : undefined;
 
 const getPriorityLabel = (priority: number) =>
-  PRIORITY_OPTIONS.find((option) => option.value === priority)?.label || 'Medium';
+  PRIORITY_OPTIONS.find((option) => option.value === priority)?.label ||
+  'Medium';
 
-const getPriorityVariant = (priority: number): 'default' | 'secondary' | 'outline' | 'destructive' => {
+const getPriorityVariant = (
+  priority: number
+): 'default' | 'secondary' | 'outline' | 'destructive' => {
   if (priority <= 1) {
     return 'destructive';
   }
@@ -92,7 +133,9 @@ const getPriorityVariant = (priority: number): 'default' | 'secondary' | 'outlin
   return 'outline';
 };
 
-const buildActivityPayload = (form: CreateCrmActivityDto): CreateCrmActivityDto => ({
+const buildActivityPayload = (
+  form: CreateCrmActivityDto
+): CreateCrmActivityDto => ({
   subject: form.subject.trim(),
   activityType: form.activityType,
   description: toOptionalString(form.description),
@@ -100,7 +143,8 @@ const buildActivityPayload = (form: CreateCrmActivityDto): CreateCrmActivityDto 
   dueDate: form.dueDate || undefined,
   activityStatus: form.activityStatus,
   priority: Number(form.priority) || 2,
-  duration: form.duration && form.duration > 0 ? Number(form.duration) : undefined,
+  duration:
+    form.duration && form.duration > 0 ? Number(form.duration) : undefined,
   assignedToId: form.assignedToId || undefined,
   businessPartnerId: form.businessPartnerId || undefined,
   leadId: form.leadId || undefined,
@@ -110,10 +154,15 @@ const buildActivityPayload = (form: CreateCrmActivityDto): CreateCrmActivityDto 
   outcome: toOptionalString(form.outcome),
   notes: toOptionalString(form.notes),
   requiresFollowUp: form.requiresFollowUp,
-  nextFollowUpDate: form.requiresFollowUp && form.nextFollowUpDate ? form.nextFollowUpDate : undefined,
+  nextFollowUpDate:
+    form.requiresFollowUp && form.nextFollowUpDate
+      ? form.nextFollowUpDate
+      : undefined,
 });
 
-const mapActivityToForm = (activity: CrmActivityDetailDto): CreateCrmActivityDto => ({
+const mapActivityToForm = (
+  activity: CrmActivityDetailDto
+): CreateCrmActivityDto => ({
   subject: activity.subject,
   activityType: activity.activityType || 'Call',
   description: activity.description || '',
@@ -134,10 +183,15 @@ const mapActivityToForm = (activity: CrmActivityDetailDto): CreateCrmActivityDto
   nextFollowUpDate: activity.nextFollowUpDate?.slice(0, 10) || '',
 });
 
-const resolveContextLine = (activity: Pick<
-  CrmActivityListItemDto,
-  'businessPartnerName' | 'opportunityName' | 'leadName'
->) => [activity.businessPartnerName, activity.opportunityName, activity.leadName].filter(Boolean).join(' | ') || 'General CRM context';
+const resolveContextLine = (
+  activity: Pick<
+    CrmActivityListItemDto,
+    'businessPartnerName' | 'opportunityName' | 'leadName'
+  >
+) =>
+  [activity.businessPartnerName, activity.opportunityName, activity.leadName]
+    .filter(Boolean)
+    .join(' | ') || 'General CRM context';
 
 function ActivityDialog({
   open,
@@ -162,238 +216,285 @@ function ActivityDialog({
   opportunities: CrmOpportunityListItemDto[];
   onOpenChange: (open: boolean) => void;
   onSubmit: () => void;
-  onChange: <K extends keyof CreateCrmActivityDto>(field: K, value: CreateCrmActivityDto[K]) => void;
+  onChange: <K extends keyof CreateCrmActivityDto>(
+    field: K,
+    value: CreateCrmActivityDto[K]
+  ) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[85vh] max-w-4xl flex-col gap-0 overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-6 py-4 pr-12">
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-4 py-2 md:grid-cols-2">
-          <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="activity-subject">Subject</Label>
-            <Input
-              id="activity-subject"
-              value={form.subject}
-              onChange={(event) => onChange('subject', event.target.value)}
-              placeholder="Executive follow-up call"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Activity Type</Label>
-            <Select value={form.activityType} onValueChange={(value) => onChange('activityType', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select activity type" />
-              </SelectTrigger>
-              <SelectContent>
-                {ACTIVITY_TYPE_OPTIONS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <Select value={form.activityStatus} onValueChange={(value) => onChange('activityStatus', value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select activity status" />
-              </SelectTrigger>
-              <SelectContent>
-                {ACTIVITY_STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>CRM Account</Label>
-            <Select value={form.businessPartnerId || 'none'} onValueChange={(value) => onChange('businessPartnerId', value === 'none' ? '' : value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select account" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No direct account</SelectItem>
-                {accounts.map((account) => (
-                  <SelectItem key={account.id} value={account.id}>
-                    {account.partnerName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Lead</Label>
-            <Select value={form.leadId || 'none'} onValueChange={(value) => onChange('leadId', value === 'none' ? '' : value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select lead" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No linked lead</SelectItem>
-                {leads.map((lead) => (
-                  <SelectItem key={lead.leadId} value={lead.leadId}>
-                    {lead.fullName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Opportunity</Label>
-            <Select value={form.opportunityId || 'none'} onValueChange={(value) => onChange('opportunityId', value === 'none' ? '' : value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select opportunity" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No linked opportunity</SelectItem>
-                {opportunities.map((opportunity) => (
-                  <SelectItem key={opportunity.opportunityId} value={opportunity.opportunityId}>
-                    {opportunity.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Priority</Label>
-            <Select value={String(form.priority)} onValueChange={(value) => onChange('priority', Number(value))}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select priority" />
-              </SelectTrigger>
-              <SelectContent>
-                {PRIORITY_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={String(option.value)}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="activity-date">Activity Date</Label>
-            <Input
-              id="activity-date"
-              type="date"
-              value={form.activityDate}
-              onChange={(event) => onChange('activityDate', event.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="activity-due-date">Due Date</Label>
-            <Input
-              id="activity-due-date"
-              type="date"
-              value={form.dueDate || ''}
-              onChange={(event) => onChange('dueDate', event.target.value)}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="activity-duration">Duration (minutes)</Label>
-            <Input
-              id="activity-duration"
-              type="number"
-              min={0}
-              value={form.duration ?? ''}
-              onChange={(event) => onChange('duration', event.target.value ? Number(event.target.value) : undefined)}
-              placeholder="45"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="activity-location">Location</Label>
-            <Input
-              id="activity-location"
-              value={form.location || ''}
-              onChange={(event) => onChange('location', event.target.value)}
-              placeholder="Client office or Teams"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="activity-outcome">Outcome</Label>
-            <Input
-              id="activity-outcome"
-              value={form.outcome || ''}
-              onChange={(event) => onChange('outcome', event.target.value)}
-              placeholder="Left message, Successful, Reschedule"
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="activity-attendees">Attendees</Label>
-            <Input
-              id="activity-attendees"
-              value={form.attendees || ''}
-              onChange={(event) => onChange('attendees', event.target.value)}
-              placeholder="Irene Mensah, Kojo Asare"
-            />
-          </div>
-
-          <div className="space-y-3 rounded-lg border p-4 md:col-span-2">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="font-medium">Requires Follow-Up</div>
-                <div className="text-sm text-muted-foreground">
-                  Keep this activity in the CRM follow-up queue.
-                </div>
-              </div>
-              <Switch
-                checked={form.requiresFollowUp}
-                onCheckedChange={(checked) => onChange('requiresFollowUp', checked)}
+        <div className="min-h-0 flex-1 overflow-y-auto px-6">
+          <div className="grid gap-3 py-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="activity-subject">Subject</Label>
+              <Input
+                id="activity-subject"
+                value={form.subject}
+                onChange={(event) => onChange('subject', event.target.value)}
+                placeholder="Executive follow-up call"
               />
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="activity-next-follow-up">Next Follow-Up Date</Label>
+              <Label>Activity Type</Label>
+              <Select
+                value={form.activityType}
+                onValueChange={(value) => onChange('activityType', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select activity type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACTIVITY_TYPE_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={form.activityStatus}
+                onValueChange={(value) => onChange('activityStatus', value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select activity status" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ACTIVITY_STATUS_OPTIONS.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>CRM Account</Label>
+              <Select
+                value={form.businessPartnerId || 'none'}
+                onValueChange={(value) =>
+                  onChange('businessPartnerId', value === 'none' ? '' : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select account" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No direct account</SelectItem>
+                  {accounts.map((account) => (
+                    <SelectItem key={account.id} value={account.id}>
+                      {account.partnerName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Lead</Label>
+              <Select
+                value={form.leadId || 'none'}
+                onValueChange={(value) =>
+                  onChange('leadId', value === 'none' ? '' : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select lead" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No linked lead</SelectItem>
+                  {leads.map((lead) => (
+                    <SelectItem key={lead.leadId} value={lead.leadId}>
+                      {lead.fullName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Opportunity</Label>
+              <Select
+                value={form.opportunityId || 'none'}
+                onValueChange={(value) =>
+                  onChange('opportunityId', value === 'none' ? '' : value)
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select opportunity" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No linked opportunity</SelectItem>
+                  {opportunities.map((opportunity) => (
+                    <SelectItem
+                      key={opportunity.opportunityId}
+                      value={opportunity.opportunityId}
+                    >
+                      {opportunity.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Priority</Label>
+              <Select
+                value={String(form.priority)}
+                onValueChange={(value) => onChange('priority', Number(value))}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select priority" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PRIORITY_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={String(option.value)}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="activity-date">Activity Date</Label>
               <Input
-                id="activity-next-follow-up"
+                id="activity-date"
                 type="date"
-                value={form.nextFollowUpDate || ''}
-                onChange={(event) => onChange('nextFollowUpDate', event.target.value)}
-                disabled={!form.requiresFollowUp}
+                value={form.activityDate}
+                onChange={(event) =>
+                  onChange('activityDate', event.target.value)
+                }
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="activity-due-date">Due Date</Label>
+              <Input
+                id="activity-due-date"
+                type="date"
+                value={form.dueDate || ''}
+                onChange={(event) => onChange('dueDate', event.target.value)}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="activity-duration">Duration (minutes)</Label>
+              <Input
+                id="activity-duration"
+                type="number"
+                min={0}
+                value={form.duration ?? ''}
+                onChange={(event) =>
+                  onChange(
+                    'duration',
+                    event.target.value ? Number(event.target.value) : undefined
+                  )
+                }
+                placeholder="45"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="activity-location">Location</Label>
+              <Input
+                id="activity-location"
+                value={form.location || ''}
+                onChange={(event) => onChange('location', event.target.value)}
+                placeholder="Client office or Teams"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="activity-outcome">Outcome</Label>
+              <Input
+                id="activity-outcome"
+                value={form.outcome || ''}
+                onChange={(event) => onChange('outcome', event.target.value)}
+                placeholder="Left message, Successful, Reschedule"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="activity-attendees">Attendees</Label>
+              <Input
+                id="activity-attendees"
+                value={form.attendees || ''}
+                onChange={(event) => onChange('attendees', event.target.value)}
+                placeholder="Irene Mensah, Kojo Asare"
+              />
+            </div>
+
+            <div className="space-y-3 rounded-lg border p-3 md:col-span-2">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-medium">Requires Follow-Up</div>
+                  <div className="text-sm text-muted-foreground">
+                    Keep this activity in the CRM follow-up queue.
+                  </div>
+                </div>
+                <Switch
+                  checked={form.requiresFollowUp}
+                  onCheckedChange={(checked) =>
+                    onChange('requiresFollowUp', checked)
+                  }
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="activity-next-follow-up">
+                  Next Follow-Up Date
+                </Label>
+                <Input
+                  id="activity-next-follow-up"
+                  type="date"
+                  value={form.nextFollowUpDate || ''}
+                  onChange={(event) =>
+                    onChange('nextFollowUpDate', event.target.value)
+                  }
+                  disabled={!form.requiresFollowUp}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="activity-description">Description</Label>
+              <Textarea
+                id="activity-description"
+                value={form.description || ''}
+                onChange={(event) =>
+                  onChange('description', event.target.value)
+                }
+                placeholder="Capture the purpose and customer context for this touchpoint."
+                rows={2}
+              />
+            </div>
+
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="activity-notes">Notes</Label>
+              <Textarea
+                id="activity-notes"
+                value={form.notes || ''}
+                onChange={(event) => onChange('notes', event.target.value)}
+                placeholder="Add internal notes, follow-up actions, and next commitments."
+                rows={3}
               />
             </div>
           </div>
-
-          <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="activity-description">Description</Label>
-            <Textarea
-              id="activity-description"
-              value={form.description || ''}
-              onChange={(event) => onChange('description', event.target.value)}
-              placeholder="Capture the purpose and customer context for this touchpoint."
-              rows={3}
-            />
-          </div>
-
-          <div className="space-y-2 md:col-span-2">
-            <Label htmlFor="activity-notes">Notes</Label>
-            <Textarea
-              id="activity-notes"
-              value={form.notes || ''}
-              onChange={(event) => onChange('notes', event.target.value)}
-              placeholder="Add internal notes, follow-up actions, and next commitments."
-              rows={4}
-            />
-          </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t bg-background px-6 py-3">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
@@ -409,32 +510,50 @@ function ActivityDialog({
 export default function CrmActivitiesPage() {
   const searchParams = useSearchParams();
   const resolvedSearchParams = searchParams ?? new URLSearchParams();
-  const scopedBusinessPartnerId = resolvedSearchParams.get('businessPartnerId') || '';
+  const scopedBusinessPartnerId =
+    resolvedSearchParams.get('businessPartnerId') || '';
   const scopedLeadId = resolvedSearchParams.get('leadId') || '';
   const scopedOpportunityId = resolvedSearchParams.get('opportunityId') || '';
   const requestedActivityId = resolvedSearchParams.get('activityId') || '';
 
-  const [search, setSearch] = useState(resolvedSearchParams.get('search') || '');
-  const [status, setStatus] = useState(resolvedSearchParams.get('status') || 'all');
-  const [activityType, setActivityType] = useState(resolvedSearchParams.get('activityType') || 'all');
-  const [followUpOnly, setFollowUpOnly] = useState(resolvedSearchParams.get('followUpOnly') === 'true');
+  const [search, setSearch] = useState(
+    resolvedSearchParams.get('search') || ''
+  );
+  const [status, setStatus] = useState(
+    resolvedSearchParams.get('status') || 'all'
+  );
+  const [activityType, setActivityType] = useState(
+    resolvedSearchParams.get('activityType') || 'all'
+  );
+  const [followUpOnly, setFollowUpOnly] = useState(
+    resolvedSearchParams.get('followUpOnly') === 'true'
+  );
   const [page, setPage] = useState(1);
 
-  const [result, setResult] = useState<PagedResult<CrmActivityListItemDto> | null>(null);
+  const [result, setResult] =
+    useState<PagedResult<CrmActivityListItemDto> | null>(null);
   const [loading, setLoading] = useState(true);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [selectedActivityId, setSelectedActivityId] = useState(requestedActivityId);
-  const [selectedActivity, setSelectedActivity] = useState<CrmActivityDetailDto | null>(null);
+  const [selectedActivityId, setSelectedActivityId] =
+    useState(requestedActivityId);
+  const [selectedActivity, setSelectedActivity] =
+    useState<CrmActivityDetailDto | null>(null);
 
   const [accounts, setAccounts] = useState<BusinessPartnerDto[]>([]);
   const [leads, setLeads] = useState<CrmLeadListItemDto[]>([]);
-  const [opportunities, setOpportunities] = useState<CrmOpportunityListItemDto[]>([]);
+  const [opportunities, setOpportunities] = useState<
+    CrmOpportunityListItemDto[]
+  >([]);
 
   const [formOpen, setFormOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [formMode, setFormMode] = useState<'create' | 'edit'>('create');
   const [form, setForm] = useState<CreateCrmActivityDto>(
-    createEmptyActivityForm(scopedBusinessPartnerId, scopedLeadId, scopedOpportunityId),
+    createEmptyActivityForm(
+      scopedBusinessPartnerId,
+      scopedLeadId,
+      scopedOpportunityId
+    )
   );
   const [saving, setSaving] = useState(false);
   const [newRequestHandled, setNewRequestHandled] = useState(false);
@@ -450,8 +569,15 @@ export default function CrmActivitiesPage() {
       setAccounts(
         partnerData
           .filter((partner) => partner.status !== 'Inactive')
-          .filter((partner) => partner.partnerType === 'Customer' || partner.partnerType === 'Both' || !!partner.customerType)
-          .sort((left, right) => left.partnerName.localeCompare(right.partnerName)),
+          .filter(
+            (partner) =>
+              partner.partnerType === 'Customer' ||
+              partner.partnerType === 'Both' ||
+              !!partner.customerType
+          )
+          .sort((left, right) =>
+            left.partnerName.localeCompare(right.partnerName)
+          )
       );
       setLeads(leadData.items);
       setOpportunities(opportunityData.items);
@@ -482,7 +608,10 @@ export default function CrmActivitiesPage() {
         return;
       }
 
-      if (selectedActivityId && data.items.some((item) => item.activityId === selectedActivityId)) {
+      if (
+        selectedActivityId &&
+        data.items.some((item) => item.activityId === selectedActivityId)
+      ) {
         return;
       }
 
@@ -517,7 +646,15 @@ export default function CrmActivitiesPage() {
 
   useEffect(() => {
     void loadActivities(page);
-  }, [page, status, activityType, followUpOnly, scopedBusinessPartnerId, scopedLeadId, scopedOpportunityId]);
+  }, [
+    page,
+    status,
+    activityType,
+    followUpOnly,
+    scopedBusinessPartnerId,
+    scopedLeadId,
+    scopedOpportunityId,
+  ]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -538,10 +675,22 @@ export default function CrmActivitiesPage() {
     }
 
     setFormMode('create');
-    setForm(createEmptyActivityForm(scopedBusinessPartnerId, scopedLeadId, scopedOpportunityId));
+    setForm(
+      createEmptyActivityForm(
+        scopedBusinessPartnerId,
+        scopedLeadId,
+        scopedOpportunityId
+      )
+    );
     setFormOpen(true);
     setNewRequestHandled(true);
-  }, [newRequestHandled, resolvedSearchParams, scopedBusinessPartnerId, scopedLeadId, scopedOpportunityId]);
+  }, [
+    newRequestHandled,
+    resolvedSearchParams,
+    scopedBusinessPartnerId,
+    scopedLeadId,
+    scopedOpportunityId,
+  ]);
 
   const metrics = useMemo(() => {
     const items = result?.items || [];
@@ -555,7 +704,9 @@ export default function CrmActivitiesPage() {
       },
       {
         label: 'Follow-Up Queue',
-        value: items.filter((item) => item.requiresFollowUp).length.toLocaleString(),
+        value: items
+          .filter((item) => item.requiresFollowUp)
+          .length.toLocaleString(),
         hint: 'Current page only',
         icon: CalendarClock,
       },
@@ -567,20 +718,34 @@ export default function CrmActivitiesPage() {
       },
       {
         label: 'Account Coverage',
-        value: new Set(items.map((item) => item.businessPartnerId).filter(Boolean)).size.toLocaleString(),
+        value: new Set(
+          items.map((item) => item.businessPartnerId).filter(Boolean)
+        ).size.toLocaleString(),
         hint: 'Distinct CRM accounts on this page',
         icon: Building2,
       },
     ];
   }, [result]);
 
-  const scopedAccountName = accounts.find((account) => account.id === scopedBusinessPartnerId)?.partnerName;
-  const scopedLeadName = leads.find((lead) => lead.leadId === scopedLeadId)?.fullName;
-  const scopedOpportunityName = opportunities.find((opportunity) => opportunity.opportunityId === scopedOpportunityId)?.name;
+  const scopedAccountName = accounts.find(
+    (account) => account.id === scopedBusinessPartnerId
+  )?.partnerName;
+  const scopedLeadName = leads.find(
+    (lead) => lead.leadId === scopedLeadId
+  )?.fullName;
+  const scopedOpportunityName = opportunities.find(
+    (opportunity) => opportunity.opportunityId === scopedOpportunityId
+  )?.name;
 
   const openCreateDialog = () => {
     setFormMode('create');
-    setForm(createEmptyActivityForm(scopedBusinessPartnerId, scopedLeadId, scopedOpportunityId));
+    setForm(
+      createEmptyActivityForm(
+        scopedBusinessPartnerId,
+        scopedLeadId,
+        scopedOpportunityId
+      )
+    );
     setFormOpen(true);
   };
 
@@ -591,9 +756,10 @@ export default function CrmActivitiesPage() {
     }
 
     try {
-      const detail = targetActivityId === selectedActivity?.activityId && selectedActivity
-        ? selectedActivity
-        : await crmService.getActivity(targetActivityId);
+      const detail =
+        targetActivityId === selectedActivity?.activityId && selectedActivity
+          ? selectedActivity
+          : await crmService.getActivity(targetActivityId);
 
       setSelectedActivity(detail);
       setSelectedActivityId(detail.activityId);
@@ -614,11 +780,14 @@ export default function CrmActivitiesPage() {
     try {
       setSaving(true);
       const payload = buildActivityPayload(form);
-      const activity = formMode === 'create'
-        ? await crmService.createActivity(payload)
-        : await crmService.updateActivity(selectedActivityId, payload);
+      const activity =
+        formMode === 'create'
+          ? await crmService.createActivity(payload)
+          : await crmService.updateActivity(selectedActivityId, payload);
 
-      toast.success(formMode === 'create' ? 'Activity created.' : 'Activity updated.');
+      toast.success(
+        formMode === 'create' ? 'Activity created.' : 'Activity updated.'
+      );
       setFormOpen(false);
       setSelectedActivityId(activity.activityId);
       setPage(1);
@@ -658,7 +827,8 @@ export default function CrmActivitiesPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">CRM Activities</h1>
           <p className="text-muted-foreground">
-            Manage the follow-up queue and customer touchpoints already flowing into the ERP-native CRM workspace.
+            Manage the follow-up queue and customer touchpoints already flowing
+            into the ERP-native CRM workspace.
           </p>
         </div>
 
@@ -690,7 +860,9 @@ export default function CrmActivitiesPage() {
                 </CardDescription>
                 <CardTitle>{metric.value}</CardTitle>
               </CardHeader>
-              <CardContent className="pt-0 text-xs text-muted-foreground">{metric.hint}</CardContent>
+              <CardContent className="pt-0 text-xs text-muted-foreground">
+                {metric.hint}
+              </CardContent>
             </Card>
           );
         })}
@@ -699,7 +871,10 @@ export default function CrmActivitiesPage() {
       <Card>
         <CardHeader>
           <CardTitle>Filters</CardTitle>
-          <CardDescription>Filter CRM activities by search, status, type, and follow-up urgency.</CardDescription>
+          <CardDescription>
+            Filter CRM activities by search, status, type, and follow-up
+            urgency.
+          </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 lg:grid-cols-[1.4fr_0.8fr_0.8fr_auto]">
           <div className="relative">
@@ -712,10 +887,13 @@ export default function CrmActivitiesPage() {
             />
           </div>
 
-          <Select value={status} onValueChange={(value) => {
-            setPage(1);
-            setStatus(value);
-          }}>
+          <Select
+            value={status}
+            onValueChange={(value) => {
+              setPage(1);
+              setStatus(value);
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Filter by status" />
             </SelectTrigger>
@@ -729,10 +907,13 @@ export default function CrmActivitiesPage() {
             </SelectContent>
           </Select>
 
-          <Select value={activityType} onValueChange={(value) => {
-            setPage(1);
-            setActivityType(value);
-          }}>
+          <Select
+            value={activityType}
+            onValueChange={(value) => {
+              setPage(1);
+              setActivityType(value);
+            }}
+          >
             <SelectTrigger>
               <SelectValue placeholder="Filter by type" />
             </SelectTrigger>
@@ -758,12 +939,20 @@ export default function CrmActivitiesPage() {
         </CardContent>
       </Card>
 
-      {(scopedAccountName || scopedLeadName || scopedOpportunityName) ? (
+      {scopedAccountName || scopedLeadName || scopedOpportunityName ? (
         <Card>
           <CardContent className="flex flex-wrap gap-2 py-4 text-sm">
-            {scopedAccountName ? <Badge variant="outline">Account: {scopedAccountName}</Badge> : null}
-            {scopedLeadName ? <Badge variant="outline">Lead: {scopedLeadName}</Badge> : null}
-            {scopedOpportunityName ? <Badge variant="outline">Opportunity: {scopedOpportunityName}</Badge> : null}
+            {scopedAccountName ? (
+              <Badge variant="outline">Account: {scopedAccountName}</Badge>
+            ) : null}
+            {scopedLeadName ? (
+              <Badge variant="outline">Lead: {scopedLeadName}</Badge>
+            ) : null}
+            {scopedOpportunityName ? (
+              <Badge variant="outline">
+                Opportunity: {scopedOpportunityName}
+              </Badge>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}
@@ -773,14 +962,22 @@ export default function CrmActivitiesPage() {
           <CardHeader>
             <CardTitle>Activity Queue</CardTitle>
             <CardDescription>
-              {result ? `${result.totalCount} CRM activities matched` : 'Loading CRM activities'}
+              {result
+                ? `${result.totalCount} CRM activities matched`
+                : 'Loading CRM activities'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {loading ? <div className="py-16 text-center text-muted-foreground">Loading activities...</div> : null}
+            {loading ? (
+              <div className="py-16 text-center text-muted-foreground">
+                Loading activities...
+              </div>
+            ) : null}
 
-            {!loading && !(result?.items.length) ? (
-              <div className="py-16 text-center text-muted-foreground">No CRM activities matched the current filters.</div>
+            {!loading && !result?.items.length ? (
+              <div className="py-16 text-center text-muted-foreground">
+                No CRM activities matched the current filters.
+              </div>
             ) : null}
 
             {!loading && result?.items.length ? (
@@ -791,14 +988,20 @@ export default function CrmActivitiesPage() {
                     <TableHead>Context</TableHead>
                     <TableHead>Due</TableHead>
                     <TableHead>Priority</TableHead>
-                    <TableHead className="w-[120px] text-right">Actions</TableHead>
+                    <TableHead className="w-[120px] text-right">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {result.items.map((activity) => (
                     <TableRow
                       key={activity.activityId}
-                      className={selectedActivityId === activity.activityId ? 'bg-muted/40' : ''}
+                      className={
+                        selectedActivityId === activity.activityId
+                          ? 'bg-muted/40'
+                          : ''
+                      }
                       onClick={() => setSelectedActivityId(activity.activityId)}
                     >
                       <TableCell>
@@ -808,14 +1011,24 @@ export default function CrmActivitiesPage() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div className="text-sm">{resolveContextLine(activity)}</div>
+                        <div className="text-sm">
+                          {resolveContextLine(activity)}
+                        </div>
                         <div className="mt-1 flex flex-wrap gap-2">
-                          {activity.requiresFollowUp ? <Badge variant="secondary">Follow-Up</Badge> : null}
-                          {activity.isOverdue ? <Badge variant="destructive">Overdue</Badge> : null}
+                          {activity.requiresFollowUp ? (
+                            <Badge variant="secondary">Follow-Up</Badge>
+                          ) : null}
+                          {activity.isOverdue ? (
+                            <Badge variant="destructive">Overdue</Badge>
+                          ) : null}
                         </div>
                       </TableCell>
                       <TableCell>
-                        <div>{formatDate(activity.dueDate || activity.nextFollowUpDate)}</div>
+                        <div>
+                          {formatDate(
+                            activity.dueDate || activity.nextFollowUpDate
+                          )}
+                        </div>
                         <div className="text-xs text-muted-foreground">
                           Activity {formatDate(activity.activityDate)}
                         </div>
@@ -858,7 +1071,8 @@ export default function CrmActivitiesPage() {
 
             <div className="flex items-center justify-between gap-3">
               <div className="text-sm text-muted-foreground">
-                Page {result?.page || 1} of {Math.max(result?.totalPages || 1, 1)}
+                Page {result?.page || 1} of{' '}
+                {Math.max(result?.totalPages || 1, 1)}
               </div>
               <div className="flex gap-2">
                 <Button
@@ -870,7 +1084,9 @@ export default function CrmActivitiesPage() {
                 </Button>
                 <Button
                   variant="outline"
-                  disabled={!result || result.page >= result.totalPages || loading}
+                  disabled={
+                    !result || result.page >= result.totalPages || loading
+                  }
                   onClick={() => setPage((current) => current + 1)}
                 >
                   Next
@@ -883,56 +1099,107 @@ export default function CrmActivitiesPage() {
         <Card>
           <CardHeader>
             <CardTitle>Activity Detail</CardTitle>
-            <CardDescription>Inspect the full follow-up context and related CRM records for the selected activity.</CardDescription>
+            <CardDescription>
+              Inspect the full follow-up context and related CRM records for the
+              selected activity.
+            </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {detailLoading ? <div className="py-16 text-center text-muted-foreground">Loading activity detail...</div> : null}
+            {detailLoading ? (
+              <div className="py-16 text-center text-muted-foreground">
+                Loading activity detail...
+              </div>
+            ) : null}
 
             {!detailLoading && !selectedActivity ? (
-              <div className="py-16 text-center text-muted-foreground">Select an activity to inspect and manage it.</div>
+              <div className="py-16 text-center text-muted-foreground">
+                Select an activity to inspect and manage it.
+              </div>
             ) : null}
 
             {!detailLoading && selectedActivity ? (
               <>
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <div className="text-xl font-semibold">{selectedActivity.subject}</div>
-                    <div className="text-sm text-muted-foreground">{resolveContextLine(selectedActivity)}</div>
+                    <div className="text-xl font-semibold">
+                      {selectedActivity.subject}
+                    </div>
+                    <div className="text-sm text-muted-foreground">
+                      {resolveContextLine(selectedActivity)}
+                    </div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline">{selectedActivity.activityType}</Badge>
-                    <Badge variant={selectedActivity.activityStatus === 'Completed' ? 'default' : 'outline'}>
+                    <Badge variant="outline">
+                      {selectedActivity.activityType}
+                    </Badge>
+                    <Badge
+                      variant={
+                        selectedActivity.activityStatus === 'Completed'
+                          ? 'default'
+                          : 'outline'
+                      }
+                    >
                       {selectedActivity.activityStatus}
                     </Badge>
-                    <Badge variant={getPriorityVariant(selectedActivity.priority)}>
+                    <Badge
+                      variant={getPriorityVariant(selectedActivity.priority)}
+                    >
                       {getPriorityLabel(selectedActivity.priority)}
                     </Badge>
-                    {selectedActivity.requiresFollowUp ? <Badge variant="secondary">Needs Follow-Up</Badge> : null}
-                    {selectedActivity.isOverdue ? <Badge variant="destructive">Overdue</Badge> : null}
+                    {selectedActivity.requiresFollowUp ? (
+                      <Badge variant="secondary">Needs Follow-Up</Badge>
+                    ) : null}
+                    {selectedActivity.isOverdue ? (
+                      <Badge variant="destructive">Overdue</Badge>
+                    ) : null}
                   </div>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border p-4 text-sm">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Schedule</div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Schedule
+                    </div>
                     <div className="mt-2 space-y-2">
-                      <div>Activity Date: {formatDateTime(selectedActivity.activityDate)}</div>
-                      <div>Due Date: {formatDate(selectedActivity.dueDate)}</div>
-                      <div>Next Follow-Up: {formatDate(selectedActivity.nextFollowUpDate)}</div>
+                      <div>
+                        Activity Date:{' '}
+                        {formatDateTime(selectedActivity.activityDate)}
+                      </div>
+                      <div>
+                        Due Date: {formatDate(selectedActivity.dueDate)}
+                      </div>
+                      <div>
+                        Next Follow-Up:{' '}
+                        {formatDate(selectedActivity.nextFollowUpDate)}
+                      </div>
                     </div>
                   </div>
                   <div className="rounded-lg border p-4 text-sm">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Execution</div>
+                    <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                      Execution
+                    </div>
                     <div className="mt-2 space-y-2">
-                      <div>Duration: {selectedActivity.duration ? `${selectedActivity.duration} min` : 'Not captured'}</div>
-                      <div>Location: {selectedActivity.location || 'Not captured'}</div>
-                      <div>Created: {formatDateTime(selectedActivity.createdAt)}</div>
+                      <div>
+                        Duration:{' '}
+                        {selectedActivity.duration
+                          ? `${selectedActivity.duration} min`
+                          : 'Not captured'}
+                      </div>
+                      <div>
+                        Location: {selectedActivity.location || 'Not captured'}
+                      </div>
+                      <div>
+                        Created: {formatDateTime(selectedActivity.createdAt)}
+                      </div>
                     </div>
                   </div>
                 </div>
 
                 <div className="flex flex-wrap gap-2">
-                  <Button variant="outline" onClick={() => void openEditDialog()}>
+                  <Button
+                    variant="outline"
+                    onClick={() => void openEditDialog()}
+                  >
                     <Pencil className="mr-2 h-4 w-4" />
                     Edit Activity
                   </Button>
@@ -942,21 +1209,27 @@ export default function CrmActivitiesPage() {
                   </Button>
                   {selectedActivity.businessPartnerId ? (
                     <Button asChild>
-                      <Link href={`/crm/accounts/${selectedActivity.businessPartnerId}`}>
+                      <Link
+                        href={`/crm/accounts/${selectedActivity.businessPartnerId}`}
+                      >
                         Open Account
                       </Link>
                     </Button>
                   ) : null}
                   {selectedActivity.leadId ? (
                     <Button asChild variant="outline">
-                      <Link href={`/crm/leads?leadId=${selectedActivity.leadId}`}>
+                      <Link
+                        href={`/crm/leads?leadId=${selectedActivity.leadId}`}
+                      >
                         Open Lead
                       </Link>
                     </Button>
                   ) : null}
                   {selectedActivity.opportunityId ? (
                     <Button asChild variant="outline">
-                      <Link href={`/crm/opportunities?opportunityId=${selectedActivity.opportunityId}`}>
+                      <Link
+                        href={`/crm/opportunities?opportunityId=${selectedActivity.opportunityId}`}
+                      >
                         Open Opportunity
                       </Link>
                     </Button>
@@ -966,26 +1239,37 @@ export default function CrmActivitiesPage() {
                 <div className="grid gap-3 sm:grid-cols-3">
                   <div className="rounded-lg border p-4 text-sm">
                     <div className="mb-2 font-medium">Account</div>
-                    <div className="text-muted-foreground">{selectedActivity.businessPartnerName || 'Not linked'}</div>
+                    <div className="text-muted-foreground">
+                      {selectedActivity.businessPartnerName || 'Not linked'}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 text-sm">
                     <div className="mb-2 font-medium">Lead</div>
-                    <div className="text-muted-foreground">{selectedActivity.leadName || 'Not linked'}</div>
+                    <div className="text-muted-foreground">
+                      {selectedActivity.leadName || 'Not linked'}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 text-sm">
                     <div className="mb-2 font-medium">Opportunity</div>
-                    <div className="text-muted-foreground">{selectedActivity.opportunityName || 'Not linked'}</div>
+                    <div className="text-muted-foreground">
+                      {selectedActivity.opportunityName || 'Not linked'}
+                    </div>
                   </div>
                 </div>
 
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="rounded-lg border p-4 text-sm">
                     <div className="mb-2 font-medium">Description</div>
-                    <div className="text-muted-foreground">{selectedActivity.description || 'No description provided.'}</div>
+                    <div className="text-muted-foreground">
+                      {selectedActivity.description ||
+                        'No description provided.'}
+                    </div>
                   </div>
                   <div className="rounded-lg border p-4 text-sm">
                     <div className="mb-2 font-medium">Outcome</div>
-                    <div className="text-muted-foreground">{selectedActivity.outcome || 'No outcome recorded.'}</div>
+                    <div className="text-muted-foreground">
+                      {selectedActivity.outcome || 'No outcome recorded.'}
+                    </div>
                   </div>
                 </div>
 
@@ -994,7 +1278,9 @@ export default function CrmActivitiesPage() {
                     <Clock3 className="h-4 w-4" />
                     Notes
                   </div>
-                  <div className="text-muted-foreground">{selectedActivity.notes || 'No notes recorded.'}</div>
+                  <div className="text-muted-foreground">
+                    {selectedActivity.notes || 'No notes recorded.'}
+                  </div>
                 </div>
 
                 {selectedActivity.attendees ? (
@@ -1003,7 +1289,9 @@ export default function CrmActivitiesPage() {
                       <Target className="h-4 w-4" />
                       Attendees
                     </div>
-                    <div className="text-muted-foreground">{selectedActivity.attendees}</div>
+                    <div className="text-muted-foreground">
+                      {selectedActivity.attendees}
+                    </div>
                   </div>
                 ) : null}
               </>
@@ -1014,7 +1302,9 @@ export default function CrmActivitiesPage() {
 
       <ActivityDialog
         open={formOpen}
-        title={formMode === 'create' ? 'Create CRM Activity' : 'Edit CRM Activity'}
+        title={
+          formMode === 'create' ? 'Create CRM Activity' : 'Edit CRM Activity'
+        }
         description="Track follow-ups, meetings, calls, and touchpoints directly against the current CRM account, lead, and opportunity records."
         form={form}
         saving={saving}
@@ -1023,7 +1313,9 @@ export default function CrmActivitiesPage() {
         opportunities={opportunities}
         onOpenChange={setFormOpen}
         onSubmit={() => void submitActivity()}
-        onChange={(field, value) => setForm((current) => ({ ...current, [field]: value }))}
+        onChange={(field, value) =>
+          setForm((current) => ({ ...current, [field]: value }))
+        }
       />
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
@@ -1038,7 +1330,11 @@ export default function CrmActivitiesPage() {
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => void deleteActivity()} disabled={saving}>
+            <Button
+              variant="destructive"
+              onClick={() => void deleteActivity()}
+              disabled={saving}
+            >
               {saving ? 'Deleting...' : 'Delete Activity'}
             </Button>
           </DialogFooter>

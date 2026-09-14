@@ -230,6 +230,30 @@ public class BusinessPartner : TenantEntity
     public virtual PaymentTerm? PaymentTerm { get; set; }
 
     // GL Defaults
+    public bool SubjectToWithholdingDeduction { get; set; }
+
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal WithholdingTaxRate { get; set; }
+    public Guid? DefaultWithholdingTaxId { get; set; }
+
+    public Guid? DefaultTaxGroupId { get; set; }
+    public Guid? DefaultBankAccountId { get; set; }
+
+    [MaxLength(20)]
+    public string CashAccountSource { get; set; } = "Chequebook";
+
+    public Guid? DefaultCashAccountId { get; set; }
+    public Guid? DefaultTermsDiscountsAvailableAccountId { get; set; }
+    public Guid? DefaultTermsDiscountsTakenAccountId { get; set; }
+    public Guid? DefaultFinanceChargesAccountId { get; set; }
+    public Guid? DefaultTradeDiscountAccountId { get; set; }
+    public Guid? DefaultMiscellaneousAccountId { get; set; }
+    public Guid? DefaultFreightAccountId { get; set; }
+    public Guid? DefaultTaxAccountId { get; set; }
+    public Guid? DefaultWriteoffAccountId { get; set; }
+    public Guid? DefaultAccruedPurchasesAccountId { get; set; }
+    public Guid? DefaultPurchasePriceVarianceAccountId { get; set; }
+
     public Guid? DefaultApAccountId { get; set; }
     public virtual Account? DefaultApAccount { get; set; }
 

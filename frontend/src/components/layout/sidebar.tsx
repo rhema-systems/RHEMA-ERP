@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
@@ -2709,6 +2709,7 @@ export const navigationItems: NavItem[] = [
     roles: [
       ...ADMINISTRATION_ROLES,
       'Sales User',
+      'Marketing User',
       'Sales Manager',
       'Sales Officer',
       'Salesperson',
@@ -2717,6 +2718,7 @@ export const navigationItems: NavItem[] = [
     accessMode: 'any',
     children: [
       { title: 'Sales Overview', href: '/sales', icon: LayoutDashboard },
+      { title: 'Property Enquiries', href: '/sales/property-enquiries', icon: MessageSquare, permissions: ['enquiry.property.access'] },
       { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
       { title: 'Allocations', href: '/sales/allocations', icon: MapPin },
       { title: 'Delivery Notes', href: '/sales/deliveries', icon: Truck },

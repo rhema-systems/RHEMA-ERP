@@ -217,11 +217,16 @@ export default function NewAccountPage() {
                     financeDataService.getSegmentStructures(),
                 ]);
                 setSettings(settingsData);
-                setSegments(segmentsData.sort((a, b) => a.segmentPosition - b.segmentPosition));
+                // Setup also returns inactive definitions for administration/history.
+                // Account creation must match the server's active segment structure.
+                const activeSegments = segmentsData
+                    .filter(segment => segment.isActive)
+                    .sort((a, b) => a.segmentPosition - b.segmentPosition);
+                setSegments(activeSegments);
 
                 // Initialize segment values
                 const initialValues: Record<string, string> = {};
-                segmentsData.forEach(seg => {
+                activeSegments.forEach(seg => {
                     initialValues[seg.id] = '';
                 });
                 setSegmentValues(initialValues);

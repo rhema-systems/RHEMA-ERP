@@ -60,7 +60,7 @@ public partial class VendorInvoiceService
                     if (partner == null || !partner.IsActive || partner.IsBlacklisted ||
                         partner.RegistrationStatus is not ("Active" or "Approved") || partner.PartnerType == "Customer")
                         throw new InvalidOperationException("Every charge needs an active, approved cost supplier in this company.");
-                    var supplier = await ResolveSupplierForInvoiceAsync(id, cancellationToken);
+                    var supplier = await ResolveSupplierIdentityForInvoiceAsync(id, true, cancellationToken);
                     if (supplier.IsBlacklisted) throw new InvalidOperationException("The cost supplier is blacklisted.");
                     canonicalSuppliers[id] = supplier.Id;
                     foreach (var charge in dto.Charges.Where(c => c.SupplierId == id))
@@ -128,6 +128,8 @@ public partial class VendorInvoiceService
 
     private static void EnsureLandedCostTaxReviewed(VendorInvoice invoice)
     {
+        if (invoice.WithholdingDecisionPending)
+            throw new InvalidOperationException("AP_WHT_CONFIRMATION_REQUIRED: Choose Yes or No for withholding in Edit invoice before submitting or posting.");
         if (invoice.LineItems.Any(l => !l.IsDeleted && l.LandedCostItemId.HasValue &&
             (!Enum.IsDefined(l.TaxTreatment) || l.TaxTreatment == TaxTreatment.PendingReview ||
                 (l.TaxTreatment == TaxTreatment.Standard && !l.TaxGroupId.HasValue))))
@@ -189,12 +191,17 @@ public partial class VendorInvoiceService
                     var partner = await _unitOfWork.Repository<BusinessPartner>().GetQueryable(p =>
                         p.Id == partnerId && p.TenantId == TenantId && !p.IsDeleted).SingleOrDefaultAsync(cancellationToken)
                         ?? throw new ArgumentException("Select a saved cost supplier from this company.");
-                    var supplier = await ResolveSupplierForInvoiceAsync(partner.Id, cancellationToken);
+                    var supplier = await ResolveSupplierIdentityForInvoiceAsync(partner.Id, true, cancellationToken);
                     if (!partner.IsActive || partner.IsBlacklisted || partner.RegistrationStatus is not ("Active" or "Approved") ||
                         string.Equals(partner.PartnerType, "Customer", StringComparison.OrdinalIgnoreCase) || supplier.IsBlacklisted)
                         throw new InvalidOperationException("The selected cost supplier must be active, approved and not blacklisted.");
                     suppliers.Add(partnerId, (partner, supplier));
                 }
+
+                // CreateCore and supplier defaults query canonical identities from the database.
+                // Flush an onboarding handoff within this same owned transaction before those
+                // reads; a later validation failure still rolls the entire generation back.
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
                 var output = new List<VendorInvoiceDto>();
                 var groups = dto.Charges.GroupBy(c => (Supplier: suppliers[c.SupplierId].Supplier.Id,
@@ -242,7 +249,7 @@ public partial class VendorInvoiceService
                             };
                         }).ToList()
                     };
-                    var invoice = await CreateCoreAsync(create, producer, cancellationToken);
+                    var invoice = await CreateCoreAsync(create, producer, cancellationToken, deferSupplierWithholdingDecision: true);
                     foreach (var c in group)
                     {
                         var item = items[c.CostItemId]; item.InvoiceNumber = invoice.InvoiceNumber; item.InvoiceDate = invoice.InvoiceDate;

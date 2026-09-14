@@ -2,421 +2,488 @@
 
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
+import { ArrowLeft, Save } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, Save, Building2 } from 'lucide-react';
-import { toast } from 'sonner';
-import { businessPartnerService, BusinessPartnerDetailDto, UpdateBusinessPartnerDto, BusinessPartnerDto } from '@/services/businessPartnerService';
-import { paymentTermService, procurementCurrencyService } from '@/services/financeCommonService';
-import type { PaymentTermListDto, CurrencyListDto } from '@/services/financeCommonService';
-import { priceListService, PriceListDto, PriceListType } from '@/services/priceListService';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  businessPartnerService,
+  type BusinessPartnerDetailDto,
+  type UpdateBusinessPartnerDto,
+  type BusinessPartnerDto,
+} from '@/services/businessPartnerService';
+import {
+  paymentTermService,
+  procurementCurrencyService,
+  type PaymentTermListDto,
+  type CurrencyListDto,
+} from '@/services/financeCommonService';
+import {
+  priceListService,
+  type PriceListDto,
+} from '@/services/priceListService';
+import {
+  emptyBusinessPartnerPostingDefaults,
+  PartnerAccountsFields,
+  PartnerCatalogueNotice,
+  PartnerOptionsFields,
+  PartnerTaxDefaultsFields,
+  useBusinessPartnerPostingCatalogues,
+} from '@/components/procurement/BusinessPartnerPostingFields';
+
+const emptyForm: UpdateBusinessPartnerDto = {
+  partnerName: '',
+  tradingName: '',
+  registrationNumber: '',
+  taxNumber: '',
+  email: '',
+  phone: '',
+  website: '',
+  physicalAddress: '',
+  city: '',
+  country: '',
+  postalCode: '',
+  notes: '',
+  status: 'Active',
+  isPreferred: false,
+  currency: '',
+  paymentTerms: '',
+  paymentTermId: '',
+  priceList: '',
+  parentId: '',
+};
 
 export default function EditBusinessPartnerPage() {
   const params = useParams();
   const router = useRouter();
-  const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
-
+  const id = Array.isArray(params?.id) ? params.id[0] : (params?.id ?? '');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [activeTab, setActiveTab] = useState('details');
   const [partner, setPartner] = useState<BusinessPartnerDetailDto | null>(null);
   const [paymentTerms, setPaymentTerms] = useState<PaymentTermListDto[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [priceLists, setPriceLists] = useState<PriceListDto[]>([]);
   const [allPartners, setAllPartners] = useState<BusinessPartnerDto[]>([]);
-  const [formData, setFormData] = useState<UpdateBusinessPartnerDto>({
-    partnerName: '',
-    tradingName: '',
-    registrationNumber: '',
-    taxNumber: '',
-    email: '',
-    phone: '',
-    website: '',
-    physicalAddress: '',
-    city: '',
-    country: '',
-    postalCode: '',
-    notes: '',
-    status: 'Active',
-    isPreferred: false,
-    currency: '',
-    paymentTerms: '',
-    paymentTermId: '',
-    priceList: '',
-    parentId: '',
-  });
+  const [formData, setFormData] = useState<UpdateBusinessPartnerDto>(emptyForm);
+  const [creditLimit, setCreditLimit] = useState('');
+  const [postingDefaults, setPostingDefaults] = useState(
+    emptyBusinessPartnerPostingDefaults
+  );
+  const catalogues = useBusinessPartnerPostingCatalogues(partner?.partnerType);
 
   useEffect(() => {
-    loadData();
+    let current = true;
+    setLoading(true);
+    void Promise.all([
+      businessPartnerService.getPartnerById(id),
+      paymentTermService.getActive().catch(() => []),
+      procurementCurrencyService.getActive().catch(() => []),
+      businessPartnerService.getAllPartnersForDropdown().catch(() => []),
+      priceListService.getActivePriceLists().catch(() => []),
+    ])
+      .then(([data, terms, currencyData, partners, lists]) => {
+        if (!current) return;
+        setPartner(data);
+        setPaymentTerms(terms);
+        setCurrencies(currencyData);
+        setAllPartners(partners.filter((candidate) => candidate.id !== id));
+        setPriceLists(lists);
+        setFormData({
+          partnerName: data.partnerName || data.companyName || '',
+          tradingName: data.tradingName || '',
+          registrationNumber: data.registrationNumber || '',
+          taxNumber: data.taxNumber || '',
+          email: data.email || '',
+          phone: data.phone || '',
+          website: data.website || '',
+          physicalAddress: data.physicalAddress || '',
+          city: data.city || '',
+          country: data.country || '',
+          postalCode: data.physicalPostalCode || '',
+          notes: data.notes || '',
+          status: data.status || 'Active',
+          isPreferred: data.isPreferred,
+          currency: data.currency || '',
+          paymentTerms: data.paymentTerms || '',
+          paymentTermId: data.paymentTermId || '',
+          priceList: data.priceList || '',
+          parentId: data.parentId || '',
+        });
+        setCreditLimit(
+          data.creditLimit == null ? '' : String(data.creditLimit)
+        );
+        setPostingDefaults({
+          ...emptyBusinessPartnerPostingDefaults(),
+          ...data.postingDefaults,
+        });
+      })
+      .catch((error) => {
+        if (current)
+          toast.error(
+            error instanceof Error
+              ? error.message
+              : 'Failed to load business partner'
+          );
+      })
+      .finally(() => {
+        if (current) setLoading(false);
+      });
+    return () => {
+      current = false;
+    };
   }, [id]);
 
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      console.log('Business Partner Edit Page: Starting to load data for id:', id);
-      
-      // Load price lists separately to debug
-      console.log('Business Partner Edit Page: Calling priceListService.getActivePriceLists()...');
-      let priceListsData: PriceListDto[] = [];
-      try {
-        priceListsData = await priceListService.getActivePriceLists();
-        console.log('Business Partner Edit Page: Price lists loaded:', priceListsData);
-      } catch (priceListError) {
-        console.error('Business Partner Edit Page: Error loading price lists:', priceListError);
-      }
-      
-      // Load partner data and reference data in parallel
-      const [partnerData, termsData, currenciesData, partnersData] = await Promise.all([
-        businessPartnerService.getPartnerById(id),
-        paymentTermService.getActive().catch((err) => { console.error('Error loading payment terms:', err); return []; }),
-        procurementCurrencyService.getActive().catch((err) => { console.error('Error loading currencies:', err); return []; }),
-        businessPartnerService.getAllPartnersForDropdown().catch((err) => { console.error('Error loading partners:', err); return []; })
-      ]);
-      
-      console.log('Business Partner Edit Page: Other data loaded - terms:', termsData?.length, 'currencies:', currenciesData?.length, 'partners:', partnersData?.length);
-      
-      setPartner(partnerData);
-      setPaymentTerms(termsData || []);
-      setCurrencies(currenciesData || []);
-      // Show all active price lists
-      setPriceLists(priceListsData || []);
-      // Filter out the current partner from the list (can't be its own parent)
-      setAllPartners((partnersData || []).filter(p => p.id !== id));
-      
-      // Populate form data
-      setFormData({
-        partnerName: partnerData.partnerName || partnerData.companyName || '',
-        tradingName: partnerData.tradingName || '',
-        registrationNumber: partnerData.registrationNumber || '',
-        taxNumber: partnerData.taxNumber || '',
-        email: partnerData.email || '',
-        phone: partnerData.phone || '',
-        website: partnerData.website || '',
-        physicalAddress: partnerData.physicalAddress || '',
-        city: partnerData.city || '',
-        country: partnerData.country || '',
-        postalCode: partnerData.physicalPostalCode || '',
-        notes: partnerData.notes || '',
-        status: partnerData.status || 'Active',
-        isPreferred: partnerData.isPreferred || false,
-        currency: partnerData.currency || '',
-        paymentTerms: partnerData.paymentTerms || '',
-        paymentTermId: partnerData.paymentTermId || '',
-        priceList: partnerData.priceList || '',
-        parentId: partnerData.parentId || '',
-      });
-    } catch (error) {
-      console.error('Error loading business partner:', error);
-      toast.error('Failed to load business partner details');
-    } finally {
-      setLoading(false);
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!formData.partnerName.trim()) {
+      setActiveTab('details');
+      toast.error('Enter the company name.');
+      return;
     }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    
+    if (
+      creditLimit !== '' &&
+      (!Number.isFinite(Number(creditLimit)) || Number(creditLimit) < 0)
+    ) {
+      setActiveTab('options');
+      toast.error('Credit Limit must be zero or greater.');
+      return;
+    }
     try {
       setSaving(true);
-      await businessPartnerService.updatePartner(id, formData);
+      await businessPartnerService.updatePartner(id, {
+        ...formData,
+        creditLimit: creditLimit === '' ? null : Number(creditLimit),
+        postingDefaults,
+      });
       toast.success('Business partner updated successfully');
       router.push(`/procurement/business-partners/${id}`);
     } catch (error) {
-      console.error('Error updating business partner:', error);
-      toast.error(error instanceof Error ? error.message : 'Failed to update business partner');
+      toast.error(
+        error instanceof Error
+          ? error.message
+          : 'Failed to update business partner'
+      );
     } finally {
       setSaving(false);
     }
   };
 
-  if (loading) {
+  const textField = (
+    field: keyof UpdateBusinessPartnerDto,
+    label: string,
+    type = 'text'
+  ) => (
+    <div className="space-y-1.5" key={field}>
+      <Label htmlFor={field}>{label}</Label>
+      <Input
+        id={field}
+        type={type}
+        value={String(formData[field] ?? '')}
+        disabled={saving}
+        onChange={(event) =>
+          setFormData((previous) => ({
+            ...previous,
+            [field]: event.target.value,
+          }))
+        }
+      />
+    </div>
+  );
+
+  if (loading)
     return (
-      <div className="flex items-center justify-center h-96">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading business partner...</p>
-        </div>
+      <div
+        role="status"
+        className="flex h-64 items-center justify-center text-muted-foreground"
+      >
+        Loading business partner...
       </div>
     );
-  }
-
-  if (!partner) {
+  if (!partner)
     return (
-      <div className="text-center py-12">
-        <p className="text-gray-600">Business partner not found</p>
-        <Button onClick={() => router.push('/procurement/business-partners')} className="mt-4">
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to List
+      <div className="space-y-4 py-12 text-center">
+        <p>Business partner could not be loaded.</p>
+        <Button variant="outline" onClick={() => router.back()}>
+          Back
         </Button>
       </div>
     );
-  }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <Button variant="ghost" size="icon" onClick={() => router.back()}>
-            <ArrowLeft className="h-5 w-5" />
+    <div className="mx-auto w-full max-w-5xl space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Back"
+            onClick={() => router.back()}
+          >
+            <ArrowLeft className="h-4 w-4" />
           </Button>
           <div>
-            <h1 className="text-3xl font-bold">Edit Business Partner</h1>
-            <p className="text-gray-600 mt-1">{partner.partnerCode} - {partner.partnerName}</p>
+            <h1 className="text-2xl font-semibold">Edit Business Partner</h1>
+            <p className="text-sm text-muted-foreground">
+              {partner.partnerCode} - {partner.partnerName}
+            </p>
           </div>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => router.back()}>
+          <Button
+            variant="outline"
+            onClick={() => router.back()}
+            disabled={saving}
+          >
             Cancel
           </Button>
-          <Button onClick={handleSubmit} disabled={saving}>
-            <Save className="w-4 h-4 mr-2" />
-            {saving ? 'Saving...' : 'Save Changes'}
+          <Button type="submit" form="business-partner-edit" disabled={saving}>
+            <Save className="mr-2 h-4 w-4" />
+            {saving ? 'Saving...' : 'Save'}
           </Button>
         </div>
       </div>
-
-      {/* Form */}
-      <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Basic Information */}
+      <PartnerCatalogueNotice unavailable={catalogues.unavailable} />
+      <form id="business-partner-edit" onSubmit={handleSubmit}>
         <Card>
-          <CardHeader>
-            <CardTitle>Basic Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="partnerName">Company Name *</Label>
-                <Input
-                  id="partnerName"
-                  value={formData.partnerName}
-                  onChange={(e) => setFormData({ ...formData, partnerName: e.target.value })}
-                  required
-                />
-              </div>
-              <div>
-                <Label htmlFor="tradingName">Trading Name</Label>
-                <Input
-                  id="tradingName"
-                  value={formData.tradingName}
-                  onChange={(e) => setFormData({ ...formData, tradingName: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="status">Status</Label>
-                <Select value={formData.status} onValueChange={(value) => setFormData({ ...formData, status: value })}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Active">Active</SelectItem>
-                    <SelectItem value="Inactive">Inactive</SelectItem>
-                    <SelectItem value="Suspended">Suspended</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="registrationNumber">Registration Number</Label>
-                <Input
-                  id="registrationNumber"
-                  value={formData.registrationNumber}
-                  onChange={(e) => setFormData({ ...formData, registrationNumber: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="taxNumber">Tax Number</Label>
-                <Input
-                  id="taxNumber"
-                  value={formData.taxNumber}
-                  onChange={(e) => setFormData({ ...formData, taxNumber: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="parentId" className="flex items-center gap-2">
-                  <Building2 className="w-4 h-4" />
-                  Parent Business Partner
-                </Label>
-                <Select value={formData.parentId || '__none__'} onValueChange={(value) => setFormData({ ...formData, parentId: value === '__none__' ? '' : value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select parent (optional)" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none__">None (Top Level)</SelectItem>
-                    {allPartners.map((p) => (
-                      <SelectItem key={p.id} value={p.id}>
-                        {p.partnerCode} - {p.partnerName}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Contact Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Contact Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="phone">Phone</Label>
-                <Input
-                  id="phone"
-                  value={formData.phone}
-                  onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="website">Website</Label>
-                <Input
-                  id="website"
-                  value={formData.website}
-                  onChange={(e) => setFormData({ ...formData, website: e.target.value })}
-                />
-              </div>
-            </div>
-            <div>
-              <Label htmlFor="physicalAddress">Physical Address</Label>
-              <Textarea
-                id="physicalAddress"
-                value={formData.physicalAddress}
-                onChange={(e) => setFormData({ ...formData, physicalAddress: e.target.value })}
-                rows={3}
-              />
-            </div>
-            <div className="grid grid-cols-3 gap-4">
-              <div>
-                <Label htmlFor="city">City</Label>
-                <Input
-                  id="city"
-                  value={formData.city}
-                  onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="country">Country</Label>
-                <Input
-                  id="country"
-                  value={formData.country}
-                  onChange={(e) => setFormData({ ...formData, country: e.target.value })}
-                />
-              </div>
-              <div>
-                <Label htmlFor="postalCode">Postal Code</Label>
-                <Input
-                  id="postalCode"
-                  value={formData.postalCode}
-                  onChange={(e) => setFormData({ ...formData, postalCode: e.target.value })}
-                />
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Additional Information */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Additional Information</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <Label htmlFor="currency">Currency</Label>
-                <Select value={formData.currency || ''} onValueChange={(value) => setFormData({ ...formData, currency: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select currency" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {currencies.length > 0 ? (
-                      currencies.map((curr) => (
-                        <SelectItem key={curr.id} value={curr.code}>
-                          {curr.code} - {curr.name} ({curr.symbol})
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <>
-                        <SelectItem value="USD">USD - US Dollar</SelectItem>
-                        <SelectItem value="EUR">EUR - Euro</SelectItem>
-                        <SelectItem value="GBP">GBP - British Pound</SelectItem>
-                        <SelectItem value="ZAR">ZAR - South African Rand</SelectItem>
-                      </>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label htmlFor="paymentTerms">Payment Terms</Label>
-                {/* Procurement/Finance boundary: PaymentTermId is authoritative; legacy text is backend-managed. */}
-                <Select
-                  value={formData.paymentTermId || ''}
-                  onValueChange={(value) => setFormData({ ...formData, paymentTermId: value })}
-                  disabled={paymentTerms.length === 0}
-                >
-                  <SelectTrigger>
-                    <SelectValue
-                      placeholder={paymentTerms.length > 0
-                        ? 'Select payment terms'
-                        : 'No active payment terms available'}
+          <CardContent className="p-4">
+            <Tabs value={activeTab} onValueChange={setActiveTab}>
+              <TabsList className="grid w-full grid-cols-4">
+                <TabsTrigger value="details">Details</TabsTrigger>
+                <TabsTrigger value="contact">Contact</TabsTrigger>
+                <TabsTrigger value="options">Options</TabsTrigger>
+                <TabsTrigger value="accounts">Accounts</TabsTrigger>
+              </TabsList>
+              <div className="h-[min(620px,calc(100vh-250px))] min-h-80 overflow-y-auto px-1">
+                <TabsContent value="details" className="space-y-5 py-3">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {textField('partnerName', 'Company Name *')}
+                    {textField('tradingName', 'Trading Name')}
+                    {textField('registrationNumber', 'Registration Number')}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="status">Status</Label>
+                      <Select
+                        value={formData.status}
+                        disabled={saving}
+                        onValueChange={(status) =>
+                          setFormData((previous) => ({ ...previous, status }))
+                        }
+                      >
+                        <SelectTrigger id="status">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {['Active', 'Inactive', 'Suspended'].map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {status}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5 md:col-span-2">
+                      <Label htmlFor="parentId">Parent Business Partner</Label>
+                      <Select
+                        value={formData.parentId || '__none__'}
+                        disabled={saving}
+                        onValueChange={(parentId) =>
+                          setFormData((previous) => ({
+                            ...previous,
+                            parentId: parentId === '__none__' ? '' : parentId,
+                          }))
+                        }
+                      >
+                        <SelectTrigger id="parentId">
+                          <SelectValue placeholder="None" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">None</SelectItem>
+                          {formData.parentId &&
+                            !allPartners.some(
+                              (candidate) => candidate.id === formData.parentId
+                            ) && (
+                              <SelectItem value={formData.parentId}>
+                                {partner.parentName ||
+                                  'Saved partner (unavailable)'}
+                              </SelectItem>
+                            )}
+                          {allPartners.map((candidate) => (
+                            <SelectItem key={candidate.id} value={candidate.id}>
+                              {candidate.partnerCode} - {candidate.partnerName}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                  <PartnerTaxDefaultsFields
+                    value={postingDefaults}
+                    onChange={setPostingDefaults}
+                    taxGroups={catalogues.taxGroups}
+                    withholdingTaxes={catalogues.withholdingTaxes}
+                    disabled={saving}
+                  />
+                  <div className="space-y-1.5">
+                    <Label htmlFor="notes">Notes</Label>
+                    <Textarea
+                      id="notes"
+                      rows={3}
+                      disabled={saving}
+                      value={formData.notes}
+                      onChange={(event) =>
+                        setFormData((previous) => ({
+                          ...previous,
+                          notes: event.target.value,
+                        }))
+                      }
                     />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {paymentTerms.map((term) => (
-                      <SelectItem key={term.id} value={term.id}>
-                        {term.code} - {term.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  </div>
+                </TabsContent>
+                <TabsContent value="contact" className="space-y-4 py-3">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    {textField('email', 'Email', 'email')}
+                    {textField('phone', 'Phone')}
+                    {textField('website', 'Website')}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="physicalAddress">Physical Address</Label>
+                    <Textarea
+                      id="physicalAddress"
+                      rows={3}
+                      disabled={saving}
+                      value={formData.physicalAddress}
+                      onChange={(event) =>
+                        setFormData((previous) => ({
+                          ...previous,
+                          physicalAddress: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+                    {textField('city', 'City')}
+                    {textField('country', 'Country')}
+                    {textField('postalCode', 'Postal Code')}
+                  </div>
+                </TabsContent>
+                <TabsContent value="options" className="space-y-4 py-3">
+                  <PartnerOptionsFields
+                    value={postingDefaults}
+                    onChange={setPostingDefaults}
+                    options={{
+                      paymentTermId: formData.paymentTermId || '',
+                      taxNumber: formData.taxNumber || '',
+                      creditLimit,
+                    }}
+                    onOptionsChange={(patch) => {
+                      if (patch.creditLimit !== undefined)
+                        setCreditLimit(patch.creditLimit);
+                      setFormData((previous) => ({
+                        ...previous,
+                        ...(patch.paymentTermId !== undefined
+                          ? { paymentTermId: patch.paymentTermId }
+                          : {}),
+                        ...(patch.taxNumber !== undefined
+                          ? { taxNumber: patch.taxNumber }
+                          : {}),
+                      }));
+                    }}
+                    paymentTerms={paymentTerms}
+                    partnerType={partner.partnerType}
+                    bankAccounts={catalogues.bankAccounts}
+                    disabled={saving}
+                  />
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="currency">Currency</Label>
+                      <Select
+                        value={formData.currency || ''}
+                        disabled={saving}
+                        onValueChange={(currency) =>
+                          setFormData((previous) => ({ ...previous, currency }))
+                        }
+                      >
+                        <SelectTrigger id="currency">
+                          <SelectValue placeholder="Select currency" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {formData.currency &&
+                            !currencies.some(
+                              (currency) => currency.code === formData.currency
+                            ) && (
+                              <SelectItem value={formData.currency}>
+                                {formData.currency}
+                              </SelectItem>
+                            )}
+                          {currencies.map((currency) => (
+                            <SelectItem key={currency.id} value={currency.code}>
+                              {currency.code} - {currency.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label htmlFor="priceList">Price List</Label>
+                      <Select
+                        value={formData.priceList || '__none__'}
+                        disabled={saving}
+                        onValueChange={(priceList) =>
+                          setFormData((previous) => ({
+                            ...previous,
+                            priceList:
+                              priceList === '__none__' ? '' : priceList,
+                          }))
+                        }
+                      >
+                        <SelectTrigger id="priceList">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">None</SelectItem>
+                          {formData.priceList &&
+                            !priceLists.some(
+                              (list) => list.id === formData.priceList
+                            ) && (
+                              <SelectItem value={formData.priceList}>
+                                Saved price list (unavailable)
+                              </SelectItem>
+                            )}
+                          {priceLists.map((list) => (
+                            <SelectItem key={list.id} value={list.id}>
+                              {list.priceListCode} - {list.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </TabsContent>
+                <TabsContent value="accounts" className="py-3">
+                  <PartnerAccountsFields
+                    value={postingDefaults}
+                    onChange={setPostingDefaults}
+                    accounts={catalogues.accounts}
+                    bankAccounts={catalogues.bankAccounts}
+                    disabled={saving}
+                  />
+                </TabsContent>
               </div>
-              <div>
-                <Label htmlFor="priceList">Price List</Label>
-                <Select value={formData.priceList || ''} onValueChange={(value) => setFormData({ ...formData, priceList: value })}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select price list" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {priceLists.length > 0 ? (
-                      priceLists.map((pl) => (
-                        <SelectItem key={pl.id} value={pl.id}>
-                          {pl.priceListCode} - {pl.name}
-                        </SelectItem>
-                      ))
-                    ) : (
-                      <SelectItem value="__no_price_lists__" disabled>No price lists available</SelectItem>
-                    )}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div>
-              <Label htmlFor="notes">Notes</Label>
-              <Textarea
-                id="notes"
-                value={formData.notes}
-                onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                rows={4}
-              />
-            </div>
+            </Tabs>
           </CardContent>
         </Card>
       </form>
     </div>
   );
 }
-
-

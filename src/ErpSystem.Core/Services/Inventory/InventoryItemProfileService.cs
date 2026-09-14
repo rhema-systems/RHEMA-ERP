@@ -104,6 +104,8 @@ public sealed class InventoryItemProfileService : IInventoryItemProfileService
         if (duplicateCode)
             throw Invalid("ITEM_CODE_DUPLICATE", $"Stock code '{item.ItemCode}' already exists in the current tenant.");
 
+        await InventoryItemPostingAccounts.ValidateAsync(_unitOfWork, item, cancellationToken);
+
         await _identifiers.ValidateItemIdentifiersAsync(
             item.TenantId,
             existingItemId,

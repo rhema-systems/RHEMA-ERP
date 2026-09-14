@@ -179,6 +179,182 @@ public sealed class ApInvoiceSupplierProjectionTests
     };
 
     [Fact]
+    public async Task LinkedApprovedContractor_ShouldBeSelectableAndKeepCanonicalIdentityForCreateAndEdit()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var partner = Partner(tenant, "CONT-GH-ADOM-BUILD", "Adom contractor");
+        partner.PartnerType = "Contractor";
+        partner.RegistrationStatus = "Approved";
+        var supplier = Supplier(tenant, partner.PartnerCode, partner.PartnerName);
+        db.BusinessPartners.Add(partner);
+        db.Suppliers.Add(supplier);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        var entries = await EntryOptions(db, tenant);
+        entries.Should().ContainSingle(x => x.Id == supplier.Id && x.BusinessPartnerId == partner.Id);
+        var service = CreateInvoiceService(db, tenant);
+        (await Resolve(service, "ResolveSupplierForInvoiceAsync", partner.Id)).Id.Should().Be(supplier.Id);
+        (await Resolve(service, "ResolveSupplierForInvoiceAsync", supplier.Id)).Id.Should().Be(supplier.Id);
+        (await Resolve(service, "ResolveExistingSupplierForInvoiceAsync", supplier.Id)).Id.Should().Be(supplier.Id);
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+        (await db.Suppliers.CountAsync()).Should().Be(1);
+        (await db.BusinessPartners.SingleAsync()).PartnerType.Should().Be("Contractor");
+    }
+
+    [Theory]
+    [InlineData("Pending")]
+    [InlineData("InactivePartner")]
+    [InlineData("DeletedPartner")]
+    [InlineData("BlacklistedPartner")]
+    [InlineData("InactiveSupplier")]
+    [InlineData("DeletedSupplier")]
+    [InlineData("BlacklistedSupplier")]
+    [InlineData("Customer")]
+    [InlineData("ArbitraryType")]
+    [InlineData("AmbiguousPartner")]
+    [InlineData("AmbiguousSupplier")]
+    public async Task UnsafeContractorIdentity_ShouldBeExcludedAndRejectedByCreateAndEdit(string scenario)
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var partner = Partner(tenant, "CONTRACTOR", "Contractor");
+        partner.PartnerType = "Contractor";
+        var supplier = Supplier(tenant, partner.PartnerCode, partner.PartnerName);
+        switch (scenario)
+        {
+            case "Pending": partner.RegistrationStatus = "Pending"; break;
+            case "InactivePartner": partner.IsActive = false; break;
+            case "DeletedPartner": partner.IsDeleted = true; break;
+            case "BlacklistedPartner": partner.IsBlacklisted = true; break;
+            case "InactiveSupplier": supplier.IsActive = false; break;
+            case "DeletedSupplier": supplier.IsDeleted = true; break;
+            case "BlacklistedSupplier": supplier.IsBlacklisted = true; break;
+            case "Customer": partner.PartnerType = "Customer"; break;
+            case "ArbitraryType": partner.PartnerType = "Unrecognised"; break;
+            case "AmbiguousPartner": db.BusinessPartners.Add(Partner(tenant, partner.PartnerCode, "Duplicate")); break;
+            case "AmbiguousSupplier": db.Suppliers.Add(Supplier(tenant, partner.PartnerCode, "Duplicate")); break;
+        }
+        db.BusinessPartners.Add(partner);
+        db.Suppliers.Add(supplier);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+
+        (await EntryOptions(db, tenant)).Should().BeEmpty();
+        var service = CreateInvoiceService(db, tenant);
+        foreach (var method in new[] { "ResolveSupplierForInvoiceAsync", "ResolveExistingSupplierForInvoiceAsync" })
+        {
+            Func<Task> attempt = () => Resolve(service, method, supplier.Id);
+            await attempt.Should().ThrowAsync<Exception>();
+        }
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task UnlinkedOrForeignContractor_ShouldNotBeOnboardedByOrdinaryInvoiceEntry()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var partner = Partner(tenant, "UNLINKED", "No Finance identity");
+        partner.PartnerType = "Contractor";
+        var foreign = Supplier(Guid.NewGuid(), partner.PartnerCode, "Foreign supplier");
+        db.BusinessPartners.Add(partner);
+        db.Suppliers.Add(foreign);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        (await EntryOptions(db, tenant)).Should().BeEmpty();
+        var service = CreateInvoiceService(db, tenant);
+        Func<Task> unlinked = () => Resolve(service, "ResolveSupplierForInvoiceAsync", partner.Id);
+        await unlinked.Should().ThrowAsync<InvalidOperationException>().WithMessage("*active linked Finance supplier*");
+        Func<Task> wrongTenant = () => Resolve(service, "ResolveSupplierForInvoiceAsync", foreign.Id);
+        await wrongTenant.Should().ThrowAsync<KeyNotFoundException>();
+        Func<Task> editWrongTenant = () => Resolve(service, "ResolveExistingSupplierForInvoiceAsync", foreign.Id);
+        await editWrongTenant.Should().ThrowAsync<KeyNotFoundException>();
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ApprovedLandedCostContractorHandoff_ShouldRemainSupportedButPendingMustFail()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var partner = Partner(tenant, "COST-CONTRACTOR", "Approved freight contractor");
+        partner.PartnerType = "Contractor";
+        db.BusinessPartners.Add(partner);
+        await db.SaveChangesAsync();
+        var service = CreateInvoiceService(db, tenant);
+        var method = service.GetType().GetMethod("ResolveSupplierIdentityForInvoiceAsync", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Task<Supplier> Handoff() => (Task<Supplier>)method.Invoke(service, new object[] { partner.Id, true, CancellationToken.None })!;
+        var supplier = await Handoff();
+        supplier.SupplierCode.Should().Be(partner.PartnerCode);
+        await db.SaveChangesAsync();
+        partner.RegistrationStatus = "Pending";
+        await db.SaveChangesAsync();
+        await ((Func<Task>)(() => Handoff())).Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task DraftEdit_ShouldRevalidateInactiveCanonicalSupplierBeforeChangingInvoice()
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var supplier = Supplier(tenant, "INACTIVE-EDIT", "Inactive", isActive: false);
+        var invoice = new ErpSystem.Core.Entities.Finance.VendorInvoice
+        {
+            Id = Guid.NewGuid(), TenantId = tenant, SupplierId = supplier.Id, SupplierName = supplier.Name,
+            InvoiceNumber = "VI-UNTOUCHED", Status = ErpSystem.Core.Entities.Finance.VendorInvoiceStatus.Draft
+        };
+        db.Suppliers.Add(supplier);
+        db.Set<ErpSystem.Core.Entities.Finance.VendorInvoice>().Add(invoice);
+        await db.SaveChangesAsync();
+        Func<Task> update = () => CreateInvoiceService(db, tenant).UpdateAsync(new VendorInvoiceUpdateDto
+        {
+            Id = invoice.Id, SupplierInvoiceNumber = "MUST-NOT-SAVE", InvoiceDate = DateTime.Today
+        });
+        await update.Should().ThrowAsync<InvalidOperationException>().WithMessage("*inactive*invoice entry*");
+        invoice.SupplierInvoiceNumber.Should().BeNull();
+        db.ChangeTracker.HasChanges().Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("Both")]
+    [InlineData("CustomerAndSupplier")]
+    public async Task CombinedSupplierPartner_ShouldRetainApprovedOnboarding(string partnerType)
+    {
+        var tenant = Guid.NewGuid();
+        await using var db = CreateContext();
+        var partner = Partner(tenant, "COMBINED", "Combined supplier");
+        partner.PartnerType = partnerType;
+        db.BusinessPartners.Add(partner);
+        await db.SaveChangesAsync();
+        (await EntryOptions(db, tenant)).Should().ContainSingle(x => x.Id == partner.Id);
+        var supplier = await Resolve(CreateInvoiceService(db, tenant), "ResolveSupplierForInvoiceAsync", partner.Id);
+        supplier.SupplierCode.Should().Be(partner.PartnerCode);
+    }
+
+    private static ErpSystem.Api.Services.Finance.AP.VendorInvoiceService CreateInvoiceService(ApplicationDbContext db, Guid tenant)
+    {
+        var user = new Mock<ICurrentUserService>();
+        user.SetupGet(x => x.TenantId).Returns(tenant);
+        user.SetupGet(x => x.UserName).Returns("uat-maker");
+        return new(new UnitOfWork(db), user.Object,
+            Mock.Of<ErpSystem.Core.Interfaces.Inventory.IInventoryValuationService>(),
+            Mock.Of<Microsoft.Extensions.Logging.ILogger<ErpSystem.Api.Services.Finance.AP.VendorInvoiceService>>(),
+            Mock.Of<ErpSystem.Core.Interfaces.Numbering.IDocumentNumberingService>(), Mock.Of<IWorkflowService>());
+    }
+
+    private static Task<Supplier> Resolve(ErpSystem.Api.Services.Finance.AP.VendorInvoiceService service, string method, Guid id) =>
+        (Task<Supplier>)service.GetType().GetMethod(method, BindingFlags.NonPublic | BindingFlags.Instance)!
+            .Invoke(service, new object[] { id, CancellationToken.None })!;
+
+    private static async Task<IReadOnlyList<ApInvoiceSupplierEntryDto>> EntryOptions(ApplicationDbContext db, Guid tenant)
+    {
+        var result = await CreateController(db, tenant).GetSupplierEntryOptions(CancellationToken.None);
+        return (IReadOnlyList<ApInvoiceSupplierEntryDto>)((OkObjectResult)result.Result!).Value!;
+    }
+
+    [Fact]
     [Trait("Category", "TenantIsolation")]
     public async Task Lookup_ShouldReturnOnlyActiveCanonicalSuppliersForCurrentTenant()
     {

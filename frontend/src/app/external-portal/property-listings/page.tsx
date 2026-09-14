@@ -1,6 +1,8 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
+import { PropertyEnquiryDialog } from '@/components/estate/PropertyEnquiryDialog';
 import {
   Building2,
   CalendarDays,
@@ -33,7 +35,6 @@ import {
 import { useToast } from '@/hooks/use-toast';
 import {
   externalEstateListingsService,
-  type ExternalCustomerProfile,
   type ExternalListingEnquiry,
   type ExternalEstateListing,
 } from '@/services/external-estate-listings.service';
@@ -211,10 +212,6 @@ function ListingStat({
 export default function ExternalPropertyListingsPage() {
   const pageSize = 10;
   const { toast } = useToast();
-  const [customerProfiles, setCustomerProfiles] = React.useState<
-    ExternalCustomerProfile[]
-  >([]);
-  const [selectedCustomerId, setSelectedCustomerId] = React.useState('');
   const [listings, setListings] = React.useState<ExternalEstateListing[]>([]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
   const [search, setSearch] = React.useState('');
@@ -228,18 +225,23 @@ export default function ExternalPropertyListingsPage() {
   const [hasPreviousPage, setHasPreviousPage] = React.useState(false);
   const [hasNextPage, setHasNextPage] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
-  const [isSubmitting, setIsSubmitting] = React.useState(false);
-  const [submittingListingId, setSubmittingListingId] = React.useState<string | null>(null);
+  const [enquiryListing, setEnquiryListing] = React.useState<ExternalEstateListing | null>(null);
   const [createdRequest, setCreatedRequest] =
     React.useState<ExternalListingEnquiry | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const openedLinkedListing = React.useRef(false);
 
-  const selectedCustomer = React.useMemo(
-    () =>
-      customerProfiles.find((profile) => profile.id === selectedCustomerId) ||
-      null,
-    [customerProfiles, selectedCustomerId]
-  );
+  React.useEffect(() => {
+    const listingId = new URLSearchParams(window.location.search).get('listingId');
+    if (!listingId || openedLinkedListing.current) return;
+    openedLinkedListing.current = true;
+    void externalEstateListingsService.getListingsPage({ listingId }).then(result => {
+      const listing = result.items.find(item => item.id === listingId);
+      if (listing) { setSelectedId(listing.id); setEnquiryListing(listing); }
+      else setError('This property is no longer available for enquiry.');
+    }).catch(() => setError('Could not load the selected property. Please try again.'));
+  }, []);
+
   const selected = React.useMemo(
     () => listings.find((listing) => listing.id === selectedId) || listings[0],
     [listings, selectedId]
@@ -277,62 +279,17 @@ export default function ExternalPropertyListingsPage() {
   }, [listingType, location, maxPrice, minPrice, pageSize, search]);
 
   React.useEffect(() => {
-    let mounted = true;
-
-    const loadProfiles = async () => {
-      try {
-        const profiles =
-          await externalEstateListingsService.getCustomerProfiles();
-        if (!mounted) return;
-        setCustomerProfiles(profiles);
-        setSelectedCustomerId((current) => current || profiles[0]?.id || '');
-      } catch {
-        if (mounted) setCustomerProfiles([]);
-      }
-    };
-
-    void loadProfiles();
-    return () => {
-      mounted = false;
-    };
-  }, []);
-
-  React.useEffect(() => {
     void loadListings();
   }, [loadListings]);
 
-  const submitEnquiry = async (listing: ExternalEstateListing) => {
-    setSelectedId(listing.id);
-    setIsSubmitting(true);
-    setSubmittingListingId(listing.id);
-    setCreatedRequest(null);
-    setError(null);
-    try {
-      const created = await externalEstateListingsService.createEnquiry(
-        listing.id,
-        selectedCustomer ? { businessPartnerId: selectedCustomer.id } : {}
-      );
-      setCreatedRequest(created);
-      toast({
-        title: 'Enquiry sent',
-        description: `${created.referenceNumber || created.title} is now with Sales.`,
-        variant: 'success',
-      });
-      await loadListings();
-    } catch (submitError) {
-      setError(
-        submitError instanceof Error
-          ? submitError.message
-          : 'Could not submit enquiry for this listing.'
-      );
-    } finally {
-      setIsSubmitting(false);
-      setSubmittingListingId(null);
-    }
+  const enquiryCreated = (ticket: ExternalListingEnquiry) => {
+    setCreatedRequest(ticket); setEnquiryListing(null);
+    toast({ title: 'Enquiry sent', description: `${ticket.ticketNumber} is with Sales and Marketing.`, variant: 'success' });
   };
 
   return (
     <div className="space-y-6">
+      {enquiryListing && <PropertyEnquiryDialog key={enquiryListing.id} listing={enquiryListing} onClose={() => setEnquiryListing(null)} onCreated={enquiryCreated} />}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">
@@ -423,9 +380,8 @@ export default function ExternalPropertyListingsPage() {
           <CheckCircle2 className="h-4 w-4 text-green-700" />
           <AlertTitle>Enquiry sent to Sales</AlertTitle>
           <AlertDescription>
-            {createdRequest.referenceNumber || createdRequest.title} is now in{' '}
-            {createdRequest.currentStageName}. Sales will complete their process
-            before handing the transaction back to Estate.
+            {createdRequest.ticketNumber} is with Sales and Marketing.{' '}
+            <Link className="underline font-medium" href={`/external-portal/support/tickets/${createdRequest.id}`}>View your enquiry and replies</Link>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -623,14 +579,9 @@ export default function ExternalPropertyListingsPage() {
 
                 <Button
                   className="w-full"
-                  disabled={isSubmitting}
-                  onClick={() => void submitEnquiry(selected)}
+                  onClick={() => setEnquiryListing(selected)}
                 >
-                  {submittingListingId === selected.id ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Send className="mr-2 h-4 w-4" />
-                  )}
+                  <Send className="mr-2 h-4 w-4" />
                   Enquiry
                 </Button>
               </>

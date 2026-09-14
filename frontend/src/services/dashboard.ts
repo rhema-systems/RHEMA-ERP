@@ -8,7 +8,13 @@ import type { TenderDto } from './tenderService'
 export interface DashboardModuleStatus {
   module: string
   available: boolean
+  accessRestricted?: boolean
   error?: string
+}
+
+export function getUnavailableDashboardModules(statuses: readonly DashboardModuleStatus[]): DashboardModuleStatus[] {
+  // Restricted analytics stay absent; an access decision is not a service outage.
+  return statuses.filter(status => !status.available && !status.accessRestricted)
 }
 
 export interface MaintenanceDashboardOverviewSummary {

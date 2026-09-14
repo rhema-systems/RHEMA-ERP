@@ -15,6 +15,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Numbering;
 using Microsoft.EntityFrameworkCore.Query;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -110,6 +111,78 @@ public class LandedCostSupplierInvoiceTests
         Assert.Equal(invoice.InvoiceNumber, _freight.InvoiceNumber); Assert.Equal(invoice.InvoiceNumber, _handling.InvoiceNumber);
         Assert.Equal(_partner.Id, _freight.SupplierId); Assert.All(invoice.LineItems, l => Assert.NotNull(l.LandedCostItemId));
         _unit.Verify(u => u.ExecuteInTransactionAsync(It.IsAny<Func<CancellationToken, Task>>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task GeneratedDraftDistribution_ClearsTheOriginalLandedCostAccrualWithoutPosting()
+    {
+        var created = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
+        _unit.Invocations.Clear();
+        var distribution = await _service.GetDistributionAsync(created.Id);
+
+        Assert.Equal("Proposed", distribution.Status);
+        Assert.Equal(360m, distribution.TotalDebit);
+        Assert.Equal(360m, distribution.TotalCredit);
+        Assert.Equal(360m, distribution.Lines.Where(line => line.AccountId == _accrual.Id).Sum(line => line.Debit));
+        Assert.Contains(distribution.Lines, line => line.AccountId == _ap.Id && line.Credit == 360m);
+        Assert.Equal(VendorInvoiceStatus.Draft, Assert.Single(_invoices).Status);
+        Assert.Null(distribution.JournalEntryId);
+        _unit.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ApprovedLinkedContractor_GeneratesEditableDraftUsingExistingCanonicalSupplier()
+    {
+        _partner.PartnerType = "Contractor";
+        var created = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
+        Assert.Equal(_supplier.Id, created.SupplierId);
+        Assert.Equal(VendorInvoiceStatus.Draft, created.Status);
+        Assert.Null(created.JournalEntryId);
+        Assert.Single(_suppliers);
+        Assert.Equal("Contractor", _partner.PartnerType);
+        var distribution = await _service.GetDistributionAsync(created.Id);
+        Assert.Equal(360m, distribution.TotalDebit);
+        Assert.Equal(360m, distribution.TotalCredit);
+        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task StandaloneLandedCost_NewContractorIdentityIsFlushedWithinTransactionBeforeDraftQueries()
+    {
+        // A real EF repository does not return Added-but-unsaved rows in database queries.
+        // List-backed mocks used elsewhere cannot detect this onboarding boundary.
+        await using var db = new ErpSystem.Data.ApplicationDbContext(
+            new DbContextOptionsBuilder<ErpSystem.Data.ApplicationDbContext>()
+                .UseInMemoryDatabase($"new-lc-contractor-{Guid.NewGuid()}").Options);
+        var identities = new ErpSystem.Data.UnitOfWork(db).Repository<Supplier>();
+        _unit.Setup(value => value.Repository<Supplier>()).Returns(identities);
+        _suppliers.Clear();
+        _partner.PartnerType = "Contractor";
+        var saveBoundaries = new List<bool>();
+        _unit.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
+            .Returns(async (CancellationToken token) =>
+            {
+                saveBoundaries.Add(_transaction);
+                var changed = await db.SaveChangesAsync(token);
+                _suppliers.Clear();
+                _suppliers.AddRange(await db.Suppliers.ToListAsync(token));
+                return changed;
+            });
+
+        var first = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
+        var canonical = Assert.Single(await db.Suppliers.ToListAsync());
+        Assert.Equal(canonical.Id, first.SupplierId);
+        Assert.Equal(_partner.PartnerCode, canonical.SupplierCode);
+        Assert.Equal(VendorInvoiceStatus.Draft, first.Status);
+        var retry = Assert.Single(await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer));
+        Assert.Equal(first.Id, retry.Id);
+        Assert.Single(await db.Suppliers.ToListAsync());
+        Assert.Single(_invoices);
+        Assert.NotEmpty(saveBoundaries);
+        Assert.All(saveBoundaries, active => Assert.True(active));
+        _unit.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
+        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]

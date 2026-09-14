@@ -159,20 +159,24 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             : null;
     }
 
-    private async Task<Department> ResolveDepartmentAsync(Guid departmentId)
+    private async Task<OrganizationUnit> ResolveOrganizationUnitAsync(Guid organizationUnitId)
     {
-        var department = await _unitOfWork.Repository<Department>().GetByIdAsync(departmentId);
-        if (department == null || department.TenantId != _currentUserProvider.TenantId || !department.IsActive)
-            throw new ArgumentException("Select an active department belonging to your organisation.");
-        return department;
+        if (organizationUnitId == Guid.Empty)
+            throw new ArgumentException("Select an active HR organisation unit.");
+
+        var organizationUnit = await _unitOfWork.Repository<OrganizationUnit>().GetByIdAsync(organizationUnitId);
+        if (organizationUnit == null || organizationUnit.TenantId != _currentUserProvider.TenantId ||
+            organizationUnit.IsDeleted || !organizationUnit.IsActive)
+            throw new ArgumentException("Select an active HR organisation unit belonging to your organisation.");
+        return organizationUnit;
     }
 
-    private static string? ResolveDepartmentCostCenter(Department department, bool hasProject)
+    private static string? ResolveOrganizationUnitCostCenter(OrganizationUnit organizationUnit, bool hasProject)
     {
-        // Same department cost-object rule as plan-linked procurement requisitions.
-        var value = NormalizeOptional(department.AccountCode, 100) ?? NormalizeOptional(department.Code, 100);
+        var value = NormalizeOptional(organizationUnit.AccountCode, 100) ??
+                    NormalizeOptional(organizationUnit.Code, 100);
         if (value == null && !hasProject)
-            throw new ArgumentException($"Department {department.Name} needs an accounting or department code configured before creating a stores requisition.");
+            throw new ArgumentException($"Organisation unit {organizationUnit.Name} needs an accounting or unit code configured before creating a stores requisition.");
         return value;
     }
 
@@ -181,14 +185,15 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         var warehouse = await _warehouseRepository.GetByIdAsync(dto.WarehouseId)
             ?? throw new ArgumentException($"Warehouse {dto.WarehouseId} not found");
         var project = await NormalizeProjectReferenceAsync(dto.ProjectId, dto.ProjectCode);
-        var department = await ResolveDepartmentAsync(dto.DepartmentId);
-        var costCenter = ResolveDepartmentCostCenter(department, project != null);
+        var organizationUnit = await ResolveOrganizationUnitAsync(dto.OrganizationUnitId);
+        var costCenter = ResolveOrganizationUnitCostCenter(organizationUnit, project != null);
 
         var requisition = new InventoryRequisition
         {
             RequisitionNumber = await _requisitionRepository.GenerateRequisitionNumberAsync(),
-            DepartmentId = dto.DepartmentId,
-            DepartmentName = department.Name,
+            DepartmentId = null,
+            OrganizationUnitId = organizationUnit.Id,
+            DepartmentName = organizationUnit.Name,
             CostCenter = costCenter,
             WarehouseId = dto.WarehouseId,
             LocationId = dto.LocationId,
@@ -277,14 +282,17 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         }
 
         // Keep the stored cost object on unrelated edits. Re-derive when the
-        // department changes or a legacy draft has no cost centre recorded.
-        if ((dto.DepartmentId.HasValue && dto.DepartmentId != requisition.DepartmentId) ||
+        // organisation-unit changes or a legacy draft has no cost centre recorded.
+        if ((dto.OrganizationUnitId.HasValue && dto.OrganizationUnitId != requisition.OrganizationUnitId) ||
             string.IsNullOrWhiteSpace(requisition.CostCenter))
         {
-            var department = await ResolveDepartmentAsync(dto.DepartmentId ?? requisition.DepartmentId);
-            requisition.CostCenter = ResolveDepartmentCostCenter(department, requisition.ProjectId.HasValue);
-            requisition.DepartmentId = department.Id;
-            requisition.DepartmentName = department.Name;
+            var organizationUnitId = dto.OrganizationUnitId ?? requisition.OrganizationUnitId
+                ?? throw new ArgumentException("Select an active HR organisation unit before updating this requisition.");
+            var organizationUnit = await ResolveOrganizationUnitAsync(organizationUnitId);
+            requisition.CostCenter = ResolveOrganizationUnitCostCenter(organizationUnit, requisition.ProjectId.HasValue);
+            requisition.DepartmentId = null;
+            requisition.OrganizationUnitId = organizationUnit.Id;
+            requisition.DepartmentName = organizationUnit.Name;
         }
 
         if (dto.WarehouseId.HasValue || dto.LocationId.HasValue)
@@ -611,6 +619,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             requisition.RequisitionNumber,
             requisition.Status,
             requisition.DepartmentId,
+            requisition.OrganizationUnitId,
             requisition.DepartmentName,
             requisition.CostCenter,
             requisition.ProjectId,
@@ -635,6 +644,7 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             LocationId = requisition.LocationId,
             DepartmentId = requisition.DepartmentId,
             DepartmentName = requisition.DepartmentName,
+            OrganizationUnitId = requisition.OrganizationUnitId,
             CostCenter = NormalizeOptional(requisition.CostCenter, 100),
             ProjectId = requisition.ProjectId,
             ProjectCode = NormalizeOptional(requisition.ProjectCode, 100),
@@ -1472,8 +1482,10 @@ public class InventoryRequisitionService : IInventoryRequisitionService
         WarehouseName = voucher.Warehouse?.Name ?? string.Empty,
         LocationId = voucher.LocationId,
         LocationCode = voucher.Location?.LocationCode,
-        DepartmentId = voucher.DepartmentId,
-        DepartmentName = voucher.DepartmentName,
+            DepartmentId = voucher.DepartmentId,
+            DepartmentName = voucher.DepartmentName,
+            OrganizationUnitId = voucher.OrganizationUnitId,
+            OrganizationUnitName = voucher.DepartmentName,
         CostCenter = voucher.CostCenter,
         ProjectId = voucher.ProjectId,
         ProjectCode = voucher.ProjectCode,
@@ -1787,6 +1799,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             Description = requisition.Description,
             DepartmentId = requisition.DepartmentId,
             DepartmentName = requisition.DepartmentName,
+            OrganizationUnitId = requisition.OrganizationUnitId,
+            OrganizationUnitName = requisition.DepartmentName,
             CostCenter = requisition.CostCenter,
             WarehouseId = requisition.WarehouseId,
             WarehouseName = requisition.Warehouse?.Name ?? string.Empty,
@@ -1870,6 +1884,8 @@ public class InventoryRequisitionService : IInventoryRequisitionService
             Description = requisition.Description,
             DepartmentId = requisition.DepartmentId,
             DepartmentName = requisition.DepartmentName,
+            OrganizationUnitId = requisition.OrganizationUnitId,
+            OrganizationUnitName = requisition.DepartmentName,
             CostCenter = requisition.CostCenter,
             WarehouseId = requisition.WarehouseId,
             WarehouseName = requisition.Warehouse?.Name ?? string.Empty,

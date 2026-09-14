@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -23,53 +24,35 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
         Guid purchaseOrderReceiptId,
         CancellationToken cancellationToken = default)
     {
+        if (!_db.Database.IsRelational() || _db.Database.CurrentTransaction is not null)
+            return await PostAcceptedReceiptCoreAsync(purchaseOrderReceiptId, cancellationToken);
+        return await _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+        {
+            await using var transaction = await _db.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, cancellationToken);
+            var result = await PostAcceptedReceiptCoreAsync(purchaseOrderReceiptId, cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+            return result;
+        });
+    }
+
+    private async Task<InventoryFinancePostingResult> PostAcceptedReceiptCoreAsync(
+        Guid purchaseOrderReceiptId, CancellationToken cancellationToken)
+    {
         var receipt = await _db.PurchaseOrderReceipts.AsNoTracking()
-            .Include(value => value.PurchaseOrder)
+            .Include(value => value.PurchaseOrder).ThenInclude(value => value.BusinessPartner)
             .SingleOrDefaultAsync(value => value.Id == purchaseOrderReceiptId && !value.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("The governed purchase-order receipt was not found for Finance posting.");
-        var settings = await _db.FinanceSettings.AsNoTracking()
-            .SingleOrDefaultAsync(value => value.TenantId == receipt.TenantId && !value.IsDeleted, cancellationToken)
-            ?? throw new InvalidOperationException("Finance settings are not configured for the receipt tenant.");
-        var inventoryAccount = settings.ControlAccountInventoryId
-            ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.");
-        var accrualAccount = settings.ControlAccountGRVAccrualId
-            ?? throw new InvalidOperationException("GRV Accrual Control Account is not configured in Finance Settings.");
-        var movements = await _db.InventoryMovements.AsNoTracking()
-            .Where(value => value.TenantId == receipt.TenantId && value.ReferenceId == receipt.Id &&
-                            value.MovementType == InventoryMovementType.PurchaseReceipt && value.IsPosted &&
-                            !value.IsDeleted)
-            .OrderBy(value => value.PostingDate).ThenBy(value => value.Id)
-            .ToListAsync(cancellationToken);
-        if (movements.Count == 0)
-            throw new InvalidOperationException("The accepted receipt has no posted inventory valuation movements.");
-
-        var inventoryValue = Round(movements.Sum(value => value.TotalValue));
-        var purchasePriceVariance = Round(movements.Sum(value => value.VarianceAmount ?? 0m));
-        var accrualValue = Round(inventoryValue + purchasePriceVariance);
-        if (inventoryValue <= 0m || accrualValue <= 0m)
-            throw new InvalidOperationException("The accepted receipt valuation must be positive before Finance posting.");
-
-        var currency = Currency(settings.BaseCurrency);
-        var lines = new List<FinancePostingLineDto>
-        {
-            Line(inventoryAccount, $"Accepted stock {receipt.ReceiptNumber}", inventoryValue, 0m,
-                currency, 1, receipt.ReceiptNumber, "INV-RECEIPT-CONTROL")
-        };
-        var lineNumber = 2;
-        if (purchasePriceVariance != 0m)
-        {
-            var varianceAccount = settings.WriteOffExpenseAccountId
-                ?? throw new InvalidOperationException(
-                    "Write-off Expense Account is required as the configured purchase-price variance account.");
-            lines.Add(purchasePriceVariance > 0m
-                ? Line(varianceAccount, $"Purchase price variance {receipt.ReceiptNumber}", purchasePriceVariance,
-                    0m, currency, lineNumber++, receipt.ReceiptNumber, "INV-RECEIPT-PRICE-VARIANCE")
-                : Line(varianceAccount, $"Purchase price variance {receipt.ReceiptNumber}", 0m,
-                    Math.Abs(purchasePriceVariance), currency, lineNumber++, receipt.ReceiptNumber,
-                    "INV-RECEIPT-PRICE-VARIANCE"));
-        }
-        lines.Add(Line(accrualAccount, $"GRV accrual {receipt.ReceiptNumber}", 0m, accrualValue,
-            currency, lineNumber, receipt.ReceiptNumber, "INV-RECEIPT-GRV-ACCRUAL"));
+        var distributions = new ProcurementReceiptDistributionService(_db);
+        await distributions.LockReceiptAsync(receipt.TenantId, receipt.Id, cancellationToken);
+        // A save may have committed between the first read and the lock acquisition.
+        receipt = await distributions.LoadReceiptAsync(receipt.TenantId, receipt.Id, cancellationToken);
+        var existing = await _db.FinancePostingEvents.AsNoTracking().Where(value => value.TenantId == receipt.TenantId &&
+            !value.IsDeleted && value.SourceDocumentType == "ProcurementPurchaseOrderReceipt" && value.SourceDocumentId == receipt.Id &&
+            value.PostingAction == "PostAcceptedInventoryReceipt" && value.PostingStatus == "Posted" && value.JournalEntryId.HasValue)
+            .OrderByDescending(value => value.PostedAt).FirstOrDefaultAsync(cancellationToken);
+        if (existing is not null)
+            return new InventoryFinancePostingResult(existing.Id, existing.JournalEntryId!.Value, true);
+        var distribution = await distributions.BuildAsync(receipt, true, cancellationToken);
 
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
@@ -84,9 +67,9 @@ public sealed class InventoryReceiptFinancePostingService : IInventoryReceiptFin
             PostingDate = receipt.ReceiptDate,
             JournalType = "System Generated",
             BookClassification = "IFRS",
-            FunctionalCurrencyCode = currency,
+            FunctionalCurrencyCode = distribution.Currency,
             IdempotencyKey = $"ProcurementPurchaseOrderReceipt:{receipt.TenantId:N}:{receipt.Id:N}:AcceptedInventory",
-            Lines = lines
+            Lines = distribution.Lines
         }, cancellationToken);
         return new InventoryFinancePostingResult(result.PostingEventId, result.JournalEntryId, result.WasDuplicate);
     }
@@ -137,8 +120,6 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
         var settings = await _db.FinanceSettings.AsNoTracking()
             .SingleOrDefaultAsync(value => value.TenantId == landedCost.TenantId && !value.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Finance settings are not configured for the landed-cost tenant.");
-        var inventoryAccount = settings.ControlAccountInventoryId
-            ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.");
         var accrualAccount = settings.ControlAccountGRVAccrualId
             ?? throw new InvalidOperationException("GRV Accrual Control Account is not configured in Finance Settings.");
         var movements = await _db.InventoryMovements.AsNoTracking()
@@ -162,15 +143,33 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
         var currency = InventoryReceiptFinancePostingService.Currency(settings.BaseCurrency);
         var lines = new List<FinancePostingLineDto>();
         var number = 1;
-        AddSigned(lines, inventoryAccount, $"Landed cost inventory {landedCost.LandedCostNumber}", inventoryValue,
-            currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-CONTROL");
-        if (varianceValue != 0m)
+        var itemIds = movements.Select(value => value.InventoryItemId).Distinct().ToArray();
+        var profiles = await _db.InventoryItems.AsNoTracking().Where(value => value.TenantId == landedCost.TenantId &&
+            itemIds.Contains(value.Id) && !value.IsDeleted).ToDictionaryAsync(value => value.Id, cancellationToken);
+        var groups = movements.GroupBy(value => value.InventoryItemId).OrderBy(value => value.Key).ToArray();
+        var inventoryAllocations = AllocateSignedValues(groups.Select(group => group.Sum(value => value.TotalValue)).ToArray(), inventoryValue);
+        var varianceAllocations = AllocateSignedValues(groups.Select(group => group.Sum(value => value.VarianceAmount ?? 0m)).ToArray(), varianceValue);
+        for (var index = 0; index < groups.Length; index++)
         {
-            var varianceAccount = settings.WriteOffExpenseAccountId
-                ?? throw new InvalidOperationException(
-                    "Write-off Expense Account is required as the configured landed-cost variance account.");
-            AddSigned(lines, varianceAccount, $"Landed cost variance {landedCost.LandedCostNumber}", varianceValue,
-                currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-VARIANCE");
+            var group = groups[index];
+            profiles.TryGetValue(group.Key, out var profile);
+            var itemInventory = inventoryAllocations[index];
+            var itemVariance = varianceAllocations[index];
+            if (itemInventory != 0m)
+            {
+                var inventoryAccount = await InventoryPostingAccountResolution.ResolveAsync(_db, landedCost.TenantId,
+                    profile?.InventoryAccountId, settings.ControlAccountInventoryId, "Inventory", cancellationToken, AccountType.Asset);
+                AddSigned(lines, inventoryAccount, $"Landed cost inventory {landedCost.LandedCostNumber}", itemInventory,
+                    currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-CONTROL");
+            }
+            if (itemVariance != 0m)
+            {
+                var varianceAccount = await InventoryPostingAccountResolution.ResolveAsync(_db, landedCost.TenantId,
+                    profile?.PurchasePriceVarianceAccountId ?? profile?.VarianceAccountId, settings.WriteOffExpenseAccountId,
+                    "Landed-cost variance", cancellationToken, AccountType.Expense, AccountType.Revenue);
+                AddSigned(lines, varianceAccount, $"Landed cost variance {landedCost.LandedCostNumber}", itemVariance,
+                    currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-VARIANCE");
+            }
         }
         AddSigned(lines, accrualAccount, $"Landed cost accrual {landedCost.LandedCostNumber}", -postedValue,
             currency, ref number, landedCost.LandedCostNumber, "INV-LANDED-COST-ACCRUAL");
@@ -193,6 +192,25 @@ public sealed class InventoryLandedCostFinancePostingService : IInventoryLandedC
             Lines = lines
         }, cancellationToken);
         return new InventoryFinancePostingResult(result.PostingEventId, result.JournalEntryId, result.WasDuplicate);
+    }
+
+    internal static decimal[] AllocateSignedValues(IReadOnlyList<decimal> amounts, decimal target)
+    {
+        if (target != InventoryReceiptFinancePostingService.Round(amounts.Sum()))
+            throw new InvalidOperationException("Landed-cost allocation target must equal the rounded signed total.");
+        var positive = amounts.Select(value => Math.Max(value, 0m)).ToArray();
+        var negative = amounts.Select(value => Math.Max(-value, 0m)).ToArray();
+        var rawPositive = positive.Sum(); var rawNegative = negative.Sum();
+        var roundedPositive = InventoryReceiptFinancePostingService.Round(rawPositive);
+        var roundedNegative = InventoryReceiptFinancePostingService.Round(rawNegative);
+        var pools = new[] { (Positive: roundedPositive, Negative: roundedPositive - target),
+                (Positive: target + roundedNegative, Negative: roundedNegative) }
+            .Where(value => value.Positive >= 0m && value.Negative >= 0m &&
+                (rawPositive > 0m || value.Positive == 0m) && (rawNegative > 0m || value.Negative == 0m))
+            .OrderBy(value => Math.Abs(value.Positive - rawPositive) + Math.Abs(value.Negative - rawNegative)).First();
+        var debits = MonetaryAllocation.Allocate(positive, pools.Positive);
+        var credits = MonetaryAllocation.Allocate(negative, pools.Negative);
+        return debits.Select((value, index) => value - credits[index]).ToArray();
     }
 
     private static void AddSigned(List<FinancePostingLineDto> lines, Guid accountId, string description,

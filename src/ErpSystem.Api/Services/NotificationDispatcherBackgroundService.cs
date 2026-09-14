@@ -83,7 +83,8 @@ public class NotificationDispatcherBackgroundService : BackgroundService
                 try
                 {
                     await DispatchPendingNotificationsAsync();
-                    await ArchiveExpiredNotificationsAsync();
+                    if (!_configuration.GetValue("Notifications:PropertyEnquiriesOnly", false))
+                        await ArchiveExpiredNotificationsAsync();
                 }
                 catch (Exception ex)
                 {
@@ -113,6 +114,12 @@ public class NotificationDispatcherBackgroundService : BackgroundService
         _logger.LogDebug("Starting pending notification dispatch");
 
         using var scope = _serviceProvider.CreateScope();
+
+        if (_configuration.GetValue("Notifications:PropertyEnquiriesOnly", false))
+        {
+            await scope.ServiceProvider.GetRequiredService<INotificationService>().ProcessPendingNotificationsAsync();
+            return;
+        }
 
         try
         {

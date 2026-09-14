@@ -10,6 +10,7 @@ namespace ErpSystem.Core.DTOs.Inventory;
 /// </summary>
 public class InventoryItemDto
 {
+    public InventoryItemPostingAccountsDto PostingAccounts { get; set; } = new();
     public Guid Id { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
@@ -145,6 +146,8 @@ public class InventoryItemDetailDto : InventoryItemDto
 /// </summary>
 public class CreateInventoryItemDto
 {
+    // Omitted values preserve mappings; explicit null account values clear them.
+    public InventoryItemPostingAccountsDto? PostingAccounts { get; set; }
     // === BASIC INFO TAB ===
     [Required]
     public string ItemCode { get; set; } = string.Empty;

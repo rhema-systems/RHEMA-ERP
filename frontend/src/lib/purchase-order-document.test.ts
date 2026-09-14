@@ -73,7 +73,7 @@ describe('purchase order business PDF', () => {
     expect(pdf.getNumberOfPages()).toBeGreaterThan(2);
     const content = pdf.output();
     expect(content).toContain('SERVICE-28');
-    expect(content.match(/ITEM \/ DESCRIPTION/g)!.length).toBeGreaterThan(1);
+    expect(content.match(/ITEM \/ DESCRIPTION/g)?.length ?? 0).toBeGreaterThan(1);
     expect(content).toContain(`Page ${pdf.getNumberOfPages()} of ${pdf.getNumberOfPages()}`);
     if (process.env.PO_PDF_QA_DIR) writeFileSync(join(process.env.PO_PDF_QA_DIR, 'purchase-order-pagination-stress.pdf'), Buffer.from(pdf.output('arraybuffer')));
   });

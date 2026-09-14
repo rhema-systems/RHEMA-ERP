@@ -1316,8 +1316,10 @@ public class InventoryRequisitionDto
     public Guid Id { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public string? CostCenter { get; set; }
     public Guid WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
@@ -1393,8 +1395,10 @@ public class InventoryRequisitionItemDto
 
 public class CreateInventoryRequisitionDto
 {
+    public Guid? DepartmentId { get; set; }
+
     [Required]
-    public Guid DepartmentId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
 
     [MaxLength(100)]
     public string? DepartmentName { get; set; }
@@ -1432,6 +1436,7 @@ public class CreateInventoryRequisitionDto
 public class UpdateInventoryRequisitionDto
 {
     public Guid? DepartmentId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
 
     [MaxLength(100)]
     public string? DepartmentName { get; set; }
@@ -1639,8 +1644,10 @@ public sealed class InventoryIssueVoucherDto
     public string WarehouseName { get; set; } = string.Empty;
     public Guid? LocationId { get; set; }
     public string? LocationCode { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public string? CostCenter { get; set; }
     public Guid? ProjectId { get; set; }
     public string? ProjectCode { get; set; }

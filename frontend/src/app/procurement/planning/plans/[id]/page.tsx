@@ -1472,7 +1472,7 @@ export default function ProcurementPlanDetailPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-500">
-              Department
+              Organization Unit
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1519,9 +1519,9 @@ export default function ProcurementPlanDetailPage() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-500">
-                  Department
+                  Organization Unit
                 </label>
-                <p className="mt-1">{plan.departmentName || '-'}</p>
+                <p className="mt-1">{plan.organizationUnitName || plan.departmentName || '-'}</p>
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-500">

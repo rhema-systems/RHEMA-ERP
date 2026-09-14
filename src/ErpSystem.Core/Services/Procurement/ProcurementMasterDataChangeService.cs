@@ -1151,7 +1151,27 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         {
             if (document.RootElement.ValueKind != JsonValueKind.Object)
                 throw new ProcurementMasterDataChangeValidationException("PATCH_OBJECT_REQUIRED", "ProposedChangesJson must be a JSON object.");
-            var properties = document.RootElement.EnumerateObject().ToList();
+            var rootProperties = document.RootElement.EnumerateObject().ToList();
+            if (rootProperties.GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
+                throw new ProcurementMasterDataChangeValidationException("PATCH_DUPLICATE_FIELD", "Patch field names must be unique ignoring case.");
+            var properties = new List<JsonProperty>();
+            foreach (var item in rootProperties)
+            {
+                if (entity is BusinessPartner && string.Equals(item.Name, "postingDefaults", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (item.Value.ValueKind != JsonValueKind.Object)
+                        throw new ProcurementMasterDataChangeValidationException("FIELD_VALUE_INVALID", "PostingDefaults must be a JSON object.");
+                    var defaultFields = typeof(BusinessPartnerPostingDefaultsDto).GetProperties()
+                        .Select(property => property.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+                    foreach (var nested in item.Value.EnumerateObject())
+                    {
+                        if (!defaultFields.Contains(nested.Name))
+                            throw new ProcurementMasterDataChangeValidationException("FIELD_NOT_ALLOWED", $"'{nested.Name}' is not a business-partner posting default.");
+                        properties.Add(nested);
+                    }
+                }
+                else properties.Add(item);
+            }
             if (properties.Count == 0)
                 throw new ProcurementMasterDataChangeValidationException("PATCH_EMPTY", "At least one protected field change is required.");
             if (properties.GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase).Any(group => group.Count() > 1))
@@ -1222,6 +1242,22 @@ public sealed class ProcurementMasterDataChangeService : IProcurementMasterDataC
         switch (entity)
         {
             case BusinessPartner partner:
+                if (resourceType is ProcurementMasterDataResourceType.SupplierProfile or
+                    ProcurementMasterDataResourceType.SupplierBankDetails or ProcurementMasterDataResourceType.SupplierTaxDetails)
+                {
+                    if (partner.CreditLimit < 0)
+                        throw new ProcurementMasterDataChangeValidationException("SUPPLIER_CREDIT_LIMIT_INVALID", "Credit limit cannot be negative.");
+                    try
+                    {
+                        var postingDefaults = BusinessPartnerPostingDefaults.FromPartner(partner);
+                        await BusinessPartnerPostingDefaultValidation.ValidateAsync(postingDefaults, partner.PartnerType, _unitOfWork, _currentUser);
+                        BusinessPartnerPostingDefaults.Apply(partner, postingDefaults);
+                    }
+                    catch (InvalidOperationException exception)
+                    {
+                        throw new ProcurementMasterDataChangeValidationException("BUSINESS_PARTNER_DEFAULTS_INVALID", exception.Message);
+                    }
+                }
                 if (partner.ParentId == partner.Id)
                     throw new ProcurementMasterDataChangeValidationException("SUPPLIER_PARENT_SELF", "A supplier cannot be its own parent.");
                 if (partner.ParentId.HasValue && !await ExistsTenantAsync<BusinessPartner>(partner.ParentId.Value, cancellationToken))

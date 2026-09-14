@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Inventory;
@@ -34,8 +35,6 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         var settings = await _db.FinanceSettings.AsNoTracking()
             .SingleOrDefaultAsync(x => x.TenantId == adjustment.TenantId && !x.IsDeleted, cancellationToken)
             ?? throw new InvalidOperationException("Finance settings are not configured for this tenant.");
-        var inventory = settings.ControlAccountInventoryId
-            ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.");
         // Inventory owns INITIAL_STOCK plus every warehouse/location/item/quantity/unit-cost
         // lifecycle mutation. Finance consumes only its approved immutable evidence, creates no
         // Inventory master data, and derives the configured control/clearing accounts. The ordinary
@@ -48,11 +47,18 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
         Guid? recovery = isOpeningStock ? null : settings.WriteOffRecoveryAccountId;
         var currency = string.IsNullOrWhiteSpace(settings.BaseCurrency) ? "GHS" : settings.BaseCurrency.Trim().ToUpperInvariant();
         var lines = new List<FinancePostingLineDto>();
+        var itemIds = adjustment.Items.Where(value => !value.IsDeleted).Select(value => value.InventoryItemId).Distinct().ToArray();
+        var itemProfiles = await _db.InventoryItems.AsNoTracking().Where(value =>
+            value.TenantId == adjustment.TenantId && itemIds.Contains(value.Id) && !value.IsDeleted)
+            .ToDictionaryAsync(value => value.Id, cancellationToken);
         var number = 1;
         foreach (var item in adjustment.Items.Where(x => !x.IsDeleted).OrderBy(x => x.CreatedAt).ThenBy(x => x.Id))
         {
             var amount = decimal.Round(Math.Abs(item.AdjustmentValue), 2);
             if (amount <= 0) continue;
+            itemProfiles.TryGetValue(item.InventoryItemId, out var profile);
+            var inventory = await InventoryPostingAccountResolution.ResolveAsync(_db, adjustment.TenantId,
+                profile?.InventoryAccountId, settings.ControlAccountInventoryId, "Inventory", cancellationToken, AccountType.Asset);
             var description = $"Stock adjustment {adjustment.AdjustmentNumber} - {item.InventoryItem?.Name ?? item.InventoryItemId.ToString()}";
             if (isOpeningStock)
             {
@@ -65,8 +71,10 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             }
             else if (item.AdjustmentQuantity < 0)
             {
-                var expenseAccount = expense
-                    ?? throw new InvalidOperationException("Write-off Expense Account is not configured in Finance Settings.");
+                var itemExpense = adjustment.ReasonCode == StockAdjustmentReasonCodes.Damage
+                    ? profile?.DamagedAccountId ?? profile?.VarianceAccountId : profile?.VarianceAccountId;
+                var expenseAccount = await InventoryPostingAccountResolution.ResolveAsync(_db, adjustment.TenantId,
+                    itemExpense, expense, "Stock adjustment expense", cancellationToken, AccountType.Expense, AccountType.Revenue);
                 lines.Add(Line(expenseAccount, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
                     "INV-ADJ-EXPENSE", adjustment.AdjustmentDate));
                 lines.Add(Line(inventory, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,
@@ -74,8 +82,8 @@ public sealed class InventoryAdjustmentFinancePostingService : IInventoryAdjustm
             }
             else
             {
-                var recoveryAccount = recovery
-                    ?? throw new InvalidOperationException("Write-off Recovery Account is not configured in Finance Settings.");
+                var recoveryAccount = await InventoryPostingAccountResolution.ResolveAsync(_db, adjustment.TenantId,
+                    profile?.VarianceAccountId, recovery, "Stock adjustment recovery", cancellationToken, AccountType.Expense, AccountType.Revenue);
                 lines.Add(Line(inventory, description, amount, 0m, currency, number++, adjustment.AdjustmentNumber,
                     "INV-ADJ-CONTROL", adjustment.AdjustmentDate));
                 lines.Add(Line(recoveryAccount, description, 0m, amount, currency, number++, adjustment.AdjustmentNumber,

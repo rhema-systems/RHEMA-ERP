@@ -24,6 +24,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { canIssueRequisition } from '@/lib/inventory-requisition-access';
 import { inventoryManagementService, type WarehouseLocationDto } from '@/services/inventoryManagementService';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import { format } from 'date-fns';
 import {
   InventoryTrackingExceptionSelect,
@@ -101,6 +102,8 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
   const [vouchers, setVouchers] = useState<InventoryIssueVoucherDto[]>([]);
   const [acknowledgementComment, setAcknowledgementComment] = useState('');
   const [voucherActionId, setVoucherActionId] = useState<string | null>(null);
+  const [voucherPreview, setVoucherPreview] = useState<CentralDocumentViewerFile | null>(null);
+  useEffect(() => { setVoucherPreview(null); }, [open, requisitionId]);
   const canIssue = canIssueRequisition(requisition, user?.id, hasIssuePermission);
   const trackingExceptions = useAvailableInventoryTrackingExceptions(open && canIssue);
 
@@ -140,7 +143,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
             (location.isConsignmentBin && location.consignmentWarehouseId === detail.warehouseId))));
         setReceivers(receiverOptions);
         const requesterIsEligible = receiverOptions.some(receiver => receiver.userId === detail.requestedById);
-        setReceiverUserId(requesterIsEligible ? detail.requestedById! : '');
+        setReceiverUserId(requesterIsEligible ? detail.requestedById ?? '' : '');
         setChangingReceiver(!requesterIsEligible);
         setAccountingOptions(governedOptions);
         setMovementReasonCode(governedOptions.applicableMovementReasonCodes.length === 1
@@ -287,23 +290,13 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
     }
   };
 
-  const handleDownload = async (voucher: InventoryIssueVoucherDto) => {
-    try {
-      setVoucherActionId(voucher.id);
-      const blob = await inventoryRequisitionService.downloadIssueVoucher(voucher.id);
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `${voucher.voucherNumber}.pdf`;
-      anchor.click();
-      URL.revokeObjectURL(url);
-    } catch (err: unknown) {
-      const message = err instanceof Error ? err.message : 'Failed to download the Store Issue Voucher';
-      toast({ title: 'Download failed', description: message, variant: 'destructive' });
-    } finally {
-      setVoucherActionId(null);
-    }
-  };
+  const handleDownload = (voucher: InventoryIssueVoucherDto) => setVoucherPreview({
+    title: voucher.voucherNumber,
+    fileName: `${voucher.voucherNumber}.pdf`,
+    contentType: 'application/pdf',
+    repositoryPath: `/api/inventory/requisitions/issue-vouchers/${encodeURIComponent(voucher.id)}/download`,
+    sourceLabel: 'Store Issue Voucher',
+  });
 
   const getStatusBadge = (status: number | string) => {
     const numStatus = normalizeStatus(status);
@@ -327,6 +320,7 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
   }, [applicableMovementReasons, movementReasonCode]);
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="w-[96vw] max-w-[96vw] sm:max-w-6xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -633,6 +627,9 @@ export function IssueRequisitionDialog({ open, onOpenChange, requisitionId, onSu
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <CentralDocumentViewerDialog file={voucherPreview} open={open && Boolean(voucherPreview)}
+      onOpenChange={(value) => { if (!value) setVoucherPreview(null); }} enableAnnotations={false} />
+    </>
   );
 }
 

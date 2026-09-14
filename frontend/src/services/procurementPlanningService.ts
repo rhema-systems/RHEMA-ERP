@@ -79,8 +79,10 @@ export interface ProcurementPlanDto {
   planNumber: string;
   title: string;
   description?: string;
-  departmentId: string;
+  departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   fiscalYear: number;
   planningCycle: string;
   planningQuarter?: string;
@@ -136,7 +138,7 @@ export interface ProcurementPlanDetailDto extends ProcurementPlanDto {
 export interface CreateProcurementPlanDto {
   title: string;
   description?: string;
-  departmentId: string;
+  organizationUnitId: string;
   fiscalYear: number;
   planningCycle?: string;
   planningQuarter?: string;
@@ -153,7 +155,7 @@ export interface CreateProcurementPlanDto {
 export interface UpdateProcurementPlanDto {
   title: string;
   description?: string;
-  departmentId: string;
+  organizationUnitId: string;
   fiscalYear: number;
   planningCycle?: string;
   planningQuarter?: string;
@@ -196,8 +198,10 @@ export interface ProcurementPlanConsolidationItemDto {
   planId: string;
   planNumber: string;
   planItemId: string;
-  departmentId: string;
+  departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   itemDescription: string;
   quantity: number;
   estimatedTotalCost: number;
@@ -227,7 +231,7 @@ export interface ProcurementPlanConsolidationOpportunityDto {
 }
 
 export interface ProcurementPlanningDepartmentSummaryDto {
-  departmentId: string;
+  organizationUnitId: string;
   departmentName: string;
   planCount: number;
   itemCount: number;
@@ -521,8 +525,10 @@ export interface ProcurementBudgetDto {
   budgetCode: string;
   title: string;
   description?: string;
-  departmentId: string;
+  departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   procurementPlanId?: string;
   fiscalYear: number;
   allocatedAmount: number;
@@ -551,7 +557,7 @@ export interface ProcurementBudgetDetailDto extends ProcurementBudgetDto {
 export interface CreateProcurementBudgetDto {
   title: string;
   description?: string;
-  departmentId: string;
+  organizationUnitId: string;
   procurementPlanId?: string;
   fiscalYear: number;
   allocatedAmount: number;
@@ -621,6 +627,8 @@ export interface ProcurementScheduleDto {
   procurementPlanItemId?: string;
   departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   scheduleType: string;
   plannedStartDate: string;
   plannedEndDate: string;
@@ -654,6 +662,7 @@ export interface CreateProcurementScheduleDto {
   procurementPlanId?: string;
   procurementPlanItemId?: string;
   departmentId?: string;
+  organizationUnitId?: string;
   scheduleType?: string;
   plannedStartDate: string;
   plannedEndDate: string;

@@ -4,6 +4,11 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IssueRequisitionDialog } from './IssueRequisitionDialog';
 import { inventoryRequisitionService as service } from '@/services/inventoryRequisitionService';
 import { inventoryManagementService } from '@/services/inventoryManagementService';
+import { apiService } from '@/services/api.service';
+
+vi.mock('next/dynamic', () => ({ default: () => (props: { fileData?: Uint8Array }) => <div data-testid="voucher-pdf">{Array.from(props.fileData || []).join(',')}</div> }));
+vi.mock('@/services/api.service', () => ({ apiService: { downloadBlob: vi.fn() } }));
+vi.mock('@/services/document-management.service', () => ({ documentManagementService: {} }));
 
 const state = vi.hoisted(() => ({ actor: 'receiver', canIssue: false, toast: vi.fn() }));
 vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: state.actor }, hasPermission: () => state.canIssue }) }));
@@ -52,6 +57,33 @@ beforeEach(() => {
 });
 
 const open = () => render(<IssueRequisitionDialog open requisitionId="req-1" onOpenChange={vi.fn()} onSuccess={vi.fn()} />);
+
+describe('Store Issue Voucher PDF', () => {
+  it('opens the protected voucher in-page without issuing or acknowledging it again', async () => {
+    vi.mocked(service.getIssueVouchers).mockResolvedValue([voucher('Posted')] as never);
+    vi.mocked(apiService.downloadBlob).mockResolvedValue({ arrayBuffer: async () => new Uint8Array([37, 80, 68, 70]).buffer } as Blob);
+    const popup = vi.spyOn(window, 'open').mockReturnValue(null);
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }));
+    expect(await screen.findByTestId('voucher-pdf')).toHaveTextContent('37,80,68,70');
+    expect(screen.getByRole('dialog', { name: 'SIV-TEST' })).toBeInTheDocument();
+    expect(apiService.downloadBlob).toHaveBeenCalledWith('/inventory/requisitions/issue-vouchers/voucher-1/download');
+    expect(service.issue).not.toHaveBeenCalled();
+    expect(service.acknowledgeIssueVoucher).not.toHaveBeenCalled();
+    expect(popup).not.toHaveBeenCalled();
+    popup.mockRestore();
+  });
+  it('keeps the protected PDF error visible rather than silently closing', async () => {
+    vi.mocked(service.getIssueVouchers).mockResolvedValue([voucher('Posted')] as never);
+    vi.mocked(apiService.downloadBlob).mockRejectedValue(new Error('Voucher PDF is not available to this actor.'));
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: 'PDF' }));
+    expect(await screen.findByText('Voucher PDF is not available to this actor.')).toBeInTheDocument();
+    expect(screen.getByRole('dialog', { name: 'SIV-TEST' })).toBeInTheDocument();
+    expect(screen.queryByTestId('voucher-pdf')).not.toBeInTheDocument();
+    expect(service.issue).not.toHaveBeenCalled();
+  });
+});
 
 function prepareIssue(locationId?: string, inventoryTrackingExceptionId?: string) {
   state.actor = 'issuer';

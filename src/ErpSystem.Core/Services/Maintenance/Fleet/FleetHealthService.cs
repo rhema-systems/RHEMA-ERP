@@ -40,15 +40,15 @@ public sealed class FleetHealthService : IFleetHealthService
         var activeEmployeesQ = _unitOfWork.Repository<Employee>()
             .GetQueryable(e => e.TenantId == tenantId && !e.IsDeleted && e.IsActive);
 
-        var maintenanceDepartmentsQ = _unitOfWork.Repository<Department>()
-            .GetQueryable(d =>
-                d.TenantId == tenantId &&
-                !d.IsDeleted &&
-                d.IsActive &&
-                d.DepartmentType == ErpSystem.Core.Enums.DepartmentType.Maintenance);
+        var maintenanceUnitsQ = _unitOfWork.Repository<OrganizationUnit>()
+            .GetQueryable(unit =>
+                unit.TenantId == tenantId &&
+                !unit.IsDeleted &&
+                unit.IsActive &&
+                unit.Name.Contains("Maintenance"));
 
         var maintenanceEmployeesCount = await (from e in activeEmployeesQ
-                                               join d in maintenanceDepartmentsQ on e.DepartmentId equals d.Id
+                                               join unit in maintenanceUnitsQ on e.OrganizationUnitId equals unit.Id
                                                select e.Id)
             .Distinct()
             .CountAsync();
@@ -73,7 +73,7 @@ public sealed class FleetHealthService : IFleetHealthService
         if (vehiclesCount == 0)
             warnings.Add("No vehicles found. Vehicles are assets whose category AssetType is \"Vehicle\".");
         if (maintenanceEmployeesCount == 0)
-            warnings.Add("No active Maintenance employees found. Add employees with DepartmentType = Maintenance to assign technicians/drivers.");
+            warnings.Add("No active Maintenance employees found. Assign employees to an active HR organization unit named Maintenance before assigning technicians or drivers.");
         if (employeesWithDriverLicenseCount == 0)
             warnings.Add("No employee driver's licenses found. Add an Employee Identification Card whose DocumentType contains \"Driver\" to dispatch fleet trips with driver license blocking enabled.");
 

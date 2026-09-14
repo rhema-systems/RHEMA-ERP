@@ -25,8 +25,11 @@ public class ProcurementPlan : TenantEntity
     [MaxLength(2000)]
     public string? Description { get; set; }
 
-    [Required]
-    public Guid DepartmentId { get; set; }
+    /// <summary>Legacy department retained for historic plan records only.</summary>
+    public Guid? DepartmentId { get; set; }
+
+    /// <summary>Current owner from HR's Organisation Structure → Level → Unit hierarchy.</summary>
+    public Guid? OrganizationUnitId { get; set; }
 
     /// <summary>
     /// Fiscal year for this plan (e.g., 2024)
@@ -100,7 +103,8 @@ public class ProcurementPlan : TenantEntity
     public string? Notes { get; set; }
 
     // Navigation Properties
-    public virtual Department Department { get; set; } = null!;
+    public virtual Department? Department { get; set; }
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
     public virtual ApplicationUser? PreparedBy { get; set; }
     public virtual ApplicationUser? ReviewedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
@@ -304,8 +308,11 @@ public class ProcurementBudget : TenantEntity
     [MaxLength(1000)]
     public string? Description { get; set; }
 
-    [Required]
-    public Guid DepartmentId { get; set; }
+    /// <summary>Legacy department retained for historic budget records only.</summary>
+    public Guid? DepartmentId { get; set; }
+
+    /// <summary>Current owner from HR's Organisation Structure → Level → Unit hierarchy.</summary>
+    public Guid? OrganizationUnitId { get; set; }
 
     public Guid? ProcurementPlanId { get; set; }
 
@@ -355,7 +362,8 @@ public class ProcurementBudget : TenantEntity
     public string? Notes { get; set; }
 
     // Navigation Properties
-    public virtual Department Department { get; set; } = null!;
+    public virtual Department? Department { get; set; }
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
     public virtual ProcurementPlan? ProcurementPlan { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ICollection<ProcurementBudgetAllocation> Allocations { get; set; } = new List<ProcurementBudgetAllocation>();
@@ -457,6 +465,7 @@ public class ProcurementSchedule : TenantEntity
     public Guid? ProcurementPlanId { get; set; }
     public Guid? ProcurementPlanItemId { get; set; }
     public Guid? DepartmentId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
 
     /// <summary>
     /// Schedule type: Tender, RFQ, DirectPurchase, Contract, Delivery
@@ -517,6 +526,7 @@ public class ProcurementSchedule : TenantEntity
     public virtual ProcurementPlan? ProcurementPlan { get; set; }
     public virtual ProcurementPlanItem? ProcurementPlanItem { get; set; }
     public virtual Department? Department { get; set; }
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
 }
 
 #endregion

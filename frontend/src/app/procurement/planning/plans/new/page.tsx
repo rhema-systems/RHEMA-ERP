@@ -13,25 +13,25 @@ import { toast } from 'sonner';
 import {
   procurementBudgetService,
   procurementPlanService,
-  commonService,
   type CreateProcurementPlanDto,
-  type DepartmentDto,
   type ProcurementBudgetDto,
 } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { FiscalYearSelect } from '../../components/FiscalYearSelect';
 import { applyProcurementPlanBudgetSelection } from '../../components/procurementPlanBudgetSelection';
 
 export default function NewProcurementPlanPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
-  const [loadingDepartments, setLoadingDepartments] = useState(true);
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
+  const [loadingOrganizationUnits, setLoadingOrganizationUnits] = useState(true);
   const [availableBudgets, setAvailableBudgets] = useState<ProcurementBudgetDto[]>([]);
   const [loadingBudgets, setLoadingBudgets] = useState(false);
   const [formData, setFormData] = useState<CreateProcurementPlanDto>({
     title: '',
     description: '',
-    departmentId: '',
+    organizationUnitId: '',
     fiscalYear: new Date().getFullYear(),
     planningCycle: 'Annual',
     planningQuarter: '',
@@ -44,25 +44,25 @@ export default function NewProcurementPlanPage() {
     items: [],
   });
 
-  // Fetch departments on mount
+  // Fetch the active HR organization units on mount.
   useEffect(() => {
-    const fetchDepartments = async () => {
+    const fetchOrganizationUnits = async () => {
       try {
-        setLoadingDepartments(true);
-        const data = await commonService.getDepartments();
-        setDepartments(data);
+        setLoadingOrganizationUnits(true);
+        const data = await organizationUnitService.getSummary();
+        setOrganizationUnits(data.filter((unit) => unit.isActive));
       } catch (error) {
-        console.error('Error fetching departments:', error);
-        toast.error('Failed to load departments');
+        console.error('Error fetching organization units:', error);
+        toast.error('Failed to load organization units');
       } finally {
-        setLoadingDepartments(false);
+        setLoadingOrganizationUnits(false);
       }
     };
-    fetchDepartments();
+    fetchOrganizationUnits();
   }, []);
 
   useEffect(() => {
-    if (!formData.departmentId || !formData.fiscalYear) {
+    if (!formData.organizationUnitId || !formData.fiscalYear) {
       setAvailableBudgets([]);
       return;
     }
@@ -72,7 +72,7 @@ export default function NewProcurementPlanPage() {
       try {
         setLoadingBudgets(true);
         const values = await procurementBudgetService.getAvailableBudgetsForLinking(
-          formData.departmentId,
+          formData.organizationUnitId,
           formData.fiscalYear,
           true,
         );
@@ -81,7 +81,7 @@ export default function NewProcurementPlanPage() {
         console.error('Error fetching selectable procurement budgets:', error);
         if (active) {
           setAvailableBudgets([]);
-          toast.error('Failed to load approved budgets for the selected department and fiscal year');
+          toast.error('Failed to load approved budgets for the selected organization unit and fiscal year');
         }
       } finally {
         if (active) setLoadingBudgets(false);
@@ -90,13 +90,13 @@ export default function NewProcurementPlanPage() {
 
     void loadBudgets();
     return () => { active = false; };
-  }, [formData.departmentId, formData.fiscalYear]);
+  }, [formData.organizationUnitId, formData.fiscalYear]);
 
   const handleInputChange = (field: keyof CreateProcurementPlanDto, value: string | number) => {
     setFormData(prev => ({
       ...prev,
       [field]: value,
-      ...(field === 'departmentId' || field === 'fiscalYear' ? { budgetId: undefined } : {}),
+      ...(field === 'organizationUnitId' || field === 'fiscalYear' ? { budgetId: undefined } : {}),
     }));
   };
 
@@ -107,8 +107,8 @@ export default function NewProcurementPlanPage() {
       toast.error('Title is required');
       return;
     }
-    if (!formData.departmentId) {
-      toast.error('Department is required');
+    if (!formData.organizationUnitId) {
+      toast.error('Organization unit is required');
       return;
     }
 
@@ -135,7 +135,7 @@ export default function NewProcurementPlanPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Create Procurement Plan</h1>
           <p className="text-muted-foreground">
-            Create a new departmental procurement plan
+            Create a new organization-unit procurement plan
           </p>
         </div>
       </div>
@@ -161,24 +161,24 @@ export default function NewProcurementPlanPage() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="departmentId">Department *</Label>
+                  <Label htmlFor="organizationUnitId">Organization unit *</Label>
                   <Select
-                    value={formData.departmentId}
-                    onValueChange={(value) => handleInputChange('departmentId', value)}
-                    disabled={loadingDepartments}
+                    value={formData.organizationUnitId}
+                    onValueChange={(value) => handleInputChange('organizationUnitId', value)}
+                    disabled={loadingOrganizationUnits}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder={loadingDepartments ? "Loading departments..." : "Select department"} />
+                      <SelectValue placeholder={loadingOrganizationUnits ? "Loading organization units..." : "Select organization unit"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {departments.map((dept) => (
-                        <SelectItem key={dept.id} value={dept.id}>
-                          {dept.code ? `${dept.code} - ${dept.name}` : dept.name}
+                      {organizationUnits.map((unit) => (
+                        <SelectItem key={unit.id} value={unit.id}>
+                          {unit.code ? `${unit.code} - ${unit.name}` : unit.name}
                         </SelectItem>
                       ))}
-                      {departments.length === 0 && !loadingDepartments && (
+                      {organizationUnits.length === 0 && !loadingOrganizationUnits && (
                         <div className="px-2 py-4 text-center text-sm text-muted-foreground">
-                          No departments available
+                          No organization units available
                         </div>
                       )}
                     </SelectContent>
@@ -307,12 +307,12 @@ export default function NewProcurementPlanPage() {
                       setFormData((previous) =>
                         applyProcurementPlanBudgetSelection(previous, availableBudgets, value));
                     }}
-                    disabled={!formData.departmentId || loadingBudgets}
+                    disabled={!formData.organizationUnitId || loadingBudgets}
                   >
                     <SelectTrigger id="budgetId">
                       <SelectValue placeholder={
-                        !formData.departmentId
-                          ? 'Select a department first'
+                        !formData.organizationUnitId
+                          ? 'Select an organization unit first'
                           : loadingBudgets
                             ? 'Loading approved budgets...'
                             : 'Select approved budget'
@@ -328,7 +328,7 @@ export default function NewProcurementPlanPage() {
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
-                    Final approval requires an approved budget for this department and fiscal year. A budget may fund
+                    Final approval requires an approved budget for this organization unit and fiscal year. A budget may fund
                     multiple plans while its controlled planning capacity remains sufficient.
                   </p>
                 </div>

@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 
@@ -141,6 +142,9 @@ public class SupplierContact : TenantEntity
     [MaxLength(100)]
     public string? Department { get; set; }
 
+    /// <summary>Current requester ownership from HR's Organisation Structure → Level → Unit hierarchy.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+
     [MaxLength(50)]
     public string? Phone { get; set; }
 
@@ -213,6 +217,9 @@ public class SupplierItemCatalog : TenantEntity
 /// </summary>
 public class PurchaseOrder : TenantEntity
 {
+    /// <summary>Supplier defaults at creation/selection; retained when the supplier master changes.</summary>
+    [Column(TypeName = "nvarchar(max)")]
+    public string? SupplierDefaultsSnapshotJson { get; set; }
     [Required]
     [MaxLength(50)]
     public string OrderNumber { get; set; } = string.Empty;
@@ -578,6 +585,10 @@ public class PurchaseOrderReceipt : TenantEntity
     [Column(TypeName = "nvarchar(max)")]
     public string? ReceiptSourceSnapshotJson { get; set; }
 
+    // Transaction-only GL splits. Item master mappings and later stock movements are unchanged.
+    [Column(TypeName = "nvarchar(max)")]
+    public string? DistributionDraftJson { get; set; }
+
     [MaxLength(64)]
     public string? ReceiptSourceIntegrityHash { get; set; }
 
@@ -865,6 +876,7 @@ public class PurchaseRequisition : TenantEntity
     public virtual ApplicationUser? LastAmendedBy { get; set; }
     public virtual ProcurementPlan? SourcePlan { get; set; }
     public virtual ProcurementPlanItem? SourcePlanItem { get; set; }
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
     public virtual ProcurementBudget? Budget { get; set; }
     public virtual ProcurementSpecificationTemplate? SpecificationTemplate { get; set; }
     public virtual ProcurementPolicyExceptionRule? ApprovedExceptionRule { get; set; }

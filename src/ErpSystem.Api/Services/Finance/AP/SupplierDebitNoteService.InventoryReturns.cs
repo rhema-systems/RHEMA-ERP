@@ -12,6 +12,54 @@ namespace ErpSystem.Api.Services.Finance.AP;
 
 public sealed partial class SupplierDebitNoteService
 {
+    public async Task<IReadOnlyList<InventoryReturnCreditCandidateDto>> GetInventoryReturnCreditCandidatesAsync(
+        string? search = null, CancellationToken cancellationToken = default)
+    {
+        // Finance gets only the source metadata needed for an AP credit. This does not
+        // authorize Inventory operations or weaken their warehouse-scoped access.
+        var tenant = TenantId;
+        var query = _db.Set<PurchaseReturn>().AsNoTracking().Where(source =>
+            source.TenantId == tenant && !source.IsDeleted &&
+            (source.Status == "Shipped" || source.Status == "Acknowledged") && source.ShippedDate.HasValue &&
+            source.PurchaseOrderId.HasValue && source.GoodsReceiptNoteId.HasValue &&
+            !_db.SupplierDebitNotes.Any(note => note.TenantId == tenant && !note.IsDeleted && note.InventoryPurchaseReturnId == source.Id));
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var term = search.Trim();
+            query = query.Where(source => source.ReturnNumber.Contains(term) ||
+                (source.SupplierName != null && source.SupplierName.Contains(term)));
+        }
+        var sources = await query.OrderByDescending(source => source.ShippedDate).ThenByDescending(source => source.CreatedAt)
+            .Take(100).Select(source => new InventoryReturnCreditCandidateDto
+            {
+                ReturnId = source.Id, ReturnNumber = source.ReturnNumber, SupplierName = source.SupplierName ?? string.Empty,
+                ShippedDate = source.ShippedDate!.Value, Reason = source.ReturnReason,
+                TotalQuantity = source.Items.Where(line => !line.IsDeleted && line.TenantId == tenant).Sum(line => line.ReturnQuantity)
+            }).ToListAsync(cancellationToken);
+        var eligible = new List<InventoryReturnCreditCandidateDto>();
+        foreach (var source in sources)
+        {
+            try
+            {
+                // Reuse the original source validator, including tenant, dispatched GRN,
+                // purchase-unit conversion and the invoice's own posted journal.
+                var invoices = await GetInventoryReturnCreditSourcesAsync(source.ReturnId, cancellationToken);
+                if (invoices.Any(invoice => invoice.OutstandingAmount > 0)) eligible.Add(source);
+            }
+            catch (InvalidOperationException exception) when (exception.Message.StartsWith("RTV_", StringComparison.Ordinal))
+            {
+                // Incomplete legacy lineage is not an eligible credit source. The
+                // operational return and audit history remain unchanged.
+                _logger.LogDebug("Return {ReturnId} is not an eligible AP credit source: {Reason}", source.ReturnId, exception.Message);
+            }
+            catch (KeyNotFoundException)
+            {
+                // A concurrently removed source must not be offered for creation.
+            }
+        }
+        return eligible;
+    }
+
     public async Task<IReadOnlyList<InventoryReturnCreditSourceDto>> GetInventoryReturnCreditSourcesAsync(
         Guid returnId, CancellationToken cancellationToken = default)
     {
@@ -153,10 +201,17 @@ public sealed partial class SupplierDebitNoteService
         if (!_unitOfWork.HasActiveTransaction)
             throw new InvalidOperationException("RTV_DISPATCH_TRANSACTION_REQUIRED: Finance handoff must share the Inventory dispatch transaction.");
         var settings = await _db.FinanceSettings.AsNoTracking().SingleOrDefaultAsync(x => x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
-        if (settings?.ReturnToVendorClearingAccountId == null || settings.ControlAccountInventoryId == null) return false;
+        if (settings?.ReturnToVendorClearingAccountId == null) return false;
         var candidates = await GetInventoryReturnCreditSourcesAsync(inventoryReturnId, cancellationToken);
         if (candidates.Count != 1) return false;
         var source = await RequireDispatchedReturnAsync(inventoryReturnId, cancellationToken);
+        if (!settings.ControlAccountInventoryId.HasValue)
+        {
+            var itemIds = source.Items.Select(line => line.InventoryItemId).Distinct().ToArray();
+            var mappedCount = await _db.InventoryItems.CountAsync(item => item.TenantId == TenantId && !item.IsDeleted &&
+                itemIds.Contains(item.Id) && item.InventoryAccountId.HasValue, cancellationToken);
+            if (mappedCount != itemIds.Length) return false;
+        }
         var invoice = await _db.Set<VendorInvoice>().Include(x => x.LineItems).SingleAsync(x =>
             x.Id == candidates[0].InvoiceId && x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
         await ValidateInvoiceAsync(invoice.Id, invoice.SupplierId, cancellationToken);
@@ -268,16 +323,17 @@ public sealed partial class SupplierDebitNoteService
         foreach (var group in source.Items.GroupBy(x => (x.InventoryItemId, x.LocationId, x.LotNumber, x.SerialNumber)))
         {
             var total = Round(posted.Where(x => (x.InventoryItemId, x.LocationId, x.LotNumber, x.SerialNumber) == group.Key).Sum(x => x.TotalValue));
-            var ordered = group.OrderBy(x => x.Id).ToList();
-            var allocated = 0m;
-            for (var index = 0; index < ordered.Count; index++)
-            {
-                var amount = index == ordered.Count - 1 ? total - allocated : Round(total * ordered[index].ReturnQuantity / expected[group.Key]);
-                carryingByLine.Add(ordered[index].Id, amount);
-                allocated += amount;
-            }
+            foreach (var allocation in AllocateDispatchCarryingByLine(group.ToArray(), total))
+                carryingByLine.Add(allocation.Key, allocation.Value);
         }
         return carryingByLine;
+    }
+
+    internal static IReadOnlyDictionary<Guid, decimal> AllocateDispatchCarryingByLine(IReadOnlyList<PurchaseReturnItem> items, decimal total)
+    {
+        var ordered = items.OrderBy(item => item.Id).ToArray();
+        var values = MonetaryAllocation.Allocate(ordered.Select(item => item.ReturnQuantity).ToArray(), total);
+        return ordered.Select((item, index) => (item.Id, Value: values[index])).ToDictionary(item => item.Id, item => item.Value);
     }
 
     private async Task<InventorySupplierReturnPosting> EnsureReturnDispatchPostedAsync(PurchaseReturn source, VendorInvoice invoice,
@@ -285,7 +341,8 @@ public sealed partial class SupplierDebitNoteService
     {
         await _unitOfWork.AcquireTransactionLockAsync($"finance-return-dispatch:{TenantId:N}:{source.Id:N}", cancellationToken);
         RequireExactReturnInvoiceLines(source, invoice, await ReturnInvoiceQuantitiesAsync(source, cancellationToken));
-        var carrying = Round((await RequireDispatchCarryingByLineAsync(source, cancellationToken)).Values.Sum());
+        var carryingByLine = await RequireDispatchCarryingByLineAsync(source, cancellationToken);
+        var carrying = Round(carryingByLine.Values.Sum());
         var existing = await _db.Set<InventorySupplierReturnPosting>().SingleOrDefaultAsync(x =>
             x.TenantId == TenantId && x.InventoryPurchaseReturnId == source.Id && !x.IsDeleted, cancellationToken);
         if (existing != null)
@@ -301,17 +358,27 @@ public sealed partial class SupplierDebitNoteService
                 x.SourceDocumentId == source.Id && x.SourceDocumentType == "InventorySupplierReturnDispatch", cancellationToken);
             if (!postedEvent || !postedJournal)
                 throw new InvalidOperationException("RTV_DISPATCH_POSTING_INVALID: the recorded Finance handoff is missing or reversed.");
+            await ReadDispatchInventoryAccountsAsync(existing, cancellationToken);
             return existing;
         }
         var settings = await _db.FinanceSettings.AsNoTracking().SingleAsync(x => x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
         var clearing = settings.ReturnToVendorClearingAccountId
             ?? throw new InvalidOperationException("RTV_CLEARING_ACCOUNT_REQUIRED: configure the dedicated return-to-vendor clearing account in Finance.");
-        var inventory = settings.ControlAccountInventoryId
-            ?? throw new InvalidOperationException("RTV_INVENTORY_ACCOUNT_REQUIRED: configure the Inventory control account in Finance.");
-        if (clearing == inventory) throw new InvalidOperationException("RTV_ACCOUNTS_MUST_DIFFER: clearing and Inventory cannot use the same GL account.");
         await RequirePostingAccountAsync(clearing, postingDate, "Return-to-vendor clearing account", true, cancellationToken);
-        await RequirePostingAccountAsync(inventory, postingDate, "Inventory control account", true, cancellationToken);
+        var itemIds = source.Items.Select(line => line.InventoryItemId).Distinct().ToArray();
+        var profiles = await _db.InventoryItems.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted && itemIds.Contains(item.Id))
+            .ToDictionaryAsync(item => item.Id, cancellationToken);
+        var inventoryByLine = new Dictionary<Guid, Guid>();
+        foreach (var line in source.Items)
+        {
+            profiles.TryGetValue(line.InventoryItemId, out var item);
+            var inventoryAccount = await InventoryPostingAccountResolution.ResolveAsync(_db, TenantId,
+                item?.InventoryAccountId, settings.ControlAccountInventoryId, "Supplier-return Inventory", cancellationToken, AccountType.Asset);
+            await RequirePostingAccountAsync(inventoryAccount, postingDate, "Inventory control account", true, cancellationToken);
+            inventoryByLine.Add(line.Id, inventoryAccount);
+        }
         var currency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+        var postingLines = BuildReturnDispatchLines(source, clearing, inventoryByLine, carryingByLine, currency, postingDate);
         var result = await _posting.PostAsync(new FinancePostingRequestDto
         {
             SourceModule = "Inventory", SourceDocumentType = "InventorySupplierReturnDispatch", SourceDocumentId = source.Id,
@@ -319,22 +386,64 @@ public sealed partial class SupplierDebitNoteService
             PostingAction = "Dispatch", PostingDate = postingDate, JournalType = "Supplier Return Dispatch", BookClassification = "IFRS",
             Description = $"Dispatched supplier return {source.ReturnNumber}", FunctionalCurrencyCode = currency,
             IdempotencyKey = $"Inventory:SupplierReturn:{TenantId:N}:{source.Id:N}:Dispatch", ReturnExistingOnDuplicate = true,
-            Lines = new[]
-            {
-                PostingLine(clearing, $"Supplier return clearing {source.ReturnNumber}", carrying, 0, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 1, "RTV-Dispatch-Clearing"),
-                PostingLine(inventory, $"Dispatched Inventory {source.ReturnNumber}", 0, carrying, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 2, "RTV-Dispatch-Inventory")
-            }
+            Lines = postingLines
         }, cancellationToken);
         var record = new InventorySupplierReturnPosting
         {
             Id = Guid.NewGuid(), TenantId = TenantId, InventoryPurchaseReturnId = source.Id, OriginalVendorInvoiceId = invoice.Id,
             PostingEventId = result.PostingEventId, JournalEntryId = result.JournalEntryId,
-            ClearingAccountId = clearing, InventoryAccountId = inventory, CarryingAmount = carrying, PostingDate = postingDate,
+            // Legacy required column is a representative only; the journal is authoritative for every target.
+            ClearingAccountId = clearing, InventoryAccountId = postingLines.Where(line => line.TransactionTag == "RTV-Dispatch-Inventory")
+                .Select(line => line.AccountId).OrderBy(value => value).First(), CarryingAmount = carrying, PostingDate = postingDate,
             CreatedAt = DateTime.UtcNow, CreatedBy = UserName, CreatedById = CurrentUserId == Guid.Empty ? null : CurrentUserId
         };
         _db.Set<InventorySupplierReturnPosting>().Add(record);
         await _db.SaveChangesAsync(cancellationToken);
         return record;
+    }
+
+    internal static IReadOnlyList<FinancePostingLineDto> BuildReturnDispatchLines(PurchaseReturn source, Guid clearing,
+        IReadOnlyDictionary<Guid, Guid> inventoryByLine, IReadOnlyDictionary<Guid, decimal> carryingByLine, string currency, DateTime postingDate)
+    {
+        if (source.Items.Count == 0 || source.Items.Any(line => !inventoryByLine.ContainsKey(line.Id) ||
+            !carryingByLine.TryGetValue(line.Id, out var value) || value < 0m))
+            throw new InvalidOperationException("RTV_DISPATCH_MAPPING_INVALID: every returned line requires a resolved Inventory account and carrying value.");
+        if (source.Items.Any(line => inventoryByLine[line.Id] == clearing))
+            throw new InvalidOperationException("RTV_ACCOUNTS_MUST_DIFFER: clearing and Inventory cannot use the same GL account.");
+        var carrying = Round(source.Items.Sum(line => carryingByLine[line.Id]));
+        if (carrying <= 0m)
+            throw new InvalidOperationException("RTV_DISPATCH_VALUE_INVALID: total dispatched carrying value must be positive.");
+        var lines = new List<FinancePostingLineDto>
+        {
+            PostingLine(clearing, $"Supplier return clearing {source.ReturnNumber}", carrying, 0, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 1, "RTV-Dispatch-Clearing")
+        };
+        foreach (var group in source.Items.GroupBy(line => inventoryByLine[line.Id]).OrderBy(group => group.Key))
+        {
+            var amount = Round(group.Sum(line => carryingByLine[line.Id]));
+            if (amount == 0m) continue;
+            lines.Add(PostingLine(group.Key, $"Dispatched Inventory {source.ReturnNumber}", 0, amount, amount,
+                currency, currency, 1, postingDate, source.ReturnNumber, lines.Count + 1, "RTV-Dispatch-Inventory"));
+        }
+        if (Round(lines.Sum(line => line.DebitAmount - line.CreditAmount)) != 0m)
+            throw new InvalidOperationException("RTV_DISPATCH_UNBALANCED: mapped Inventory values do not balance.");
+        return lines;
+    }
+
+    private async Task<HashSet<Guid>> ReadDispatchInventoryAccountsAsync(InventorySupplierReturnPosting dispatch, CancellationToken ct)
+    {
+        var entries = await _db.AccountTransactions.AsNoTracking().Where(line => line.TenantId == TenantId &&
+            line.JournalEntryId == dispatch.JournalEntryId && !line.IsDeleted && line.PostingStatus == "Posted" &&
+            line.TransactionTag == "RTV-Dispatch-Inventory").ToListAsync(ct);
+        if (entries.Count == 0 || !entries.Any(line => line.AccountId == dispatch.InventoryAccountId) ||
+            Round(entries.Sum(line => line.CreditAmount - line.DebitAmount)) != dispatch.CarryingAmount)
+            throw new InvalidOperationException("RTV_DISPATCH_POSTING_INVALID: original Inventory journal values do not reconcile to dispatch.");
+        return entries.Select(line => line.AccountId).ToHashSet();
+    }
+
+    internal static void RequireReturnVarianceAccount(Guid variance, Guid clearing, IReadOnlySet<Guid> inventoryAccounts)
+    {
+        if (variance == clearing || inventoryAccounts.Contains(variance))
+            throw new InvalidOperationException("RTV_ACCOUNTS_MUST_DIFFER: cost variance must not use Inventory or clearing.");
     }
 
     private async Task PrepareInventoryReturnPostingAsync(SupplierDebitNote note, FinancePostingRequestDto request, CancellationToken cancellationToken)
@@ -355,8 +464,7 @@ public sealed partial class SupplierDebitNoteService
         var settings = await _db.FinanceSettings.AsNoTracking().SingleAsync(x => x.TenantId == TenantId && !x.IsDeleted, cancellationToken);
         var variance = settings.PurchaseReturnVarianceAccountId
             ?? throw new InvalidOperationException("RTV_VARIANCE_ACCOUNT_REQUIRED: configure the dedicated purchase-return cost variance account.");
-        if (variance == dispatch.ClearingAccountId || variance == dispatch.InventoryAccountId)
-            throw new InvalidOperationException("RTV_ACCOUNTS_MUST_DIFFER: cost variance must not use Inventory or clearing.");
+        RequireReturnVarianceAccount(variance, dispatch.ClearingAccountId, await ReadDispatchInventoryAccountsAsync(dispatch, cancellationToken));
         await RequirePostingAccountAsync(dispatch.ClearingAccountId, note.DebitNoteDate, "Return clearing account", true, cancellationToken);
         await RequirePostingAccountAsync(variance, note.DebitNoteDate, "Purchase-return cost variance account", false, cancellationToken);
         var carryingByReturnLine = await RequireDispatchCarryingByLineAsync(source, cancellationToken);

@@ -11,31 +11,33 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementScheduleService, commonService, type CreateProcurementScheduleDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import { procurementScheduleService, type CreateProcurementScheduleDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 
 export default function NewProcurementSchedulePage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
   const [formData, setFormData] = useState<CreateProcurementScheduleDto>({
-    title: '', description: '', departmentId: '', scheduleType: 'Tender',
+    title: '', description: '', organizationUnitId: '', scheduleType: 'Tender',
     plannedStartDate: '', plannedEndDate: '', isOptimalTiming: true, timingRationale: '',
     considerSeasonalPricing: false, seasonalNotes: '', considerCashFlow: false, cashFlowNotes: '',
     storageLimitations: '', consolidationOpportunity: false, consolidationNotes: '', notes: '',
   });
 
   useEffect(() => {
-    const fetchDepartments = async () => {
+    const fetchOrganizationUnits = async () => {
       try {
-        const depts = await commonService.getDepartments();
-        setDepartments(depts);
+        const units = await organizationUnitService.getSummary();
+        setOrganizationUnits(units.filter((unit) => unit.isActive));
       } catch (error) {
-        console.error('Error loading departments:', error);
-        toast.error('Failed to load departments');
+        console.error('Error loading organization units:', error);
+        toast.error('Failed to load organization units');
       } finally { setLoading(false); }
     };
-    fetchDepartments();
+    fetchOrganizationUnits();
   }, []);
 
   const handleInputChange = (field: keyof CreateProcurementScheduleDto, value: string | boolean) => {
@@ -79,10 +81,10 @@ export default function NewProcurementSchedulePage() {
                 <Input id="title" value={formData.title} onChange={(e) => handleInputChange('title', e.target.value)} required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="departmentId">Department</Label>
-                <Select value={formData.departmentId} onValueChange={(value) => handleInputChange('departmentId', value)}>
-                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                  <SelectContent>{departments.map((dept) => (<SelectItem key={dept.id} value={dept.id}>{dept.code ? `${dept.code} - ${dept.name}` : dept.name}</SelectItem>))}</SelectContent>
+                <Label htmlFor="organizationUnitId">Organization unit</Label>
+                <Select value={formData.organizationUnitId} onValueChange={(value) => handleInputChange('organizationUnitId', value)}>
+                  <SelectTrigger><SelectValue placeholder="Select organization unit" /></SelectTrigger>
+                  <SelectContent>{organizationUnits.map((unit) => (<SelectItem key={unit.id} value={unit.id}>{unit.code ? `${unit.code} - ${unit.name}` : unit.name}</SelectItem>))}</SelectContent>
                 </Select>
               </div>
             </div>
@@ -148,4 +150,3 @@ export default function NewProcurementSchedulePage() {
     </div>
   );
 }
-

@@ -55,7 +55,7 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
                 (item.Status == "Approved" || item.Status == "Planned") && !item.ProcurementPlan.IsDeleted &&
                 (item.ProcurementPlan.Status == "Approved" || item.ProcurementPlan.Status == "Active"))
             .Include(item => item.ProcurementBudget)
-            .Include(item => item.ProcurementPlan).ThenInclude(plan => plan.Department)
+            .Include(item => item.ProcurementPlan).ThenInclude(plan => plan.OrganizationUnit)
             .Include(item => item.ProcurementPlan).ThenInclude(plan => plan.Budget)
             .AsNoTracking()
             .OrderByDescending(item => item.ProcurementPlan.FiscalYear).ThenBy(item => item.ProcurementPlan.PlanNumber)
@@ -80,7 +80,9 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
                 BudgetId = item.ProcurementBudgetId ?? item.ProcurementPlan.BudgetId,
                 BudgetCode = item.ProcurementBudget?.BudgetCode ?? item.ProcurementPlan.Budget?.BudgetCode,
                 DepartmentId = item.ProcurementPlan.DepartmentId,
-                DepartmentName = item.ProcurementPlan.Department.Name,
+                DepartmentName = item.ProcurementPlan.Department?.Name,
+                OrganizationUnitId = item.ProcurementPlan.OrganizationUnitId,
+                OrganizationUnitName = item.ProcurementPlan.OrganizationUnit?.Name,
                 InventoryItemId = item.InventoryItemId,
                 Quantity = item.EstimatedQuantity,
                 UnitOfMeasure = item.UnitOfMeasure,
@@ -91,6 +93,7 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
             }).ToList();
 
         var budgets = await Budgets.GetQueryable(item => item.TenantId == tenantId && !item.IsDeleted && item.Status != "Closed")
+            .Include(item => item.OrganizationUnit)
             .AsNoTracking().OrderByDescending(item => item.FiscalYear).ThenBy(item => item.BudgetCode).Take(500)
             .Select(item => new PurchaseRequisitionLinkageOptionDto
             {
@@ -100,7 +103,11 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
                 Status = item.Status,
                 ParentId = item.ProcurementPlanId,
                 Amount = item.RemainingAmount,
-                Currency = item.Currency
+                Currency = item.Currency,
+                DepartmentId = item.DepartmentId,
+                DepartmentName = item.Department == null ? null : item.Department.Name,
+                OrganizationUnitId = item.OrganizationUnitId,
+                OrganizationUnitName = item.OrganizationUnit == null ? null : item.OrganizationUnit.Name
             }).ToListAsync(cancellationToken);
 
         var projects = await Projects.GetQueryable(item => item.TenantId == tenantId && !item.IsDeleted)
@@ -206,7 +213,7 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
             ? []
             : await PlanItems.GetQueryable(item => requestedSourcePlanItemIds.Contains(item.Id) &&
                     item.TenantId == tenantId && !item.IsDeleted)
-                .Include(item => item.ProcurementPlan).ThenInclude(plan => plan.Department)
+                .Include(item => item.ProcurementPlan).ThenInclude(plan => plan.OrganizationUnit)
                 .AsNoTracking().ToListAsync(cancellationToken);
         if (sourcePlanItems.Count != requestedSourcePlanItemIds.Count)
             throw new ProcurementRequisitionLinkageNotFoundException(
@@ -274,9 +281,9 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
                 ?? throw new ProcurementRequisitionLinkageNotFoundException("BUDGET_NOT_FOUND", "The procurement budget was not found in the current tenant.")
             : null;
 
-        if (sourcePlanItems.Any(item => budget is not null && budget.DepartmentId != item.ProcurementPlan.DepartmentId))
+        if (sourcePlanItems.Any(item => budget is not null && budget.OrganizationUnitId != item.ProcurementPlan.OrganizationUnitId))
             throw new ProcurementRequisitionLinkageValidationException(
-                "PLAN_BUDGET_DEPARTMENT_MISMATCH", "The plan item budget does not belong to the procurement plan department.");
+                "PLAN_BUDGET_ORGANIZATION_UNIT_MISMATCH", "The plan item budget does not belong to the procurement plan organization unit.");
         if (sourcePlanItem is not null && budget is not null &&
             !string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase))
@@ -383,13 +390,13 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
         requisition.ProcurementCategory = request.ProcurementCategory ??
             (sourceCategories.Count == 1 ? sourceCategories[0] : null);
         // A planned requisition already carries its accounting ownership through the
-        // source plan department. Keep the field out of the requester UI, but persist a
+        // source plan organization unit. Keep the field out of the requester UI, but persist a
         // stable Finance dimension so the downstream commitment/release gate is not left
         // with an impossible null value. AccountCode is the explicit accounting mapping;
         // older departments fall back to their controlled department code.
         requisition.CostCenter = sourcePlanItem is null
             ? TrimOrNull(request.CostCenter, 100)
-            : ResolveDepartmentCostCenter(sourcePlanItem.ProcurementPlan.Department);
+            : ResolveOrganizationUnitCostCenter(sourcePlanItem.ProcurementPlan.OrganizationUnit);
         requisition.ProjectId = project?.Id;
         requisition.ProjectCode = project?.ProjectCode;
         requisition.ProjectName = project?.Title;
@@ -610,14 +617,14 @@ public sealed class ProcurementRequisitionLinkageService : IProcurementRequisiti
         string.IsNullOrWhiteSpace(correlationId) ? Guid.NewGuid().ToString("N") : Truncate(correlationId.Trim(), 100);
     private static string? TrimOrNull(string? value, int maxLength) =>
         string.IsNullOrWhiteSpace(value) ? null : Truncate(value.Trim(), maxLength);
-    private static string ResolveDepartmentCostCenter(Department department)
+    private static string ResolveOrganizationUnitCostCenter(OrganizationUnit? organizationUnit)
     {
-        var value = TrimOrNull(department.AccountCode, 100)
-            ?? TrimOrNull(department.Code, 100);
+        var value = TrimOrNull(organizationUnit?.AccountCode, 100)
+            ?? TrimOrNull(organizationUnit?.Code, 100);
         if (value is null)
             throw new ProcurementRequisitionLinkageValidationException(
-                "PLAN_DEPARTMENT_COST_CENTER_REQUIRED",
-                $"Department {department.Name} has no accounting or department code from which to derive the cost centre.");
+                "PLAN_ORGANIZATION_UNIT_COST_CENTER_REQUIRED",
+                $"Organization unit {organizationUnit?.Name ?? "(unknown)"} has no accounting or unit code from which to derive the cost centre.");
 
         return value;
     }

@@ -260,10 +260,22 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
             value.TenantId == period.TenantId && !value.IsDeleted, cancellationToken)
             ?? throw Error("INV_VALUATION_RECONCILIATION_FINANCE_SETTINGS_MISSING",
                 "Finance settings are required before inventory valuation can be reconciled.");
-        var accountId = settings.ControlAccountInventoryId
-            ?? throw Error("INV_VALUATION_RECONCILIATION_ACCOUNT_MISSING",
-                "Inventory Control Account is not configured in Finance Settings.");
         var cutoff = DateTime.SpecifyKind(period.EndDate.Date.AddDays(1).AddTicks(-1), DateTimeKind.Utc);
+        var mappedAccounts = await _db.InventoryItems.AsNoTracking().Where(value => value.TenantId == period.TenantId && !value.IsDeleted)
+            .Select(value => value.InventoryAccountId).ToListAsync(cancellationToken);
+        var accountIds = mappedAccounts
+            .Append(settings.ControlAccountInventoryId).Where(value => value.HasValue).Select(value => value!.Value).ToHashSet();
+        // Retain historical inventory targets even when a master default has subsequently changed.
+        var historicalAccounts = await _db.AccountTransactions.AsNoTracking().Where(value => value.TenantId == period.TenantId &&
+            !value.IsDeleted && value.PostingStatus == "Posted" && value.TransactionDate <= cutoff && value.TransactionTag != null &&
+            (value.TransactionTag == "INV-RECEIPT-CONTROL" || value.TransactionTag == "INV-LANDED-COST-CONTROL" ||
+             value.TransactionTag == "INV-OPEN-CONTROL" || value.TransactionTag == "INV-ADJ-CONTROL" ||
+             value.TransactionTag == "INV-ISSUE-CONTROL" || value.TransactionTag.StartsWith("INV-ISSUE-CTL-") ||
+             value.TransactionTag.StartsWith("INV-RET-CTL-") || value.TransactionTag == "RTV-Dispatch-Inventory"))
+            .Select(value => value.AccountId).Distinct().ToListAsync(cancellationToken);
+        accountIds.UnionWith(historicalAccounts);
+        var accountId = settings.ControlAccountInventoryId ?? accountIds.OrderBy(value => value).Select(value => (Guid?)value).FirstOrDefault()
+            ?? throw Error("INV_VALUATION_RECONCILIATION_ACCOUNT_MISSING", "An Inventory account is required on the items or in Finance Settings.");
         var exceptions = new List<InventoryValuationReconciliationExceptionDto>();
         var cutoffMovements = await _db.InventoryMovements.AsNoTracking().Where(value =>
                 value.TenantId == period.TenantId && value.IsPosted && !value.IsDeleted &&
@@ -287,14 +299,16 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
                 "The inventory balance cache does not equal the complete posted movement subledger.", null,
                 currentMovementValue, cacheValue));
 
-        var glValue = Round(await _db.AccountTransactions.AsNoTracking().Where(value =>
-                value.TenantId == period.TenantId && value.AccountId == accountId && !value.IsDeleted &&
+        var accountBalances = await _db.AccountTransactions.AsNoTracking().Where(value =>
+                value.TenantId == period.TenantId && accountIds.Contains(value.AccountId) && !value.IsDeleted &&
                 value.PostingStatus == "Posted" && value.TransactionDate <= cutoff)
-            .SumAsync(value => value.DebitAmount - value.CreditAmount, cancellationToken));
+            .GroupBy(value => value.AccountId).Select(group => new { AccountId = group.Key, Balance = group.Sum(value => value.DebitAmount - value.CreditAmount) })
+            .OrderBy(value => value.AccountId).ToListAsync(cancellationToken);
+        var glValue = Round(accountBalances.Sum(value => value.Balance));
         var variance = Round(inventorySubledger - glValue);
         if (Math.Abs(variance) > tolerance)
             exceptions.Add(Exception("INV_VALUATION_GL_MISMATCH", "GeneralLedger",
-                "The movement subledger does not equal the Inventory control-account balance at cut-off.", null,
+                "The movement subledger does not equal the combined Inventory account balances at cut-off.", null,
                 inventorySubledger, glValue));
 
         var receiptMovements = cutoffMovements.Where(value =>
@@ -376,10 +390,14 @@ public sealed class InventoryValuationReconciliationService : IInventoryValuatio
             Exceptions = exceptions.OrderBy(value => value.Area).ThenBy(value => value.Code)
                 .ThenBy(value => value.Reference).ToList()
         };
+        // Preserve the hash contract of existing single-control snapshots; multi-account
+        // snapshots additionally pin each account balance so offsetting changes cannot hide.
+        var snapshotHash = accountIds.Count == 1 ? Hash(hashPayload)
+            : Hash(new { Snapshot = hashPayload, InventoryAccountIds = accountIds.OrderBy(value => value).ToArray(), InventoryAccountBalances = accountBalances });
         return new Snapshot(cutoff, hashPayload.FunctionalCurrencyCode, accountId, receiptValue,
             postedLanded, landedInventory, landedVariance, inventorySubledger, cacheValue,
             currentMovementValue, glValue, variance, hashPayload.ToleranceAmount,
-            hashPayload.Exceptions, Hash(hashPayload));
+            hashPayload.Exceptions, snapshotHash);
     }
 
     private IQueryable<InventoryValuationReconciliation> FullQuery() =>

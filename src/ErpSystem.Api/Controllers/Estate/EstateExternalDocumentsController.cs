@@ -1,3 +1,7 @@
+using ErpSystem.Core.DTOs.Ehc;
+using ErpSystem.Core.Interfaces.Ehc;
+using ErpSystem.Api.Services;
+using Microsoft.AspNetCore.RateLimiting;
 using System.Globalization;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.DocumentManagement;
@@ -38,6 +42,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     private readonly ICentralDocumentRenditionService _renditionService;
     private readonly INotificationService _notificationService;
     private readonly IOpportunityService _opportunityService;
+    private readonly IEhcTicketService _ticketService;
+    private readonly ICaptchaVerificationService _captchaService;
 
     public EstateExternalDocumentsController(
         ApplicationDbContext db,
@@ -46,7 +52,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         IFileStorageService fileStorageService,
         ICentralDocumentRenditionService renditionService,
         INotificationService notificationService,
-        IOpportunityService opportunityService)
+        IOpportunityService opportunityService,
+        IEhcTicketService ticketService,
+        ICaptchaVerificationService captchaService)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -55,6 +63,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         _renditionService = renditionService;
         _notificationService = notificationService;
         _opportunityService = opportunityService;
+        _ticketService = ticketService;
+        _captchaService = captchaService;
     }
 
     [HttpGet("/api/estate/external/customer-profiles")]
@@ -1604,7 +1614,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         [FromQuery] decimal? minPrice = null,
         [FromQuery] decimal? maxPrice = null,
         [FromQuery] int? take = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, [FromQuery] Guid? listingId = null)
     {
         if (minPrice < 0 || maxPrice < 0 || (minPrice.HasValue && maxPrice.HasValue && minPrice > maxPrice))
         {
@@ -1746,6 +1756,12 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
 
         demarcationQuery = ApplyPublicPriceFilter(demarcationQuery, normalizedListingType, minPrice, maxPrice);
+
+        if (listingId.HasValue)
+        {
+            query = query.Where(asset => asset.Id == listingId.Value);
+            demarcationQuery = demarcationQuery.Where(item => item.Id == listingId.Value);
+        }
 
         var listingsPage = await BuildExternalListingsPageAsync(
             query,
@@ -2280,12 +2296,24 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
     }
 
-    [HttpPost("/api/estate/external/listings/{listingId:guid}/enquiries")]
-    public async Task<IActionResult> CreateListingEnquiry(
-        Guid listingId,
-        [FromBody] CreateExternalListingRequest request,
-        CancellationToken cancellationToken)
+    [HttpGet("/api/estate/external/enquiry-profiles")]
+    public async Task<IActionResult> GetEnquiryProfiles(CancellationToken cancellationToken)
     {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var userId = GetUserId();
+        if (tenantId == Guid.Empty || userId is null) return Unauthorized();
+        var profiles = await PortalEnquiryPartners(tenantId, userId.Value).OrderBy(p => p.PartnerName)
+            .Select(p => new { p.Id, p.PartnerName, p.PrimaryEmail, p.PrimaryPhone, p.PartnerType }).ToListAsync(cancellationToken);
+        return Ok(new { success = true, data = profiles });
+    }
+
+    [HttpPost("/api/estate/external/listings/{listingId:guid}/enquiries")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<IActionResult> CreateListingEnquiry(Guid listingId,
+        [FromBody] CreatePropertyListingEnquiryRequest request, CancellationToken cancellationToken)
+    {
+        if (request.SubmissionId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Trim().Length > 4000)
+            return BadRequest(new { success = false, message = "Enter an enquiry message of up to 4,000 characters and a submission identifier." });
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
             .FirstOrDefaultAsync(item => item.Id == listingId
@@ -2318,115 +2346,54 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return NotFound(new { success = false, message = "Listing was not found or is not available." });
         }
 
-        var portalUserId = GetUserId();
-        if (portalUserId is null)
-        {
-            return Unauthorized(new { success = false, message = "A signed-in portal account is required." });
-        }
 
-        var customer = request.BusinessPartnerId.HasValue
-            ? await FindPortalCustomerAsync(
-                tenantId,
-                portalUserId.Value,
-                request.BusinessPartnerId.Value,
-                cancellationToken)
-            : null;
-        customer ??= await PortalCustomers(tenantId, portalUserId.Value)
-            .OrderBy(item => item.PartnerName)
-            .ThenBy(item => item.CustomerAccountNumber)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        var listingType = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
-        var listingReference = demarcationListing is null
-            ? asset.AssetCode
+        var userId = GetUserId();
+        if (userId is null || tenantId == Guid.Empty) return Unauthorized();
+        var partners = PortalEnquiryPartners(tenantId, userId.Value);
+        var partner = request.BusinessPartnerId.HasValue
+            ? await partners.FirstOrDefaultAsync(p => p.Id == request.BusinessPartnerId, cancellationToken)
+            : await partners.OrderBy(p => p.PartnerName).FirstOrDefaultAsync(cancellationToken);
+        if (request.BusinessPartnerId.HasValue && partner is null)
+            return BadRequest(new { success = false, message = "The selected business partner is not linked to your portal account." });
+        var reference = demarcationListing is null ? asset.AssetCode
             : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
-        var listingName = demarcationListing is null
-            ? asset.Name
-            : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
-        var listingCurrency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
-        var listingSalePrice = demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice;
-        var listingPrice = demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
-        var listingMonthlyRent = demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent;
-        var requestedType = string.IsNullOrWhiteSpace(request.RequestType)
-            ? null
-            : NormalizeListingRequestType(request.RequestType, listingType);
-        var publishedAmount = requestedType == "Purchase"
-            ? listingSalePrice ?? listingPrice
-            : requestedType == "Lease"
-                ? listingMonthlyRent ?? listingPrice
-                : listingSalePrice ?? listingPrice ?? listingMonthlyRent;
-        var reference = BuildExternalReference("ENQ");
-        var enquiryLabel = requestedType == "Purchase"
-            ? "Purchase enquiry"
-            : requestedType == "Lease"
-                ? "Lease enquiry"
-                : "Property enquiry";
-        var requesterName = FirstNonBlank(customer?.PartnerName, _currentUserService.UserName, _currentUserService.Email, "External portal user")!;
-        var requesterReference = FirstNonBlank(customer?.CustomerAccountNumber, _currentUserService.Email, _currentUserService.UserName, "Portal account")!;
-        var description = $"{enquiryLabel} for {listingReference} - {listingName} by {requesterName} ({requesterReference}).";
-        var notes = Truncate(string.Join(Environment.NewLine, new[]
-        {
-            description,
-            $"Estate enquiry reference: {reference}",
-            $"Estate listing id: {listingId}",
-            $"Estate parent asset id: {asset.Id}",
-            demarcationListing is null ? null : $"Estate demarcation id: {demarcationListing.Id}",
-            $"Listing reference: {listingReference}",
-            $"Available listing type: {listingType}",
-            customer is null ? "Business partner profile: Not supplied; enquiry captured from authenticated portal login." : $"Business partner id: {customer.Id}",
-            requestedType is null ? null : $"Requested transaction: {requestedType}",
-            string.IsNullOrWhiteSpace(request.Message) ? null : $"Customer message: {request.Message.Trim()}"
-        }.Where(line => !string.IsNullOrWhiteSpace(line))), 2000);
-
+        var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+        var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
+        var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
+        var price = type == "Rent"
+            ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
+            : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
+        var category = await _db.EhcTicketCategories.AsNoTracking().FirstOrDefaultAsync(c =>
+            c.TenantId == tenantId && !c.IsDeleted && c.Code == "PROPERTY-LISTING", cancellationToken);
+        if (category is null) return Problem(statusCode: 503, detail: "Property enquiry routing has not been configured for this tenant.");
         try
         {
-            var opportunity = await _opportunityService.CreateAsync(new CreateOpportunityDto
+            var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+            await _captchaService.EnsureCaptchaValidAsync(tenantId, request.CaptchaToken,
+                string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Host : forwardedHost,
+                HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+            var property = new EhcPropertyListingContextDto("estate-public-listing", listingId, reference, name, type,
+                string.IsNullOrWhiteSpace(currency) ? "GHS" : currency, asset.Location, price, asset.Id, demarcationListing?.Id,
+                partner?.Id, partner?.PartnerName ?? _currentUserService.FullName,
+                _currentUserService.FullName, _currentUserService.Email ?? partner?.PrimaryEmail, partner?.PrimaryPhone);
+            var ticket = await _ticketService.CreateExternalPropertyEnquiryAsync(new CreateEhcTicketRequestDto
             {
-                Name = Truncate($"{enquiryLabel} - {listingName}", 200),
-                Description = Truncate(description, 2000),
-                CustomerId = customer?.Id,
-                Stage = "Prospecting",
-                Probability = 10,
-                Amount = publishedAmount ?? 0m,
-                Currency = string.IsNullOrWhiteSpace(listingCurrency) ? customer?.Currency ?? "GHS" : listingCurrency,
-                ExpectedCloseDate = DateTime.UtcNow.Date.AddDays(30),
-                LeadSource = "External Portal - Estate Listings",
-                OpportunityType = requestedType == "Purchase"
-                    ? "Estate Property Sale"
-                    : requestedType == "Lease"
-                        ? "Estate Property Lease"
-                        : "Estate Property Enquiry",
-                Notes = notes
-            });
-
-            return Ok(new
-            {
-                success = true,
-                data = new
-                {
-                    Id = opportunity.Id,
-                    ReferenceNumber = reference,
-                    Title = opportunity.Name,
-                    Module = "Sales",
-                    EntityType = "Opportunity",
-                    Status = opportunity.Stage,
-                    CurrentStageName = "Sales enquiry",
-                    CurrentAssignedRole = "Sales",
-                    CreatedAt = DateTime.UtcNow,
-                    SalesOpportunityId = opportunity.Id,
-                    SalesOpportunityName = opportunity.Name,
-                    EstateListingId = listingId,
-                    EstateListingReference = listingReference,
-                    EstateParentAssetId = asset.Id,
-                    EstateDemarcationId = demarcationListing?.Id
-                }
-            });
+                TicketType = EhcTicketType.Enquiry, Source = EhcTicketSource.Web, CategoryId = category.Id,
+                Subject = Truncate($"Property enquiry: {name}", 200), Description = request.Message.Trim(),
+                RelatedEntityType = "EstateListing", RelatedEntityReference = reference
+            }, property, request.SubmissionId, cancellationToken);
+            return Ok(new { success = true, data = ticket });
         }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { success = false, message = ex.Message });
-        }
+        catch (CaptchaVerificationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
+        catch (ArgumentException ex) { return BadRequest(new { success = false, message = ex.Message }); }
+        catch (InvalidOperationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
     }
+
+    private IQueryable<BusinessPartner> PortalEnquiryPartners(Guid tenantId, Guid userId)
+        => _db.BusinessPartners.AsNoTracking().Where(p => p.TenantId == tenantId && !p.IsDeleted && p.IsActive
+            && p.ApprovalStatus == "Approved" && (p.PartnerType == "Supplier" || p.PartnerType == "Customer" || p.PartnerType == "Both")
+            && (p.UserId == userId || _db.BusinessPartnerUsers.Any(link => link.TenantId == tenantId && !link.IsDeleted
+                && link.IsActive && link.UserId == userId && link.BusinessPartnerId == p.Id)));
 
     private HashSet<string> BuildIdentityTerms()
     {
@@ -3670,3 +3637,5 @@ public sealed record ExternalEstateRequestDefinition(
     string Module,
     string EntityType,
     string Category);
+
+public sealed record CreatePropertyListingEnquiryRequest(Guid SubmissionId, string Message, Guid? BusinessPartnerId = null, string? CaptchaToken = null);

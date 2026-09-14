@@ -34,6 +34,113 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class ApInvoicePostingMigrationTests
 {
     [Fact]
+    public async Task DraftDistribution_ShouldUseThePostingTaxEngineAndConfiguredInputTaxAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.TaxAmount = 15m;
+            invoice.TotalAmount = 115m;
+            invoice.LineItems.Single().TaxRate = 15m;
+            invoice.LineItems.Single().TaxAmount = 15m;
+        });
+        var taxEngine = new Mock<ITaxCalculationEngine>();
+        taxEngine.Setup(value => value.CalculateTaxesAsync(It.IsAny<TaxCalculationRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TaxCalculationResultDto
+            {
+                BaseAmount = 100m, TotalTaxAmount = 15m, GrandTotal = 115m,
+                TaxBreakdowns = new() { new() { TaxId = Guid.NewGuid(), TaxCode = "VAT", TaxName = "Input VAT",
+                    TaxRate = 15m, TaxAmount = 15m, TaxableAmount = 100m,
+                    IsInputTaxDeductible = true, TaxReceivableAccountId = fixture.TaxAccount.Id } }
+            });
+        var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
+
+        var distribution = await service.GetDistributionAsync(fixture.Invoice.Id);
+
+        distribution.Lines.Single(line => line.Type == "Input tax").AccountId.Should().Be(fixture.TaxAccount.Id);
+        distribution.Lines.Single(line => line.Type == "Input tax").Debit.Should().Be(15m);
+        distribution.Lines.Single(line => line.Type == "Accounts payable").Credit.Should().Be(115m);
+        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(115m);
+        (await db.Set<TaxCalculation>().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task DraftDistribution_ShouldSharePostingAccountsWithoutApprovingSavingOrPostingWht()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            invoice.Status = VendorInvoiceStatus.Draft;
+            invoice.ApprovalStatus = "Draft";
+            invoice.ApprovedById = null;
+            invoice.ApprovedDate = null;
+            invoice.LineItems.Single().DiscountAmount = 10m;
+            invoice.DiscountAmount = 10m;
+            invoice.SubTotal = 90m;
+            invoice.TotalAmount = 90m;
+            invoice.WithholdingTaxRate = 5m;
+            invoice.WithholdingTaxAmount = 4.5m;
+        });
+        var (service, legacyPosting) = CreateService(db, tenantId);
+        var saveCount = 0;
+        db.SavingChanges += (_, _) => saveCount++;
+
+        var distribution = await service.GetDistributionAsync(fixture.Invoice.Id);
+
+        distribution.Status.Should().Be("Proposed");
+        distribution.Currency.Should().Be("GHS");
+        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(100m);
+        distribution.Lines.Single(line => line.AccountId == fixture.ApAccount.Id).Credit.Should().Be(90m);
+        distribution.Lines.Single(line => line.Type == "Purchase discount").Credit.Should().Be(10m);
+        distribution.TotalDebit.Should().Be(distribution.TotalCredit).And.Be(100m);
+        distribution.Lines.Should().NotContain(line => line.Type.Contains("WHT"));
+        distribution.JournalEntryId.Should().BeNull();
+        fixture.Invoice.Status.Should().Be(VendorInvoiceStatus.Draft);
+        saveCount.Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+        legacyPosting.Verify(value => value.PostApInvoiceAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PostedDistribution_ShouldUseOriginalJournalWhenDefaultAccountsChange()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var posted = await service.PostAsync(fixture.Invoice.Id);
+        fixture.Supplier.DefaultExpenseAccountId = fixture.TaxAccount.Id;
+        fixture.Supplier.DefaultApAccountId = fixture.TaxAccount.Id;
+        fixture.ExpenseAccount.Status = AccountStatus.Inactive;
+        await db.SaveChangesAsync();
+
+        var distribution = await service.GetDistributionAsync(fixture.Invoice.Id);
+
+        distribution.Status.Should().Be("Posted");
+        distribution.JournalEntryId.Should().Be(posted.JournalEntryId);
+        distribution.Lines.Single(line => line.AccountId == fixture.ExpenseAccount.Id).Debit.Should().Be(100m);
+        distribution.Lines.Single(line => line.AccountId == fixture.ApAccount.Id).Credit.Should().Be(100m);
+        distribution.Lines.Should().NotContain(line => line.AccountId == fixture.TaxAccount.Id);
+        (await db.FinancePostingEvents.CountAsync(value => value.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task InvoiceDistribution_ShouldNotExposeAnotherTenantsInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, Guid.NewGuid());
+
+        var read = () => service.GetDistributionAsync(fixture.Invoice.Id);
+
+        await read.Should().ThrowAsync<KeyNotFoundException>();
+    }
+
+    [Fact]
     public async Task NoWorkflowSubmit_ShouldPostThroughRealFinanceOwnerWithoutApproverOrRewritingInvoiceLines()
     {
         var tenantId = Guid.NewGuid();
@@ -1108,7 +1215,8 @@ public sealed class ApInvoicePostingMigrationTests
         Guid tenantId,
         IWorkflowService? workflowService = null,
         IFinanceBudgetCommitmentService? budgetCommitments = null,
-        IFinanceSourceDimensionService? sourceDimensions = null)
+        IFinanceSourceDimensionService? sourceDimensions = null,
+        ITaxCalculationEngine? taxEngine = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -1133,8 +1241,9 @@ public sealed class ApInvoicePostingMigrationTests
             Mock.Of<ILogger<VendorInvoiceService>>(),
             Mock.Of<IDocumentNumberingService>(),
             workflowService ?? Mock.Of<IWorkflowService>(),
-            postingEngine,
-            auditService,
+            financePostingEngine: postingEngine,
+            financeAuditService: auditService,
+            taxEngine: taxEngine,
             budgetCommitments: budgetCommitments,
             sourceDimensions: sourceDimensions);
 

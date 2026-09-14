@@ -874,35 +874,33 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         {
             throw new InvalidOperationException("Stage 1 applications should be validated or rejected. Clarification return is available from Stage 2 onward.");
         }
-        if (!procedureCase.WorkflowInstanceId.HasValue)
-        {
-            throw new InvalidOperationException("This application is not connected to an active workflow instance.");
-        }
-
-        var stepInstance = await _db.WorkflowStepInstances
-            .Where(item => item.WorkflowInstanceId == procedureCase.WorkflowInstanceId.Value
-                && item.WorkflowStepId == procedureCase.WorkflowStepId
-                && (item.Status == WorkflowStepInstanceStatus.Pending
-                    || item.Status == WorkflowStepInstanceStatus.InProgress))
-            .OrderByDescending(item => item.CreatedDate)
-            .FirstOrDefaultAsync();
-        if (stepInstance is null)
-        {
-            throw new InvalidOperationException("The active workflow step could not be found.");
-        }
-
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
         var now = DateTime.UtcNow;
-        var workflowResult = await _workflowEngine.ProcessStepAsync(
-            stepInstance.Id,
-            userId,
-            isReject ? WorkflowStepAction.Reject : WorkflowStepAction.RequestInformation,
-            new { procedureCase.Id, procedureCase.ReferenceNumber, Reason = reason },
-            reason);
-        if (!workflowResult.Success)
+        if (procedureCase.WorkflowInstanceId is { } workflowInstanceId)
         {
-            throw new InvalidOperationException(workflowResult.Message ?? "The workflow review action failed.");
+            var stepInstance = await _db.WorkflowStepInstances
+                .Where(item => item.WorkflowInstanceId == workflowInstanceId
+                    && item.WorkflowStepId == procedureCase.WorkflowStepId
+                    && (item.Status == WorkflowStepInstanceStatus.Pending
+                        || item.Status == WorkflowStepInstanceStatus.InProgress))
+                .OrderByDescending(item => item.CreatedDate)
+                .FirstOrDefaultAsync();
+            if (stepInstance is null)
+            {
+                throw new InvalidOperationException("The active workflow step could not be found.");
+            }
+
+            var workflowResult = await _workflowEngine.ProcessStepAsync(
+                stepInstance.Id,
+                userId,
+                isReject ? WorkflowStepAction.Reject : WorkflowStepAction.RequestInformation,
+                new { procedureCase.Id, procedureCase.ReferenceNumber, Reason = reason },
+                reason);
+            if (!workflowResult.Success)
+            {
+                throw new InvalidOperationException(workflowResult.Message ?? "The workflow review action failed.");
+            }
         }
 
         if (isReject)
@@ -3539,22 +3537,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 .ToList();
         }
 
-        if (string.Equals(module, "Facilities", StringComparison.OrdinalIgnoreCase)
-            && string.Equals(entityType, "EstateFacilityMaintenance", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "Facilities Maintenance requires an active published workflow in Administration > Workflow Setup.");
-        }
-
-        if (string.Equals(
-                entityType,
-                "EstatePropertyManagementListingApplication",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "Property Requests / Listing Applications requires an active published workflow in Administration > Workflow Setup.");
-        }
-
+        // A published workflow supplies engine routing when it is available. The procedure catalog
+        // remains the operational manual path when the workflow has not yet been configured.
         return module switch
         {
             "Legal" => _legalCatalog.GetProcedureWorkspace(entityType)?.Stages
@@ -4957,7 +4941,9 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         if (!procedureCase.WorkflowStepId.HasValue)
         {
-            return [];
+            return IsPropertyManagementListingApplication(procedureCase)
+                ? GetPropertyListingStageFieldKeys(procedureCase.CurrentStageIndex)
+                : [];
         }
 
         var configurationJson = await _db.WorkflowSteps
@@ -4976,15 +4962,22 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return configuredFields;
         }
 
-        if (!string.Equals(
-                procedureCase.EntityType,
-                "EstatePropertyManagementListingApplication",
-                StringComparison.OrdinalIgnoreCase))
+        if (!IsPropertyManagementListingApplication(procedureCase))
         {
             return [];
         }
 
-        return procedureCase.CurrentStageIndex switch
+        return GetPropertyListingStageFieldKeys(procedureCase.CurrentStageIndex);
+    }
+
+    private static bool IsPropertyManagementListingApplication(ProcedureCase procedureCase)
+        => string.Equals(
+            procedureCase.EntityType,
+            "EstatePropertyManagementListingApplication",
+            StringComparison.OrdinalIgnoreCase);
+
+    private static IReadOnlyList<string> GetPropertyListingStageFieldKeys(int stageIndex)
+        => stageIndex switch
         {
             0 => ["customerValidationStatus", "listingValidationStatus", "applicationStatus", "notes"],
             1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "notes"],

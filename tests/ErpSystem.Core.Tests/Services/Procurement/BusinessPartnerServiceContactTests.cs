@@ -181,7 +181,8 @@ public class BusinessPartnerServiceContactTests
                 _workflowIntegrationService.Object,
                 _workflowStatusAdapterRegistry.Object,
                 _paymentTermRepository.Object,
-                NullLogger<BusinessPartnerService>.Instance);
+                NullLogger<BusinessPartnerService>.Instance,
+                Mock.Of<IUnitOfWork>());
 
         public BusinessPartnerContact AddContact(
             string name,

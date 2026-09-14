@@ -11,7 +11,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, Save, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { procurementScheduleService, commonService, type ProcurementScheduleDetailDto, type CreateProcurementScheduleDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import { procurementScheduleService, type ProcurementScheduleDetailDto, type CreateProcurementScheduleDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 
 export default function EditProcurementSchedulePage() {
   const router = useRouter();
@@ -19,10 +21,10 @@ export default function EditProcurementSchedulePage() {
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
   const [schedule, setSchedule] = useState<ProcurementScheduleDetailDto | null>(null);
   const [formData, setFormData] = useState<CreateProcurementScheduleDto>({
-    title: '', description: '', departmentId: '', scheduleType: 'Tender',
+    title: '', description: '', organizationUnitId: '', scheduleType: 'Tender',
     plannedStartDate: '', plannedEndDate: '', isOptimalTiming: true, timingRationale: '',
     considerSeasonalPricing: false, seasonalNotes: '', considerCashFlow: false, cashFlowNotes: '',
     storageLimitations: '', consolidationOpportunity: false, consolidationNotes: '', notes: '',
@@ -31,16 +33,16 @@ export default function EditProcurementSchedulePage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [depts, scheduleData] = await Promise.all([
-          commonService.getDepartments(),
+        const [units, scheduleData] = await Promise.all([
+          organizationUnitService.getSummary(),
           procurementScheduleService.getScheduleById(id)
         ]);
-        setDepartments(depts);
+        setOrganizationUnits(units.filter((unit) => unit.isActive));
         setSchedule(scheduleData);
         setFormData({
           title: scheduleData.title,
           description: scheduleData.description || '',
-          departmentId: scheduleData.departmentId || '',
+          organizationUnitId: scheduleData.organizationUnitId || '',
           scheduleType: scheduleData.scheduleType,
           plannedStartDate: scheduleData.plannedStartDate?.split('T')[0] || '',
           plannedEndDate: scheduleData.plannedEndDate?.split('T')[0] || '',
@@ -106,10 +108,10 @@ export default function EditProcurementSchedulePage() {
                 <Input id="title" value={formData.title} onChange={(e) => handleInputChange('title', e.target.value)} required />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="departmentId">Department</Label>
-                <Select value={formData.departmentId} onValueChange={(value) => handleInputChange('departmentId', value)}>
-                  <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
-                  <SelectContent>{departments.map((dept) => (<SelectItem key={dept.id} value={dept.id}>{dept.code ? `${dept.code} - ${dept.name}` : dept.name}</SelectItem>))}</SelectContent>
+                <Label htmlFor="organizationUnitId">Organization unit</Label>
+                <Select value={formData.organizationUnitId} onValueChange={(value) => handleInputChange('organizationUnitId', value)}>
+                  <SelectTrigger><SelectValue placeholder="Select organization unit" /></SelectTrigger>
+                  <SelectContent>{organizationUnits.map((unit) => (<SelectItem key={unit.id} value={unit.id}>{unit.code ? `${unit.code} - ${unit.name}` : unit.name}</SelectItem>))}</SelectContent>
                 </Select>
               </div>
             </div>

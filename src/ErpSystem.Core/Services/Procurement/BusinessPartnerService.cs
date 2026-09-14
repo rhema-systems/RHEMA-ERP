@@ -1,6 +1,8 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -16,6 +18,7 @@ public class BusinessPartnerService : IBusinessPartnerService
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IPaymentTermRepository _paymentTermRepository;
+    private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<BusinessPartnerService> _logger;
 
     public BusinessPartnerService(
@@ -25,7 +28,8 @@ public class BusinessPartnerService : IBusinessPartnerService
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IPaymentTermRepository paymentTermRepository,
-        ILogger<BusinessPartnerService> logger)
+        ILogger<BusinessPartnerService> logger,
+        IUnitOfWork unitOfWork)
     {
         _partnerRepository = partnerRepository;
         _contactRepository = contactRepository;
@@ -33,7 +37,51 @@ public class BusinessPartnerService : IBusinessPartnerService
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _paymentTermRepository = paymentTermRepository;
+        _unitOfWork = unitOfWork;
         _logger = logger;
+    }
+
+    public async Task<BusinessPartnerPostingOptionsDto> GetPostingOptionsAsync(string? partnerType = null)
+    {
+        var tenantId = _currentUserProvider.TenantId;
+        if (tenantId == Guid.Empty || _currentUserProvider.IsExternalUser)
+            throw new UnauthorizedAccessException("Business-partner posting options are available to internal users in the current tenant.");
+        var now = DateTime.UtcNow;
+        var accounts = (await _unitOfWork.Accounts.FindAsync(account =>
+            account.TenantId == tenantId && !account.IsDeleted && account.Status == AccountStatus.Active &&
+            (account.AllowDirectPosting || account.IsControlAccount) &&
+            (!account.EffectiveDate.HasValue || account.EffectiveDate <= now) &&
+            (!account.ExpirationDate.HasValue || account.ExpirationDate > now)))
+            .OrderBy(account => account.AccountNumber).ToList();
+        var accountById = accounts.ToDictionary(account => account.Id);
+        var banks = (await _unitOfWork.Repository<BankAccount>().FindAsync(bank =>
+            bank.TenantId == tenantId && !bank.IsDeleted && bank.IsActive)).OrderBy(bank => bank.AccountName);
+        var applicability = string.Equals(partnerType, "Customer", StringComparison.OrdinalIgnoreCase)
+            ? TaxApplicability.Sales : TaxApplicability.Purchases;
+        var taxes = (await _unitOfWork.Repository<TaxGroup>().FindAsync(tax =>
+            tax.TenantId == tenantId && !tax.IsDeleted && tax.IsActive &&
+            (tax.Applicability == TaxApplicability.Both || tax.Applicability == applicability)))
+            .OrderBy(tax => tax.Name);
+        var withholdingTaxes = (await _unitOfWork.Repository<Tax>().FindAsync(tax =>
+            tax.TenantId == tenantId && !tax.IsDeleted && tax.IsActive && tax.Category == TaxCategory.Withholding &&
+            (tax.Applicability == TaxApplicability.Purchases || tax.Applicability == TaxApplicability.Both)))
+            .OrderBy(tax => tax.Code);
+        return new BusinessPartnerPostingOptionsDto
+        {
+            Accounts = accounts.Select(account => new BusinessPartnerPostingAccountOptionDto(account.Id, account.AccountCode,
+                account.AccountNumber, account.AccountName, account.AccountType, account.Status,
+                account.AllowDirectPosting, account.IsControlAccount)).ToList(),
+            BankAccounts = banks.Select(bank =>
+            {
+                var gl = bank.GLAccountId.HasValue ? accountById.GetValueOrDefault(bank.GLAccountId.Value) : null;
+                return new BusinessPartnerChequeBookOptionDto(bank.Id, bank.AccountNumber, bank.AccountName, bank.Currency,
+                    bank.IsActive, bank.GLAccountId, gl?.AccountNumber, gl?.AccountName);
+            }).ToList(),
+            TaxGroups = taxes.Select(tax => new BusinessPartnerTaxGroupOptionDto(tax.Id, tax.Code, tax.Name,
+                tax.Applicability, tax.IsActive)).ToList(),
+            WithholdingTaxes = withholdingTaxes.Select(tax => new BusinessPartnerWithholdingTaxOptionDto(tax.Id,
+                tax.Code, tax.Name, tax.Rate, tax.EffectiveFrom, tax.TaxPayableAccountId)).ToList()
+        };
     }
 
     public async Task<BusinessPartnerDetailDto?> GetByIdAsync(Guid id)
@@ -71,6 +119,11 @@ public class BusinessPartnerService : IBusinessPartnerService
 
     public async Task<BusinessPartnerDetailDto> CreateAsync(CreateBusinessPartnerDto dto)
     {
+        if (_currentUserProvider.IsExternalUser && dto.CreditLimit.HasValue)
+            throw new UnauthorizedAccessException("Credit limits are maintained by internal business-partner administrators.");
+        ValidateCreditLimit(dto.CreditLimit);
+        if (dto.PostingDefaults != null)
+            await ValidatePostingDefaultsAsync(dto.PostingDefaults, dto.PartnerType);
         var partnerCode = await _partnerRepository.GeneratePartnerCodeAsync(dto.PartnerType);
         var paymentTerm = await ResolvePaymentTermAsync(dto.PaymentTermId, dto.PartnerType, useDefaultWhenMissing: true);
 
@@ -109,12 +162,13 @@ public class BusinessPartnerService : IBusinessPartnerService
         // parse or bulk-backfill historical free text without agreement from the procurement owner.
         partner.PaymentTermId = paymentTerm?.Id;
         partner.PaymentTerms = paymentTerm?.Name;
+        partner.CreditLimit = dto.CreditLimit;
+        if (dto.PostingDefaults != null) BusinessPartnerPostingDefaults.Apply(partner, dto.PostingDefaults);
 
         // Set customer-specific fields if partner type is Customer
         if (dto.PartnerType == "Customer")
         {
             partner.CustomerType = dto.CustomerType;
-            partner.CreditLimit = dto.CreditLimit;
             partner.DefaultDiscount = dto.DefaultDiscount;
             partner.PriceList = dto.PriceList;
             partner.SalesRepresentativeId = dto.SalesRepresentativeId;
@@ -135,6 +189,13 @@ public class BusinessPartnerService : IBusinessPartnerService
     public async Task<BusinessPartnerDetailDto> UpdateAsync(Guid id, UpdateBusinessPartnerDto dto)
     {
         var partner = await _partnerRepository.GetByIdAsync(id) ?? throw new InvalidOperationException($"Business partner with ID {id} not found");
+        if (partner.TenantId != _currentUserProvider.TenantId)
+            throw new UnauthorizedAccessException("Business partner belongs to another tenant.");
+        if (_currentUserProvider.IsExternalUser && dto.CreditLimit.HasValue && dto.CreditLimit != partner.CreditLimit)
+            throw new UnauthorizedAccessException("Credit limits are maintained by internal business-partner administrators.");
+        ValidateCreditLimit(dto.CreditLimit);
+        if (dto.PostingDefaults != null)
+            await ValidatePostingDefaultsAsync(dto.PostingDefaults, partner.PartnerType);
         partner.PartnerName = dto.PartnerName;
         partner.LegalName = dto.PartnerName;
         partner.BusinessRegistrationNumber = dto.RegistrationNumber;
@@ -150,6 +211,8 @@ public class BusinessPartnerService : IBusinessPartnerService
         partner.UpdatedAt = DateTime.UtcNow;
         partner.ParentId = dto.ParentId;
         partner.Currency = dto.Currency;
+        if (dto.CreditLimit.HasValue || dto.PostingDefaults != null) partner.CreditLimit = dto.CreditLimit;
+        if (dto.PostingDefaults != null) BusinessPartnerPostingDefaults.Apply(partner, dto.PostingDefaults);
 
         if (dto.PaymentTermId.HasValue)
         {
@@ -159,6 +222,11 @@ public class BusinessPartnerService : IBusinessPartnerService
             // forward edits made through the structured selector. Existing legacy-only rows stay untouched.
             partner.PaymentTermId = paymentTerm!.Id;
             partner.PaymentTerms = paymentTerm.Name;
+        }
+        else if (dto.PostingDefaults != null)
+        {
+            partner.PaymentTermId = null;
+            partner.PaymentTerms = null;
         }
         
         if (!string.IsNullOrEmpty(dto.Status)) 
@@ -170,7 +238,6 @@ public class BusinessPartnerService : IBusinessPartnerService
         if (partner.PartnerType == "Customer")
         {
             partner.CustomerType = dto.CustomerType;
-            partner.CreditLimit = dto.CreditLimit;
             partner.DefaultDiscount = dto.DefaultDiscount;
             partner.PriceList = dto.PriceList;
             partner.SalesRepresentativeId = dto.SalesRepresentativeId;
@@ -724,6 +791,7 @@ public class BusinessPartnerService : IBusinessPartnerService
     {
         var dto = new BusinessPartnerDetailDto
         {
+            PostingDefaults = BusinessPartnerPostingDefaults.FromPartner(partner),
             Id = partner.Id,
             PartnerCode = partner.PartnerCode,
             PartnerName = partner.PartnerName,
@@ -933,7 +1001,7 @@ public class BusinessPartnerService : IBusinessPartnerService
             throw new InvalidOperationException("The selected payment term was not found for this tenant.");
         }
 
-        if (term != null && (!term.IsActive ||
+        if (term != null && (term.TenantId != _currentUserProvider.TenantId || term.IsDeleted || !term.IsActive ||
             !(term.ApplicableTo.Equals("All", StringComparison.OrdinalIgnoreCase) ||
               term.ApplicableTo.Equals(applicableTo, StringComparison.OrdinalIgnoreCase) ||
               (applicableTo == "Supplier" && term.ApplicableTo.Equals("Vendor", StringComparison.OrdinalIgnoreCase)) ||
@@ -944,6 +1012,14 @@ public class BusinessPartnerService : IBusinessPartnerService
 
         return term;
     }
+
+private static void ValidateCreditLimit(decimal? creditLimit)
+    {
+        if (creditLimit < 0) throw new InvalidOperationException("Credit limit cannot be negative.");
+    }
+
+    private Task ValidatePostingDefaultsAsync(BusinessPartnerPostingDefaultsDto defaults, string partnerType) =>
+        BusinessPartnerPostingDefaultValidation.ValidateAsync(defaults, partnerType, _unitOfWork, _currentUserProvider);
 
     private async Task<BusinessPartner> GetPartnerEntityAsync(Guid partnerId)
     {

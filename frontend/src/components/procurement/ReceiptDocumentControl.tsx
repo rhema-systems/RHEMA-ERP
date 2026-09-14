@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { ProcurementControlAccordion } from './ProcurementControlAccordion';
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import {
   purchasingService,
   type ProcurementReceiptDocumentDto,
@@ -32,6 +33,7 @@ export function ReceiptDocumentControl({ receiptId }: { receiptId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [comment, setComment] = useState('');
   const [signatureRole, setSignatureRole] = useState<Record<string, string>>({});
+  const [preview, setPreview] = useState<CentralDocumentViewerFile | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -66,18 +68,14 @@ export function ReceiptDocumentControl({ receiptId }: { receiptId: string }) {
   );
   const allChecksPass = useMemo(() => overview?.checks.every((check) => check.passed) ?? false, [overview]);
 
-  const download = async (document: ProcurementReceiptDocumentDto) => {
-    try {
-      setBusy(true);
-      const blob = await purchasingService.downloadReceiptDocument(document.id);
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank', 'noopener,noreferrer');
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-    } catch (downloadError) {
-      toast.error(messageOf(downloadError));
-    } finally {
-      setBusy(false);
-    }
+  const download = (document: ProcurementReceiptDocumentDto) => {
+    setPreview({
+      title: document.documentNumber,
+      fileName: `${document.documentNumber}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/ProcurementReceiptDocuments/${encodeURIComponent(document.id)}/download`,
+      sourceLabel: 'Issued goods receipt note',
+    });
   };
 
   if (loading) return <Card data-testid="receipt-document-loading"><CardContent className="flex items-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading GRN register…</CardContent></Card>;
@@ -144,5 +142,7 @@ export function ReceiptDocumentControl({ receiptId }: { receiptId: string }) {
         </CardContent>
       </Card>;
     })}
+    <CentralDocumentViewerDialog file={preview} open={preview !== null}
+      onOpenChange={open => { if (!open) setPreview(null); }} enableAnnotations={false} />
   </div>;
 }

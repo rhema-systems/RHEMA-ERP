@@ -95,7 +95,7 @@ export function ReceiptSourceControlCard({
                     <TableHead className="text-right">Ordered</TableHead>
                     <TableHead className="text-right">Receipted</TableHead>
                     <TableHead className="text-right">Tolerance</TableHead>
-                    <TableHead className="text-right">Remaining</TableHead>
+                    <TableHead className="text-right">Max. incl. tolerance</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
                 </TableHeader>

@@ -33,6 +33,19 @@ public class BusinessPartnersController : ControllerBase
         _masterDataChanges = masterDataChanges;
     }
 
+    [HttpGet("posting-options")]
+    public async Task<ActionResult<BusinessPartnerPostingOptionsDto>> GetPostingOptions([FromQuery] string? partnerType = null)
+    {
+        try
+        {
+            return Ok(await _partnerService.GetPostingOptionsAsync(partnerType));
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+        }
+    }
+
     /// <summary>
     /// Gets a paginated list of business partners with optional filtering
     /// </summary>
@@ -246,6 +259,14 @@ public class BusinessPartnersController : ControllerBase
         {
             return BadRequest(ex.Message);
         }
+        catch (InvalidOperationException ex)
+        {
+            return InvalidPartnerDefaults(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating business partner");
@@ -274,6 +295,14 @@ public class BusinessPartnersController : ControllerBase
         catch (ArgumentException ex)
         {
             return BadRequest(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return InvalidPartnerDefaults(ex.Message);
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Problem(statusCode: StatusCodes.Status403Forbidden, detail: ex.Message);
         }
         catch (Exception ex)
         {
@@ -631,6 +660,15 @@ public class BusinessPartnersController : ControllerBase
             return StatusCode(500, "An error occurred while downloading the document");
         }
     }
+
+    private BadRequestObjectResult InvalidPartnerDefaults(string detail) => BadRequest(new ProblemDetails
+    {
+        Status = StatusCodes.Status400BadRequest,
+        Title = "Check the business partner defaults",
+        Detail = detail,
+        Instance = HttpContext.Request.Path,
+        Extensions = { ["code"] = "BUSINESS_PARTNER_DEFAULTS_INVALID" }
+    });
 
     private async Task<ObjectResult?> GuardDirectMutationAsync(
         Guid? id,

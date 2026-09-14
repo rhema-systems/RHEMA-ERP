@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data.Repositories;
 using Microsoft.EntityFrameworkCore;
 
@@ -336,13 +337,33 @@ public class PurchaseOrderRepository : GenericRepository<PurchaseOrder>, IPurcha
 
     public async Task<PurchaseOrder> CreatePurchaseOrderAsync(PurchaseOrder purchaseOrder)
     {
+        await ApplySupplierDefaultsAsync(purchaseOrder);
         return await AddAsync(purchaseOrder);
     }
 
     public async Task<PurchaseOrder> UpdatePurchaseOrderAsync(PurchaseOrder purchaseOrder)
     {
+        var persistedSupplier = await _dbSet.AsNoTracking()
+            .Where(po => po.Id == purchaseOrder.Id && po.TenantId == purchaseOrder.TenantId)
+            .Select(po => (Guid?)po.BusinessPartnerId).FirstOrDefaultAsync();
+        if (persistedSupplier.HasValue && persistedSupplier.Value != purchaseOrder.BusinessPartnerId)
+        {
+            if (!string.Equals(purchaseOrder.Status, "Draft", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The supplier can only change on a draft purchase order.");
+            await ApplySupplierDefaultsAsync(purchaseOrder);
+        }
         await UpdateAsync(purchaseOrder);
         return purchaseOrder;
+    }
+
+    private async Task ApplySupplierDefaultsAsync(PurchaseOrder purchaseOrder)
+    {
+        var partner = await _context.BusinessPartners.AsNoTracking().Include(bp => bp.PaymentTerm).FirstOrDefaultAsync(bp =>
+            bp.Id == purchaseOrder.BusinessPartnerId && bp.TenantId == purchaseOrder.TenantId && !bp.IsDeleted);
+        if (partner == null) throw new InvalidOperationException("Select a business partner from the current tenant.");
+        purchaseOrder.SupplierDefaultsSnapshotJson = BusinessPartnerPostingDefaults.SerializeSnapshot(partner);
+        // Explicit negotiated terms always take precedence over master-data defaults.
+        if (string.IsNullOrWhiteSpace(purchaseOrder.PaymentTerms)) purchaseOrder.PaymentTerms = partner.PaymentTerms;
     }
 
     public async Task UpdateStatusAsync(Guid purchaseOrderId, string status)
