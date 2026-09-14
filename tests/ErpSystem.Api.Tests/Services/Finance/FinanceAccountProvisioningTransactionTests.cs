@@ -40,6 +40,115 @@ public sealed class FinanceAccountProvisioningTransactionTests
     }
 
     [Fact]
+    public async Task ConfiguredSqlServerIdentity_IgnoresMutableLivePasswordRedactionForSameTarget()
+    {
+        const string configured = "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;" +
+            "Password=do-not-emit;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite";
+        var firstOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(configured).Options;
+        var secondOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(configured).Options;
+        await using var first = new ApplicationDbContext(firstOptions);
+        await using var second = new ApplicationDbContext(secondOptions);
+
+        // SqlClient removes password material from a live connection after a successful open when
+        // PersistSecurityInfo=false. Mutating this unopened fixture reproduces that observable state
+        // without contacting SQL Server; identity must continue to come from immutable EF options.
+        first.Database.GetDbConnection().ConnectionString =
+            "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;" +
+            "Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite";
+
+        FinanceAccountProvisioningService.HaveEquivalentConfiguredConnectionIdentity(
+            first, firstOptions, second, secondOptions).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ConfiguredSqlServerIdentity_RefusesTargetAuthenticationEncryptionAndRoutingDrift()
+    {
+        const string expected = "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;" +
+            "Password=first-secret;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite;" +
+            "MultiSubnetFailover=false";
+        var mismatches = new[]
+        {
+            "Server=finance-b\\instance;Database=RhemaERP;User ID=finance_seed;Password=first-secret;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite;MultiSubnetFailover=false",
+            "Server=finance-a\\instance;Database=Other;User ID=finance_seed;Password=first-secret;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite;MultiSubnetFailover=false",
+            "Server=finance-a\\instance;Database=RhemaERP;Integrated Security=true;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite;MultiSubnetFailover=false",
+            "Server=finance-a\\instance;Database=RhemaERP;User ID=other_user;Password=first-secret;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite;MultiSubnetFailover=false",
+            "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;Password=first-secret;Encrypt=false;TrustServerCertificate=false;ApplicationIntent=ReadWrite;MultiSubnetFailover=false",
+            "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;Password=first-secret;Encrypt=true;TrustServerCertificate=true;ApplicationIntent=ReadWrite;MultiSubnetFailover=false",
+            "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;Password=first-secret;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadOnly;MultiSubnetFailover=false",
+            "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;Password=first-secret;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite;MultiSubnetFailover=true",
+            "Server=finance-a\\instance;Database=RhemaERP;User ID=finance_seed;Password=first-secret;Encrypt=true;TrustServerCertificate=false;ApplicationIntent=ReadWrite;MultiSubnetFailover=false;Failover Partner=finance-failover"
+        };
+        var expectedOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(expected).Options;
+        await using var first = new ApplicationDbContext(expectedOptions);
+
+        foreach (var mismatch in mismatches)
+        {
+            var mismatchOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(mismatch).Options;
+            await using var second = new ApplicationDbContext(mismatchOptions);
+            FinanceAccountProvisioningService.HaveEquivalentConfiguredConnectionIdentity(
+                first, expectedOptions, second, mismatchOptions).Should().BeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task ConfiguredSqlServerIdentity_RefusesUnboundRawAccessTokensWithoutReadingOrEmittingThem()
+    {
+        var firstConnection = new SqlConnection(
+            "Server=finance-a\\instance;Database=RhemaERP;Encrypt=true;TrustServerCertificate=false");
+        var secondConnection = new SqlConnection(
+            "Server=finance-a\\instance;Database=RhemaERP;Encrypt=true;TrustServerCertificate=false");
+        firstConnection.AccessToken = "first-sensitive-token";
+        secondConnection.AccessToken = "second-sensitive-token";
+        var firstOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(firstConnection).Options;
+        var secondOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(secondConnection).Options;
+        await using var first = new ApplicationDbContext(firstOptions);
+        await using var second = new ApplicationDbContext(secondOptions);
+
+        FinanceAccountProvisioningService.HaveEquivalentConfiguredConnectionIdentity(
+            first, firstOptions, second, secondOptions).Should().BeFalse(
+            "raw tokens do not expose a stable non-secret principal identity for child-scope comparison");
+    }
+
+    [Fact]
+    public async Task ConfiguredSqlServerIdentity_BindsConnectionStringTokenAuthenticationModeAndPrincipal()
+    {
+        const string expected = "Server=finance-a.database.windows.net;Database=RhemaERP;" +
+            "Authentication=Active Directory Managed Identity;User ID=finance-client;Encrypt=true";
+        const string otherPrincipal = "Server=finance-a.database.windows.net;Database=RhemaERP;" +
+            "Authentication=Active Directory Managed Identity;User ID=other-client;Encrypt=true";
+        var expectedOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(expected).Options;
+        var sameOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(expected).Options;
+        var otherOptions = new DbContextOptionsBuilder<ApplicationDbContext>().UseSqlServer(otherPrincipal).Options;
+        await using var first = new ApplicationDbContext(expectedOptions);
+        await using var same = new ApplicationDbContext(sameOptions);
+        await using var other = new ApplicationDbContext(otherOptions);
+
+        FinanceAccountProvisioningService.HaveEquivalentConfiguredConnectionIdentity(
+            first, expectedOptions, same, sameOptions).Should().BeTrue();
+        FinanceAccountProvisioningService.HaveEquivalentConfiguredConnectionIdentity(
+            first, expectedOptions, other, otherOptions).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ConfiguredSqliteIdentity_MatchesSameOptionsAndRefusesDifferentTarget()
+    {
+        var firstOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite("Data Source=identity-a;Mode=Memory;Cache=Shared").Options;
+        var sameOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite("Data Source=identity-a;Mode=Memory;Cache=Shared").Options;
+        var otherOptions = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite("Data Source=identity-b;Mode=Memory;Cache=Shared").Options;
+        await using var first = new ApplicationDbContext(firstOptions);
+        await using var same = new ApplicationDbContext(sameOptions);
+        await using var other = new ApplicationDbContext(otherOptions);
+
+        FinanceAccountProvisioningService.HaveEquivalentConfiguredConnectionIdentity(
+            first, firstOptions, same, sameOptions).Should().BeTrue();
+        FinanceAccountProvisioningService.HaveEquivalentConfiguredConnectionIdentity(
+            first, firstOptions, other, otherOptions).Should().BeFalse();
+    }
+
+    [Fact]
     public void LockResources_AreCanonicalTenantBoundAndDeterministicWithoutAProvider()
     {
         var tenant = Guid.Parse("9c63a702-f177-4b45-b3a3-37408ef340f3");

@@ -6,8 +6,10 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
+using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace ErpSystem.Api.Services.Finance.GL;
@@ -22,6 +24,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
     private readonly ILogger<FinanceAccountProvisioningService> _logger;
     private readonly IAccountSegmentIdentityService _segmentIdentity;
     private readonly IServiceScopeFactory? _scopeFactory;
+    private readonly DbContextOptions<ApplicationDbContext>? _configuredOptions;
     private readonly bool _ownsIsolatedTracker;
 
     public FinanceAccountProvisioningService(
@@ -29,8 +32,9 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         ICurrentUserService currentUser,
         ILogger<FinanceAccountProvisioningService> logger,
         IAccountSegmentIdentityService? segmentIdentity = null,
-        IServiceScopeFactory? scopeFactory = null)
-        : this(db, currentUser, logger, segmentIdentity, scopeFactory, ownsIsolatedTracker: false)
+        IServiceScopeFactory? scopeFactory = null,
+        DbContextOptions<ApplicationDbContext>? configuredOptions = null)
+        : this(db, currentUser, logger, segmentIdentity, scopeFactory, configuredOptions, ownsIsolatedTracker: false)
     {
     }
 
@@ -40,6 +44,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         ILogger<FinanceAccountProvisioningService> logger,
         IAccountSegmentIdentityService? segmentIdentity,
         IServiceScopeFactory? scopeFactory,
+        DbContextOptions<ApplicationDbContext>? configuredOptions,
         bool ownsIsolatedTracker)
     {
         _db = db;
@@ -47,6 +52,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         _logger = logger;
         _segmentIdentity = segmentIdentity ?? new ErpSystem.Api.Services.Finance.Segments.AccountSegmentIdentityService(db);
         _scopeFactory = scopeFactory;
+        _configuredOptions = configuredOptions;
         _ownsIsolatedTracker = ownsIsolatedTracker;
     }
 
@@ -82,10 +88,11 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
             EnsureCallerTrackerHasNoPendingWork();
             await using var scope = _scopeFactory.CreateAsyncScope();
             var isolatedDb = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
-            EnsureEquivalentIsolatedContext(isolatedDb);
+            var isolatedOptions = scope.ServiceProvider.GetRequiredService<DbContextOptions<ApplicationDbContext>>();
+            EnsureEquivalentIsolatedContext(isolatedDb, isolatedOptions);
             var isolatedService = new FinanceAccountProvisioningService(
                 isolatedDb, _currentUser, _logger, segmentIdentity: null, scopeFactory: null,
-                ownsIsolatedTracker: true);
+                configuredOptions: isolatedOptions, ownsIsolatedTracker: true);
             return await isolatedService.ProvisionAsync(request, cancellationToken);
         }
 
@@ -138,19 +145,122 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         }
     }
 
-    private void EnsureEquivalentIsolatedContext(ApplicationDbContext isolatedDb)
+    private void EnsureEquivalentIsolatedContext(
+        ApplicationDbContext isolatedDb,
+        DbContextOptions<ApplicationDbContext> isolatedOptions)
     {
         if (ReferenceEquals(_db, isolatedDb)
-            || !string.Equals(_db.Database.ProviderName, isolatedDb.Database.ProviderName, StringComparison.Ordinal)
-            || !string.Equals(
-                _db.Database.GetDbConnection().ConnectionString,
-                isolatedDb.Database.GetDbConnection().ConnectionString,
-                StringComparison.Ordinal))
+            || ReferenceEquals(_db.Database.GetDbConnection(), isolatedDb.Database.GetDbConnection())
+            || _configuredOptions is null
+            || !HaveEquivalentConfiguredConnectionIdentity(
+                _db, _configuredOptions, isolatedDb, isolatedOptions))
         {
             throw new InvalidOperationException(
                 "FINANCE_ACCOUNT_PROVISIONING_ISOLATION_INVALID: the scoped provisioning context must be a distinct " +
                 "context configured for the exact same provider and database target.");
         }
+    }
+
+    internal static bool HaveEquivalentConfiguredConnectionIdentity(
+        ApplicationDbContext first,
+        DbContextOptions<ApplicationDbContext> firstOptions,
+        ApplicationDbContext second,
+        DbContextOptions<ApplicationDbContext> secondOptions)
+    {
+        var firstIdentity = BuildConfiguredConnectionIdentity(first, firstOptions);
+        var secondIdentity = BuildConfiguredConnectionIdentity(second, secondOptions);
+        return firstIdentity.IsSafe && secondIdentity.IsSafe && firstIdentity == secondIdentity;
+    }
+
+    private static ConfiguredConnectionIdentity BuildConfiguredConnectionIdentity(
+        ApplicationDbContext db,
+        DbContextOptions<ApplicationDbContext> options)
+    {
+        var provider = db.Database.ProviderName?.Trim() ?? string.Empty;
+        var relational = options.Extensions.OfType<RelationalOptionsExtension>().SingleOrDefault();
+        if (provider.Length == 0 || relational is null)
+            return ConfiguredConnectionIdentity.Unsafe(provider);
+
+        // Only the immutable connection string captured by EF options is a valid identity source.
+        // A configured live DbConnection may already have redacted credentials or mutable token state.
+        var configuredConnectionString = relational.ConnectionString;
+        if (configuredConnectionString is null)
+            return ConfiguredConnectionIdentity.Unsafe(provider);
+
+        if (provider.Contains("SqlServer", StringComparison.Ordinal))
+        {
+            SqlConnectionStringBuilder builder;
+            try
+            {
+                builder = new SqlConnectionStringBuilder(configuredConnectionString);
+            }
+            catch (ArgumentException)
+            {
+                return ConfiguredConnectionIdentity.Unsafe(provider);
+            }
+
+            var connectionWithRuntimeToken = db.Database.GetDbConnection() as SqlConnection;
+            var hasAccessToken = connectionWithRuntimeToken is not null
+                && (!string.IsNullOrEmpty(connectionWithRuntimeToken.AccessToken)
+                    || connectionWithRuntimeToken.GetType().GetProperty("AccessTokenCallback")?.GetValue(connectionWithRuntimeToken) is not null);
+            var hasConnectionStringAuthentication = builder.IntegratedSecurity
+                || builder.Authentication != SqlAuthenticationMethod.NotSpecified
+                || !string.IsNullOrWhiteSpace(builder.UserID);
+            if (hasAccessToken && !hasConnectionStringAuthentication)
+            {
+                // A raw token does not expose a stable, non-secret principal identity that can be
+                // compared with a fresh child scope. Refuse isolation instead of comparing token bytes.
+                return ConfiguredConnectionIdentity.Unsafe(provider);
+            }
+
+            builder.DataSource = builder.DataSource.Trim().ToUpperInvariant();
+            builder.InitialCatalog = builder.InitialCatalog.Trim();
+            builder.UserID = builder.UserID.Trim();
+            builder.Remove("Password");
+            var authentication = builder.IntegratedSecurity
+                ? "INTEGRATED_PROCESS"
+                : builder.Authentication != SqlAuthenticationMethod.NotSpecified
+                    ? $"AUTHENTICATION:{builder.Authentication}|USER:{builder.UserID}"
+                    : !string.IsNullOrEmpty(builder.UserID)
+                        ? $"SQL_USER:{builder.UserID}"
+                        : "UNSPECIFIED";
+            return new ConfiguredConnectionIdentity(provider, builder.ConnectionString, authentication, true);
+        }
+
+        if (provider.Contains("Sqlite", StringComparison.Ordinal))
+        {
+            try
+            {
+                var builder = new System.Data.Common.DbConnectionStringBuilder
+                {
+                    ConnectionString = configuredConnectionString
+                };
+                var sanitized = new System.Data.Common.DbConnectionStringBuilder();
+                foreach (string key in builder.Keys)
+                {
+                    if (key.Equals("Password", StringComparison.OrdinalIgnoreCase)
+                        || key.Equals("Pwd", StringComparison.OrdinalIgnoreCase))
+                        continue;
+                    sanitized[key] = builder[key];
+                }
+                return new ConfiguredConnectionIdentity(provider, sanitized.ConnectionString, "SQLITE", true);
+            }
+            catch (ArgumentException)
+            {
+                return ConfiguredConnectionIdentity.Unsafe(provider);
+            }
+        }
+
+        return ConfiguredConnectionIdentity.Unsafe(provider);
+    }
+
+    private sealed record ConfiguredConnectionIdentity(
+        string Provider,
+        string NonSecretMaterialIdentity,
+        string AuthenticationIdentity,
+        bool IsSafe)
+    {
+        internal static ConfiguredConnectionIdentity Unsafe(string provider) => new(provider, string.Empty, string.Empty, false);
     }
 
     private IReadOnlyList<TrackedEntrySnapshot> CaptureRetryableTrackedState()
