@@ -691,5 +691,5 @@ audit. Existing active/posting books retain enabled provisioning behavior. Produ
 Finance then Procurement supplier onboarding twice in separate scopes, proves GLF003 is zero after each pass and
 canonical Finance authority state is byte-identical, then proves an exact manifest/provisioning retry performs zero
 authority writes. Focused classification/provisioning/DI/Payroll tests pass 64/64, and Data, API, and ordinary API-test
-builds pass with zero errors. No operational retry is authorized; independent Sol High review and a new explicit
-attempt authorization remain required.
+builds pass with zero errors. All four clean-tree rehearsal safety/evidence suites pass. No operational retry is
+authorized; independent Sol High review and a new explicit attempt authorization remain required.

@@ -2862,5 +2862,6 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   complete enabled-lineage audit fails closed. Active/posting-book compatibility is retained.
 - Offline result: production Finance-to-Procurement order passes twice with GLF003 zero and byte-identical authority
   state; an exact manifest/provisioning retry writes no Finance authority row. Classification/provisioning/DI/Payroll
-  tests pass 64/64; Data, API, and ordinary API-test builds have zero errors. Clean-tree reset/FinalClone gates remain
-  to be recorded after this docs commit. No operational retry is authorized.
+  tests pass 64/64; Data, API, and ordinary API-test builds have zero errors. FinalClone safety, DisposableReset
+  safety, DisposableReset evidence, and FinalClone evidence suites all pass from the clean committed candidate. No
+  operational retry is authorized.
