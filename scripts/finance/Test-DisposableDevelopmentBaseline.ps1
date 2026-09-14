@@ -15,12 +15,14 @@ $snapshotPath = Join-Path $migrationDirectory 'ApplicationDbContextModelSnapshot
 $authorityPath = Join-Path $migrationDirectory 'FinanceC1C8BaselineAuthoritySql.cs'
 $governancePath = Join-Path $migrationDirectory 'ArchivedGovernanceBaselineSql.cs'
 $governanceManifestPath = Join-Path $migrationDirectory 'ArchivedGovernanceBaselineManifest.json'
+$archivedCheckModelPath = Join-Path $repositoryRoot 'src\ErpSystem.Data\Configuration\ArchivedCheckConstraintBaselineModel.cs'
 $archivedC8Path = Join-Path $archiveDirectory '20260908120000_AddProducerIntentGroupsC8.cs'
+$archivedPettyPath = Join-Path $archiveDirectory '20260907033000_AlignPettyPurchaseQuotationLifecycle.cs'
 $inspectorProject = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\ArchivedMigrationSqlInspector.csproj'
 $inspectorSource = Join-Path $repositoryRoot 'scripts\finance\ArchivedMigrationSqlInspector\Program.cs'
 
 foreach ($requiredPath in @($dataProject,$baselinePath,$designerPath,$snapshotPath,$authorityPath,$governancePath,
-    $governanceManifestPath,$inspectorProject,$inspectorSource,$archivedC8Path,
+    $governanceManifestPath,$archivedCheckModelPath,$inspectorProject,$inspectorSource,$archivedC8Path,$archivedPettyPath,
     (Join-Path $archiveDirectory 'README.md'))) {
     if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
         throw "Disposable-development baseline artifact is missing: $requiredPath"
@@ -125,6 +127,7 @@ $snapshotText = Get-Content -Raw -LiteralPath $snapshotPath
 $modelTriggerNames = @([regex]::Matches($snapshotText, 'HasTrigger\("(?<name>[^"]+)"\)') |
     ForEach-Object { $_.Groups['name'].Value } | Sort-Object -Unique)
 $governanceManifest = Get-Content -Raw -LiteralPath $governanceManifestPath | ConvertFrom-Json
+$archivedCheckModelText = Get-Content -Raw -LiteralPath $archivedCheckModelPath
 $manifestTriggerNames = @($governanceManifest.triggerDefinitions | ForEach-Object { [string]$_.Name } | Sort-Object -Unique)
 $manifestModelTriggerNames=@($governanceManifest.modelTriggerNames|Sort-Object -Unique)
 $activeNonModelTriggerNames=@($governanceManifest.activeNonModelTriggerNames|Sort-Object -Unique)
@@ -137,6 +140,10 @@ if ($governanceManifest.schema -cne 'RHEMA_DISPOSABLE_BASELINE_GOVERNANCE_V2' -o
     [int]$governanceManifest.archivedUniqueTriggerCount -ne 488 -or
     [int]$governanceManifest.finalUniqueTriggerCount -ne 493 -or
     [int]$governanceManifest.baselineTableCount -ne 1629 -or
+    [int]$governanceManifest.archivedCheckConstraintCount -ne 675 -or
+    [int]$governanceManifest.baselineCheckConstraintCount -ne 835 -or
+    @($governanceManifest.finalArchivedCheckConstraints).Count -ne 675 -or
+    @($governanceManifest.finalArchivedCheckConstraints | ForEach-Object { "$($_.Table)|$($_.Name)" } | Sort-Object -Unique).Count -ne 675 -or
     [int]$governanceManifest.staticallyValidatedColumnReferenceCount -ne 16212) {
     throw 'Archived governance manifest lacks exact model and active non-model trigger coverage.'
 }
@@ -149,6 +156,22 @@ foreach($entry in $expectedDispositions.GetEnumerator()){
 }
 
 $governanceText = Get-Content -Raw -LiteralPath $governancePath
+$archivedPettyText = Get-Content -Raw -LiteralPath $archivedPettyPath
+if ([regex]::Matches($archivedPettyText,
+        'ALTER TABLE dbo\.ProcurementExceptionalSourcingControls DROP CONSTRAINT CK_ProcurementExceptionalSourcingControls_Lifecycle').Count -ne 1 -or
+    $governanceText -match '(?im)^\s*ALTER\s+TABLE\b' -or
+    $governanceText -match 'migration:WarehouseDefaultLocations|ALTER\s+COLUMN\s+UnitCost' -or
+    [regex]::Matches($governanceText,
+        'CREATE OR ALTER FUNCTION dbo\.InventoryAdjustmentExpectedUnitCost').Count -ne 1) {
+    throw 'The empty-schema governance helper retained mixed predecessor DDL/backfill or duplicated its final valuation function.'
+}
+if ([regex]::Matches($archivedCheckModelText,'(?m)^\s*Apply\(modelBuilder, "').Count -ne 675 -or
+    $archivedCheckModelText -cnotmatch 'CK_ProcurementExceptionalSourcingControls_Lifecycle' -or
+    $archivedCheckModelText -cnotmatch 'CK_PhysicalCountActions_ActionType' -or
+    $archivedCheckModelText -cnotmatch 'ActionType BETWEEN 1 AND 16' -or
+    $archivedCheckModelText -cnotmatch 'CK_PettyPurchase_Authority') {
+    throw 'The declarative archived-final check-constraint model is incomplete or stale.'
+}
 $governanceBatches = @([regex]::Matches($governanceText,
     'migrationBuilder\.Sql\(\s*"""(?<sql>.*?)"""\);',[Text.RegularExpressions.RegexOptions]::Singleline))
 $triggerBatches = @($governanceBatches | Where-Object {
@@ -273,6 +296,12 @@ if ($GeneratedSqlPath) {
         [regex]::Matches($generatedSql,[regex]::Escape($baselineId)).Count -ne 1) {
         throw 'Generated zero-to-current SQL omits or duplicates audited governance objects, patches, or baseline history.'
     }
+    if ($generatedSql -match '(?im)^\s*ALTER\s+TABLE\s+.+\s+DROP\s+CONSTRAINT\b' -or
+        $generatedSql -match 'migration:WarehouseDefaultLocations|ALTER\s+COLUMN\s+\[?UnitCost\]?\s+decimal\(18,4\)' -or
+        [regex]::Matches($generatedSql,'CK_ProcurementExceptionalSourcingControls_Lifecycle').Count -ne 1 -or
+        [regex]::Matches($generatedSql,'CK_PhysicalCountActions_ActionType').Count -ne 1) {
+        throw 'Generated zero-to-current SQL replays a predecessor constraint/backfill/column mutation or duplicates final checks.'
+    }
     $grammarOutput = @(& dotnet run --project $inspectorProject -- --verify-generated-sql $resolvedGeneratedSql 2>&1)
     if ($LASTEXITCODE -ne 0 -or
         @($grammarOutput | Where-Object { $_ -ceq 'PASS: generated SQL parses with TSql160Parser; THROW_STATEMENTS=1502' }).Count -ne 1 -or
@@ -287,6 +316,8 @@ Write-Host "PASS: exactly one compiled EF migration ($baselineId)"
 Write-Host 'PASS: complete 596-migration source chain retained as an uncompiled recoverable archive'
 Write-Host 'PASS: exact reviewed D3 migration/designer/snapshot hashes are preserved separately from the merged baseline'
 Write-Host 'PASS: zero-to-current Up has no predecessor-dependent drops/updates'
+Write-Host 'PASS: 675 archived-final checks are declarative in the 835-check current model with zero missing/drifted definitions'
+Write-Host 'PASS: mixed trigger patches exclude predecessor constraint, backfill, and column DDL while retaining exact patch order'
 Write-Host 'PASS: 386 current-model, 92 active non-model, and 15 distinct C5-C8 triggers are preserved'
 Write-Host 'PASS: archived governance audit retains the final five functions, one view, and chronological trigger patches'
 Write-Host 'PASS: trigger targets and 16,212 unambiguous inserted/deleted column references match the baseline schema'

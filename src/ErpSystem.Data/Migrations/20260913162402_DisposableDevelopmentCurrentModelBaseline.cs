@@ -20207,6 +20207,11 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ReportTemplates", x => x.Id);
+                    table.CheckConstraint("CK_ReportTemplates_Audience", "[Audience] IN (N'PPA/GHANEPS', N'Finance', N'Audit', N'Board')");
+                    table.CheckConstraint("CK_ReportTemplates_Cadence", "[Cadence] IN (N'Monthly', N'Quarterly', N'AdHoc')");
+                    table.CheckConstraint("CK_ReportTemplates_DefaultOutputFormat", "[DefaultOutputFormat] IN (N'Online', N'XLSX', N'PDF')");
+                    table.CheckConstraint("CK_ReportTemplates_Status", "[Status] IN (N'Draft', N'Published', N'Archived')");
+                    table.CheckConstraint("CK_ReportTemplates_Version", "[Version] > 0");
                     table.ForeignKey(
                         name: "FK_ReportTemplates_Reports_ReportId",
                         column: x => x.ReportId,
@@ -20984,6 +20989,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_BusinessPartnerRegistrations", x => x.Id);
+                    table.CheckConstraint("CK_BusinessPartnerRegistrations_RegistrationCategory", "[RegistrationCategory] IS NULL OR [RegistrationCategory] BETWEEN 0 AND 2");
                     table.ForeignKey(
                         name: "FK_BusinessPartnerRegistrations_BusinessPartners_BusinessPartnerId",
                         column: x => x.BusinessPartnerId,
@@ -24323,6 +24329,7 @@ namespace ErpSystem.Data.Migrations
                 {
                     table.PrimaryKey("PK_ProjectCivilDesignCases", x => x.Id);
                     table.CheckConstraint("CK_ProjectCivilDesignCases_Assignment", "[HodUserId] <> [SupervisingCivilEngineerUserId] AND ([CivilEngineerUserId] IS NULL OR ([CivilEngineerUserId] <> [HodUserId] AND [CivilEngineerUserId] <> [SupervisingCivilEngineerUserId])) AND ([DraftsmanUserId] IS NULL OR ([DraftsmanUserId] <> [HodUserId] AND [DraftsmanUserId] <> [SupervisingCivilEngineerUserId] AND ([CivilEngineerUserId] IS NULL OR [DraftsmanUserId] <> [CivilEngineerUserId])))");
+                    table.CheckConstraint("CK_ProjectCivilDesignCases_InitiationShape", "(\n      InitiationSource IS NULL AND InitiationSourceId IS NULL\n      AND InitiationSourceDocumentVersionId IS NULL AND InitiationSourceReference IS NULL\n      AND EstateManagedAssetId IS NULL AND EngineeringCategoryId IS NULL\n      AND WorkClassification IS NULL AND ScopeSummary IS NULL\n      AND ConstraintSummary IS NULL AND RiskSummary IS NULL AND Recommendation IS NULL\n    )\n    OR\n    (\n      InitiationSource BETWEEN 0 AND 6\n      AND InitiationSourceId IS NOT NULL\n      AND InitiationSourceReference IS NOT NULL AND LEN(LTRIM(RTRIM(InitiationSourceReference))) >= 3\n      AND EstateManagedAssetId IS NOT NULL AND EngineeringCategoryId IS NOT NULL\n      AND WorkClassification BETWEEN 0 AND 5\n      AND ScopeSummary IS NOT NULL AND LEN(LTRIM(RTRIM(ScopeSummary))) >= 3\n      AND ConstraintSummary IS NOT NULL AND LEN(LTRIM(RTRIM(ConstraintSummary))) >= 3\n      AND RiskSummary IS NOT NULL AND LEN(LTRIM(RTRIM(RiskSummary))) >= 3\n      AND Recommendation IS NOT NULL AND LEN(LTRIM(RTRIM(Recommendation))) >= 3\n      AND ((InitiationSource = 4 AND InitiationSourceDocumentVersionId IS NOT NULL)\n        OR (InitiationSource <> 4 AND InitiationSourceDocumentVersionId IS NULL))\n    )");
                     table.CheckConstraint("CK_ProjectCivilDesignCases_Stage", "[Stage] IN ('DraftDirective','SceInformationGathering','CivilEngineerDesign','SceDesignReview','Drafting','SceDrawingReview','HodFinalReview','Approved','Rejected','Cancelled')");
                     table.ForeignKey(
                         name: "FK_ProjectCivilDesignCases_CivilEngineeringConfigurationDecisions_ConfigurationDecisionId",
@@ -26452,6 +26459,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_BusinessPartnerRegistrationDocuments", x => x.Id);
+                    table.CheckConstraint("CK_BusinessPartnerRegistrationDocuments_EvidenceValidity", "([ChecksumSha256] IS NULL OR LEN([ChecksumSha256]) = 64) AND ([ExpiresAtUtc] IS NULL OR [IssuedAtUtc] IS NULL OR [ExpiresAtUtc] > [IssuedAtUtc])");
                     table.ForeignKey(
                         name: "FK_BusinessPartnerRegistrationDocuments_BusinessPartnerRegistrations_RegistrationId",
                         column: x => x.RegistrationId,
@@ -27807,7 +27815,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_InventoryReturnVouchers", x => x.Id);
-                    table.CheckConstraint("CK_InventoryReturnVouchers_Status", "[Status] BETWEEN 1 AND 6");
+                    table.CheckConstraint("CK_InventoryReturnVouchers_Status", "Status BETWEEN 1 AND 6");
                     table.CheckConstraint("CK_InventoryReturnVouchers_TotalValue", "[TotalValue] > 0");
                     table.ForeignKey(
                         name: "FK_InventoryReturnVouchers_InventoryRequisitions_InventoryRequisitionId",
@@ -32167,6 +32175,8 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementPrequalificationExercises", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementPrequalificationExercises_Core", "[Status] BETWEEN 0 AND 7\r\nAND [ClosesAtUtc] > [OpensAtUtc]\r\nAND [ValidityMonths] BETWEEN 1 AND 60\r\nAND [PassingScore] > 0 AND [PassingScore] <= 100\r\nAND ISJSON([CategoryIdsJson]) = 1\r\nAND LEN([IntegrityHash]) = 64\r\nAND NULLIF(LTRIM(RTRIM([Reference])), '') IS NOT NULL\r\nAND NULLIF(LTRIM(RTRIM([Title])), '') IS NOT NULL\r\nAND NULLIF(LTRIM(RTRIM([Description])), '') IS NOT NULL");
+                    table.CheckConstraint("CK_ProcurementPrequalificationExercises_Evidence", "([Status] = 0 OR (\r\n    NULLIF(LTRIM(RTRIM([AdvertisementReference])), '') IS NOT NULL\r\n    AND NULLIF(LTRIM(RTRIM([AdvertisementEvidenceReference])), '') IS NOT NULL\r\n    AND [AdvertisedAtUtc] IS NOT NULL AND [AdvertisedById] IS NOT NULL))\r\nAND ([Status] NOT IN (2,3,4,5,6,7) OR ([ClosedAtUtc] IS NOT NULL AND [ClosedById] IS NOT NULL))\r\nAND ([Status] NOT IN (4,5,6,7) OR (\r\n    ([ApprovalRequired]=(0) OR [WorkflowInstanceId] IS NOT NULL)\r\n    AND [SubmittedForApprovalAtUtc] IS NOT NULL\r\n    AND [SubmittedForApprovalById] IS NOT NULL))\r\nAND ([Status] NOT IN (5,6,7) OR (\r\n    NULLIF(LTRIM(RTRIM([DecisionReference])), '') IS NOT NULL\r\n    AND NULLIF(LTRIM(RTRIM([DecisionEvidenceReference])), '') IS NOT NULL\r\n    AND NULLIF(LTRIM(RTRIM([DecisionReason])), '') IS NOT NULL\r\n    AND [DecidedAtUtc] IS NOT NULL AND [DecidedById] IS NOT NULL))");
                     table.ForeignKey(
                         name: "FK_ProcurementPrequalificationExercises_ProcurementPolicySets_PolicySetId",
                         column: x => x.PolicySetId,
@@ -36164,6 +36174,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementPrequalificationApplications", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementPrequalificationApplications_Core", "[Status] BETWEEN 0 AND 4\r\nAND ISJSON([CategoryIdsJson]) = 1\r\nAND ISJSON([EvidenceJson]) = 1\r\nAND LEN([IntegrityHash]) = 64\r\nAND NULLIF(LTRIM(RTRIM([ApplicationNumber])), '') IS NOT NULL\r\nAND (([Status] = 0 AND [EvaluatedAtUtc] IS NULL AND [EvaluatedById] IS NULL\r\n      AND [TotalScore] IS NULL AND [Passed] IS NULL)\r\n OR ([Status] IN (1,2,3,4) AND [EvaluatedAtUtc] IS NOT NULL AND [EvaluatedById] IS NOT NULL\r\n      AND [TotalScore] BETWEEN 0 AND 100 AND [Passed] IS NOT NULL\r\n      AND NULLIF(LTRIM(RTRIM([EvaluationRemarks])), '') IS NOT NULL\r\n      AND NULLIF(LTRIM(RTRIM([RecommendationEvidenceReference])), '') IS NOT NULL))");
                     table.ForeignKey(
                         name: "FK_ProcurementPrequalificationApplications_BusinessPartners_BusinessPartnerId",
                         column: x => x.BusinessPartnerId,
@@ -36212,6 +36223,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementPrequalificationCriteria", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementPrequalificationCriteria_Core", "[Weight] > 0 AND [Weight] <= 100\r\nAND [MinimumScore] >= 0 AND [MinimumScore] <= 100\r\nAND NULLIF(LTRIM(RTRIM([Code])), '') IS NOT NULL\r\nAND NULLIF(LTRIM(RTRIM([Name])), '') IS NOT NULL");
                     table.ForeignKey(
                         name: "FK_ProcurementPrequalificationCriteria_ProcurementPrequalificationExercises_ExerciseId",
                         column: x => x.ExerciseId,
@@ -37505,7 +37517,9 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProjectCivilSiteInstructionRoutings", x => x.Id);
-                    table.CheckConstraint("CK_ProjectCivilSiteInstructionRoutings_Status", "[Status] IN ('PendingApproval','AwaitingContractorAcknowledgement','ContractorResponded','AwaitingEngineeringReview','AwaitingEngineeringFollowUp','Closed','Rejected','Superseded')");
+                    table.CheckConstraint("CK_ProjectCivilSiteInstructionRoutings_InstructionVersion", "InstructionVersion > 0");
+                    table.CheckConstraint("CK_ProjectCivilSiteInstructionRoutings_NoSelfSupersession", "SupersedesRoutingId IS NULL OR SupersedesRoutingId <> Id");
+                    table.CheckConstraint("CK_ProjectCivilSiteInstructionRoutings_Status", "Status IN ('PendingApproval','AwaitingContractorAcknowledgement','ContractorResponded','AwaitingEngineeringReview','AwaitingEngineeringFollowUp','Closed','Rejected','Superseded')");
                     table.ForeignKey(
                         name: "FK_ProjectCivilSiteInstructionRoutings_CivilEngineeringConfigurationDecisions_ConfigurationDecisionId",
                         column: x => x.ConfigurationDecisionId,
@@ -37666,10 +37680,10 @@ namespace ErpSystem.Data.Migrations
                 {
                     table.PrimaryKey("PK_ProjectCivilDirectTaskControls", x => x.Id);
                     table.CheckConstraint("CK_ProjectCivilDirectTaskControls_Evidence", "([CentralDocumentRecordId] IS NULL AND [CentralDocumentVersionId] IS NULL) OR ([CentralDocumentRecordId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL)");
-                    table.CheckConstraint("CK_ProjectCivilDirectTaskControls_Progress", "[ProgressPercent] >= 0 AND [ProgressPercent] <= 100");
+                    table.CheckConstraint("CK_ProjectCivilDirectTaskControls_Progress", "ProgressPercent >= 0 AND ProgressPercent <= 100");
                     table.CheckConstraint("CK_ProjectCivilDirectTaskControls_Status", "[Status] IN ('Assigned','InProgress','PendingAcceptance','Accepted','Returned','Cancelled') AND [ApprovalStatus] IN ('Draft','Pending','Approved','Rejected')");
                     table.CheckConstraint("CK_ProjectCivilDirectTaskControls_Urgency", "[Urgency] IN (0,1,2,3)");
-                    table.CheckConstraint("CK_ProjectCivilDirectTaskControls_UrgentPath", "([IsUrgentPath] = 0 AND [UrgencyReason] IS NULL AND [UrgentResponseDueAt] IS NULL AND [UrgentEscalatedAt] IS NULL AND [UrgentEscalationClientRequestId] IS NULL AND [UrgentEscalationRequestHash] IS NULL) OR ([IsUrgentPath] = 1 AND [Urgency] IN (2,3) AND [UrgencyReason] IS NOT NULL AND LEN(LTRIM(RTRIM([UrgencyReason]))) BETWEEN 5 AND 1000 AND [UrgentResponseDueAt] IS NOT NULL AND [DueDate] <= [UrgentResponseDueAt])");
+                    table.CheckConstraint("CK_ProjectCivilDirectTaskControls_UrgentPath", "([IsUrgentPath] = 0 AND [UrgencyReason] IS NULL AND [UrgentResponseDueAt] IS NULL AND [UrgentEscalatedAt] IS NULL AND [UrgentEscalationClientRequestId] IS NULL AND [UrgentEscalationRequestHash] IS NULL)\n    OR\n    ([IsUrgentPath] = 1 AND [Urgency] IN (2,3) AND [UrgencyReason] IS NOT NULL AND LEN(LTRIM(RTRIM([UrgencyReason]))) BETWEEN 5 AND 1000 AND [UrgentResponseDueAt] IS NOT NULL AND [DueDate] <= [UrgentResponseDueAt])");
                     table.ForeignKey(
                         name: "FK_ProjectCivilDirectTaskControls_AspNetRoles_AssignedRoleId",
                         column: x => x.AssignedRoleId,
@@ -38565,6 +38579,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementQualifiedListEntries", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementQualifiedListEntries_Core", "[Status] BETWEEN 0 AND 2\r\nAND [ExpiresAtUtc] > [ValidFromUtc]\r\nAND LEN([IntegrityHash]) = 64\r\nAND NULLIF(LTRIM(RTRIM([ApprovalReference])), '') IS NOT NULL\r\nAND NULLIF(LTRIM(RTRIM([ApprovalEvidenceReference])), '') IS NOT NULL\r\nAND ([Status] <> 1 OR [ExpiredAtUtc] IS NOT NULL)\r\nAND ([Status] <> 2 OR ([RevokedAtUtc] IS NOT NULL AND NULLIF(LTRIM(RTRIM([RevocationReason])), '') IS NOT NULL))");
                     table.ForeignKey(
                         name: "FK_ProcurementQualifiedListEntries_BusinessPartners_BusinessPartnerId",
                         column: x => x.BusinessPartnerId,
@@ -38624,6 +38639,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementPrequalificationScores", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementPrequalificationScores_Core", "[Score] >= 0 AND [Score] <= 100\r\nAND NULLIF(LTRIM(RTRIM([Reason])), '') IS NOT NULL");
                     table.ForeignKey(
                         name: "FK_ProcurementPrequalificationScores_ProcurementPrequalificationApplications_ApplicationId",
                         column: x => x.ApplicationId,
@@ -39370,8 +39386,8 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProjectCivilWeeklySupervisionReports", x => x.Id);
-                    table.CheckConstraint("CK_ProjectCivilWeeklySupervisionReports_MilestoneScheduleSnapshot", "[HasGovernedProgressControl] = 0 OR [MilestoneTargetDateSnapshot] IS NOT NULL");
-                    table.CheckConstraint("CK_ProjectCivilWeeklySupervisionReports_ProgressControl", "[HasGovernedProgressControl] = 0 OR ([ProjectMilestoneId] IS NOT NULL AND [OverallProgressPercent] IS NOT NULL AND [SiteStatus] IN ('OnTrack','AtRisk','Delayed','Stopped') AND (([SiteStatus] = 'OnTrack' AND [DelayReason] IS NULL AND [RecoveryActionItemId] IS NULL) OR ([SiteStatus] IN ('AtRisk','Delayed','Stopped') AND LEN(LTRIM(RTRIM(ISNULL([DelayReason],'')))) >= 3 AND [RecoveryActionItemId] IS NOT NULL)) AND (([IsProgressCorrection] = 0 AND [ProgressCorrectionDecisionId] IS NULL) OR ([IsProgressCorrection] = 1 AND (([Status] <> 'Approved' AND [ProgressCorrectionDecisionId] IS NULL) OR ([Status] = 'Approved' AND [ProgressCorrectionDecisionId] IS NOT NULL)))))");
+                    table.CheckConstraint("CK_ProjectCivilWeeklySupervisionReports_MilestoneScheduleSnapshot", "[HasGovernedProgressControl]=0 OR [MilestoneTargetDateSnapshot] IS NOT NULL");
+                    table.CheckConstraint("CK_ProjectCivilWeeklySupervisionReports_ProgressControl", "[HasGovernedProgressControl] = 0 OR\n    ([ProjectMilestoneId] IS NOT NULL AND [OverallProgressPercent] IS NOT NULL\n     AND [SiteStatus] IN ('OnTrack','AtRisk','Delayed','Stopped')\n     AND (([SiteStatus] = 'OnTrack' AND [DelayReason] IS NULL AND [RecoveryActionItemId] IS NULL)\n       OR ([SiteStatus] IN ('AtRisk','Delayed','Stopped')\n           AND LEN(LTRIM(RTRIM(ISNULL([DelayReason],'')))) >= 3 AND [RecoveryActionItemId] IS NOT NULL))\n     AND (([IsProgressCorrection] = 0 AND [ProgressCorrectionDecisionId] IS NULL)\n       OR ([IsProgressCorrection] = 1 AND (([Status] <> 'Approved' AND [ProgressCorrectionDecisionId] IS NULL)\n         OR ([Status] = 'Approved' AND [ProgressCorrectionDecisionId] IS NOT NULL)))))");
                     table.CheckConstraint("CK_ProjectCivilWeeklySupervisionReports_Status", "([Status] = 'PendingApproval' AND [ApprovalStatus] = 'Pending' AND [ApprovedById] IS NULL AND [ApprovedAt] IS NULL AND [RejectionReason] IS NULL) OR ([Status] = 'Approved' AND [ApprovalStatus] = 'Approved' AND [ApprovedById] IS NOT NULL AND [ApprovedAt] IS NOT NULL AND [RejectionReason] IS NULL) OR ([Status] = 'Rejected' AND [ApprovalStatus] = 'Rejected' AND [ApprovedById] IS NULL AND [ApprovedAt] IS NULL AND [RejectionReason] IS NOT NULL AND LEN(LTRIM(RTRIM([RejectionReason]))) > 0)");
                     table.CheckConstraint("CK_ProjectCivilWeeklySupervisionReports_Week", "DATEDIFF(day, [WeekStart], [WeekEnd]) = 6 AND DATEDIFF(day, CONVERT(date, '19000101', 112), CONVERT(date, [WeekStart])) % 7 = 0");
                     table.ForeignKey(
@@ -39490,7 +39506,7 @@ namespace ErpSystem.Data.Migrations
                     table.PrimaryKey("PK_ProjectCivilDirectTaskFeedbackEntries", x => x.Id);
                     table.CheckConstraint("CK_ProjectCivilDirectTaskFeedbackEntries_Action", "[Action] IN (0,1,2,3,4)");
                     table.CheckConstraint("CK_ProjectCivilDirectTaskFeedbackEntries_Evidence", "([CentralDocumentRecordId] IS NULL AND [CentralDocumentVersionId] IS NULL) OR ([CentralDocumentRecordId] IS NOT NULL AND [CentralDocumentVersionId] IS NOT NULL)");
-                    table.CheckConstraint("CK_ProjectCivilDirectTaskFeedbackEntries_Measurement", "([MeasurementValue] IS NULL AND [MeasurementUnitId] IS NULL) OR ([MeasurementValue] IS NOT NULL AND [MeasurementValue] >= 0 AND [MeasurementUnitId] IS NOT NULL)");
+                    table.CheckConstraint("CK_ProjectCivilDirectTaskFeedbackEntries_Measurement", "(MeasurementValue IS NULL AND MeasurementUnitId IS NULL) OR (MeasurementValue IS NOT NULL AND MeasurementValue >= 0 AND MeasurementUnitId IS NOT NULL)");
                     table.CheckConstraint("CK_ProjectCivilDirectTaskFeedbackEntries_Progress", "[ProgressPercent] IS NULL OR ([ProgressPercent] >= 0 AND [ProgressPercent] <= 100)");
                     table.ForeignKey(
                         name: "FK_ProjectCivilDirectTaskFeedbackEntries_CentralDocumentRecords_CentralDocumentRecordId",
@@ -40411,10 +40427,10 @@ namespace ErpSystem.Data.Migrations
                     table.CheckConstraint("CK_ProjectCivilInspectionControls_ClosureEvidence", "([ClosureDocumentRecordId] IS NULL AND [ClosureDocumentVersionId] IS NULL) OR ([ClosureDocumentRecordId] IS NOT NULL AND [ClosureDocumentVersionId] IS NOT NULL)");
                     table.CheckConstraint("CK_ProjectCivilInspectionControls_CorrectiveEvidence", "([CorrectiveActionDocumentRecordId] IS NULL AND [CorrectiveActionDocumentVersionId] IS NULL) OR ([CorrectiveActionDocumentRecordId] IS NOT NULL AND [CorrectiveActionDocumentVersionId] IS NOT NULL)");
                     table.CheckConstraint("CK_ProjectCivilInspectionControls_Evidence", "([InspectionDocumentRecordId] IS NULL AND [InspectionDocumentVersionId] IS NULL) OR ([InspectionDocumentRecordId] IS NOT NULL AND [InspectionDocumentVersionId] IS NOT NULL)");
-                    table.CheckConstraint("CK_ProjectCivilInspectionControls_PlanApproval", "[PlanApprovalStatus] IN ('Pending','Approved','Rejected')");
+                    table.CheckConstraint("CK_ProjectCivilInspectionControls_PlanApproval", "PlanApprovalStatus IN ('Pending','Approved','Rejected')");
                     table.CheckConstraint("CK_ProjectCivilInspectionControls_ReinspectionEvidence", "([ReinspectionDocumentRecordId] IS NULL AND [ReinspectionDocumentVersionId] IS NULL) OR ([ReinspectionDocumentRecordId] IS NOT NULL AND [ReinspectionDocumentVersionId] IS NOT NULL)");
-                    table.CheckConstraint("CK_ProjectCivilInspectionControls_Stage", "[Stage] IN ('PendingApproval','Scheduled','CorrectiveActionRequired','ReinspectionScheduled','Passed','Closed','Rejected')");
-                    table.CheckConstraint("CK_ProjectCivilInspectionControls_Status", "[Status] IN ('PendingApproval','Scheduled','Active','Blocked','Passed','Closed','Rejected')");
+                    table.CheckConstraint("CK_ProjectCivilInspectionControls_Stage", "Stage IN ('PendingApproval','Scheduled','CorrectiveActionRequired','ReinspectionScheduled','Passed','Closed','Rejected')");
+                    table.CheckConstraint("CK_ProjectCivilInspectionControls_Status", "Status IN ('PendingApproval','Scheduled','Active','Blocked','Passed','Closed','Rejected')");
                     table.ForeignKey(
                         name: "FK_ProjectCivilInspectionControls_CentralDocumentMetadataTemplates_EvidenceMetadataTemplateId",
                         column: x => x.EvidenceMetadataTemplateId,
@@ -42637,6 +42653,8 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_AssetDisposals", x => x.Id);
+                    table.CheckConstraint("CK_AssetDisposals_ProceedsExchangeRateValue", "[ProceedsExchangeRateValue] > 0");
+                    table.CheckConstraint("CK_AssetDisposals_ScopePercentage", "([DisposalScope] = 1 AND [DisposedPortionPercent] = 100) OR ([DisposalScope] IN (2, 3) AND [DisposedPortionPercent] > 0 AND [DisposedPortionPercent] < 100)");
                     table.CheckConstraint("CK_AssetDisposals_SettlementDestination", "[SettlementBankAccountId] IS NULL OR [SettlementLiquidityAccountId] IS NULL");
                     table.CheckConstraint("CK_AssetDisposals_SettlementDocumentState", "([SettlementStatus] IN (0,1,4)) OR ([SettlementStatus] IN (2,3) AND [CustomerInvoiceId] IS NOT NULL)");
                     table.ForeignKey(
@@ -75118,6 +75136,12 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_InventoryValuationReconciliations", x => x.Id);
+                    table.CheckConstraint("CK_InventoryValuationReconciliations_ExceptionCounts", "[ReceiptExceptionCount] >= 0 AND [LandedCostExceptionCount] >= 0 AND [ValuationExceptionCount] >= 0 AND [GeneralLedgerExceptionCount] >= 0 AND [ExceptionCount] = [ReceiptExceptionCount] + [LandedCostExceptionCount] + [ValuationExceptionCount] + [GeneralLedgerExceptionCount]");
+                    table.CheckConstraint("CK_InventoryValuationReconciliations_FrozenLifecycle", "([Status] = 2 AND [FrozenById] IS NOT NULL AND [FrozenAtUtc] IS NOT NULL AND [PeriodModuleLockId] IS NOT NULL AND [FrozenById] <> [GeneratedById]) OR ([Status] <> 2 AND [FrozenById] IS NULL AND [FrozenAtUtc] IS NULL AND [PeriodModuleLockId] IS NULL)");
+                    table.CheckConstraint("CK_InventoryValuationReconciliations_Hashes", "LEN([SnapshotHash]) = 64 AND LEN([PayloadHash]) = 64 AND LEN([IdempotencyKey]) > 0 AND LEN([CorrelationId]) > 0");
+                    table.CheckConstraint("CK_InventoryValuationReconciliations_Reconciled", "[Status] = 0 OR ([ExceptionCount] = 0 AND ABS([ReconciliationVariance]) <= [ToleranceAmount])");
+                    table.CheckConstraint("CK_InventoryValuationReconciliations_Status", "[Status] BETWEEN 0 AND 2");
+                    table.CheckConstraint("CK_InventoryValuationReconciliations_Tolerance", "[ToleranceAmount] >= 0");
                     table.ForeignKey(
                         name: "FK_InventoryValuationReconciliations_Accounts_InventoryControlAccountId",
                         column: x => x.InventoryControlAccountId,
@@ -76590,6 +76614,8 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_InventoryValuationReconciliationActions", x => x.Id);
+                    table.CheckConstraint("CK_InventoryValuationReconciliationActions_Hashes", "LEN([PayloadHash]) = 64 AND LEN([IntegrityHash]) = 64 AND ([PreviousHash] IS NULL OR LEN([PreviousHash]) = 64)");
+                    table.CheckConstraint("CK_InventoryValuationReconciliationActions_Sequence", "[Sequence] > 0");
                     table.ForeignKey(
                         name: "FK_InventoryValuationReconciliationActions_InventoryValuationReconciliations_ReconciliationId",
                         column: x => x.ReconciliationId,
@@ -77516,7 +77542,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_PhysicalCountActions", x => x.Id);
-                    table.CheckConstraint("CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 16");
+                    table.CheckConstraint("CK_PhysicalCountActions_ActionType", "ActionType BETWEEN 1 AND 16");
                     table.ForeignKey(
                         name: "FK_PhysicalCountActions_PhysicalCounts_PhysicalCountId",
                         column: x => x.PhysicalCountId,
@@ -83838,6 +83864,7 @@ namespace ErpSystem.Data.Migrations
                 {
                     table.PrimaryKey("PK_ProcurementSourcingCases", x => x.Id);
                     table.CheckConstraint("CK_ProcurementSourcingCases_MethodSelection", "[RecommendedMethod] BETWEEN 0 AND 8 AND [SelectedMethod] BETWEEN 0 AND 8 AND [MethodSelectionBasis] IN (0, 1) AND (([MethodSelectionBasis] = 0 AND [SelectedMethod] = [RecommendedMethod] AND [MethodOverrideWorkflowInstanceId] IS NULL AND [MethodOverrideReason] IS NULL AND [MethodOverrideApprovalActorsJson] IS NULL AND [MethodOverrideApprovedAtUtc] IS NULL) OR ([MethodSelectionBasis] = 1 AND [SelectedMethod] <> [RecommendedMethod] AND [ApprovedExceptionRuleId] IS NOT NULL AND [MethodOverrideWorkflowInstanceId] IS NOT NULL AND LEN(LTRIM(RTRIM([MethodOverrideReason]))) >= 5 AND ISJSON([MethodOverrideApprovalActorsJson]) = 1 AND [MethodOverrideApprovalActorsJson] <> '[]' AND [MethodOverrideApprovedAtUtc] IS NOT NULL AND [ExceptionApprovalReference] IS NOT NULL AND [ExceptionEvidenceReference] IS NOT NULL))");
+                    table.CheckConstraint("CK_ProcurementSourcingCases_State", "[Status] BETWEEN 0 AND 3 AND [CaseSequence] > 0 AND [EstimatedValue] >= 0 AND LEN([SourceControlFingerprint]) = 64 AND LEN([CaseFingerprint]) = 64 AND LEN([IntegrityHash]) = 64 AND ISJSON([SnapshotJson]) = 1");
                     table.ForeignKey(
                         name: "FK_ProcurementSourcingCases_ProcurementPlanItems_SourcePlanItemId",
                         column: x => x.SourcePlanItemId,
@@ -83932,6 +83959,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementSourcingCaseLots", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementSourcingCaseLots_Value", "[LotNumber] > 0 AND [EstimatedValue] >= 0");
                     table.ForeignKey(
                         name: "FK_ProcurementSourcingCaseLots_ProcurementSourcingCases_SourcingCaseId",
                         column: x => x.SourcingCaseId,
@@ -83980,6 +84008,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementSourcingCaseSourceRequests", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementSourcingCaseSourceRequests_State", "[RequestSequence] > 0 AND [Status] BETWEEN 0 AND 2 AND ISJSON([LotIdsJson]) = 1");
                     table.ForeignKey(
                         name: "FK_ProcurementSourcingCaseSourceRequests_ProcurementSourcingCases_SourcingCaseId",
                         column: x => x.SourcingCaseId,
@@ -84113,6 +84142,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_Tenders", x => x.Id);
+                    table.CheckConstraint("CK_Tenders_BidValidityPeriodDays", "BidValidityPeriodDays IS NULL OR BidValidityPeriodDays > 0");
                     table.ForeignKey(
                         name: "FK_Tenders_EvaluationTemplates_EvaluationTemplateId",
                         column: x => x.EvaluationTemplateId,
@@ -84413,6 +84443,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementTenderControls", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementTenderControls_State", "[Method] IN (1, 2, 7, 8) AND [Status] BETWEEN 0 AND 9\n        AND [DocumentFee] >= 0\n        AND [OpeningScheduledAtUtc] >= [SubmissionDeadlineUtc]\n        AND LEN([IntegrityHash]) = 64\n        AND ISJSON([LifecycleSnapshotJson]) = 1");
                     table.ForeignKey(
                         name: "FK_ProcurementTenderControls_ProcurementPolicyMethodRules_MethodRuleId",
                         column: x => x.MethodRuleId,
@@ -85496,6 +85527,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementTenderDocumentIssues", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementTenderDocumentIssues_Evidence", "[AmountPaid] >= 0 AND LEN([IntegrityHash]) = 64");
                     table.ForeignKey(
                         name: "FK_ProcurementTenderDocumentIssues_BusinessPartners_BusinessPartnerId",
                         column: x => x.BusinessPartnerId,
@@ -85805,6 +85837,7 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementTenderSubmissionReceipts", x => x.Id);
+                    table.CheckConstraint("CK_ProcurementTenderSubmissionReceipts_Classification", "[Disposition] IN (0, 1)\n    AND [Disposition] = CASE WHEN [ReceivedAtUtc] <= [SubmissionDeadlineUtc] THEN 0 ELSE 1 END\n    AND LEN([IntegrityHash]) = 64\n    AND ISJSON([SealedSnapshotJson]) = 1");
                     table.ForeignKey(
                         name: "FK_ProcurementTenderSubmissionReceipts_BusinessPartners_BusinessPartnerId",
                         column: x => x.BusinessPartnerId,
@@ -87109,6 +87142,9 @@ namespace ErpSystem.Data.Migrations
                 constraints: table =>
                 {
                     table.PrimaryKey("PK_ProcurementExceptionalSourcingControls", x => x.Id);
+                    table.CheckConstraint("CK_PettyPurchase_Authority", "([Method] = 5 AND [AuthorityRouteId] IS NULL AND NULLIF(LTRIM(RTRIM([AuthorityRouteReference])), '') IS NULL)\n  OR ([AuthorityRouteId] IS NOT NULL AND NULLIF(LTRIM(RTRIM([AuthorityRouteReference])), '') IS NOT NULL)");
+                    table.CheckConstraint("CK_ProcurementExceptionalSourcingControls_Core", "[Method] IN (3,4,5) AND [Status] BETWEEN 0 AND 9\n        AND ISJSON([SupplierSnapshotJson]) = 1\n        AND ISJSON([EvidenceChecklistJson]) = 1\n        AND ISJSON([ApprovalActorsJson]) = 1\n        AND LEN([IntegrityHash]) = 64");
+                    table.CheckConstraint("CK_ProcurementExceptionalSourcingControls_Lifecycle", "([Status] = 0 OR (([ApprovalRequired]=(0) OR [WorkflowInstanceId] IS NOT NULL) AND [SubmittedForApprovalAtUtc] IS NOT NULL AND [SubmittedForApprovalById] IS NOT NULL))\n  AND ([Status] NOT IN (2,3,4,5,6,7,8) OR (([ApprovalRequired]=(0) OR [ApprovedAtUtc] IS NOT NULL AND [ApprovedById] IS NOT NULL)\n    AND ([Method] = 5 OR [SuppliersInvitedAtUtc] IS NOT NULL)\n    AND ([PpaApprovalRequired] = 0 OR NULLIF(LTRIM(RTRIM([PpaApprovalReference])), '') IS NOT NULL)\n    AND ([BoardApprovalRequired] = 0 OR NULLIF(LTRIM(RTRIM([BoardApprovalReference])), '') IS NOT NULL)\n    AND ([ManagingDirectorApprovalRequired] = 0 OR NULLIF(LTRIM(RTRIM([ManagingDirectorApprovalReference])), '') IS NOT NULL)))\n  AND ([Method] = 5 OR [Status] NOT IN (3,4,5,6,7,8) OR ([NegotiationId] IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([NegotiationPlanReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([NegotiationMinutesEvidenceReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([NegotiationOutcomeReference])), '') IS NOT NULL\n    AND [NegotiatedAmount] IS NOT NULL AND [NegotiatedAtUtc] IS NOT NULL))\n  AND ([Status] NOT IN (4,5,6,7,8) OR ([RecommendedBidId] IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([RecommendationReason])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([RecommendationEvidenceReference])), '') IS NOT NULL\n    AND [RecommendedAtUtc] IS NOT NULL AND [RecommendedById] IS NOT NULL))\n  AND ([Status] NOT IN (5,6,7,8) OR ([AwardBidId] IS NOT NULL AND [AwardBidId] = [RecommendedBidId]\n    AND NULLIF(LTRIM(RTRIM([AwardReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([AwardEvidenceReference])), '') IS NOT NULL AND [AwardedAtUtc] IS NOT NULL))\n  AND ([Status] NOT IN (6,7,8) OR (NULLIF(LTRIM(RTRIM([ContractReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([ContractEvidenceReference])), '') IS NOT NULL AND [ContractedAtUtc] IS NOT NULL))\n  AND ([Status] NOT IN (7,8) OR (NULLIF(LTRIM(RTRIM([BidderAcceptanceReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([BidderAcceptanceEvidenceReference])), '') IS NOT NULL AND [AcceptedAtUtc] IS NOT NULL))\n  AND ([Status] <> 8 OR (NULLIF(LTRIM(RTRIM([PostAwardFilingReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([PostAwardFilingEvidenceReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([ExceptionReportReference])), '') IS NOT NULL\n    AND NULLIF(LTRIM(RTRIM([ExceptionReportEvidenceReference])), '') IS NOT NULL\n    AND [FiledAtUtc] IS NOT NULL AND [FiledById] IS NOT NULL))");
                     table.ForeignKey(
                         name: "FK_ProcurementExceptionalSourcingControls_ProcurementPolicyExceptionRules_ExceptionRuleId",
                         column: x => x.ExceptionRuleId,

@@ -25539,40 +25539,6 @@ internal static class ArchivedGovernanceBaselineSql
             """);
         // POST-DEFINITION PATCH TR_ProcurementExceptionalSourcingControls_Lifecycle from 20260907033000_AlignPettyPurchaseQuotationLifecycle:0
         migrationBuilder.Sql("""
-            ALTER TABLE dbo.ProcurementExceptionalSourcingControls DROP CONSTRAINT CK_ProcurementExceptionalSourcingControls_Lifecycle;
-            ALTER TABLE dbo.ProcurementExceptionalSourcingControls WITH CHECK ADD CONSTRAINT CK_ProcurementExceptionalSourcingControls_Lifecycle CHECK (
-              ([Status] = 0 OR ([WorkflowInstanceId] IS NOT NULL AND [SubmittedForApprovalAtUtc] IS NOT NULL AND [SubmittedForApprovalById] IS NOT NULL))
-              AND ([Status] NOT IN (2,3,4,5,6,7,8) OR ([ApprovedAtUtc] IS NOT NULL AND [ApprovedById] IS NOT NULL
-                AND ([Method] = 5 OR [SuppliersInvitedAtUtc] IS NOT NULL)
-                AND ([PpaApprovalRequired] = 0 OR NULLIF(LTRIM(RTRIM([PpaApprovalReference])), '') IS NOT NULL)
-                AND ([BoardApprovalRequired] = 0 OR NULLIF(LTRIM(RTRIM([BoardApprovalReference])), '') IS NOT NULL)
-                AND ([ManagingDirectorApprovalRequired] = 0 OR NULLIF(LTRIM(RTRIM([ManagingDirectorApprovalReference])), '') IS NOT NULL)))
-              AND ([Method] = 5 OR [Status] NOT IN (3,4,5,6,7,8) OR ([NegotiationId] IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([NegotiationPlanReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([NegotiationMinutesEvidenceReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([NegotiationOutcomeReference])), '') IS NOT NULL
-                AND [NegotiatedAmount] IS NOT NULL AND [NegotiatedAtUtc] IS NOT NULL))
-              AND ([Status] NOT IN (4,5,6,7,8) OR ([RecommendedBidId] IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([RecommendationReason])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([RecommendationEvidenceReference])), '') IS NOT NULL
-                AND [RecommendedAtUtc] IS NOT NULL AND [RecommendedById] IS NOT NULL))
-              AND ([Status] NOT IN (5,6,7,8) OR ([AwardBidId] IS NOT NULL AND [AwardBidId] = [RecommendedBidId]
-                AND NULLIF(LTRIM(RTRIM([AwardReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([AwardEvidenceReference])), '') IS NOT NULL AND [AwardedAtUtc] IS NOT NULL))
-              AND ([Status] NOT IN (6,7,8) OR (NULLIF(LTRIM(RTRIM([ContractReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([ContractEvidenceReference])), '') IS NOT NULL AND [ContractedAtUtc] IS NOT NULL))
-              AND ([Status] NOT IN (7,8) OR (NULLIF(LTRIM(RTRIM([BidderAcceptanceReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([BidderAcceptanceEvidenceReference])), '') IS NOT NULL AND [AcceptedAtUtc] IS NOT NULL))
-              AND ([Status] <> 8 OR (NULLIF(LTRIM(RTRIM([PostAwardFilingReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([PostAwardFilingEvidenceReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([ExceptionReportReference])), '') IS NOT NULL
-                AND NULLIF(LTRIM(RTRIM([ExceptionReportEvidenceReference])), '') IS NOT NULL
-                AND [FiledAtUtc] IS NOT NULL AND [FiledById] IS NOT NULL))
-            );
-            ALTER TABLE dbo.ProcurementExceptionalSourcingControls WITH CHECK ADD CONSTRAINT CK_PettyPurchase_Authority CHECK (
-              ([Method] = 5 AND [AuthorityRouteId] IS NULL AND NULLIF(LTRIM(RTRIM([AuthorityRouteReference])), '') IS NULL)
-              OR ([AuthorityRouteId] IS NOT NULL AND NULLIF(LTRIM(RTRIM([AuthorityRouteReference])), '') IS NOT NULL)
-            );
             DECLARE @trigger nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_ProcurementExceptionalSourcingControls_Lifecycle'));
             IF @trigger IS NULL OR CHARINDEX(N'OR a.[Id] IS NULL', @trigger) = 0
               OR CHARINDEX(N'c.[AuthorityRouteId] <> i.[AuthorityRouteId]', @trigger) = 0
@@ -25730,10 +25696,6 @@ internal static class ArchivedGovernanceBaselineSql
             """);
         // POST-DEFINITION PATCH TR_InventoryItems_PhysicalCountFreeze,TR_PhysicalCountActions_AppendOnly,TR_PhysicalCountItems_ControlledMutation,TR_PhysicalCounts_ControlledLifecycle,TR_StockMovements_PhysicalCountFreeze,TR_WarehouseQuantities_PhysicalCountFreeze from 20260911210000_PhysicalCountReviewDecisions:0
         migrationBuilder.Sql("""
-            -- No count, approval, quantity or posting records are rewritten by this migration.
-            ALTER TABLE dbo.PhysicalCountActions DROP CONSTRAINT CK_PhysicalCountActions_ActionType;
-            ALTER TABLE dbo.PhysicalCountActions ADD CONSTRAINT CK_PhysicalCountActions_ActionType CHECK (ActionType BETWEEN 1 AND 14);
-
             DECLARE @line nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCountItems_ControlledMutation'));
             DECLARE @life nvarchar(max) = OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCounts_ControlledLifecycle'));
             IF @line IS NULL OR @life IS NULL
@@ -25801,32 +25763,6 @@ internal static class ArchivedGovernanceBaselineSql
             """);
         // POST-DEFINITION PATCH TR_PhysicalCountActions_AppendOnly from 20260912003000_WarehouseDefaultLocations:0
         migrationBuilder.Sql("""
-            -- Configure metadata only. Existing item/bin/valuation/stock balances remain untouched.
-            ;WITH eligible AS (
-                SELECT l.Id, COUNT(*) OVER(PARTITION BY l.TenantId,l.WarehouseId) AS CandidateCount
-                FROM dbo.WarehouseLocations l INNER JOIN dbo.Warehouses w ON w.Id=l.WarehouseId AND w.TenantId=l.TenantId
-                WHERE w.IsDeleted=0 AND l.IsDeleted=0 AND l.IsActive=1 AND l.LocationType=N'Bin'
-                    AND l.IsConsignmentBin=0 AND l.ConsignmentWarehouseId IS NULL
-                    AND l.IsQuarantineLocation=0 AND l.IsInspectionLocation=0 AND l.IsInTransitLocation=0
-                    AND l.IsShippingLocation=0 AND l.IsStagingLocation=0 AND l.IsReturnLocation=0 AND l.IsDamageLocation=0
-            )
-            UPDATE l SET IsDefault=1,UpdatedAt=SYSUTCDATETIME(),UpdatedBy=N'migration:WarehouseDefaultLocations'
-            FROM dbo.WarehouseLocations l INNER JOIN eligible e ON e.Id=l.Id WHERE e.CandidateCount=1;
-
-            INSERT INTO dbo.WarehouseLocations
-                (Id,TenantId,WarehouseId,LocationCode,Name,Description,LocationType,IsDefault,IsActive,IsDeleted,
-                 IsPickingLocation,IsReceivingLocation,IsConsignmentBin,IsQuarantineLocation,IsInspectionLocation,
-                 IsInTransitLocation,IsShippingLocation,IsStagingLocation,IsReturnLocation,IsDamageLocation,
-                 PickSequence,CurrentWeight,CurrentVolume,CurrentItemCount,CreatedAt,CreatedBy)
-            SELECT NEWID(),w.TenantId,w.Id,
-                CASE WHEN EXISTS (SELECT 1 FROM dbo.WarehouseLocations l WHERE l.TenantId=w.TenantId AND l.WarehouseId=w.Id AND l.LocationCode=N'DEFAULT')
-                    THEN N'DEFAULT-'+LEFT(REPLACE(CONVERT(nvarchar(36),NEWID()),N'-',N''),8) ELSE N'DEFAULT' END,
-                N'Default bin',N'Default storage bin',N'Bin',1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,SYSUTCDATETIME(),N'migration:WarehouseDefaultLocations'
-            FROM dbo.Warehouses w WHERE w.IsDeleted=0 AND NOT EXISTS
-                (SELECT 1 FROM dbo.WarehouseLocations l WHERE l.TenantId=w.TenantId AND l.WarehouseId=w.Id AND l.IsDefault=1 AND l.IsDeleted=0);
-
-            ALTER TABLE dbo.PhysicalCountActions DROP CONSTRAINT CK_PhysicalCountActions_ActionType;
-            ALTER TABLE dbo.PhysicalCountActions ADD CONSTRAINT CK_PhysicalCountActions_ActionType CHECK(ActionType BETWEEN 1 AND 15);
             DECLARE @actions nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_PhysicalCountActions_AppendOnly'));
             IF @actions IS NULL OR CHARINDEX(N'i.ActionType NOT BETWEEN 1 AND 14',@actions)=0
                 THROW 51928,'INV_COUNT_DEFAULT_LOCATION_MIGRATION: unexpected action guard.',1;
@@ -25836,50 +25772,6 @@ internal static class ArchivedGovernanceBaselineSql
             """);
         // POST-DEFINITION PATCH TR_StockAdjustmentItems_ControlledMutation from 20260912013000_AlignStockAdjustmentLocationValuation:0
         migrationBuilder.Sql("""
-            ALTER TABLE dbo.StockAdjustmentItems ALTER COLUMN UnitCost decimal(18,4) NOT NULL;
-
-            EXEC(N'CREATE OR ALTER FUNCTION dbo.InventoryAdjustmentExpectedUnitCost
-            (
-                @tenant uniqueidentifier, @item uniqueidentifier, @warehouse uniqueidentifier,
-                @location uniqueidentifier, @delta decimal(18,4)
-            )
-            RETURNS decimal(18,4)
-            AS
-            BEGIN
-                DECLARE @method int, @average decimal(18,4), @standard decimal(18,4),
-                    @last decimal(18,4), @fallback decimal(18,4), @balance decimal(18,4);
-                SELECT @method=ValuationMethod,@average=AverageCost,@standard=StandardCost,@last=LastPurchaseCost
-                FROM dbo.InventoryItems WHERE Id=@item AND TenantId=@tenant AND IsDeleted=0;
-                IF @method IS NULL RETURN NULL;
-                SET @fallback=CASE WHEN @average>0 THEN @average WHEN @standard>0 THEN @standard ELSE @last END;
-                IF @method=4 RETURN CONVERT(decimal(18,4),ROUND(@standard,4));
-                SELECT @balance=AverageUnitCost FROM dbo.InventoryBalances
-                WHERE TenantId=@tenant AND InventoryItemId=@item AND WarehouseId=@warehouse
-                    AND LocationId=@location AND IsDeleted=0;
-                IF @method=1 OR @delta>=0
-                    RETURN CONVERT(decimal(18,4),ROUND(CASE WHEN @balance>0 THEN @balance ELSE @fallback END,4));
-
-                DECLARE @needed decimal(18,4)=ABS(@delta), @taken decimal(28,8)=0,
-                    @value decimal(28,8)=0, @cost decimal(28,8);
-                IF @needed=0 RETURN NULL;
-                ;WITH layers AS (
-                    SELECT RemainingQuantity,UnitCost,
-                        ISNULL(SUM(RemainingQuantity) OVER
-                            (ORDER BY LayerDate,CreatedAt,Id ROWS BETWEEN UNBOUNDED PRECEDING AND 1 PRECEDING),0) AS PreviousQuantity
-                    FROM dbo.InventoryLayers
-                    WHERE TenantId=@tenant AND InventoryItemId=@item AND WarehouseId=@warehouse AND LocationId=@location
-                        AND IsDeleted=0 AND IsFullyConsumed=0 AND RemainingQuantity>0
-                ), consumed AS (
-                    SELECT UnitCost,CASE WHEN PreviousQuantity>=@needed THEN 0
-                        WHEN RemainingQuantity<=@needed-PreviousQuantity THEN RemainingQuantity
-                        ELSE @needed-PreviousQuantity END AS Quantity
-                    FROM layers
-                )
-                SELECT @taken=ISNULL(SUM(Quantity),0),@value=ISNULL(SUM(Quantity*UnitCost),0) FROM consumed;
-                SET @cost=(@value+(@needed-@taken)*@fallback)/@needed;
-                RETURN CONVERT(decimal(18,4),ROUND(@cost,4));
-            END');
-
             DECLARE @definition nvarchar(max)=OBJECT_DEFINITION(OBJECT_ID(N'dbo.TR_StockAdjustmentItems_ControlledMutation'));
             DECLARE @start int=CHARINDEX(N'i.UnitCost <> CASE WHEN item.AverageCost > 0 THEN item.AverageCost',@definition);
             DECLARE @tail nvarchar(100)=N'ELSE item.LastPurchaseCost END';

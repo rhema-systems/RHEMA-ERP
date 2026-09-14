@@ -13892,6 +13892,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(item => item.FileUploadRecord).WithMany().HasForeignKey(item => item.FileUploadRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
+
+        // The legacy chain contains final database-authority checks that were never represented
+        // consistently in its snapshots. Apply their chronologically derived final state to the
+        // current model so the sole disposable baseline creates them without replaying predecessor DDL.
+        ArchivedCheckConstraintBaselineModel.Apply(builder);
     }
 
     private static void ConfigurePolicyRule<TEntity>(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity)
