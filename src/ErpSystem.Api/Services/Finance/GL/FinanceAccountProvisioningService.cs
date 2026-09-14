@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace ErpSystem.Api.Services.Finance.GL;
 
@@ -48,12 +49,95 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
             ?? throw new InvalidOperationException(
                 "The requested account code and core type are not present in the reviewed Finance classification manifest.");
 
-        var ownsTransaction = _db.Database.IsRelational() && _db.Database.CurrentTransaction == null;
-        await using var transaction = ownsTransaction
-            ? await _db.Database.BeginTransactionAsync(cancellationToken)
-            : null;
+        var provisionedAt = DateTime.UtcNow;
+        var hasCallerTransaction = _db.Database.IsRelational()
+            && (_db.Database.CurrentTransaction != null || System.Transactions.Transaction.Current != null);
+        if (!_db.Database.IsRelational() || hasCallerTransaction)
+            return await ProvisionCoreAsync(
+                request, tenantId, accountCode, accountName, currencyCode, classificationCode,
+                provisionedAt, cancellationToken);
 
-        await new FinanceSegmentDimensionManifestSeeder(_db, _logger).SeedAsync(tenantId, DateTime.UtcNow, cancellationToken);
+        // SQL Server's retrying execution strategy must own the complete transaction unit.
+        // A caller-owned transaction takes the branch above, so this boundary never nests or
+        // independently commits work that belongs to its caller.
+        var strategy = _db.Database.CreateExecutionStrategy();
+        var initialTrackedState = CaptureTrackedState();
+        return await strategy.ExecuteAsync(async () =>
+        {
+            try
+            {
+                await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+                var result = await ProvisionCoreAsync(
+                    request, tenantId, accountCode, accountName, currencyCode, classificationCode,
+                    provisionedAt, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                return result;
+            }
+            catch
+            {
+                // A failed transaction can leave successfully written-but-rolled-back entities
+                // as Unchanged in this scoped context. Restore the exact pre-attempt tracker so
+                // the execution strategy can repeat the whole idempotent unit without duplicate
+                // identity instances, while retaining caller-owned pending state.
+                RestoreTrackedState(initialTrackedState);
+                throw;
+            }
+        });
+    }
+
+    private IReadOnlyList<TrackedEntrySnapshot> CaptureTrackedState() =>
+        _db.ChangeTracker.Entries()
+            .Select(entry => new TrackedEntrySnapshot(
+                entry.Entity,
+                entry.State,
+                entry.CurrentValues.Clone(),
+                entry.OriginalValues.Clone(),
+                entry.Properties.Where(property => property.IsModified)
+                    .Select(property => property.Metadata.Name)
+                    .ToHashSet(StringComparer.Ordinal)))
+            .ToList();
+
+    private void RestoreTrackedState(IReadOnlyList<TrackedEntrySnapshot> snapshots)
+    {
+        var originalEntities = snapshots.Select(snapshot => snapshot.Entity)
+            .ToHashSet(ReferenceEqualityComparer.Instance);
+        foreach (var entry in _db.ChangeTracker.Entries()
+                     .Where(entry => !originalEntities.Contains(entry.Entity)).ToList())
+            entry.State = EntityState.Detached;
+
+        foreach (var snapshot in snapshots)
+        {
+            var entry = _db.Entry(snapshot.Entity);
+            entry.CurrentValues.SetValues(snapshot.CurrentValues);
+            entry.OriginalValues.SetValues(snapshot.OriginalValues);
+            entry.State = snapshot.State;
+            if (snapshot.State == EntityState.Modified)
+            {
+                foreach (var property in entry.Properties)
+                    property.IsModified = snapshot.ModifiedProperties.Contains(property.Metadata.Name);
+            }
+        }
+    }
+
+    private sealed record TrackedEntrySnapshot(
+        object Entity,
+        EntityState State,
+        PropertyValues CurrentValues,
+        PropertyValues OriginalValues,
+        IReadOnlySet<string> ModifiedProperties);
+
+    private async Task<ProvisionedFinanceAccountDto> ProvisionCoreAsync(
+        ProvisionFinanceAccountDto request,
+        Guid tenantId,
+        string accountCode,
+        string accountName,
+        string currencyCode,
+        string classificationCode,
+        DateTime provisionedAt,
+        CancellationToken cancellationToken)
+    {
+        await new FinanceSegmentDimensionManifestSeeder(_db, _logger)
+            .SeedAsync(tenantId, provisionedAt, cancellationToken);
         var stableCodeMatches = await _db.Accounts.AsNoTracking()
             .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.AccountCode == accountCode)
             .Select(item => item.Id)
@@ -89,8 +173,8 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                 IsSystemAccount = true,
                 Status = AccountStatus.Active,
                 ReferenceNumber = accountCode,
-                EffectiveDate = DateTime.UtcNow,
-                CreatedAt = DateTime.UtcNow,
+                EffectiveDate = provisionedAt,
+                CreatedAt = provisionedAt,
                 CreatedBy = _currentUser.UserName ?? "system"
             };
             foreach (var value in identity.Values)
@@ -100,7 +184,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                     Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
                     SegmentStructureId = value.SegmentStructureId, SegmentPosition = value.SegmentPosition,
                     SegmentValue = value.SegmentValue, SegmentLookupValueId = value.SegmentLookupValueId,
-                    EffectiveDate = DateTime.UtcNow, CreatedAt = DateTime.UtcNow,
+                    EffectiveDate = provisionedAt, CreatedAt = provisionedAt,
                     CreatedBy = _currentUser.UserName ?? "system"
                 });
             }
@@ -121,7 +205,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                     // while preserving the account ID and all downstream references.
                     account.AccountNumber = accountNumber;
                     account.IsSegmented = true;
-                    account.UpdatedAt = DateTime.UtcNow;
+                    account.UpdatedAt = provisionedAt;
                     account.UpdatedBy = _currentUser.UserName ?? "system";
                     foreach (var value in identity.Values)
                     {
@@ -130,7 +214,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
                             Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
                             SegmentStructureId = value.SegmentStructureId, SegmentPosition = value.SegmentPosition,
                             SegmentValue = value.SegmentValue, SegmentLookupValueId = value.SegmentLookupValueId,
-                            EffectiveDate = DateTime.UtcNow, CreatedAt = DateTime.UtcNow,
+                            EffectiveDate = provisionedAt, CreatedAt = provisionedAt,
                             CreatedBy = _currentUser.UserName ?? "system"
                         });
                     }
@@ -145,7 +229,7 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
         }
 
         await new FinanceClassificationManifestSeeder(_db, _logger)
-            .SeedAsync(tenantId, DateTime.UtcNow, cancellationToken);
+            .SeedAsync(tenantId, provisionedAt, cancellationToken);
         var bookCodes = await _db.AccountAccountingBooks.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.AccountId == account.Id && item.IsEnabled && !item.IsDeleted)
             .Join(_db.AccountingBooks.AsNoTracking(), mapping => mapping.AccountingBookId, book => book.Id,
@@ -161,8 +245,6 @@ public sealed class FinanceAccountProvisioningService : IFinanceAccountProvision
             AccountingBookCodes = bookCodes,
             WasCreated = wasCreated
         };
-        if (transaction != null)
-            await transaction.CommitAsync(cancellationToken);
         return result;
     }
 
