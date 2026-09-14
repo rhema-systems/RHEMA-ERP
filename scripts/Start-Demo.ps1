@@ -129,8 +129,8 @@ function Get-DevWebProcesses {
 function Test-PortListening([int]$P) {
     return [bool](Get-NetTCPConnection -LocalPort $P -State Listen -ErrorAction SilentlyContinue)
 }
-function Test-Responding([string]$Url) {
-    try { $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 5; return $true }
+function Test-Responding([string]$Url, [int]$TimeoutSec = 5) {
+    try { $null = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec $TimeoutSec; return $true }
     catch {
         if ($_.Exception.PSObject.Properties['Response'] -and $_.Exception.Response) { return $true }
         return $false
@@ -431,6 +431,7 @@ if (-not $SkipWeb) {
             Write-Host ("  " + "".PadRight(58, ' ')) -NoNewline
         }
         $webLog = Join-Path $HarnessDir 'out\demo-web.log'
+        $webErr = Join-Path $HarnessDir 'out\demo-web.err.log'
         $buildSeconds = 0
         if ($DevWeb) {
             $webStart = @{ FilePath = 'cmd'; ArgumentList = @('/c', 'npm run dev'); WorkingDirectory = $webDir; PassThru = $true }
@@ -455,11 +456,27 @@ if (-not $SkipWeb) {
         } else {
             $webStart.WindowStyle = 'Minimized'
             $webStart.RedirectStandardOutput = $webLog
+            $webStart.RedirectStandardError = $webErr
         }
         $null = Start-Process @webStart
-        $deadline = (Get-Date).AddSeconds(180)
-        while (-not (Test-Responding "http://localhost:$WebPort") -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
-        if (-not (Test-Responding "http://localhost:$WebPort")) { Write-Bad "did not come up"; throw "The web app did not start. See $webLog" }
+        # The standalone server prints "Ready" the moment its listener binds, which on this app is a
+        # minute or more before it can serve anything: the first request waits behind a CPU-bound boot
+        # that peaks near 2.7 GB. Measured at 71 s on an idle machine on 14 Sep 2026, and longer with
+        # the API and the scanner alongside it - which is what made the old 180 s deadline declare a
+        # web app dead that was in fact serving normally two minutes later.
+        $deadline = (Get-Date).AddSeconds(420)
+        # 127.0.0.1, not localhost: the server binds 0.0.0.0, which is IPv4 only, so a localhost probe
+        # spends part of every poll failing against ::1 first. The per-probe timeout is long on purpose
+        # - a 5 s one abandons the render mid-flight and the next poll stacks another render onto an
+        # already-saturated process, making the boot it is waiting for slower still.
+        $webProbe = "http://127.0.0.1:$WebPort"
+        while (-not (Test-Responding $webProbe -TimeoutSec 30) -and (Get-Date) -lt $deadline) { Start-Sleep -Seconds 5 }
+        if (-not (Test-Responding $webProbe -TimeoutSec 30)) {
+            Write-Bad "did not come up"
+            Get-Content $webLog -ErrorAction SilentlyContinue | Select-Object -Last 6 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkRed }
+            Get-Content $webErr -ErrorAction SilentlyContinue | Select-Object -Last 10 | ForEach-Object { Write-Host "        $_" -ForegroundColor DarkRed }
+            throw "The web app did not start. See $webLog and $webErr"
+        }
         if ($buildSeconds -gt 0) {
             Write-Ok ("built in {0:n0} s, ready in {1:n0} s" -f $buildSeconds, ((Get-Date) - $started).TotalSeconds)
         } else {
@@ -514,6 +531,7 @@ if ($ShowWindows) {
     Write-Host "    Their logs are being written to:" -ForegroundColor DarkGray
     Write-Host "      API      $apiLog" -ForegroundColor DarkGray
     Write-Host "      Web app  $(Join-Path $HarnessDir 'out\demo-web.log')" -ForegroundColor DarkGray
+    Write-Host "      Web err  $(Join-Path $HarnessDir 'out\demo-web.err.log')" -ForegroundColor DarkGray
     Write-Host "    Watch one live in another window:" -ForegroundColor DarkGray
     Write-Host "      Get-Content `"$apiLog`" -Tail 20 -Wait" -ForegroundColor DarkGray
     Write-Host "    Or start with -ShowWindows next time to have them scroll in their own windows." -ForegroundColor DarkGray
