@@ -11,6 +11,7 @@ import {
   HandCoins,
   Megaphone,
   ShieldCheck,
+  TrendingUp,
   UserCheck,
   Users,
 } from 'lucide-react';
@@ -102,6 +103,12 @@ const HR_ITEMS: NavCardItem[] = [
     description: 'Medical, police clearance, background and reference checks, across every offer.',
     href: '/hr/recruitment/pre-employment-checks',
     icon: ShieldCheck,
+  },
+  {
+    title: 'Analytics',
+    description: 'Time to fill, cost per hire, funnel, source effectiveness and recruiter load.',
+    href: '/hr/recruitment/analytics',
+    icon: TrendingUp,
   },
 ];
 

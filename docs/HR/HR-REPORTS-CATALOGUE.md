@@ -142,7 +142,8 @@ field-level pass found real register endpoints (incident, audit, environmental r
 fully-automated report (`SheMonthlyEnvironmentalReport`) — see the corrected §3.17.
 | Training analytics | `TrainingDashboardService` | `/hr/training/analytics` |
 | Training compliance | `TrainingDashboardService` | `/hr/training/compliance` |
-| Recruitment | `RecruitmentDashboardController` composes five services; `RecruitmentAnalyticsService` behind `GET analytics` | `/hr/recruitment/dashboard` |
+| Recruitment | `RecruitmentDashboardController` composes five services | `/hr/recruitment/dashboard` |
+| Recruitment analytics | `RecruitmentAnalyticsService` behind `GET analytics` | `/hr/recruitment/analytics` (built 2026-09-14; the endpoint had no consumer before) |
 | Succession | `SuccessionPlanController` `GET dashboard` | `/hr/succession/dashboard` |
 | Travel | `StaffTravelRequestsController` dashboard read | `/hr/travel/dashboard` |
 | Separation analytics | `SeparationsController` analytics reads | `/hr/separations/analytics` |

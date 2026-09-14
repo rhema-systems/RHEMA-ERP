@@ -1,8 +1,9 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Text.RegularExpressions;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -20,6 +21,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
     private readonly IJobHireRecordRepository       _hireRepository;
     private readonly IStaffRequisitionCostRepository _costRepository;
     private readonly IPositionVacancyRepository     _positionVacancyRepository;
+    private readonly ICurrencyService               _currencyService;
     private readonly ICurrentUserProvider           _currentUserProvider;
     private readonly ILogger<RecruitmentAnalyticsService> _logger;
 
@@ -49,6 +51,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
         IJobHireRecordRepository        hireRepository,
         IStaffRequisitionCostRepository costRepository,
         IPositionVacancyRepository      positionVacancyRepository,
+        ICurrencyService                currencyService,
         ICurrentUserProvider            currentUserProvider,
         ILogger<RecruitmentAnalyticsService> logger)
     {
@@ -58,6 +61,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
         _hireRepository            = hireRepository;
         _costRepository            = costRepository;
         _positionVacancyRepository = positionVacancyRepository;
+        _currencyService           = currencyService;
         _currentUserProvider       = currentUserProvider;
         _logger                    = logger;
     }
@@ -141,7 +145,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
         // ── Requisition costs recorded this year ──────────────────────────────
         var costs = await _costRepository.GetQueryable()
             .Where(c => c.TenantId == tenantId && c.RecordedDate.Year == y)
-            .Select(c => new { c.Category, c.Amount, c.ExchangeRate, c.Currency })
+            .Select(c => new { c.Category, c.Amount, c.ExchangeRate })
             .ToListAsync(cancellationToken);
 
         // ── Time-to-shortlist (vacancies whose shortlist completed this year) ─
@@ -291,6 +295,12 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
 
         var seatAges = openSeats.Select(d => (double)Math.Max(0, (today - d.Date).Days)).ToList();
 
+        // Every money figure below is Amount × ExchangeRate — i.e. already in the tenant's base
+        // currency. Labelling it with the first cost row's *transaction* currency, as this used to,
+        // put a "USD" code on a cedi total the moment one advert was invoiced abroad. The label has
+        // to come from the same place the conversion targeted.
+        var baseCurrency = await _currencyService.GetBaseCurrencyAsync(cancellationToken);
+
         // ── Recruiter load ────────────────────────────────────────────────────
         var hiresByRecruiter = hires
             .Where(h => h.RecruiterId.HasValue)
@@ -335,7 +345,7 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
         return new RecruitmentAnalyticsDto
         {
             Year     = y,
-            Currency = costs.Select(c => c.Currency).FirstOrDefault(c => !string.IsNullOrWhiteSpace(c)) ?? "GHS",
+            Currency = string.IsNullOrWhiteSpace(baseCurrency?.CurrencyCode) ? "GHS" : baseCurrency.CurrencyCode,
 
             OpenVacanciesCount = openVacancies.Count,
             ApplicationsYtd    = apps.Count,

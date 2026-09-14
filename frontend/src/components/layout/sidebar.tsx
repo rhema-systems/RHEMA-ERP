@@ -1494,6 +1494,14 @@ export const navigationItems: NavItem[] = [
                 icon: ShieldCheck,
                 permissions: ['HR.Recruitment.Read'],
               },
+              // Last because it is the only one that is not a step in the hire: it looks back at
+              // the whole year rather than moving a single candidate along.
+              {
+                title: 'Analytics',
+                href: '/hr/recruitment/analytics',
+                icon: TrendingUp,
+                permissions: ['HR.Recruitment.Read'],
+              },
             ],
           },
           {
