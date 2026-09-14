@@ -59,6 +59,18 @@ Core test build completes with zero errors, and the complete 75-class affected s
 SQL Server tests skipped because their explicit disposable-test connection was not supplied. No database, connection
 environment, preserved evidence, or activation flag was accessed.
 
+The broader no-environment Core run then identified a separate merge-induced archive relocation surface: 67 direct
+historical migration-source reads across 44 test files still addressed the compiled `Migrations` directory. All now
+read their exact retained source from `LegacyMigrationsArchive`; the sole-baseline discovery contract is unchanged.
+This closed 52 file-not-found failures. The only remaining integrated-only failures were two sync/async variants of a
+latest-master Inventory current-cost test whose retained `JournalEntry` fixture lacked the cutover-required
+`AccountingBookId`; the fixture now creates one tenant book and binds that immutable history row to it. The final broad
+run is 3,213 passed / 57 failed / 0 skipped (3,270 total). Exact latest master reproduces every one of those 57 names;
+it has 59 failures total, including two parent-only fixtures already corrected by the integration. The exact filter,
+comparison boundary, and residual names are retained in
+[`GL_MASTER_CORE_TEST_RESIDUAL_20260914.md`](GL_MASTER_CORE_TEST_RESIDUAL_20260914.md). No database, connection
+environment, preserved evidence, or activation flag was accessed.
+
 ## Authoritative inputs
 
 - `docs/Finance/GL_CLASSIFICATION_REVALUATION_REFACTOR_HANDOFF.md`

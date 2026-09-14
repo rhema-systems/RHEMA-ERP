@@ -8,7 +8,7 @@ public sealed class CivilEngineeringIpcEndorsementMigrationGuardTests
     public void Migration_adds_only_the_ipc_review_overlay_with_tenant_dms_and_immutable_sql_guards()
     {
         var root = FindRepositoryRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260820233000_AddCivilEngineeringIpcEndorsements.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260820233000_AddCivilEngineeringIpcEndorsements.cs"));
         Assert.Contains("CREATE TABLE ProjectCivilIpcEndorsements", sql, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE ProjectCivilIpcEndorsementRevisions", sql, StringComparison.Ordinal);
         Assert.Contains("IF OBJECT_ID(N'dbo.ProjectCivilIpcEndorsements', N'U') IS NULL", sql, StringComparison.Ordinal);

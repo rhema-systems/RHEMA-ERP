@@ -9,7 +9,7 @@ public sealed class CivilEngineeringPermittingHodDecisionMigrationGuardTests
     public void Migration_enforces_hod_handoff_workflow_projection_and_append_only_decision_controls()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821153000_AddCivilEngineeringPermittingHodDecisions.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821153000_AddCivilEngineeringPermittingHodDecisions.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_Lineage")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviewDecisions_AppendOnly")
