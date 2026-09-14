@@ -2743,3 +2743,30 @@ converted contracts pass 58/58 with one opt-in SQL Server skip, archive-reader c
 Payroll provisioning slices pass 4/4 and 3/3. Reset/FinalClone safety and evidence reruns are required from the clean
 commit because repository cleanliness is a pre-SQL refusal gate. No database, process connection variable, external
 evidence directory, or backup was accessed, and no operational retry is authorized.
+
+### Disposable reset attempt 08 / transaction-strategy handoff
+
+- Operational base: exact approved `d1565ebc615879ee728f3004c0a5911410dbb5af`, tree
+  `a668571f87c4dd75a501362281cb8b5aba294966`; executed once.
+- Terminal outcome: `FAILED_NO_AUTOMATIC_RETRY`; durable phase `MIGRATIONS_APPLIED`; failed operation
+  `SEED_AND_INVARIANTS`. Source fingerprint
+  `1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`; final history is the exact one-row baseline
+  with zero orphans. C6/C7/C8 remained false. No seed/invariant/DBCC completion was claimed.
+- Preserved recovery media: `RhemaERP_DISPOSABLE_RESET_COPYONLY_8adbdc98e0ac434eb74fb44bdbc32b04.bak`, media
+  `8adbdc98e0ac434eb74fb44bdbc32b04`, 37,806,080 bytes, verified/current SHA-256
+  `29719F61D782865B0D35F55A09F5F5531C1A920AB1C76E3EBC1A16149CE44B18`, path SHA-256
+  `C2244CF3C064D204A405C19F46DC886510A821231C3C53F7A5C82FA5977EB431`. Package validation passed; manifest-file
+  SHA-256 is `6917B90D07AB40A93025181DCA60BF484A8E56F3FB512802D96704660164F684`.
+- Root cause: Finance provisioning invoked `FinanceSegmentDimensionManifestSeeder`, whose user transaction was
+  outside `SqlServerRetryingExecutionStrategy`. SQL Server retry policy therefore refused the transaction before the
+  intended Finance provisioning unit could proceed.
+- Candidate correction: `0d580a1d12e405c1124ad3f688ae38aff05a79cb`, tree
+  `676e778fb4b9d28b4d5ecc431f1f69100f3c92d1`. Service-owned work now runs as one execution-strategy transaction;
+  caller-owned EF/ambient transactions remain uncommitted and unnested. Failed retriable attempts restore exact
+  caller tracker state before retry, preserving stable-ID idempotency after writes.
+- Offline gates: new transaction suite 6/6; combined provisioning, seed dependency graph, AccountingBook, and
+  Payroll slice 19/19; Data/API/ordinary API-test Release builds zero errors. Reset/FinalClone clean-tree safety and
+  evidence suites remain the final handoff gates. No database, connection environment, external evidence, or backup
+  was accessed during correction.
+- Operational disposition: no retry is authorized. The baseline/partially seeded source remains eligible only for a
+  separately approved disposable reset that repeats the full fingerprint, backup, identity, and clean-tree controls.

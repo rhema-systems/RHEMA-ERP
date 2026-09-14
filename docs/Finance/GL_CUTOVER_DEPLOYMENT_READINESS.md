@@ -538,3 +538,37 @@ SQL contracts because EF can no longer migrate to deliberately archived IDs. Ord
 dependency graph, and the 3/3 Payroll Finance-provisioning gates pass offline. No database, connection environment,
 preserved evidence package, or backup was accessed. A further disposable reset remains unauthorized pending Sol High
 review of the final clean candidate and a new explicit operational authorization.
+
+### Disposable reset attempt 08 and retry-safe Finance provisioning
+
+The separately authorized attempt 08 executed exact approved commit
+`d1565ebc615879ee728f3004c0a5911410dbb5af`, tree
+`a668571f87c4dd75a501362281cb8b5aba294966`, exactly once. It completed through durable phase
+`MIGRATIONS_APPLIED`, with source fingerprint
+`1|20260913162402_DisposableDevelopmentCurrentModelBaseline|0|0|0`, repository/final migration count one, exact
+latest baseline, and zero orphan migrations. It then stopped fail-closed during seed pass 1 at
+`SEED_AND_INVARIANTS`: `FinanceSegmentDimensionManifestSeeder` began a user transaction outside the configured
+`SqlServerRetryingExecutionStrategy` while serving Finance provisioning for Procurement supplier onboarding. No
+seed/invariant/DBCC success was claimed and no automatic retry, restore, drop, cleanup, or flag transition followed.
+
+The attempt-owned COPY_ONLY backup remains preserved outside the repository as
+`RhemaERP_DISPOSABLE_RESET_COPYONLY_8adbdc98e0ac434eb74fb44bdbc32b04.bak`: 37,806,080 bytes, media ID
+`8adbdc98e0ac434eb74fb44bdbc32b04`, verified/current SHA-256
+`29719F61D782865B0D35F55A09F5F5531C1A920AB1C76E3EBC1A16149CE44B18`, and bound path SHA-256
+`C2244CF3C064D204A405C19F46DC886510A821231C3C53F7A5C82FA5977EB431`. The DisposableReset package validator
+passed and wrote a manifest whose file SHA-256 is
+`6917B90D07AB40A93025181DCA60BF484A8E56F3FB512802D96704660164F684`. All C6/C7/C8 flags remained false.
+
+Correction `0d580a1d12e405c1124ad3f688ae38aff05a79cb` (tree
+`676e778fb4b9d28b4d5ecc431f1f69100f3c92d1`) moves the complete service-owned provisioning unit—manifest and
+account reads/writes, `SaveChanges`, and commit—inside `CreateExecutionStrategy().ExecuteAsync`. An existing EF or
+ambient caller transaction remains caller-owned: the service neither nests nor commits it. Failed owned attempts
+restore the caller's exact tracked state before retry, preventing duplicate stable IDs after a post-write transient;
+the operation timestamp is stable across exact retries. Six focused relational tests cover SQL Server strategy
+selection without connecting, owned retry/idempotency, post-write transient recovery, caller rollback, logical
+failure rollback, and transaction-neutral leaf boundaries. The combined provisioning/seed-DI/Payroll slice passes
+19/19, and Data, API, and ordinary API-test builds pass with zero errors. No migration, schema, Finance ownership,
+feature flag, database, connection environment, or preserved evidence was changed or accessed by this correction.
+A future reset can safely treat the one-baseline partially seeded database as a disposable source only through a
+new, independently approved harness run that re-captures and rechecks its exact history/fingerprint, verifies a new
+attempt-owned backup, and performs the normal drop/recreate flow. No further runtime attempt is presently authorized.
