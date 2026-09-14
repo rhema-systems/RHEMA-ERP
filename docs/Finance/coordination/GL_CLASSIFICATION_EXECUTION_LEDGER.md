@@ -13,7 +13,7 @@ operator authorization gates.
 | Field | Value |
 |---|---|
 | Phase | Latest-master semantic integration |
-| Status | Candidate reconciles reviewed cutover `eeaf2c71` with latest master `efdfbb7b`; independent Sol High review required; feature activation remains gated |
+| Status | Sol High APPROVED exact merged candidate `01b5cd28760fc0d9b605fdb2f0c63461554f33b8`, tree `8279da3030b435639acd77333ce1a0f1b9982fca`, with no P1/P2; deployment and feature activation remain gated |
 | Implementing task | `rehearsal_harness` |
 | Integration parents | latest master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`; reviewed cutover `eeaf2c71abc801a5bf661ff7e817e847c624d2c4` |
 | Branch | `codex/finance-gl-cutover-master-integration` |
@@ -23,14 +23,24 @@ operator authorization gates.
 | Coordinator | Current primary Finance task |
 | Recovery heartbeat | `finance-gl-cutover-coordinator` — deleted after code-cutover completion |
 | Model routing | Finance implementer/substantive correction: GPT-5.6 Sol Medium; independent accounting/schema/security/concurrency review: GPT-5.6 Sol High; later owner cutovers: GPT-5.6 Terra Medium |
-| Review status | Semantic merge candidate is under offline gate reconciliation; independent Sol High approval is required; deployment and C6/C7/C8 activation remain `NO-GO` |
-| Connectivity state | No database, environment connection, preserved evidence, or backup was accessed during latest-master integration; attempt-11 runtime facts remain historical and unchanged |
+| Review status | Independent GPT-5.6 Sol High review APPROVED exact `01b5cd28760fc0d9b605fdb2f0c63461554f33b8` / `8279da3030b435639acd77333ce1a0f1b9982fca` with no P1 or P2 findings; the frontend production build remains inconclusive, so deployment and C6/C7/C8 activation remain `NO-GO` |
+| Connectivity state | No database, environment connection, preserved evidence, backup, feature flag, remote, or primary worktree was accessed or changed during latest-master integration, corrections, review, or this reconciliation; attempt-11 runtime facts remain historical and unchanged |
 | Applied-baseline state | Attempt 11 proved the older 1,557-table / 459-trigger baseline body under the same migration ID; it does not prove the merged 1,629-table / 493-trigger baseline body |
 
 The merged baseline now represents the latest-master model while retaining 596 exact archived migration identities,
 386 current-model plus 92 active non-model triggers, the separate 15-trigger C5-C8 set (493 unique total), 108
 chronological patches, five functions, and one view. The exact reviewed D3 snapshot blob remains in the archive and
 only the regenerated merged snapshot is compiled. C6/C7/C8 remain false.
+
+The semantic integration is independently approved. Merge commit
+`93a1e5a4335f6a1782c3f40de26a7ac434ab42d7` has the verified exact parents latest master
+`efdfbb7b5105b649b0cfcf2736eff0f7a15f7954` and reviewed cutover
+`eeaf2c71abc801a5bf661ff7e817e847c624d2c4`. The final correction chain ends at exact clean commit
+`01b5cd28760fc0d9b605fdb2f0c63461554f33b8`, tree
+`8279da3030b435639acd77333ce1a0f1b9982fca`; GPT-5.6 Sol High returned `APPROVED` with no P1/P2 findings. The
+repository discovers one compiled baseline, `20260913162402_DisposableDevelopmentCurrentModelBaseline`, for the
+merged 1,629-table model. Its retained authority inventory is the exact 596 archived identities, 493 triggers and
+108 chronological patches, five functions, and one view described above.
 
 The unchanged migration identity is not evidence that the local attempt-11 database contains the regenerated merged
 baseline body. EF no-pending-model compares the repository model and compiled snapshot; it cannot inspect which SQL
@@ -70,6 +80,21 @@ it has 59 failures total, including two parent-only fixtures already corrected b
 comparison boundary, and residual names are retained in
 [`GL_MASTER_CORE_TEST_RESIDUAL_20260914.md`](GL_MASTER_CORE_TEST_RESIDUAL_20260914.md). No database, connection
 environment, preserved evidence, or activation flag was accessed.
+
+Sol High review accepted the Core reconciliation without P1/P2. All 67 direct historical source readers in the 44
+affected files now use the exact archive path; the final ordinary Core Release build has zero errors and warnings.
+The final broad result remains 3,213 passed / 57 failed / 0 skipped. Comparison against exact latest master leaves
+zero merged-only failures and zero first-message drift: every residual failure is exact parent debt, while the two
+master-only failures are fixtures already corrected by the integration. The frontend production `next build` did
+not yield a conclusive PASS during integration verification. It is not represented as green and remains a deployment
+gate even though the targeted frontend, backend, baseline, governance, reset-safety, and evidence suites passed.
+
+Next operational gate: obtain separate authorization for one guarded disposable reset of local `RhemaERP` from
+exact approved commit `01b5cd28760fc0d9b605fdb2f0c63461554f33b8`, tree
+`8279da3030b435639acd77333ce1a0f1b9982fca`, with C6/C7/C8 explicitly false. The reset must independently prove the
+merged 1,629-table / 493-trigger baseline, seed-pass identity, Finance invariants, DBCC, and its bound evidence
+package. Only after that PASS and a separate smoke gate may activation proceed sequentially; this approval neither
+authorizes the reset nor changes any feature flag.
 
 ## Authoritative inputs
 

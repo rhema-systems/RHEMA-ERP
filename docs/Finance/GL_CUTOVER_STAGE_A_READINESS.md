@@ -1,14 +1,31 @@
 # GL cutover Stage A readiness and producer inventory
 
-Status: Stage A.1 and attempt-11 runtime results remain historical. The reviewed cutover is now semantically
-integrated with exact latest-master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954` as an offline review candidate.
-Its regenerated single baseline represents the merged model and retains 596 archived migration identities,
-493 active triggers, five functions, and one view. This integration did not access a database and does not authorize
-production/final cutover or C6/C7/C8 activation; independent review and separate operator gates remain mandatory.
+Status: Stage A.1 and attempt-11 runtime results remain historical. The reviewed cutover is semantically integrated
+with exact latest-master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`; merge commit
+`93a1e5a4335f6a1782c3f40de26a7ac434ab42d7` has exact parents latest master `efdfbb7b5105b649b0cfcf2736eff0f7a15f7954`
+and reviewed cutover `eeaf2c71abc801a5bf661ff7e817e847c624d2c4`. Independent GPT-5.6 Sol High review APPROVED the final clean
+candidate `01b5cd28760fc0d9b605fdb2f0c63461554f33b8`, tree
+`8279da3030b435639acd77333ce1a0f1b9982fca`, with no P1 or P2 findings. Its regenerated single baseline represents
+the merged 1,629-table model and retains 596 archived migration identities, 493 active triggers, five functions, and
+one view. This integration and review did not access a database and do not authorize production/final cutover or
+C6/C7/C8 activation; separate operator gates remain mandatory.
 The local database proven by attempt 11 still contains the older 1,557-table / 459-trigger baseline body under the
 same migration ID. EF no-pending-model cannot detect that applied-body mismatch, so a newly authorized disposable
-reset from the independently approved merged candidate must prove the merged 1,629-table / 493-trigger model before
-staged activation.
+reset from the exact approved merged candidate must prove the merged 1,629-table / 493-trigger model with C6/C7/C8
+still false. A successful reset must be followed by smoke verification before any separately gated, sequential
+feature activation.
+
+The merged baseline/governance audit is exact: one compiled baseline
+`20260913162402_DisposableDevelopmentCurrentModelBaseline`, 596 byte-preserved archived migration identities,
+386 current-model triggers, 92 active non-model triggers, the separate 15-trigger C5-C8 authority set (493 unique
+triggers total), 108 chronological trigger patches, five functions, and one view. The exact D3 snapshot remains in
+the archive and only the regenerated merged snapshot is compiled. The final Core correction moves all 67 direct
+historical source reads across 44 test files to the exact archive location and repairs the two merged-only Inventory
+fixture cases introduced by the cutover-required `AccountingBookId`. The broad non-environment Core result is
+3,213 passed / 57 failed / 0 skipped; exact latest master reproduces all 57 residual names and messages, leaving zero
+merge-only residual failures. Those 57 are parent debt, not a cutover regression. The frontend production build did
+not reach a conclusive PASS and therefore remains an explicit deployment gate despite the backend, baseline,
+governance, focused frontend, and safety/evidence results.
 
 Stage A.1 exact base: `7bc24b22c0624aec9acae580ba8049d5f5a83425`
 
