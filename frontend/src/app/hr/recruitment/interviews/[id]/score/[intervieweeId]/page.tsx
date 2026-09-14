@@ -142,7 +142,10 @@ export default function InterviewScorecardPage() {
     setHydrated(true);
   }, [hydrated, questions, myCard, submitted.data, submitted.isLoading, draft.data, draft.isLoading]);
 
-  const scored = questions.filter((q) => entries[q.questionDetailId]?.rawScore !== '');
+  // A question the seeding effect has not reached yet has no entry at all, so read the mark through
+  // a default: entries[id]?.rawScore alone yields undefined, which is not the empty string, and every
+  // unscored question would then fall into scored for the reduce below to dereference.
+  const scored = questions.filter((q) => (entries[q.questionDetailId]?.rawScore ?? '') !== '');
   const runningTotals = scored.reduce(
     (acc, q) => {
       const raw = Number(entries[q.questionDetailId].rawScore);
@@ -165,7 +168,7 @@ export default function InterviewScorecardPage() {
     .map((plan) => {
       const required = Math.min(plan.requiredQuestionCount, plan.selectedQuestions.length);
       const answered = plan.selectedQuestions.filter(
-        (q) => entries[q.questionDetailId]?.rawScore !== '' && entries[q.questionDetailId] !== undefined,
+        (q) => (entries[q.questionDetailId]?.rawScore ?? '') !== '',
       ).length;
       return { name: plan.questionTypeName, required, answered };
     })
