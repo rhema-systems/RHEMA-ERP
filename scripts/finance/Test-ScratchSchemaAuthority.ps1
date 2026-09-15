@@ -18,8 +18,30 @@ function Assert-DeriverRefusesCursorMutation([string]$name, [string]$helperText)
     $mutatedOutput = Join-Path $temporaryDirectory "$name.json"
     $mutatedLog = Join-Path $temporaryDirectory "$name.log"
     [IO.File]::WriteAllText($mutatedHelper, $helperText, [Text.UTF8Encoding]::new($false))
-    & dotnet run --project $project -c Release -- $mutatedHelper $financeAuthority $baseline $manifest $mutatedOutput *> $mutatedLog
+    & dotnet run --project $project -c Release --no-build -- $mutatedHelper $financeAuthority $baseline $manifest $mutatedOutput *> $mutatedLog
     if ($LASTEXITCODE -eq 0) { throw "Authority deriver accepted cursor mutation: $name." }
+}
+
+function Replace-ExactOnce([string]$text, [string]$old, [string]$new) {
+    $first = $text.IndexOf($old, [StringComparison]::Ordinal)
+    if ($first -lt 0 -or $text.IndexOf($old, $first + $old.Length, [StringComparison]::Ordinal) -ge 0) {
+        throw "Expected exactly one source occurrence for mutation: $old"
+    }
+    return $text.Substring(0, $first) + $new + $text.Substring($first + $old.Length)
+}
+
+function Replace-ExactOccurrence([string]$text, [string]$old, [string]$new, [int]$ordinal, [int]$expectedCount) {
+    $indexes = @()
+    $searchAt = 0
+    while (($found = $text.IndexOf($old, $searchAt, [StringComparison]::Ordinal)) -ge 0) {
+        $indexes += $found
+        $searchAt = $found + $old.Length
+    }
+    if ($indexes.Count -ne $expectedCount -or $ordinal -lt 0 -or $ordinal -ge $indexes.Count) {
+        throw "Expected $expectedCount source occurrences and ordinal $ordinal for mutation: $old"
+    }
+    $index = $indexes[$ordinal]
+    return $text.Substring(0, $index) + $new + $text.Substring($index + $old.Length)
 }
 
 try {
@@ -77,10 +99,47 @@ try {
     Assert-DeriverRefusesCursorMutation 'cursor-target-duplicated' ($helperText.Replace($cursorList,
         "N'TR_WarehouseQuantities_PhysicalCountFreeze',N'TR_InventoryItems_PhysicalCountFreeze',N'TR_InventoryItems_PhysicalCountFreeze'", [StringComparison]::Ordinal))
 
+    $mutation = Replace-ExactOnce $helperText 'IF (SELECT COUNT(*) FROM sys.triggers WHERE parent_class=1 AND name IN' 'IF (SELECT COUNT(*) FROM sys.triggers WHERE parent_class=0 AND name IN'
+    Assert-DeriverRefusesCursorMutation 'cursor-validation-context' $mutation
+    $mutation = Replace-ExactOnce $helperText 'DECLARE freezeGuards CURSOR LOCAL FAST_FORWARD FOR SELECT name FROM sys.triggers' 'DECLARE freezeGuards CURSOR LOCAL FAST_FORWARD FOR SELECT name FROM sys.objects'
+    Assert-DeriverRefusesCursorMutation 'cursor-select-source' $mutation
+    $mutation = Replace-ExactOnce $helperText 'DECLARE freezeGuards CURSOR LOCAL FAST_FORWARD FOR SELECT name FROM sys.triggers' 'DECLARE freezeGuards CURSOR LOCAL FAST_FORWARD FOR SELECT object_id FROM sys.triggers'
+    Assert-DeriverRefusesCursorMutation 'cursor-select-projection' $mutation
+    $mutation = Replace-ExactOccurrence $helperText 'FETCH NEXT FROM freezeGuards INTO @freezeName;' 'FETCH NEXT FROM freezeGuards INTO @life;' 0 2
+    Assert-DeriverRefusesCursorMutation 'cursor-initial-fetch-destination' $mutation
+    $mutation = Replace-ExactOccurrence $helperText 'FETCH NEXT FROM freezeGuards INTO @freezeName;' 'FETCH NEXT FROM freezeGuards INTO @life;' 1 2
+    Assert-DeriverRefusesCursorMutation 'cursor-loop-fetch-destination' $mutation
+    $mutation = Replace-ExactOnce $helperText "FETCH NEXT FROM freezeGuards INTO @freezeName;`r`n            WHILE @@FETCH_STATUS = 0" "FETCH NEXT FROM freezeGuards INTO @freezeName;`r`n            WHILE @@FETCH_STATUS <> 0"
+    Assert-DeriverRefusesCursorMutation 'cursor-loop-predicate' $mutation
+    $mutation = Replace-ExactOnce $helperText "SET @freeze = OBJECT_DEFINITION(OBJECT_ID(N'dbo.'+@freezeName));" "SET @freeze = OBJECT_DEFINITION(OBJECT_ID(N'dbo.'+@life));"
+    Assert-DeriverRefusesCursorMutation 'cursor-object-definition-variable' $mutation
+    $mutation = Replace-ExactOnce $helperText "SET @freeze = REPLACE(@freeze, N'N''InProgress'',N''RecountRequired'''," "SET @life = REPLACE(@freeze, N'N''InProgress'',N''RecountRequired''',"
+    Assert-DeriverRefusesCursorMutation 'cursor-transform-destination' $mutation
+    $mutation = Replace-ExactOnce $helperText "SET @freeze = STUFF(@freeze, 1, CHARINDEX(N'TRIGGER', UPPER(@freeze)) - 1, N'CREATE OR ALTER ');" "SET @freeze = STUFF(@life, 1, CHARINDEX(N'TRIGGER', UPPER(@freeze)) - 1, N'CREATE OR ALTER ');"
+    Assert-DeriverRefusesCursorMutation 'cursor-promotion-source' $mutation
+    $mutation = Replace-ExactOnce $helperText "EXEC sys.sp_executesql @freeze;`r`n                FETCH NEXT FROM freezeGuards INTO @freezeName;" "EXEC sys.sp_executesql @life;`r`n                FETCH NEXT FROM freezeGuards INTO @freezeName;"
+    Assert-DeriverRefusesCursorMutation 'cursor-exec-variable' $mutation
+    $mutation = Replace-ExactOccurrence $helperText 'FETCH NEXT FROM freezeGuards INTO @freezeName;' '-- removed loop progression' 1 2
+    Assert-DeriverRefusesCursorMutation 'cursor-loop-progression-missing' $mutation
+
+    $badCursorList = $cursorList.Replace('TR_WarehouseQuantities_PhysicalCountFreeze',
+        'TR_PhysicalCounts_ControlledLifecycle', [StringComparison]::Ordinal)
+    $commentSpoof = $helperText.Replace($cursorList, $badCursorList, [StringComparison]::Ordinal).Replace(
+        'DECLARE @freezeName nvarchar(128), @freeze nvarchar(max);',
+        "-- name IN ($cursorList)`r`n            -- name IN ($cursorList)`r`n            DECLARE @freezeName nvarchar(128), @freeze nvarchar(max);",
+        [StringComparison]::Ordinal)
+    Assert-DeriverRefusesCursorMutation 'cursor-comment-list-spoof' $commentSpoof
+    $dummySpoof = $helperText.Replace($cursorList, $badCursorList, [StringComparison]::Ordinal).Replace(
+        'DECLARE @freezeName nvarchar(128), @freeze nvarchar(max);',
+        "DECLARE @freezeName nvarchar(128), @freeze nvarchar(max);`r`n            IF 1=0 SELECT name FROM sys.triggers WHERE name IN ($cursorList);`r`n            IF 1=0 SELECT name FROM sys.triggers WHERE name IN ($cursorList);",
+        [StringComparison]::Ordinal)
+    Assert-DeriverRefusesCursorMutation 'cursor-dummy-list-spoof' $dummySpoof
+
     Write-Host 'PASS: scratch authority deterministically derives 493 triggers and 835 checks.'
     Write-Host 'PASS: mixed static/dynamic PhysicalCount patch cannot apply freeze-cursor text cross-target.'
     Write-Host 'PASS: the rejected legacy cross-target hash cannot be substituted into committed authority.'
     Write-Host 'PASS: changed, added, removed, reordered, duplicated, or disagreeing PhysicalCount cursor targets are refused.'
+    Write-Host 'PASS: executable validation/cursor/fetch/loop/definition/transform/exec flow is bound and comment/dummy spoofing is refused.'
 }
 finally {
     if (Test-Path -LiteralPath $temporaryDirectory) {

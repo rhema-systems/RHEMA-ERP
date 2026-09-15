@@ -477,7 +477,34 @@ static string DecodeCSharpString(string value) => JsonSerializer.Deserialize<str
 
 static string[] GetExactPhysicalCountFreezeCursorTargets(string sql)
 {
-    var listMatches = Regex.Matches(sql,
+    var parser = new TSql160Parser(true);
+    var fragment = parser.Parse(new StringReader(sql), out var errors);
+    if (errors.Count != 0)
+        throw new InvalidOperationException(
+            $"Physical-count patch parse failed: {errors[0].Number}:{errors[0].Line}:{errors[0].Column}.");
+
+    var executableSql = string.Join(' ', fragment.ScriptTokenStream
+        .Where(token => token.TokenType is not TSqlTokenType.WhiteSpace and
+                        not TSqlTokenType.SingleLineComment and
+                        not TSqlTokenType.MultilineComment)
+        .Select(token => token.Text));
+    var cursorBlocks = Regex.Matches(executableSql,
+        @"(?is)\bDECLARE\s+@freezeName\b.*?\bDEALLOCATE\s+freezeGuards\s*;");
+    if (cursorBlocks.Count != 1)
+        throw new InvalidOperationException(
+            $"Physical-count patch must contain exactly one executable freeze cursor block; found {cursorBlocks.Count}.");
+    var cursorBlock = cursorBlocks[0].Value;
+    // This hash covers the executable token stream from DECLARE @freezeName through
+    // DEALLOCATE. Comments and formatting are excluded, while the validation query,
+    // cursor source, fetch/loop progression and definition transformation/EXEC flow
+    // are all bound byte-for-byte.
+    const string reviewedCursorBlockSha256 = "3F1DC4FC90BA53AC81D9C9738FF301A5ED3A228BE44BE2BB7262E722D93FDA7F";
+    var actualCursorBlockSha256 = Hash(cursorBlock);
+    if (actualCursorBlockSha256 != reviewedCursorBlockSha256)
+        throw new InvalidOperationException(
+            $"Physical-count freeze cursor executable structure drifted ({actualCursorBlockSha256}).");
+
+    var listMatches = Regex.Matches(cursorBlock,
         @"(?is)\bname\s+IN\s*\((?<items>\s*N'TR_[A-Za-z0-9_]+'(?:\s*,\s*N'TR_[A-Za-z0-9_]+')*\s*)\)");
     if (listMatches.Count != 2)
         throw new InvalidOperationException(
