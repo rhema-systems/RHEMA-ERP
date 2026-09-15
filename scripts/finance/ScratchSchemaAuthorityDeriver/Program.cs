@@ -56,6 +56,9 @@ foreach (Match block in patchBlocks)
     var before = targets.ToDictionary(name => name, name => state[name], StringComparer.Ordinal);
     var hasDynamicDefinitionTarget = Regex.IsMatch(sql,
         @"(?i)OBJECT_DEFINITION\s*\(\s*(?:OBJECT_ID\s*\(\s*N'dbo\.'\s*\+\s*)?@");
+    var physicalCountCursorTargets = patchSequence == 33
+        ? GetExactPhysicalCountFreezeCursorTargets(sql)
+        : null;
     if (patchSequence == 20)
         purchaseOrderPreAlignmentSha256 = Hash(CanonicalTrigger(state["TR_PurchaseOrders_ApprovedSourceProtected"]));
     HashSet<string> committed;
@@ -95,9 +98,19 @@ foreach (Match block in patchBlocks)
                 "TR_StockMovements_PhysicalCountFreeze",
                 "TR_WarehouseQuantities_PhysicalCountFreeze"
             };
+            var expectedCursorOrder = new[]
+            {
+                "TR_WarehouseQuantities_PhysicalCountFreeze",
+                "TR_InventoryItems_PhysicalCountFreeze",
+                "TR_StockMovements_PhysicalCountFreeze"
+            };
             if (!committed.OrderBy(item => item, StringComparer.Ordinal).SequenceEqual(expectedStaticTargets,
                     StringComparer.Ordinal) ||
                 !targets.Except(committed, StringComparer.Ordinal).OrderBy(item => item, StringComparer.Ordinal)
+                    .SequenceEqual(expectedDynamicTargets, StringComparer.Ordinal) ||
+                physicalCountCursorTargets is null ||
+                !physicalCountCursorTargets.SequenceEqual(expectedCursorOrder, StringComparer.Ordinal) ||
+                !physicalCountCursorTargets.OrderBy(item => item, StringComparer.Ordinal)
                     .SequenceEqual(expectedDynamicTargets, StringComparer.Ordinal))
                 throw new InvalidOperationException(
                     "Physical-count review patch static/dynamic target classification drifted.");
@@ -461,6 +474,33 @@ Console.WriteLine($"PASS: derived {state.Count} exact final trigger hashes and {
 
 static string DecodeCSharpString(string value) => JsonSerializer.Deserialize<string>('"' + value + '"')
     ?? throw new InvalidOperationException("C# string literal decoded to null.");
+
+static string[] GetExactPhysicalCountFreezeCursorTargets(string sql)
+{
+    var listMatches = Regex.Matches(sql,
+        @"(?is)\bname\s+IN\s*\((?<items>\s*N'TR_[A-Za-z0-9_]+'(?:\s*,\s*N'TR_[A-Za-z0-9_]+')*\s*)\)");
+    if (listMatches.Count != 2)
+        throw new InvalidOperationException(
+            $"Physical-count freeze cursor must contain exactly two closed name IN lists; found {listMatches.Count}.");
+
+    var parsedLists = listMatches.Cast<Match>().Select(match =>
+    {
+        var items = match.Groups["items"].Value;
+        var tokenMatches = Regex.Matches(items, @"N'(?<name>TR_[A-Za-z0-9_]+)'");
+        var names = tokenMatches.Cast<Match>().Select(item => item.Groups["name"].Value).ToArray();
+        var compact = Regex.Replace(items, @"\s+", string.Empty, RegexOptions.CultureInvariant);
+        var reconstructed = string.Join(',', names.Select(name => $"N'{name}'"));
+        if (names.Length == 0 || compact != reconstructed ||
+            names.Distinct(StringComparer.Ordinal).Count() != names.Length)
+            throw new InvalidOperationException(
+                "Physical-count freeze cursor target list is malformed or contains duplicate names.");
+        return names;
+    }).ToArray();
+    if (!parsedLists[0].SequenceEqual(parsedLists[1], StringComparer.Ordinal))
+        throw new InvalidOperationException(
+            "Physical-count freeze validation and cursor target lists do not agree exactly.");
+    return parsedLists[0];
+}
 
 static string RemoveOuter(string value)
 {

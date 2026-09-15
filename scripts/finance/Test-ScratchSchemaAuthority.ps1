@@ -13,6 +13,15 @@ $manifest = Join-Path $repositoryRoot 'src\ErpSystem.Data\Migrations\ArchivedGov
 $committedAuthority = Join-Path $PSScriptRoot 'sql\gl-scratch-expected-schema-authority.json'
 $temporaryDirectory = Join-Path ([IO.Path]::GetTempPath()) ('rhema-scratch-authority-test-' + [guid]::NewGuid().ToString('N'))
 
+function Assert-DeriverRefusesCursorMutation([string]$name, [string]$helperText) {
+    $mutatedHelper = Join-Path $temporaryDirectory "$name.cs"
+    $mutatedOutput = Join-Path $temporaryDirectory "$name.json"
+    $mutatedLog = Join-Path $temporaryDirectory "$name.log"
+    [IO.File]::WriteAllText($mutatedHelper, $helperText, [Text.UTF8Encoding]::new($false))
+    & dotnet run --project $project -c Release -- $mutatedHelper $financeAuthority $baseline $manifest $mutatedOutput *> $mutatedLog
+    if ($LASTEXITCODE -eq 0) { throw "Authority deriver accepted cursor mutation: $name." }
+}
+
 try {
     [void][IO.Directory]::CreateDirectory($temporaryDirectory)
     $actualAuthority = Join-Path $temporaryDirectory 'authority.json'
@@ -49,9 +58,29 @@ try {
         throw 'Authority tamper fixture did not change the reviewed PhysicalCounts hash.'
     }
 
+    $helperText = Get-Content -Raw -LiteralPath $helper
+    $cursorList = "N'TR_WarehouseQuantities_PhysicalCountFreeze',N'TR_InventoryItems_PhysicalCountFreeze',N'TR_StockMovements_PhysicalCountFreeze'"
+    $cursorListCount = ([regex]::Matches($helperText, [regex]::Escape($cursorList))).Count
+    if ($cursorListCount -ne 2) { throw "Expected two exact reviewed PhysicalCount cursor lists, found $cursorListCount." }
+
+    $firstCursorIndex = $helperText.IndexOf($cursorList, [StringComparison]::Ordinal)
+    $oneListChanged = $helperText.Substring(0, $firstCursorIndex) +
+        $cursorList.Replace('TR_WarehouseQuantities_PhysicalCountFreeze', 'TR_PhysicalCounts_ControlledLifecycle') +
+        $helperText.Substring($firstCursorIndex + $cursorList.Length)
+    Assert-DeriverRefusesCursorMutation 'cursor-lists-disagree' $oneListChanged
+    Assert-DeriverRefusesCursorMutation 'cursor-target-added' ($helperText.Replace($cursorList,
+        $cursorList + ",N'TR_PhysicalCounts_ControlledLifecycle'", [StringComparison]::Ordinal))
+    Assert-DeriverRefusesCursorMutation 'cursor-target-removed' ($helperText.Replace($cursorList,
+        "N'TR_WarehouseQuantities_PhysicalCountFreeze',N'TR_InventoryItems_PhysicalCountFreeze'", [StringComparison]::Ordinal))
+    Assert-DeriverRefusesCursorMutation 'cursor-target-reordered' ($helperText.Replace($cursorList,
+        "N'TR_InventoryItems_PhysicalCountFreeze',N'TR_WarehouseQuantities_PhysicalCountFreeze',N'TR_StockMovements_PhysicalCountFreeze'", [StringComparison]::Ordinal))
+    Assert-DeriverRefusesCursorMutation 'cursor-target-duplicated' ($helperText.Replace($cursorList,
+        "N'TR_WarehouseQuantities_PhysicalCountFreeze',N'TR_InventoryItems_PhysicalCountFreeze',N'TR_InventoryItems_PhysicalCountFreeze'", [StringComparison]::Ordinal))
+
     Write-Host 'PASS: scratch authority deterministically derives 493 triggers and 835 checks.'
     Write-Host 'PASS: mixed static/dynamic PhysicalCount patch cannot apply freeze-cursor text cross-target.'
     Write-Host 'PASS: the rejected legacy cross-target hash cannot be substituted into committed authority.'
+    Write-Host 'PASS: changed, added, removed, reordered, duplicated, or disagreeing PhysicalCount cursor targets are refused.'
 }
 finally {
     if (Test-Path -LiteralPath $temporaryDirectory) {
