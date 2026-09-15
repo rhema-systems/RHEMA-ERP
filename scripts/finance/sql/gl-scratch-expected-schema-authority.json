@@ -13,7 +13,7 @@
     "blanketNoOpAllowed": false,
     "supportedRouteClosedSubstantiveStuffCount": 2,
     "commercialCapacityClosedSubstantiveStuffCount": 2,
-    "reviewedAlreadyFinalPatchCount": 1
+    "reviewedAlreadyFinalPatchCount": 4
   },
   "purchaseOrderSupportedRouteAlignment": {
     "target": "TR_PurchaseOrders_ApprovedSourceProtected",

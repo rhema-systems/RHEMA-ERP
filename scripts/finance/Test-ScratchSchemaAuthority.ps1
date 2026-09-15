@@ -92,6 +92,7 @@ try {
     if ([string]$authority.schema -cne 'RHEMA_SCRATCH_EXPECTED_SCHEMA_AUTHORITY_V3' -or
         @($authority.triggerDefinitions).Count -ne 493 -or
         @($authority.checkConstraintDefinitions).Count -ne 835 -or
+        [int]$authority.stuffAudit.reviewedAlreadyFinalPatchCount -ne 4 -or
         $physicalCount.Count -ne 1 -or
         [string]$physicalCount[0].canonicalSha256 -cne 'F778FAD506C8AD0DA20605051395073B8E0BDCE6D37A0461DFCC0308E29A2B8D' -or
         [string]$authority.physicalCountMixedPatchClassification.rejectedCrossTargetFreezeCanonicalSha256 -cne
@@ -219,6 +220,7 @@ try {
     Write-Host 'PASS: changed, added, removed, reordered, duplicated, or disagreeing PhysicalCount cursor targets are refused.'
     Write-Host 'PASS: executable validation/cursor/fetch/loop/definition/transform/exec flow is bound and comment/dummy spoofing is refused.'
     Write-Host 'PASS: guarded already-final patches match three preserved runtime hashes and flattened duplicate hashes are rejected.'
+    Write-Host 'PASS: all four reviewed already-final patch blocks are counted deterministically.'
     Write-Host 'PASS: already-final source identity, guard/definition/exec variables, mixed targets, and marker multiplicity fail closed.'
 }
 finally {

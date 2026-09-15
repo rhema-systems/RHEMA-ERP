@@ -45,6 +45,7 @@ if (manifestRoot.GetProperty("postDefinitionPatches").GetArrayLength() != 108 ||
     throw new InvalidOperationException("Manifest authority counts do not match the reviewed closed set.");
 
 var patchSequence = 0;
+var reviewedAlreadyFinalPatchCount = 0;
 string? purchaseOrderPreAlignmentSha256 = null;
 string? purchaseOrderFinalAlignmentSha256 = null;
 string? physicalCountPreFreezeCursorSha256 = null;
@@ -59,6 +60,18 @@ foreach (Match block in patchBlocks)
     var physicalCountCursorTargets = patchSequence == 33
         ? GetExactPhysicalCountFreezeCursorTargets(sql)
         : null;
+    var isReviewedAlreadyFinalPatch =
+        (patchSequence == 2 && targets.SequenceEqual(
+            new[] { "TR_ProcurementFrameworkCallOffs_PurchaseOrderSource" }, StringComparer.Ordinal)) ||
+        (patchSequence == 4 && targets.SequenceEqual(
+            new[] { "TR_PurchaseOrders_ApprovedSourceProtected" }, StringComparer.Ordinal)) ||
+        (patchSequence == 5 && targets.SequenceEqual(
+            new[] { "TR_ProcurementFrameworkCallOffs_Lifecycle" }, StringComparer.Ordinal)) ||
+        (patchSequence == 6 && targets.SequenceEqual(new[]
+        {
+            "TR_ProcurementFrameworkAgreementExtensions_Lifecycle",
+            "TR_ProcurementFrameworkCallOffs_Lifecycle"
+        }, StringComparer.Ordinal));
     if (patchSequence == 20)
         purchaseOrderPreAlignmentSha256 = Hash(CanonicalTrigger(state["TR_PurchaseOrders_ApprovedSourceProtected"]));
     HashSet<string> committed;
@@ -173,11 +186,16 @@ foreach (Match block in patchBlocks)
     if (unexpected.Length != 0 || missing.Length != 0)
         throw new InvalidOperationException(
             $"Patch {patchSequence} ({string.Join(',', targets)}) did not produce its exact target set: missing={string.Join(',', missing)}; unexpected={string.Join(',', unexpected)}.");
+    if (isReviewedAlreadyFinalPatch)
+        reviewedAlreadyFinalPatchCount++;
     if (patchSequence == 20)
         purchaseOrderFinalAlignmentSha256 = Hash(CanonicalTrigger(state["TR_PurchaseOrders_ApprovedSourceProtected"]));
     patchSequence++;
 }
 physicalCountFinalSha256 = Hash(CanonicalTrigger(state["TR_PhysicalCounts_ControlledLifecycle"]));
+if (reviewedAlreadyFinalPatchCount != 4)
+    throw new InvalidOperationException(
+        $"Expected four reviewed already-final patch blocks, found {reviewedAlreadyFinalPatchCount}.");
 var rejectedPhysicalCountCrossTargetBody = state["TR_PhysicalCounts_ControlledLifecycle"].Replace(
     "N'InProgress',N'RecountRequired'",
     "N'InProgress',N'UnderReview',N'UnderInvestigation',N'RecountRequired'",
@@ -504,7 +522,7 @@ var output = new
         blanketNoOpAllowed = false,
         supportedRouteClosedSubstantiveStuffCount = 2,
         commercialCapacityClosedSubstantiveStuffCount = 2,
-        reviewedAlreadyFinalPatchCount = 1
+        reviewedAlreadyFinalPatchCount
     },
     purchaseOrderSupportedRouteAlignment = new
     {
