@@ -114,7 +114,7 @@ public sealed class PropertyListingEnquiryTests
     }
 
     [Fact]
-    public async Task SalesQueueRequiresSalesDepartmentAndStatusBeyondNew()
+    public async Task SalesQueueRequiresSalesAndMarketingOrganizationUnitAndStatusBeyondNew()
     {
         await using var db = Database();
         var requester = new ApplicationUser
@@ -126,9 +126,47 @@ public sealed class PropertyListingEnquiryTests
             FirstName = "Supplier",
             LastName = "Contact"
         };
-        var sales = new Department { TenantId = tenantId, Name = "Sales", Code = "SALES", AccountCode = "SALES", DepartmentType = DepartmentType.Sales, IsActive = true };
-        var marketing = new Department { TenantId = tenantId, Name = "Marketing", Code = "MKT", AccountCode = "MKT", DepartmentType = DepartmentType.Marketing, IsActive = true };
-        EhcTicket Ticket(string number, EhcTicketStatus status, Guid? departmentId) => new()
+        var structure = new OrganizationStructure { TenantId = tenantId, Name = "TDC structure", Code = "TDC", IsActive = true };
+        var level = new OrganizationLevel
+        {
+            TenantId = tenantId,
+            StructureId = structure.Id,
+            OrganizationStructure = structure,
+            Name = "Department",
+            Code = "DEPT",
+            LevelNumber = 3,
+            IsActive = true
+        };
+        var salesAndMarketing = new OrganizationUnit
+        {
+            TenantId = tenantId,
+            OrganizationLevelId = level.Id,
+            OrganizationLevel = level,
+            Name = "Marketing Unit",
+            Code = "UNIT-MKT",
+            Path = "/TDC/MKT",
+            IsActive = true
+        };
+        var otherUnit = new OrganizationUnit
+        {
+            TenantId = tenantId,
+            OrganizationLevelId = level.Id,
+            OrganizationLevel = level,
+            Name = "Operations Unit",
+            Code = "UNIT-OPS",
+            Path = "/TDC/OPS",
+            IsActive = true
+        };
+        var legacySalesDepartment = new Department
+        {
+            TenantId = tenantId,
+            Name = "Sales",
+            Code = "SALES",
+            AccountCode = "SALES",
+            DepartmentType = DepartmentType.Sales,
+            IsActive = true
+        };
+        EhcTicket Ticket(string number, EhcTicketStatus status, Guid? organizationUnitId) => new()
         {
             TenantId = tenantId,
             TicketNumber = number,
@@ -137,14 +175,16 @@ public sealed class PropertyListingEnquiryTests
             Description = "Property enquiry",
             PropertyListingContextJson = "{}",
             Status = status,
-            AssignedDepartmentId = departmentId
+            AssignedOrganizationUnitId = organizationUnitId
         };
 
-        var ready = Ticket("EHC-READY", EhcTicketStatus.Acknowledged, sales.Id);
-        var newAtSales = Ticket("EHC-NEW", EhcTicketStatus.New, sales.Id);
-        var routedToMarketing = Ticket("EHC-MKT", EhcTicketStatus.Acknowledged, marketing.Id);
+        var ready = Ticket("EHC-READY", EhcTicketStatus.Acknowledged, salesAndMarketing.Id);
+        var newAtSales = Ticket("EHC-NEW", EhcTicketStatus.New, salesAndMarketing.Id);
+        var routedToOtherUnit = Ticket("EHC-OPS", EhcTicketStatus.Acknowledged, otherUnit.Id);
         var unassigned = Ticket("EHC-NONE", EhcTicketStatus.InProgress, null);
-        db.AddRange(requester, sales, marketing, ready, newAtSales, routedToMarketing, unassigned);
+        var legacyDepartmentOnly = Ticket("EHC-LEGACY", EhcTicketStatus.Acknowledged, null);
+        legacyDepartmentOnly.AssignedDepartmentId = legacySalesDepartment.Id;
+        db.AddRange(requester, structure, level, salesAndMarketing, otherUnit, legacySalesDepartment, ready, newAtSales, routedToOtherUnit, unassigned, legacyDepartmentOnly);
         await db.SaveChangesAsync();
 
         var controller = new EhcPropertyEnquiriesController(db, User().Object, Mock.Of<IEhcTicketService>(), Mock.Of<IEstateSalesListingApplicationHandoffService>());

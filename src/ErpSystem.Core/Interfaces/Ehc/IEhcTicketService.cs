@@ -40,7 +40,7 @@ public interface IEhcTicketService
         DateTime? createdTo = null,
         CancellationToken cancellationToken = default);
     Task<EhcTicketDetailDto?> GetTicketByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task AssignTicketAsync(Guid ticketId, Guid assignedToUserId, Guid? assignedDepartmentId = null, CancellationToken cancellationToken = default);
+    Task AssignTicketAsync(Guid ticketId, Guid assignedToUserId, Guid? assignedOrganizationUnitId = null, CancellationToken cancellationToken = default);
     Task TransitionTicketAsync(Guid ticketId, EhcTicketStatus targetStatus, string? notes = null, Guid? workflowTransitionId = null, string? workflowTransitionName = null, CancellationToken cancellationToken = default);
     Task<IReadOnlyList<EhcTicketAllowedTransitionDto>> GetAllowedTransitionsAsync(Guid ticketId, CancellationToken cancellationToken = default);
     Task<EhcTicketDetailDto> UpdateTicketRcaAsync(Guid ticketId, UpdateEhcTicketRcaRequestDto request, CancellationToken cancellationToken = default);

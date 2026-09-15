@@ -45,6 +45,7 @@ export interface EhcTicketListItem {
   closedAt?: string | null;
   feedbackRating?: number | null;
   feedbackSubmittedAt?: string | null;
+  assignedOrganizationUnitName?: string | null;
   assignedDepartmentName?: string | null;
   assignedToName?: string | null;
   requesterName?: string | null;
@@ -139,6 +140,8 @@ export interface EhcTicketDetail {
   firstRespondedAt?: string | null;
   resolvedAt?: string | null;
   closedAt?: string | null;
+  assignedOrganizationUnitId?: string | null;
+  assignedOrganizationUnitName?: string | null;
   assignedDepartmentId?: string | null;
   assignedDepartmentName?: string | null;
   assignedToUserId?: string | null;

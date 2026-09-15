@@ -8388,6 +8388,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(x => new { x.TenantId, x.RequesterUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedToUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedDepartmentId });
+            entity.HasIndex(x => new { x.TenantId, x.AssignedOrganizationUnitId });
             entity.HasIndex(x => new { x.TenantId, x.RootCauseId });
             entity.HasIndex(x => new { x.TenantId, x.CrmOpportunityId });
             entity.HasIndex(x => new { x.TenantId, x.EstateListingApplicationCaseId });
@@ -8410,6 +8411,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(x => x.AssignedDepartment)
                 .WithMany()
                 .HasForeignKey(x => x.AssignedDepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.AssignedOrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedOrganizationUnitId)
                 .OnDelete(DeleteBehavior.NoAction);
 
 

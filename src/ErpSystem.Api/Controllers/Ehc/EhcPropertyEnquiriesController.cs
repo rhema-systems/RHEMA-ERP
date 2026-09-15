@@ -19,14 +19,16 @@ namespace ErpSystem.Api.Controllers.Ehc;
 public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICurrentUserService currentUser,
     IEhcTicketService tickets, IEstateSalesListingApplicationHandoffService estateHandoffs) : ControllerBase
 {
+    private const string SalesAndMarketingOrganizationUnitCode = "UNIT-MKT";
+
     private IQueryable<ErpSystem.Core.Entities.Ehc.EhcTicket> Query() => db.EhcTickets.AsNoTracking()
         .Where(t => t.TenantId == currentUser.TenantId && !t.IsDeleted && t.TicketType == EhcTicketType.Enquiry
             && t.PropertyListingContextJson != null
-            && t.AssignedDepartmentId != null
-            && t.AssignedDepartment != null
-            && !t.AssignedDepartment.IsDeleted
-            && t.AssignedDepartment.IsActive
-            && t.AssignedDepartment.DepartmentType == DepartmentType.Sales
+            && t.AssignedOrganizationUnitId != null
+            && t.AssignedOrganizationUnit != null
+            && !t.AssignedOrganizationUnit.IsDeleted
+            && t.AssignedOrganizationUnit.IsActive
+            && t.AssignedOrganizationUnit.Code == SalesAndMarketingOrganizationUnitCode
             && t.Status != EhcTicketStatus.New);
 
     [HttpGet]

@@ -3758,6 +3758,9 @@ namespace ErpSystem.Data.Migrations
                     b.Property<Guid?>("AssignedDepartmentId")
                         .HasColumnType("uniqueidentifier");
 
+                    b.Property<Guid?>("AssignedOrganizationUnitId")
+                        .HasColumnType("uniqueidentifier");
+
                     b.Property<Guid?>("AssignedToUserId")
                         .HasColumnType("uniqueidentifier");
 
@@ -3866,6 +3869,8 @@ namespace ErpSystem.Data.Migrations
 
                     b.HasIndex("AssignedDepartmentId");
 
+                    b.HasIndex("AssignedOrganizationUnitId");
+
                     b.HasIndex("AssignedToUserId");
 
                     b.HasIndex("CategoryId");
@@ -3877,6 +3882,8 @@ namespace ErpSystem.Data.Migrations
                     b.HasIndex("SubcategoryId");
 
                     b.HasIndex("TenantId", "AssignedDepartmentId");
+
+                    b.HasIndex("TenantId", "AssignedOrganizationUnitId");
 
                     b.HasIndex("TenantId", "AssignedToUserId");
 
@@ -173789,6 +173796,11 @@ namespace ErpSystem.Data.Migrations
                         .HasForeignKey("AssignedDepartmentId")
                         .OnDelete(DeleteBehavior.NoAction);
 
+                    b.HasOne("ErpSystem.Core.Entities.HR.OrganizationUnit", "AssignedOrganizationUnit")
+                        .WithMany()
+                        .HasForeignKey("AssignedOrganizationUnitId")
+                        .OnDelete(DeleteBehavior.NoAction);
+
                     b.HasOne("ErpSystem.Core.Entities.ApplicationUser", "AssignedToUser")
                         .WithMany()
                         .HasForeignKey("AssignedToUserId");
@@ -173821,6 +173833,8 @@ namespace ErpSystem.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("AssignedDepartment");
+
+                    b.Navigation("AssignedOrganizationUnit");
 
                     b.Navigation("AssignedToUser");
 
