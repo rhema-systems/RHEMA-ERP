@@ -36,7 +36,9 @@ namespace ErpSystem.Data.Seeders;
 ///   <item><b>Number sequences are advanced.</b> Sixty-odd candidates and a dozen vacancies minted
 ///   behind <c>INumberSequenceService</c>'s back would leave its counter stale, and the first
 ///   candidate created <i>live on stage</i> would collide on a duplicate number. Every key this
-///   seeder consumes (REQ, VAC, CAND, APP, OFR, HIR, INT) is read, minted from and written back.</item>
+///   seeder consumes (REQ, VAC, CAND, APP, OFR, HIR, INT) is read, minted from and written back —
+///   in the <i>same save</i> as the rows it numbered, so that no later failure can commit the one
+///   without the other. That is not hypothetical: see the note on <c>Counters.Stage</c>.</item>
 ///   <item><b>It runs in the SECOND seed pass</b>, after the scenarios, so the live records the
 ///   runbook quotes by number — REQ-2026-00001…4, VAC-000001, VAC-000002 — keep those numbers.
 ///   History therefore carries numbers <i>above</i> the live records despite being older; that is a
@@ -698,15 +700,24 @@ public class TdcDemoRecruitmentHistorySeeder
             }
 
             // ── Pre-employment checks, and what the referees actually said ───────────────────────
-            var referenceItem = AddChecks(tenantId, accepted, hrHead.Id, offerDate, hires, rng);
-
-            if (referenceItem is not null
-                && candidatesByApplication.TryGetValue(applications[0].Id, out var appointeeForRefs)
-                && refereesByCandidate.TryGetValue(appointeeForRefs.Id, out var appointeeReferees))
+            // The referees are resolved FIRST: the checklist raises one reference item per referee,
+            // because a check item carries exactly one response. See the note on AddChecks.
+            var appointeeReferees = new List<JobCandidateReferee>();
+            if (candidatesByApplication.TryGetValue(applications[0].Id, out var appointeeForRefs)
+                && refereesByCandidate.TryGetValue(appointeeForRefs.Id, out var onFile))
             {
-                var item = referenceItem;
+                appointeeReferees = onFile;
+            }
+
+            var referenceItems = AddChecks(tenantId, accepted, hrHead.Id, offerDate, hires, rng, appointeeReferees);
+
+            for (var ri = 0; ri < referenceItems.Count && ri < appointeeReferees.Count; ri++)
+            {
+                var item = referenceItems[ri];
+                var referee = appointeeReferees[ri];
+                var order = ri;
                 var when = offerDate;
-                deferred.Add(() => AddReferenceResponses(refs, item, appointeeReferees, when));
+                deferred.Add(() => AddReferenceResponse(refs, item, referee, when, order));
             }
 
             // ── The hire ─────────────────────────────────────────────────────────────────────────
@@ -842,14 +853,15 @@ public class TdcDemoRecruitmentHistorySeeder
 
         await SpreadLifecycleStatesAsync(tenantId, hrHead, now, ct);
 
-        // First save: every principal above lands in the database and becomes Unchanged.
+        // First save: every principal above lands in the database and becomes Unchanged — together
+        // with the counters that numbered them, so the two cannot be separated by a later failure.
+        // See the note on Counters.Stage.
+        seq.Stage(_context);
         await _context.SaveChangesAsync(ct);
 
         // Second save: the rows that hang off those principals. See the note on `deferred`.
         foreach (var add in deferred) add();
         await _context.SaveChangesAsync(ct);
-
-        await seq.FlushAsync(_context, ct);
 
         _logger.LogInformation(
             "Recruitment history written: {Vacancies} vacancies ({Hires} filled), {Candidates} candidates "
@@ -1043,7 +1055,28 @@ public class TdcDemoRecruitmentHistorySeeder
     /// A pre-employment check per hire. The statuses rotate so the checks register shows the five
     /// outcomes a coordinator actually deals with, not ten rows of "Pending".
     /// </summary>
-    private PreEmploymentCheckItem? AddChecks(Guid tenantId, JobOffer offer, Guid coordinatorId, DateTime offerDate, int index, DeterministicRng rng)
+    /// <summary>
+    /// The appointee's pre-employment checks, and the reference-check items the referees' answers
+    /// hang off. Returns those reference items, in the same order as <paramref name="referees"/>.
+    ///
+    /// <para>⚠ ONE REFERENCE ITEM PER REFEREE, BECAUSE A CHECK ITEM CARRIES EXACTLY ONE RESPONSE.
+    /// <c>PreEmploymentCheckItem</c> → <c>ReferenceCheckResponse</c> is modelled <c>HasOne…WithOne</c>,
+    /// which puts a UNIQUE index on <c>ReferenceCheckResponses.CheckItemId</c>
+    /// (<c>IX_RefCheckResponse_CheckItemId</c>), and <c>PreEmploymentCheckService.AddReferenceResponseAsync</c>
+    /// upserts on that basis. This seeder used to raise a single item called "Two professional
+    /// references" and then add one response per referee against it; on 2026-09-14 the second
+    /// referee's response collided with the first and took the whole second save down with it,
+    /// including the counter flush. Each referee now gets an item of their own — which is also what
+    /// the API can actually produce, so the demonstration shows a reachable state.</para>
+    /// </summary>
+    private List<PreEmploymentCheckItem> AddChecks(
+        Guid tenantId,
+        JobOffer offer,
+        Guid coordinatorId,
+        DateTime offerDate,
+        int index,
+        DeterministicRng rng,
+        IReadOnlyList<JobCandidateReferee> referees)
     {
         var overall = (index % 8) switch
         {
@@ -1076,16 +1109,34 @@ public class TdcDemoRecruitmentHistorySeeder
         };
         _context.Set<PreEmploymentCheck>().Add(check);
 
-        var items = new (PreEmploymentCheckType Type, string Name, string Provider, bool Mandatory)[]
+        var items = new List<(PreEmploymentCheckType Type, string Name, string Provider, bool Mandatory)>
         {
             (PreEmploymentCheckType.MedicalExamination, "Pre-employment medical examination", "TDC Staff Clinic", true),
             (PreEmploymentCheckType.PoliceClearance, "Police criminal record clearance", "Ghana Police Service — CID", true),
             (PreEmploymentCheckType.AcademicVerification, "Verification of academic certificates", "Issuing institutions", true),
-            (PreEmploymentCheckType.ReferenceCheck, "Two professional references", "Named referees", true),
-            (PreEmploymentCheckType.BackgroundCheck, "Employment history verification", "Previous employer", false),
         };
 
-        PreEmploymentCheckItem? referenceItem = null;
+        // One per referee — see the note on this method. A candidate with no referees on file still
+        // gets the item, so the checklist is not silently short of a mandatory check.
+        if (referees.Count == 0)
+        {
+            items.Add((PreEmploymentCheckType.ReferenceCheck, "Professional reference", "Named referee", true));
+        }
+        else
+        {
+            foreach (var referee in referees)
+            {
+                items.Add((
+                    PreEmploymentCheckType.ReferenceCheck,
+                    $"Professional reference — {referee.FullName}",
+                    string.IsNullOrWhiteSpace(referee.Organization) ? "Named referee" : referee.Organization,
+                    true));
+            }
+        }
+
+        items.Add((PreEmploymentCheckType.BackgroundCheck, "Employment history verification", "Previous employer", false));
+
+        var referenceItems = new List<PreEmploymentCheckItem>();
         var i = 0;
         foreach (var (type, name, provider, mandatory) in items)
         {
@@ -1126,12 +1177,12 @@ public class TdcDemoRecruitmentHistorySeeder
             };
             _context.Set<PreEmploymentCheckItem>().Add(item);
 
-            // Handed back so the referees' actual answers can be attached to it.
-            if (type == PreEmploymentCheckType.ReferenceCheck) referenceItem = item;
+            // Handed back so the referee's actual answer can be attached to it.
+            if (type == PreEmploymentCheckType.ReferenceCheck) referenceItems.Add(item);
             i++;
         }
 
-        return referenceItem;
+        return referenceItems;
     }
 
 
@@ -2135,38 +2186,39 @@ public class TdcDemoRecruitmentHistorySeeder
     /// What the referees actually said. Hangs off the reference item of the appointee's
     /// pre-employment check, so the check screen has something to open.
     /// </summary>
-    private void AddReferenceResponses(
-        Refs r, PreEmploymentCheckItem referenceItem, List<JobCandidateReferee> referees, DateTime offerDate)
+    /// <summary>
+    /// What one referee said, against the check item raised for them. One response per item — see
+    /// the note on <see cref="AddChecks"/> for why that is not negotiable.
+    /// </summary>
+    private void AddReferenceResponse(
+        Refs r, PreEmploymentCheckItem referenceItem, JobCandidateReferee referee, DateTime offerDate, int order)
     {
-        var i = 0;
-        foreach (var referee in referees)
+        var answered = offerDate.AddDays(6 + order * 2);
+
+        _context.Set<ReferenceCheckResponse>().Add(new ReferenceCheckResponse
         {
-            _context.Set<ReferenceCheckResponse>().Add(new ReferenceCheckResponse
-            {
-                Id = Guid.NewGuid(),
-                TenantId = r.TenantId,
-                CheckItemId = referenceItem.Id,
-                RefereeId = referee.Id,
-                RefereeName = referee.FullName,
-                RefereeOrganisation = referee.Organization,
-                RefereePosition = referee.Position,
-                RefereeEmail = referee.Email,
-                RefereePhone = referee.Phone,
-                ResponseDate = offerDate.AddDays(6 + i * 2),
-                ResponseMethod = i == 0 ? ReferenceResponseMethod.Email : ReferenceResponseMethod.Phone,
-                OverallRating = i == 0 ? ReferenceRating.Excellent : ReferenceRating.Good,
-                Comments = i == 0
-                    ? "Confirms the dates and the post held. Describes the applicant as reliable and technically sound; left on good terms and would be re-employed."
-                    : "Spoke well of the applicant's conduct and attendance. Noted that they worked with limited supervision.",
-                WouldRehire = true,
-                ConfirmedDatesOfEmployment = true,
-                ConfirmedPositionHeld = true,
-                ConfirmedReasonForLeaving = i == 0,
-                CreatedAt = offerDate.AddDays(6 + i * 2),
-                CreatedBy = By,
-            });
-            i++;
-        }
+            Id = Guid.NewGuid(),
+            TenantId = r.TenantId,
+            CheckItemId = referenceItem.Id,
+            RefereeId = referee.Id,
+            RefereeName = referee.FullName,
+            RefereeOrganisation = referee.Organization,
+            RefereePosition = referee.Position,
+            RefereeEmail = referee.Email,
+            RefereePhone = referee.Phone,
+            ResponseDate = answered,
+            ResponseMethod = order == 0 ? ReferenceResponseMethod.Email : ReferenceResponseMethod.Phone,
+            OverallRating = order == 0 ? ReferenceRating.Excellent : ReferenceRating.Good,
+            Comments = order == 0
+                ? "Confirms the dates and the post held. Describes the applicant as reliable and technically sound; left on good terms and would be re-employed."
+                : "Spoke well of the applicant's conduct and attendance. Noted that they worked with limited supervision.",
+            WouldRehire = true,
+            ConfirmedDatesOfEmployment = true,
+            ConfirmedPositionHeld = true,
+            ConfirmedReasonForLeaving = order == 0,
+            CreatedAt = answered,
+            CreatedBy = By,
+        });
     }
 
     /// <summary>
@@ -2533,7 +2585,24 @@ public class TdcDemoRecruitmentHistorySeeder
                 : $"{key}-{value.ToString().PadLeft(width, '0')}";
         }
 
-        public async Task FlushAsync(ApplicationDbContext context, CancellationToken ct)
+        /// <summary>
+        /// Writes the counters back into the change tracker, WITHOUT saving.
+        ///
+        /// <para>⚠ IT HAS TO BE STAGED, NOT FLUSHED AT THE END, AND THIS IS NOT A STYLE CHOICE.
+        /// This class used to save the counters in a step of its own after every other save. On
+        /// 2026-09-14 the second save — the deferred dependants — threw, so the twelve vacancies,
+        /// twenty-nine requisitions and eighty-three candidates above were committed while the
+        /// counters that numbered them were not. The counter then stood twelve behind the register,
+        /// and the first vacancy anybody created through the real door died on the unique index:</para>
+        /// <code>
+        /// Cannot insert duplicate key row in object 'dbo.JobVacancies' with unique index
+        /// 'IX_JobVacancy_Tenant_Number'. The duplicate key value is (…, VAC-000013).
+        /// </code>
+        /// <para>Staged into the same <c>SaveChangesAsync</c> as the rows themselves, the counters
+        /// and the numbers they issued commit or roll back together, and no later failure can
+        /// separate them. Every number is minted before that first save, so nothing is missed.</para>
+        /// </summary>
+        public void Stage(ApplicationDbContext context)
         {
             var now = DateTime.UtcNow;
 
@@ -2561,8 +2630,6 @@ public class TdcDemoRecruitmentHistorySeeder
                     });
                 }
             }
-
-            await context.SaveChangesAsync(ct);
         }
     }
 

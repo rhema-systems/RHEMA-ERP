@@ -1,7 +1,8 @@
-using ErpSystem.Core.Entities.HR.Recruitment;
+﻿using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -16,10 +17,16 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
 {
     private readonly INumberSequenceService _sequences;
 
-    public JobApplicationRepository(ApplicationDbContext context, INumberSequenceService sequences)
+    private readonly ICurrentUserProvider _currentUser;
+
+    public JobApplicationRepository(
+        ApplicationDbContext context,
+        INumberSequenceService sequences,
+        ICurrentUserProvider currentUser)
         : base(context)
     {
         _sequences = sequences;
+        _currentUser = currentUser;
     }
 
     /// <summary>
@@ -177,19 +184,29 @@ public class JobApplicationRepository : GenericRepository<JobApplication>, IJobA
             .ToListAsync();
     }
 
-    public async Task<string> GetNextApplicationNumberAsync()
-    {
-        // Not year-scoped: the printed number carries no year, so the counter must keep climbing
-        // across year boundaries.
-        var next = await _sequences.NextAsync("APP");
-        return $"APP-{next:D7}";
-    }
+    /// <summary>
+    /// Not year-scoped: the printed number carries no year, so the counter must keep climbing across
+    /// year boundaries. Checked against the table before it is used, so a counter left behind by a
+    /// seeder or a data load repairs itself instead of failing the create on the unique index.
+    /// See <see cref="NumberSequenceExtensions"/>.
+    /// </summary>
+    public Task<string> GetNextApplicationNumberAsync()
+        => GetNextApplicationNumberAsync(_currentUser.TenantId);
 
-    public async Task<string> GetNextApplicationNumberAsync(Guid tenantId)
-    {
-        var next = await _sequences.NextAsync("APP", tenantId);
-        return $"APP-{next:D7}";
-    }
+    public Task<string> GetNextApplicationNumberAsync(Guid tenantId)
+        // Soft-deleted rows still occupy the unique index, so the probe must see them too.
+        => _sequences.NextUnusedAsync(
+            "APP",
+            tenantId,
+            year: null,
+            format: value => $"APP-{value:D7}",
+            isTaken: number => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(a => a.TenantId == tenantId && a.ApplicationNumber == number),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(a => a.TenantId == tenantId)
+                    .Select(a => a.ApplicationNumber)
+                    .ToListAsync()));
 
     public async Task<JobApplication?> GetByTrackingTokenAsync(string token)
     {

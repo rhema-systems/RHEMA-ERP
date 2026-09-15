@@ -1,7 +1,8 @@
-using ErpSystem.Core.Entities.HR.Requisition;
+﻿using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -235,8 +236,27 @@ public class StaffRequisitionRepository : GenericRepository<StaffRequisition>, I
     /// </summary>
     public async Task<int> GetNextSequenceNumberAsync(Guid tenantId)
     {
-        var next = await _sequences.NextAsync("REQ", DateTime.UtcNow.Year);
-        return (int)next;
+        // The caller prints REQ-{year}-{seq:D5}; the probe has to assemble the same string to ask
+        // whether the register already holds it. See NumberSequenceExtensions for why it asks at all.
+        var year = DateTime.UtcNow.Year;
+        var prefix = $"REQ-{year}-";
+
+        // The counter resets each January, so the high-water mark is this year's numbers only —
+        // last year's REQ-2025-00312 must not push 2026 up to 312.
+        var number = await _sequences.NextUnusedAsync(
+            "REQ",
+            tenantId,
+            year,
+            format: value => $"{prefix}{value:D5}",
+            isTaken: candidate => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(r => r.TenantId == tenantId && r.RequisitionNumber == candidate),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(r => r.TenantId == tenantId && r.RequisitionNumber.StartsWith(prefix))
+                    .Select(r => r.RequisitionNumber)
+                    .ToListAsync()));
+
+        return int.Parse(number[prefix.Length..]);
     }
 
     public IQueryable<StaffRequisition> GetSummaryQueryable()

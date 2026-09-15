@@ -110,18 +110,22 @@ public class NumberSequenceService : INumberSequenceService
         throw new InvalidOperationException($"Unable to generate a reference number for '{key}'.");
     }
 
-    public async Task<long> AdvanceToAtLeastAsync(
+    public Task<long> AdvanceToAtLeastAsync(
         string key, long minimum, int? year = null, CancellationToken cancellationToken = default)
+        => AdvanceToAtLeastAsync(key, minimum, _currentUser.TenantId, year, cancellationToken);
+
+    // Both overloads share one implementation so they cannot drift — see the note on NextAsync.
+    public async Task<long> AdvanceToAtLeastAsync(
+        string key, long minimum, Guid tenantId, int? year = null, CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(key))
             throw new ArgumentException("Sequence key is required.", nameof(key));
 
-        var tenantId = _currentUser.TenantId;
         if (tenantId == Guid.Empty)
             throw new InvalidOperationException(
                 $"Cannot advance the '{key}' counter without a tenant.");
 
-        if (minimum < 1) return await PeekAsync(key, year, cancellationToken);
+        if (minimum < 1) return await PeekAsync(key, tenantId, year, cancellationToken);
 
         var yearBucket = year ?? 0;
 
@@ -178,9 +182,11 @@ public class NumberSequenceService : INumberSequenceService
     }
 
     /// <summary>Where the counter stands, without moving it. Zero when it has never been used.</summary>
-    public async Task<long> PeekAsync(string key, int? year = null, CancellationToken cancellationToken = default)
+    public Task<long> PeekAsync(string key, int? year = null, CancellationToken cancellationToken = default)
+        => PeekAsync(key, _currentUser.TenantId, year, cancellationToken);
+
+    private async Task<long> PeekAsync(string key, Guid tenantId, int? year, CancellationToken cancellationToken)
     {
-        var tenantId = _currentUser.TenantId;
         if (tenantId == Guid.Empty)
             throw new InvalidOperationException($"Cannot read the '{key}' counter without a tenant.");
 

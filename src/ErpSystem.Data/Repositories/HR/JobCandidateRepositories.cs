@@ -2,6 +2,7 @@
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -16,10 +17,16 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
 {
     private readonly INumberSequenceService _sequences;
 
-    public JobCandidateRepository(ApplicationDbContext context, INumberSequenceService sequences)
+    private readonly ICurrentUserProvider _currentUser;
+
+    public JobCandidateRepository(
+        ApplicationDbContext context,
+        INumberSequenceService sequences,
+        ICurrentUserProvider currentUser)
         : base(context)
     {
         _sequences = sequences;
+        _currentUser = currentUser;
     }
 
     public async Task<JobCandidate?> GetByCandidateNumberAsync(string candidateNumber)
@@ -80,18 +87,28 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
             .ToListAsync();
     }
 
-    public async Task<string> GetNextCandidateNumberAsync()
-    {
-        // Not year-scoped — the printed number carries no year.
-        var next = await _sequences.NextAsync("CAND");
-        return $"CAND-{next:D6}";
-    }
+    /// <summary>
+    /// Not year-scoped — the printed number carries no year. Checked against the table before it is
+    /// used, so a counter left behind by a seeder or a data load repairs itself instead of failing
+    /// the create on <c>IX_JobCandidate_Tenant_Number</c>. See <see cref="NumberSequenceExtensions"/>.
+    /// </summary>
+    public Task<string> GetNextCandidateNumberAsync()
+        => GetNextCandidateNumberAsync(_currentUser.TenantId);
 
-    public async Task<string> GetNextCandidateNumberAsync(Guid tenantId)
-    {
-        var next = await _sequences.NextAsync("CAND", tenantId);
-        return $"CAND-{next:D6}";
-    }
+    public Task<string> GetNextCandidateNumberAsync(Guid tenantId)
+        // Soft-deleted rows still occupy the unique index, so the probe must see them too.
+        => _sequences.NextUnusedAsync(
+            "CAND",
+            tenantId,
+            year: null,
+            format: value => $"CAND-{value:D6}",
+            isTaken: number => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(c => c.TenantId == tenantId && c.CandidateNumber == number),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(c => c.TenantId == tenantId)
+                    .Select(c => c.CandidateNumber)
+                    .ToListAsync()));
 
     // ── Talent pool — filtered queries ────────────────────────────────────────
 
