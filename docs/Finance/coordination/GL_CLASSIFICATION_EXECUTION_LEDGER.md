@@ -3052,7 +3052,9 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   `3647cd72df1143969cad7ba96fccfa36b531a5b2`, makes potential raw check-constraint authority fail closed unless
   ScriptDom parses it or an exact hash-bound dynamic-patch allowlist entry parses under the closed shape contract.
 - The inspector now binds 870 exact ordered lifecycle events. Actual archived-source mutation tests refuse malformed,
-  removed, duplicated, and reordered authority; the three approved dynamic patches refuse hash or structure drift.
+  removed, and duplicated authority. Reordering is covered by the synthetic out-of-order state test together with the
+  ordered 870-entry manifest and deterministic verification; the three approved dynamic patches refuse hash or
+  structure drift.
 - All 108 chronological patches bind their full normalized source-operation SHA-256 and length plus exact retained
   fragment SHA-256, offset/length, marker, and transformation discriminator. The four mixed operations additionally
   prove unique marker and suffix-boundary reconstruction; prefix, marker, boundary, and retained-fragment mutations
