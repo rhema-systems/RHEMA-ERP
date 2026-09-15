@@ -212,6 +212,33 @@ public sealed class EhcInternalLookupsController : ControllerBase
         return Ok(new { success = true, data = items });
     }
 
+    [HttpGet("organization-units")]
+    public async Task<ActionResult> GetOrganizationUnits(CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        if (tenantId == Guid.Empty)
+        {
+            return Ok(new { success = true, data = Array.Empty<EhcLookupItemDto>() });
+        }
+
+        var items = await _db.Set<OrganizationUnit>()
+            .AsNoTracking()
+            .Where(unit => unit.TenantId == tenantId && !unit.IsDeleted && unit.IsActive
+                && !unit.OrganizationLevel.IsDeleted && unit.OrganizationLevel.IsActive)
+            .OrderBy(unit => unit.OrganizationLevel.Name)
+            .ThenBy(unit => unit.Name)
+            .Select(unit => new EhcLookupItemDto
+            {
+                Id = unit.Id,
+                Name = string.IsNullOrWhiteSpace(unit.Code)
+                    ? unit.OrganizationLevel.Name + " / " + unit.Name
+                    : unit.OrganizationLevel.Name + " / " + unit.Code + " - " + unit.Name
+            })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new { success = true, data = items });
+    }
+
     [HttpGet("agents")]
     public async Task<ActionResult> GetAgents(CancellationToken cancellationToken)
     {
@@ -269,6 +296,35 @@ public sealed class EhcInternalLookupsController : ControllerBase
         }
 
         return Ok(new { success = true, data = new EhcLookupItemDto { Id = department.Id, Name = department.Name } });
+    }
+
+    [HttpGet("my-organization-unit")]
+    public async Task<ActionResult> GetMyOrganizationUnit(CancellationToken cancellationToken)
+    {
+        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+        var employeeId = _currentUserService.EmployeeId;
+        if (tenantId == Guid.Empty || !employeeId.HasValue || employeeId.Value == Guid.Empty)
+        {
+            return Ok(new { success = true, data = (EhcLookupItemDto?)null });
+        }
+
+        var item = await _db.Set<Employee>()
+            .AsNoTracking()
+            .Where(employee => employee.Id == employeeId.Value && employee.TenantId == tenantId
+                && !employee.IsDeleted && employee.IsActive
+                && employee.OrganizationUnitId.HasValue)
+            .Select(employee => employee.OrganizationUnit == null || employee.OrganizationUnit.IsDeleted || !employee.OrganizationUnit.IsActive
+                ? null
+                : new EhcLookupItemDto
+                {
+                    Id = employee.OrganizationUnit.Id,
+                    Name = string.IsNullOrWhiteSpace(employee.OrganizationUnit.Code)
+                        ? employee.OrganizationUnit.Name
+                        : employee.OrganizationUnit.Code + " - " + employee.OrganizationUnit.Name
+                })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        return Ok(new { success = true, data = item });
     }
 
     [HttpGet("root-causes")]

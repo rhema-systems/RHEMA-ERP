@@ -135,11 +135,11 @@ public sealed class EhcInternalTicketsController : ControllerBase
     }
 
     [HttpPost("{id:guid}/assign")]
-    public async Task<ActionResult> Assign(Guid id, [FromQuery] Guid assignedToUserId, [FromQuery] Guid? assignedDepartmentId, CancellationToken cancellationToken)
+    public async Task<ActionResult> Assign(Guid id, [FromQuery] Guid assignedToUserId, [FromQuery] Guid? assignedOrganizationUnitId, CancellationToken cancellationToken)
     {
         try
         {
-            await _ticketService.AssignTicketAsync(id, assignedToUserId, assignedDepartmentId, cancellationToken);
+            await _ticketService.AssignTicketAsync(id, assignedToUserId, assignedOrganizationUnitId, cancellationToken);
             return Ok(new { success = true });
         }
         catch (KeyNotFoundException)

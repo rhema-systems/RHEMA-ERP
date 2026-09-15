@@ -366,9 +366,9 @@ export const ehcInternalTicketService = {
     return res.data ?? [];
   },
 
-  async assignTicket(ticketId: string, assignedToUserId: string, assignedDepartmentId?: string | null): Promise<void> {
+  async assignTicket(ticketId: string, assignedToUserId: string, assignedOrganizationUnitId?: string | null): Promise<void> {
     const qs = new URLSearchParams({ assignedToUserId });
-    if (assignedDepartmentId) qs.set('assignedDepartmentId', assignedDepartmentId);
+    if (assignedOrganizationUnitId) qs.set('assignedOrganizationUnitId', assignedOrganizationUnitId);
     await apiService.request<ApiEnvelope<any>>(`/ehc/internal/tickets/${ticketId}/assign?${qs.toString()}`, {
       method: 'POST',
     });
@@ -438,6 +438,11 @@ export const ehcInternalTicketService = {
 
   async listDepartments(): Promise<EhcLookupItem[]> {
     const res = await apiService.request<ApiEnvelope<EhcLookupItem[]>>('/ehc/internal/lookups/departments', { method: 'GET' });
+    return res.data ?? [];
+  },
+
+  async listOrganizationUnits(): Promise<EhcLookupItem[]> {
+    const res = await apiService.request<ApiEnvelope<EhcLookupItem[]>>('/ehc/internal/lookups/organization-units', { method: 'GET' });
     return res.data ?? [];
   },
 
@@ -539,6 +544,11 @@ export const ehcInternalTicketService = {
 
   async getMyDepartment(): Promise<EhcLookupItem | null> {
     const res = await apiService.request<ApiEnvelope<EhcLookupItem | null>>('/ehc/internal/lookups/my-department', { method: 'GET' });
+    return res.data ?? null;
+  },
+
+  async getMyOrganizationUnit(): Promise<EhcLookupItem | null> {
+    const res = await apiService.request<ApiEnvelope<EhcLookupItem | null>>('/ehc/internal/lookups/my-organization-unit', { method: 'GET' });
     return res.data ?? null;
   },
 

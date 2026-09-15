@@ -63,7 +63,7 @@ export default function HelpdeskTicketDetailPage() {
   const { toast } = useToast();
 
   const [nowTs, setNowTs] = useState(() => Date.now());
-  const [assignedDepartmentId, setAssignedDepartmentId] = useState<string>('');
+  const [assignedOrganizationUnitId, setAssignedOrganizationUnitId] = useState<string>('');
   const [assignedToUserId, setAssignedToUserId] = useState<string>('');
   const [targetStatus, setTargetStatus] = useState<EhcTicketStatus>('InProgress');
   const [workflowTransitionId, setWorkflowTransitionId] = useState<string | null>(null);
@@ -106,14 +106,14 @@ export default function HelpdeskTicketDetailPage() {
     enabled: Boolean(ticketId),
   });
 
-  const { data: departments } = useQuery({
-    queryKey: ['ehc', 'internal', 'departments'],
-    queryFn: () => ehcInternalTicketService.listDepartments(),
+  const { data: organizationUnits } = useQuery({
+    queryKey: ['ehc', 'internal', 'organization-units'],
+    queryFn: () => ehcInternalTicketService.listOrganizationUnits(),
   });
 
-  const { data: myDepartment } = useQuery({
-    queryKey: ['ehc', 'internal', 'my-department'],
-    queryFn: () => ehcInternalTicketService.getMyDepartment(),
+  const { data: myOrganizationUnit } = useQuery({
+    queryKey: ['ehc', 'internal', 'my-organization-unit'],
+    queryFn: () => ehcInternalTicketService.getMyOrganizationUnit(),
   });
 
   const { data: agents } = useQuery({
@@ -191,9 +191,9 @@ export default function HelpdeskTicketDetailPage() {
   useEffect(() => {
     if (!ticket) return;
 
-    setAssignedDepartmentId((prev) => prev || ticket.assignedDepartmentId || myDepartment?.id || '');
+    setAssignedOrganizationUnitId((prev) => prev || ticket.assignedOrganizationUnitId || myOrganizationUnit?.id || '');
     setAssignedToUserId((prev) => prev || ticket.assignedToUserId || '');
-  }, [ticket, myDepartment?.id]);
+  }, [ticket, myOrganizationUnit?.id]);
 
   useEffect(() => {
     if (!ticket || ticket.ticketType !== 'Complaint') return;
@@ -355,7 +355,7 @@ export default function HelpdeskTicketDetailPage() {
   const assign = useMutation({
     mutationFn: async () => {
       if (!assignedToUserId) throw new Error('Assignee required');
-      await ehcInternalTicketService.assignTicket(ticketId, assignedToUserId, assignedDepartmentId || null);
+      await ehcInternalTicketService.assignTicket(ticketId, assignedToUserId, assignedOrganizationUnitId || null);
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['ehc', 'internal', 'ticket', ticketId] });
@@ -1490,21 +1490,21 @@ export default function HelpdeskTicketDetailPage() {
       <Card>
         <CardHeader>
           <CardTitle>Assignment</CardTitle>
-          <CardDescription>Set department and agent for accountability.</CardDescription>
+          <CardDescription>Set the HR organization unit and agent for accountability.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Department</Label>
+              <Label>Organization unit</Label>
               <select
                 className="w-full h-10 rounded-md border border-input bg-background px-3 text-sm"
-                value={assignedDepartmentId}
-                onChange={(e) => setAssignedDepartmentId(e.target.value)}
+                value={assignedOrganizationUnitId}
+                onChange={(e) => setAssignedOrganizationUnitId(e.target.value)}
               >
                 <option value="">(optional)</option>
-                {(departments || []).map((d) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name}
+                {(organizationUnits || []).map((unit) => (
+                  <option key={unit.id} value={unit.id}>
+                    {unit.name}
                   </option>
                 ))}
               </select>
