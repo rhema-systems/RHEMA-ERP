@@ -17,8 +17,8 @@
   },
   "purchaseOrderSupportedRouteAlignment": {
     "target": "TR_PurchaseOrders_ApprovedSourceProtected",
-    "preAlignmentCanonicalSha256": "3E1C6AB00565FC451ACB44F65EF317DB992874C7F5E71A5A65EC9EBC56EC8F14",
-    "finalCanonicalSha256": "8ABDBD654E35D4811D0541BD004E510E5EFC773635CFAC08054FF5A54400E6EE",
+    "preAlignmentCanonicalSha256": "EE3AD77DFDC4BB2203522E392ACA14F685F38F77454DF135C0379FA8DD9B09E4",
+    "finalCanonicalSha256": "2EDC0D810330F957E8B22173A0BDF199AEC6CE6CB868FC4B274C12D41A02C22D",
     "substantiveStuffCount": 2
   },
   "physicalCountMixedPatchClassification": {
@@ -633,7 +633,7 @@
     },
     {
       "name": "TR_ProcurementFrameworkAgreementExtensions_Lifecycle",
-      "canonicalSha256": "EA17DC774A461377E7582F96FAF0031636DFFB361FDFA38B47899FA996F763ED"
+      "canonicalSha256": "F71463C1698F0341AF79419D94F0E9DCBCC8C238BDE8AB242B7689312F8DD377"
     },
     {
       "name": "TR_ProcurementFrameworkAgreements_Lifecycle",
@@ -657,7 +657,7 @@
     },
     {
       "name": "TR_ProcurementFrameworkCallOffs_PurchaseOrderSource",
-      "canonicalSha256": "F41855117B3738BBEB3A80F8E326AF774AA2EE3C37F6D30012528B1151C7AE91"
+      "canonicalSha256": "BA76BA523B9F4DD54A78644A879BDF188A109D8B96381FF0686B5DF7CF08C456"
     },
     {
       "name": "TR_ProcurementFrameworkPriceListLines_Protected",
@@ -1529,7 +1529,7 @@
     },
     {
       "name": "TR_PurchaseOrders_ApprovedSourceProtected",
-      "canonicalSha256": "8ABDBD654E35D4811D0541BD004E510E5EFC773635CFAC08054FF5A54400E6EE"
+      "canonicalSha256": "2EDC0D810330F957E8B22173A0BDF199AEC6CE6CB868FC4B274C12D41A02C22D"
     },
     {
       "name": "TR_PurchaseOrders_FrameworkCallOffProtected",

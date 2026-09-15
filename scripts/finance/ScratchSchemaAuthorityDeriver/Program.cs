@@ -64,11 +64,44 @@ foreach (Match block in patchBlocks)
     HashSet<string> committed;
     try
     {
-        committed = patchSequence == 5 && targets.SequenceEqual(
+        committed = patchSequence == 2 && targets.SequenceEqual(
+            new[] { "TR_ProcurementFrameworkCallOffs_PurchaseOrderSource" }, StringComparer.Ordinal)
+            ? InterpretExactAlreadyFinalPatch(sql, state,
+                "8DE963432DC89FAFE749E9000B37825F767CC7A5FA3885FD9CD735B340F88077", 1,
+                new AlreadyFinalPatchContract(targets[0], "definition", new[]
+                {
+                    "exceptional.TenderId = readiness.SourceId",
+                    "newer.DecisionSequence >"
+                }))
+            : patchSequence == 4 && targets.SequenceEqual(
+                new[] { "TR_PurchaseOrders_ApprovedSourceProtected" }, StringComparer.Ordinal)
+            ? InterpretExactAlreadyFinalPatch(sql, state,
+                "15D4F00C60A9648FE4BC3040A86108D7848C1C766C0F00702039F657468F2522", 1,
+                new AlreadyFinalPatchContract(targets[0], "definition", new[]
+                {
+                    "readiness.SourceId <> exceptional.TenderId",
+                    "contract.StartDate > SYSUTCDATETIME()"
+                }))
+            : patchSequence == 5 && targets.SequenceEqual(
             new[] { "TR_ProcurementFrameworkCallOffs_Lifecycle" }, StringComparer.Ordinal)
             ? InterpretReviewedAlreadyFinalPatch(sql, state, targets[0], "AND i.AgreementEffectiveEndUtc", 2)
+            : patchSequence == 6 && targets.SequenceEqual(new[]
+            {
+                "TR_ProcurementFrameworkAgreementExtensions_Lifecycle",
+                "TR_ProcurementFrameworkCallOffs_Lifecycle"
+            }, StringComparer.Ordinal)
+            ? InterpretExactAlreadyFinalPatch(sql, state,
+                "F902428DEDD8F9A3B2AA9E8697190B4924B53EBB0D5BC1E4FB1C265F3A529107", 3,
+                new AlreadyFinalPatchContract(targets[0], "extensionDefinition", new[]
+                {
+                    "prior.Id IS NULL OR i.Status = 1"
+                }),
+                new AlreadyFinalPatchContract(targets[1], "callOffDefinition", new[]
+                {
+                    "prior.Id IS NULL OR i.Status NOT IN (4, 5)"
+                }))
             : patchSequence == 20 && targets.SequenceEqual(
-            new[] { "TR_PurchaseOrders_ApprovedSourceProtected" }, StringComparer.Ordinal)
+                new[] { "TR_PurchaseOrders_ApprovedSourceProtected" }, StringComparer.Ordinal)
             ? InterpretPurchaseOrderSupportedRoutesPatch(sql, state, targets[0])
             : patchSequence == 31 && targets.SequenceEqual(new[]
             {
@@ -228,12 +261,57 @@ static HashSet<string> InterpretReviewedAlreadyFinalPatch(string sql, Dictionary
         throw new InvalidOperationException($"Reviewed already-final patch guard is not exact for {target}.");
     return new HashSet<string>(StringComparer.Ordinal) { target };
 }
+
+static HashSet<string> InterpretExactAlreadyFinalPatch(string sql, Dictionary<string, string> state,
+    string exactNormalizedSqlSha256, int expectedStuffCount, params AlreadyFinalPatchContract[] contracts)
+{
+    // These archived operations are guarded idempotent upgrades, while the selected
+    // archived CREATE bodies already contain their exact final markers. SQL Server
+    // therefore skips the guarded assignments. Bind the complete operation and its
+    // executable guard/data-flow shape before preserving those already-final bodies.
+    if (Hash(sql) != exactNormalizedSqlSha256 || contracts.Length == 0)
+        throw new InvalidOperationException("Reviewed already-final patch source identity drifted.");
+    var parser = new TSql160Parser(true);
+    _ = parser.Parse(new StringReader(sql), out var errors);
+    if (errors.Count != 0 || Regex.Matches(sql, @"(?i)\bSTUFF\s*\(").Count != expectedStuffCount ||
+        Regex.Matches(sql, @"(?i)\bEXEC(?:UTE)?\s+(?:sys\.)?sp_executesql\s+@[A-Za-z0-9_]+\b").Count != contracts.Length)
+        throw new InvalidOperationException("Reviewed already-final patch executable shape drifted.");
+
+    var committed = new HashSet<string>(StringComparer.Ordinal);
+    foreach (var contract in contracts)
+    {
+        var variable = Regex.Escape(contract.DefinitionVariable);
+        var target = Regex.Escape(contract.Target);
+        var definitionBinding = @"(?is)\bDECLARE\s+@" + variable +
+                                @"\s+nvarchar\s*\(\s*max\s*\)\s*=\s*OBJECT_DEFINITION\s*\(\s*OBJECT_ID\s*\(\s*N'(?:\[dbo\]\.)?\[" +
+                                target + @"\]'\s*\)\s*\)\s*;";
+        var execution = @"(?is)\bEXEC(?:UTE)?\s+(?:sys\.)?sp_executesql\s+@" + variable + @"\s*;";
+        if (Regex.Matches(sql, definitionBinding).Count != 1 || Regex.Matches(sql, execution).Count != 1)
+            throw new InvalidOperationException(
+                $"Reviewed already-final patch does not bind and execute @{contract.DefinitionVariable} for {contract.Target} exactly once.");
+        if (!state.TryGetValue(contract.Target, out var definition))
+            throw new InvalidOperationException($"Reviewed already-final target is absent: {contract.Target}.");
+        foreach (var marker in contract.ExactGuardMarkers)
+        {
+            var encodedMarker = Regex.Escape(marker.Replace("'", "''", StringComparison.Ordinal));
+            var exactGuard = @"(?is)\bIF\s+CHARINDEX\s*\(\s*N'" + encodedMarker +
+                             @"'\s*,\s*@" + variable + @"\s*\)\s*=\s*0\b";
+            if (Regex.Matches(sql, exactGuard).Count != 1 || CountOrdinal(definition, marker) != 1)
+                throw new InvalidOperationException(
+                    $"Reviewed already-final guard {marker} is not exact for {contract.Target}.");
+        }
+        committed.Add(contract.Target);
+    }
+    return committed;
+}
 if (purchaseOrderPreAlignmentSha256 is null || purchaseOrderFinalAlignmentSha256 is null ||
     purchaseOrderPreAlignmentSha256 == purchaseOrderFinalAlignmentSha256)
     throw new InvalidOperationException("Purchase-order supported-route patch did not produce a distinct final normalized body.");
-if (purchaseOrderPreAlignmentSha256 != "3E1C6AB00565FC451ACB44F65EF317DB992874C7F5E71A5A65EC9EBC56EC8F14" ||
-    purchaseOrderFinalAlignmentSha256 != "8ABDBD654E35D4811D0541BD004E510E5EFC773635CFAC08054FF5A54400E6EE")
-    throw new InvalidOperationException("Purchase-order supported-route pre/final authority hashes are not the exact reviewed pair.");
+if (purchaseOrderPreAlignmentSha256 != "EE3AD77DFDC4BB2203522E392ACA14F685F38F77454DF135C0379FA8DD9B09E4" ||
+    purchaseOrderFinalAlignmentSha256 != "2EDC0D810330F957E8B22173A0BDF199AEC6CE6CB868FC4B274C12D41A02C22D")
+    throw new InvalidOperationException(
+        $"Purchase-order supported-route pre/final authority hashes are not the exact reviewed pair: " +
+        $"pre={purchaseOrderPreAlignmentSha256}; final={purchaseOrderFinalAlignmentSha256}.");
 if (physicalCountPreFreezeCursorSha256 != "5FA3289A2B8DF1C545EB916F5A9D7D5AFE9F09139CBEFDC2A98E9313E4B03C08" ||
     physicalCountFinalSha256 != "F778FAD506C8AD0DA20605051395073B8E0BDCE6D37A0461DFCC0308E29A2B8D" ||
     rejectedPhysicalCountCrossTargetSha256 != "B06E6EEEEDC5546F1B8E6F57D80F6EE1C5BD3ACE55F9373D245EFB374398D95F")
@@ -770,6 +848,7 @@ static string VariableKey(string value) => value.TrimStart('@');
 
 sealed record Value(string Text, string? Origin, bool IsNumber = false);
 sealed record Event(int StartOffset, string? Variable, ScalarExpression? Expression, string? ExecuteVariable);
+sealed record AlreadyFinalPatchContract(string Target, string DefinitionVariable, string[] ExactGuardMarkers);
 
 sealed class AssignmentVisitor : TSqlFragmentVisitor
 {
