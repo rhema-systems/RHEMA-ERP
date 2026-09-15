@@ -766,3 +766,18 @@ exist exactly once, with six total segment values and nine mappings: three each 
 disabled because those books are inactive and do not allow posting; no automatic book approval occurred. The
 external attempt-11 evidence, backup, and log remain preserved and were not copied into the repository. No retry,
 restore, drop, cleanup, or post-PASS database mutation followed.
+
+### Scratch-15 check-constraint dual-authority checkpoint
+
+The attempt-15 scratch diagnostic remains a review-only terminal capture: 835 exact source rows and 835 exact SQL
+Server storage rows were durably published, the owned scratch catalog was dropped with absence proof, and no
+schema/DBCC PASS or feature-activation claim was made. Offline exhaustive reconciliation proves the analyzer's 230
+reported drifts were all built-in function-identifier casing artifacts; the corrected closed structural analysis is
+835 matches, zero drift, and zero unsupported nodes.
+
+The committed dual authority now binds exact source raw identity, exact captured storage raw identity, and a
+collision-safe structural semantic identity for every ordered table/name tuple to the attempt-15 terminal manifest
+SHA-256 `858FC627204D5A78DF181E1351828E56DAE1AAC1296939CA2184C770A5EE35EC`. It preserves literal, N-prefix,
+collation, type/style, operator, NOT-scope, and SQL three-valued-logic distinctions and fails closed for unknown
+functions or unsupported syntax. This offline proof does not authorize a new scratch execution, RhemaERP reset, or
+C6/C7/C8 activation.

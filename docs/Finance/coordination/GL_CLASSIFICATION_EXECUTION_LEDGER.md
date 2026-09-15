@@ -3066,3 +3066,30 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
 - No database, connection environment, operational evidence, backup, feature flag, remote, or primary worktree was
   accessed or changed. Reset retry and C6/C7/C8 activation remain `NO-GO` pending independent Sol High review and a
   separately authorized operation.
+
+### Scratch attempt 15 raw check-constraint reconciliation
+
+- The immutable attempt-15 diagnostic completed `RAW_CHECK_CAPTURE_COMPLETE_REVIEW_REQUIRED_DROPPED` at reviewed
+  commit `dac0ce8eb9fad30b65584ee4f90a17ea88f7e4f5`, tree
+  `39013e19b887c2c7a8d9767089e709b9b58dc7d4`. Its exact terminal manifest SHA-256 is
+  `858FC627204D5A78DF181E1351828E56DAE1AAC1296939CA2184C770A5EE35EC`; the owned scratch catalog was dropped
+  and absence was proven. This remains a review capture, not a schema/DBCC PASS or activation authorization.
+- All 835 source and SQL Server storage rows have the exact ordered tuple keyset SHA-256
+  `46593A80E6CAF68DDC12A2F76C0BBF7ACCF0D8F6F8D774A75FBFB6D58D7BBCB3`. The source and storage raw corpus
+  SHA-256 values are respectively `716A7DD2CB8584B565C5EFD572582EE04F62F23A377D5D5FDAACEBD5BEBC229C` and
+  `ECE6645A27F20545629F647E4EAF52E51FD012B635BD56D30E6F920F3634C0CE`.
+- The optional first-pass analyzer reported 230 semantic drifts. Every one of those 230 rows contains an exact
+  source/storage built-in-function identifier case witness; the dominant witnesses are `LEN` (211 rows), `RTRIM`
+  (48), `LTRIM` (45), and `ISJSON` (50). Changing only built-in function-name comparison to its SQL case-insensitive
+  identity reduces the complete result to 835 matches, zero drift, and zero unsupported nodes. No genuine semantic
+  check-constraint drift was found.
+- The repository-owned dual authority records, for every tuple, exact source UTF-16LE/LF hashes, exact captured SQL
+  Server storage UTF-16LE/LF hashes, and a collision-safe length-prefixed ScriptDom structural hash. The closed
+  grammar preserves string literal case and whitespace, ANSI/N prefix, collation, data type, conversion style,
+  comparison/arithmetic operators, NOT scope, and SQL three-valued-logic distinctions. Unknown functions and
+  unsupported syntax fail closed.
+- The authority is provenance-bound to the raw Git baseline blob and attempt-15 terminal/pre-drop manifests. Its
+  deterministic artifact SHA-256 is `8CAE251C2B37973F044E780C6F217B52F6401A088E30C45A0642259358288EB2`.
+  Offline regeneration from the preserved read-only corpora is byte-identical; raw corpus, manifest, source,
+  storage, and semantic identity mutations refuse. No database, connection environment, scratch catalog, or
+  operational evidence file was written or changed by this reconciliation.
