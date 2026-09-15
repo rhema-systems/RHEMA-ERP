@@ -22,9 +22,9 @@ const string ActualCorpusSha256 = "ECE6645A27F20545629F647E4EAF52E51FD012B635BD5
 const string ComparisonSha256 = "C603CFE64EC04613CCB33C229F1F78916023AB0C3401820A6B8FA7034A7674C7";
 const string KeysetSha256 = "46593A80E6CAF68DDC12A2F76C0BBF7ACCF0D8F6F8D774A75FBFB6D58D7BBCB3";
 const string PreDropManifestSha256 = "0EC548B529B639FB50F19950101B6F3E8C359B245A25C98EDB5E4C112711DF34";
-const string SourceIdentitySetSha256 = "9D6FB551E24085813C9829E03D4370EFFD7804FE639DCA67132B0D4A5409D377";
-const string StorageIdentitySetSha256 = "C72F70C81742FDA371219767E4C2795AD79058B8D08881B8FB7391D33DE099C8";
-const string SemanticIdentitySetSha256 = "A0D2E71885B51FBAB4335D398C0A7524816E22FA5B2C69193043B0B2C08177E4";
+const string SourceIdentitySetSha256 = "6DE783A26DA95BC08A5434FCF8D910A711ACC0F72458D6F4C45B2E2E6B00D783";
+const string StorageIdentitySetSha256 = "C7927443B4F57E4B161C594D10EA894B4290D7E888D8E0D3E29CEEA0443EEA67";
+const string SemanticIdentitySetSha256 = "F7E31699B655C81901268BAE0A239170A88FA85CC8E073B0076F9EDCD25684E6";
 
 if (args.Length == 1 && args[0] == "--self-test")
 {
@@ -95,7 +95,7 @@ static void Generate(string baselinePath, string sourcePath, string actualPath, 
             TerminalOutcome, ReviewedCommit, ReviewedTree, SourceCorpusSha256, ActualCorpusSha256,
             ComparisonSha256, PreDropManifestSha256, "CATALOG_DROPPED", false),
         new SemanticBinding("SCRIPT_DOM_TSQL160_CLOSED_V1", "BUILTIN_FUNCTION_IDENTIFIERS_CASE_INSENSITIVE_V1",
-            "SHA256_LENGTH_PREFIXED_STRUCTURAL_TREE_V1", 835, 0, 0),
+            "SHA256_UTF16LE_LENGTH_PREFIXED_STRUCTURAL_TREE_V2", 835, 0, 0),
         Aggregate(entries, AuthorityIdentityKind.Source),
         Aggregate(entries, AuthorityIdentityKind.Storage),
         Aggregate(entries, AuthorityIdentityKind.Semantic), entries.ToArray());
@@ -113,7 +113,7 @@ static AuthorityDocument LoadAuthority(string path)
         value.semantic.semanticDriftCount != 0 || value.semantic.unsupportedCount != 0 ||
         value.semantic.grammar != "SCRIPT_DOM_TSQL160_CLOSED_V1" ||
         value.semantic.functionIdentifierPolicy != "BUILTIN_FUNCTION_IDENTIFIERS_CASE_INSENSITIVE_V1" ||
-        value.semantic.encoding != "SHA256_LENGTH_PREFIXED_STRUCTURAL_TREE_V1" ||
+        value.semantic.encoding != "SHA256_UTF16LE_LENGTH_PREFIXED_STRUCTURAL_TREE_V2" ||
         value.sourceIdentitySetSha256 != SourceIdentitySetSha256 ||
         value.storageIdentitySetSha256 != StorageIdentitySetSha256 ||
         value.semanticIdentitySetSha256 != SemanticIdentitySetSha256 ||
@@ -276,9 +276,7 @@ static string Boolean(BooleanExpression value) => value switch
     InPredicate x => In(x),
     BooleanNotExpression x => Pack("NOT", Boolean(x.Expression)),
     BooleanIsNullExpression x => Pack(x.IsNot ? "IS_NOT_NULL" : "IS_NULL", Scalar(x.Expression)),
-    LikePredicate x => x.NotDefined
-        ? Pack("NOT", Pack("LIKE", Scalar(x.FirstExpression), Scalar(x.SecondExpression), x.EscapeExpression is null ? "" : Scalar(x.EscapeExpression)))
-        : Pack("LIKE", Scalar(x.FirstExpression), Scalar(x.SecondExpression), x.EscapeExpression is null ? "" : Scalar(x.EscapeExpression)),
+    LikePredicate x => Like(x),
     _ => throw new InvalidOperationException("Unsupported boolean node " + value.GetType().Name)
 };
 static string BooleanBinary(BooleanBinaryExpression value)
@@ -313,8 +311,17 @@ static string Ternary(BooleanTernaryExpression value)
 }
 static string In(InPredicate value)
 {
+    if (value.Subquery is not null || value.Values.Count == 0)
+        throw new InvalidOperationException("IN predicates require a nonempty reviewed literal/expression list; subqueries are unsupported.");
     var terms = value.Values.Select(x => Comparison("Equals", value.Expression, x)).OrderBy(x => x, StringComparer.Ordinal).ToArray();
     var result = terms.Length == 1 ? terms[0] : Pack("OR", terms); return value.NotDefined ? Pack("NOT", result) : result;
+}
+static string Like(LikePredicate value)
+{
+    if (value.OdbcEscape) throw new InvalidOperationException("ODBC LIKE escape syntax is unsupported.");
+    var result = Pack("LIKE", Scalar(value.FirstExpression), Scalar(value.SecondExpression),
+        value.EscapeExpression is null ? "" : Scalar(value.EscapeExpression));
+    return value.NotDefined ? Pack("NOT", result) : result;
 }
 static string Scalar(ScalarExpression value)
 {
@@ -324,10 +331,10 @@ static string Scalar(ScalarExpression value)
 static string ScalarCore(ScalarExpression value) => value switch
 {
     ParenthesisExpression x => Scalar(x.Expression),
-    ColumnReferenceExpression x => Pack("COLUMN", (x.MultiPartIdentifier?.Identifiers.Select(i => i.Value) ?? []).ToArray()),
-    IntegerLiteral x => Pack("INTEGER", x.Value), NumericLiteral x => Pack("NUMERIC", x.Value),
-    RealLiteral x => Pack("REAL", x.Value), MoneyLiteral x => Pack("MONEY", x.Value),
-    StringLiteral x => Pack(x.IsNational ? "NSTRING" : "ASTRING", x.Value), NullLiteral => Pack("NULL"),
+    ColumnReferenceExpression x => Column(x),
+    IntegerLiteral x => Literal(x, LiteralType.Integer, "INTEGER"), NumericLiteral x => Literal(x, LiteralType.Numeric, "NUMERIC"),
+    RealLiteral x => Literal(x, LiteralType.Real, "REAL"), MoneyLiteral x => Literal(x, LiteralType.Money, "MONEY"),
+    StringLiteral x => StringLiteralValue(x), NullLiteral x => Literal(x, LiteralType.Null, "NULL"),
     FunctionCall x => Function(x), LeftFunctionCall x => Pack("FUNC_LEFT", x.Parameters.Select(Scalar).ToArray()),
     RightFunctionCall x => Pack("FUNC_RIGHT", x.Parameters.Select(Scalar).ToArray()),
     BinaryExpression x => Pack("BINARY_" + x.BinaryExpressionType, Scalar(x.FirstExpression), Scalar(x.SecondExpression)),
@@ -339,9 +346,32 @@ static string ScalarCore(ScalarExpression value) => value switch
     SimpleCaseExpression x => Pack("SIMPLE_CASE", new[] { Scalar(x.InputExpression) }.Concat(x.WhenClauses.Select(w => Pack("WHEN", Scalar(w.WhenExpression), Scalar(w.ThenExpression)))).Append(Pack("ELSE", x.ElseExpression is null ? "" : Scalar(x.ElseExpression))).ToArray()),
     _ => throw new InvalidOperationException("Unsupported scalar node " + value.GetType().Name)
 };
+static string Column(ColumnReferenceExpression value)
+{
+    if (value.ColumnType != ColumnType.Regular || value.MultiPartIdentifier is null || value.MultiPartIdentifier.Identifiers.Count == 0)
+        throw new InvalidOperationException("Only nonempty regular column references are supported in check authority.");
+    return Pack("COLUMN", value.MultiPartIdentifier.Identifiers.Select(i => i.Value).ToArray());
+}
+static string Literal(Literal value, LiteralType expected, string tag)
+{
+    if (value.LiteralType != expected) throw new InvalidOperationException("Literal node/type identity is inconsistent.");
+    return value is NullLiteral ? Pack(tag) : Pack(tag, value.Value);
+}
+static string StringLiteralValue(StringLiteral value)
+{
+    if (value.LiteralType != LiteralType.String || value.IsLargeObject)
+        throw new InvalidOperationException("Unreviewed string literal modifier.");
+    return Pack(value.IsNational ? "NSTRING" : "ASTRING", value.Value);
+}
 static string Function(FunctionCall value)
 {
+    if (value.OverClause is not null || value.WithinGroupClause is not null || value.JsonOrderByClause is not null ||
+        value.TrimOptions is not null || value.WithArrayWrapper || value.IgnoreRespectNulls.Count != 0 ||
+        value.JsonParameters.Count != 0 || value.AbsentOrNullOnNull.Count != 0 || value.ReturnType.Count != 0)
+        throw new InvalidOperationException("Unreviewed function modifier in check constraint.");
     if (value.CallTarget is not null) throw new InvalidOperationException("Qualified/user-defined functions are unsupported.");
+    if (value.FunctionName.QuoteType != QuoteType.NotQuoted)
+        throw new InvalidOperationException("Quoted function identifiers are unsupported.");
     var name = value.FunctionName.Value.ToUpperInvariant();
     var allowed = new HashSet<string>(StringComparer.Ordinal) { "ABS", "ASCII", "CHARINDEX", "DATALENGTH", "DATEADD", "DATEDIFF", "DATEPART", "DAY", "ISJSON", "ISNULL", "LEFT", "LEN", "LOWER", "LTRIM", "MONTH", "PATINDEX", "REPLACE", "REPLICATE", "RIGHT", "ROUND", "RTRIM", "SUBSTRING", "UPPER", "YEAR" };
     if (!allowed.Contains(name)) throw new InvalidOperationException("Unreviewed function in check constraint: " + name);
@@ -370,7 +400,7 @@ static string Fragment(TSqlFragment value)
 static string Pack(string tag, params string[] values)
 {
     var builder = new StringBuilder(); Append(tag); foreach (var value in values) Append(value); return builder.ToString();
-    void Append(string value) { var bytes = Encoding.UTF8.GetBytes(value); builder.Append(bytes.Length).Append(':').Append(Convert.ToBase64String(bytes)).Append(';'); }
+    void Append(string value) { var bytes = EncodeUtf16Le(value); builder.Append(bytes.Length).Append(':').Append(Convert.ToBase64String(bytes)).Append(';'); }
 }
 static string Aggregate(IEnumerable<AuthorityEntry> entries, AuthorityIdentityKind kind)
 {
@@ -406,11 +436,57 @@ static void SelfTest()
     Different("[Value] IS NULL", "[Value]=NULL", "SQL three-valued logic");
     Different("[Value] NOT IN (1,2)", "[Value]<>1 AND [Value]<>2", "NOT IN null semantics");
     Different("[Code]='ab' AND [Other]='c'", "[Code]='a' AND [Other]='bc'", "length-prefix collision");
+    Different("[Code]=N'\uD800'", "[Code]=N'\uD801'", "distinct lone high-surrogate code units");
+    Different("[Code]=N'\uD800\uDC00'", "[Code]=N'\uD800x\uDC00'", "valid pair versus lone components");
+    Different("[Code]=N'\uD800\uDC00'", "[Code]=N'\uD800'", "valid pair versus lone high surrogate");
+    if (Pack("SURROGATE", "\uD800") == Pack("SURROGATE", "\uD801"))
+        throw new InvalidOperationException("UTF-16LE structural frames collided for distinct lone surrogates.");
+    const string exactUnits = "\uD800\uDC00\uD801\uDC01";
+    if (!StringComparer.Ordinal.Equals(exactUnits, DecodeUtf16Le(EncodeUtf16Le(exactUnits))))
+        throw new InvalidOperationException("UTF-16LE structural frame did not preserve exact code units.");
     Refuses("dbo.CustomPredicate([Value])=1", "qualified/user-defined function");
+    Refuses("LEN([Code]) OVER () > 0", "OVER modifier");
+    Refuses("LEN([Code]) OVER (ORDER BY [Code]) > 0", "OVER ORDER BY modifier");
+    Refuses("LEN([Code]) WITHIN GROUP (ORDER BY [Code]) > 0", "WITHIN GROUP modifier");
+    Refuses("[Code] IN (SELECT [Other] FROM [AnyTable])", "IN subquery");
+    Refuses("[Code] IN ()", "empty IN list");
+    Refuses("IDENTITYCOL=1", "IDENTITYCOL pseudo-column");
+    Refuses("ROWGUIDCOL IS NOT NULL", "ROWGUIDCOL pseudo-column");
+    Refuses("$IDENTITY=1", "$IDENTITY pseudo-column");
+    Refuses("$ROWGUID IS NOT NULL", "$ROWGUID pseudo-column");
     Refuses("CHECK THIS IS NOT SQL", "unparseable syntax");
+    RefusesFunctionModifier(x => x.OverClause = new OverClause(), "manual OVER property");
+    RefusesFunctionModifier(x => x.WithinGroupClause = new WithinGroupClause(), "manual WITHIN GROUP property");
+    RefusesFunctionModifier(x => x.JsonOrderByClause = new OrderByClause(), "manual JSON ORDER BY property");
+    RefusesFunctionModifier(x => x.TrimOptions = new Identifier { Value = "BOTH" }, "manual TRIM option property");
+    RefusesFunctionModifier(x => x.WithArrayWrapper = true, "manual array-wrapper property");
+    RefusesFunctionModifier(x => x.IgnoreRespectNulls.Add(new Identifier { Value = "IGNORE" }), "manual null-handling property");
+    RefusesFunctionModifier(x => x.JsonParameters.Add(new JsonKeyValue()), "manual JSON parameter property");
+    RefusesFunctionModifier(x => x.AbsentOrNullOnNull.Add(new Identifier { Value = "ABSENT" }), "manual JSON null property");
+    RefusesFunctionModifier(x => x.ReturnType.Add(new SqlDataTypeReference()), "manual return-type property");
+    var subquery = new InPredicate { Expression = new IntegerLiteral { Value = "1" }, Subquery = new ScalarSubquery() };
+    RefusesAction(() => In(subquery), "manual IN subquery property");
+    var empty = new InPredicate { Expression = new IntegerLiteral { Value = "1" } };
+    RefusesAction(() => In(empty), "manual empty IN values");
+    var odbcLike = new LikePredicate
+    {
+        FirstExpression = new StringLiteral { Value = "value" },
+        SecondExpression = new StringLiteral { Value = "%" },
+        OdbcEscape = true
+    };
+    RefusesAction(() => Like(odbcLike), "manual ODBC LIKE modifier");
+    foreach (var kind in new[] { ColumnType.IdentityCol, ColumnType.RowGuidCol, ColumnType.PseudoColumnIdentity, ColumnType.PseudoColumnRowGuid })
+        RefusesAction(() => Column(new ColumnReferenceExpression { ColumnType = kind }), "manual non-regular column kind " + kind);
     void Equal(string left, string right, string label) { if (Semantic(left) != Semantic(right)) throw new InvalidOperationException("Equivalent pair drifted: " + label); }
     void Different(string left, string right, string label) { if (Semantic(left) == Semantic(right)) throw new InvalidOperationException("Non-equivalent pair collided: " + label); }
     void Refuses(string sql, string label) { try { _ = Semantic(sql); } catch { return; } throw new InvalidOperationException("Unsupported input was accepted: " + label); }
+    void RefusesAction(Action action, string label) { try { action(); } catch { return; } throw new InvalidOperationException("Unsupported AST state was accepted: " + label); }
+    void RefusesFunctionModifier(Action<FunctionCall> mutation, string label)
+    {
+        var function = new FunctionCall { FunctionName = new Identifier { Value = "LEN" } };
+        function.Parameters.Add(new IntegerLiteral { Value = "1" }); mutation(function);
+        RefusesAction(() => Function(function), label);
+    }
 }
 
 static JsonSerializerOptions JsonOptions() => new() { PropertyNameCaseInsensitive = false, WriteIndented = true };

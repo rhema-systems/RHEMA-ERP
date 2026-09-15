@@ -3089,7 +3089,7 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   comparison/arithmetic operators, NOT scope, and SQL three-valued-logic distinctions. Unknown functions and
   unsupported syntax fail closed.
 - The authority is provenance-bound to the raw Git baseline blob and attempt-15 terminal/pre-drop manifests. Its
-  deterministic artifact SHA-256 is `8CAE251C2B37973F044E780C6F217B52F6401A088E30C45A0642259358288EB2`.
+  deterministic artifact SHA-256 is `49226CA89909A174D232D02805C245E233A8F662289112B654300362255AC6B6`.
   Offline regeneration from the preserved read-only corpora is byte-identical; raw corpus, manifest, source,
   storage, and semantic identity mutations refuse. No database, connection environment, scratch catalog, or
   operational evidence file was written or changed by this reconciliation.
