@@ -49,8 +49,27 @@ Recorded 2026-09-15, while closing G-4.1 and G-10.1.
 
 `WorkflowIntegrationService.SubmitAsync` returns `WorkflowOutcome.Approved` whenever no active
 definition exists for the entity type. **Every HR status adapter maps `Approved` to its own
-approved status.** No HR workflow definition is seeded anywhere in the solution. So on every
-tenant, for every HR record wired to the engine, Submit was Approve.
+approved status.** So where no definition is published, Submit was Approve.
+
+> ## ⚠ CORRECTED 2026-09-16 — this section said "no HR workflow definition is seeded anywhere in
+> the solution", and that is false
+>
+> `DatabaseSeedingService.EnsureHrWorkflowsSeededAsync` seeds **28 HR workflow definitions**,
+> `IsActive` and `Published`, covering every entity type named here — including `StaffRequisition`
+> and `JobOffer`. It landed 2026-09-02, **twelve days before the guide walk that recorded the
+> claim.** Entity-type names match through `NormalizeEntityTypeKey`, which strips non-alphanumerics
+> and uppercases.
+>
+> **So on a seeded tenant this never fired.** The auto-approve path is reached only where seeding
+> has not run, or a definition was unpublished or deleted.
+>
+> **G-4.1 and G-10.1 are still correctly closed** — that state is reachable, and it is how two
+> other HR services' authors found the same hole and wrote their own guards. And two things fixed
+> alongside them were real regardless of any definition: **the offer had no segregation-of-duties
+> check at all**, and neither did **vacancy approval**.
+>
+> What was wrong was the *severity*: "on every tenant, Submit was Approve" overstated it. See
+> `HR-WORKFLOW-AUTOAPPROVE-CLOSURE-PLAN.md` for the full correction.
 
 Appendix C called this "systemic, not local" on the strength of two instances. It is wider than
 that: **27 submit call sites across 22 HR services**, and before this work

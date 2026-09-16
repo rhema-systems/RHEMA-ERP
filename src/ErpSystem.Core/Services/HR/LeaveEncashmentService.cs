@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.Common;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -148,12 +149,15 @@ public class LeaveEncashmentService : ILeaveEncashmentService
             await _encashmentRepository.AddAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
 
-            var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+            // Submitting must never approve — an encashment is a payment. Defence in depth; a
+            // LEAVE_ENCASHMENT definition is seeded. See HrWorkflowFallbackAuthority.
+            var (workflowResult, submitOutcome) =
+                await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
 
             if (workflowResult.ExecutionResult.Success)
             {
                 var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-                adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
+                adapter.ApplySubmitOutcome(entity, submitOutcome, GetCurrentUserId());
                 await _encashmentRepository.UpdateAsync(entity);
                 await _unitOfWork.SaveChangesAsync(ct);
             }
@@ -173,17 +177,12 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve", null);
-
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval.");
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Approve", null, "approve a leave encashment", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+        adapter.ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         await _encashmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -200,18 +199,14 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = !string.IsNullOrWhiteSpace(reason) ? reason : "Rejected";
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
 
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Reject", rejectionText, "reject a leave encashment", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+        adapter.ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _encashmentRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();

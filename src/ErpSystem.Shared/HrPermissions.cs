@@ -1,4 +1,4 @@
-namespace ErpSystem.Shared;
+﻿namespace ErpSystem.Shared;
 
 public sealed record HrPermissionDefinition(
     string Name,
@@ -230,6 +230,77 @@ public static class HrPermissions
     public const string CompanyWritePolicy = "HR.Policy.CompanyWrite";
     public const string CompanyAdminPolicy = "HR.Policy.CompanyAdmin";
 
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    // THE APPROVE TIER — interim authority where no workflow definition is published
+    // ═══════════════════════════════════════════════════════════════════════════════════════════
+    //
+    // ⚠ Added 2026-09-16. Read this before using, extending or removing any of them.
+    //
+    // WHAT THEY MEAN. "May rule on a record of this kind **when no workflow definition is
+    // published for its entity type**." Nothing more. Once a definition exists, the engine names
+    // the approver per step and none of these are consulted — see HrWorkflowFallbackAuthority.
+    //
+    // WHY THEY EXIST. WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved
+    // whenever no active definition exists, and every HR status adapter maps that to its own
+    // approved status. So where no definition is published, pressing Submit *approves the record*
+    // — no approver, no segregation of duties. Making submit stop at a pending status needs
+    // somewhere for the authority to come from, and there was nowhere: the permission model
+    // deliberately has no approver concept, because approval authority is meant to come from the
+    // definition.
+    //
+    // ⚠ Corrected 2026-09-16: an earlier version said "No HR definition is seeded anywhere in the
+    // solution". EnsureHrWorkflowsSeededAsync seeds 28 of them, published and active, so on a
+    // seeded tenant the fallback never runs and these permissions are inert. They exist for the
+    // unseeded tenant — a provisioning that did not complete, a definition someone unpublished, a
+    // tenant older than the seeder. Inert-by-default is the intended resting state.
+    //
+    // ⚠ WHY NOT THE ADMIN TIER. It was the obvious candidate and it is wrong. The Admin tiers are
+    // DESTRUCTIVE-OPERATIONS permissions, not approval permissions, and they say so themselves —
+    // AdministerLeave's description reads "Approving leave is NOT this permission — approval
+    // belongs to the workflow assignee and is validated per request by the workflow engine";
+    // AdministerDiscipline says the natural-justice rules are enforced on the record, "not granted
+    // here"; AdministerCompensation is about deleting grades and deactivating pay components.
+    // Pinning approval to them would misuse them, and granting them to the HR desk so it could
+    // approve would widen HR's destructive reach as a side effect.
+    //
+    // ⚠ FIVE ARE DELIBERATELY NOT GRANTED TO THE HR DESK — see HrStaffGrants. Separation,
+    // Probation, Succession, JobArchitecture and ManpowerBudget each carry a requirement-driven
+    // objection to HR approving at all. They are defined here so the mechanism is uniform; the
+    // grant is where the decision lives, which is the right place for it to be reversed.
+    //
+    // WHEN TO DELETE THEM. When every HR entity type has a published definition, these do nothing
+    // and should go. They are in one block, and each is named .Approve, so both are easy to find.
+
+    public const string ApproveLeave = "HR.Leave.Approve";
+    public const string ApproveAttendance = "HR.Attendance.Approve";
+    public const string ApproveCompensation = "HR.Compensation.Approve";
+    public const string ApproveTraining = "HR.Training.Approve";
+    public const string ApproveRecruitment = "HR.Recruitment.Approve";
+    public const string ApproveTravel = "HR.Travel.Approve";
+    public const string ApprovePerformance = "HR.Performance.Approve";
+    public const string ApproveAssets = "HR.Assets.Approve";
+    public const string ApproveMovements = "HR.Movements.Approve";
+    public const string ApproveDiscipline = "HR.Discipline.Approve";
+    public const string ApproveCompany = "HR.Company.Approve";
+
+    // ── The four the HR desk is NOT granted ──────────────────────────────────────────────────
+    //
+    // ⚠ There is deliberately NO ApproveSeparation. It was declared and then removed on the same
+    // day, once SeparationService was read properly: RequireDecisionAuthority already enforces
+    // FR-HR-092 on the record — the Managing Director signs any exit, HR only a procedural one —
+    // and its own comment notes that it holds "even if the definition is missing or wrong". That
+    // is stronger than a permission and it runs first.
+    //
+    // Adding a permission gate on top would have BLOCKED THE MANAGING DIRECTOR, who holds only
+    // ViewSeparation by design; see ApprovalReaderGrants, which says the authority to decide "is
+    // not a permission at all, it is read off the record". A second gate there would refuse the
+    // one person the requirement names. Separation's no-workflow branch therefore carries no
+    // permission check, and the record rule is the whole authority.
+    public const string ApproveProbation = "HR.Probation.Approve";
+    public const string ApproveSuccession = "HR.Succession.Approve";
+    public const string ApproveJobArchitecture = "HR.JobArchitecture.Approve";
+    public const string ApproveManpowerBudget = "HR.ManpowerBudget.Approve";
+
     public static readonly HrPermissionDefinition[] All =
     {
         new(ViewLeave, "View Leave",
@@ -450,7 +521,66 @@ public static class HrPermissions
             CategoryCompany),
         new(AdministerCompany, "Administer Company & Administration",
             "Change the HR policy settings — the procedural-absence threshold (FR-HR-092) and the budget and establishment enforcement modes (FR-HR-136) among them — and delete company-schedule records, meeting rooms, milestones, closures, fiscal years and external associates.",
-            CategoryCompany)
+            CategoryCompany),
+
+        // ── The Approve tier (2026-09-16) ────────────────────────────────────────────────────
+        // Every description says the same thing on purpose: this is an INTERIM authority, it only
+        // applies where no workflow definition is published, and publishing one supersedes it.
+        // Whoever reads these on the roles screen should be able to tell that from the text alone.
+
+        new(ApproveLeave, "Approve Leave (unconfigured)",
+            "Approve or reject leave requests, plans and encashments WHERE NO LEAVE APPROVAL WORKFLOW IS PUBLISHED. Interim: once a workflow definition names the approver, that definition decides and this permission does nothing. It does not let you approve your own request.",
+            CategoryLeave),
+        new(ApproveAttendance, "Approve Attendance & Time (unconfigured)",
+            "Approve or reject attendance regularisations, remote-work requests, overtime and consultant timesheets WHERE NO APPROVAL WORKFLOW IS PUBLISHED for them. Interim, superseded by a published definition. Consultant timesheets sit here because ConsultantTimesheetsController gates every other action on them against the attendance policies.",
+            CategoryAttendance),
+        new(ApproveCompensation, "Approve Compensation changes (unconfigured)",
+            "Approve or reject salary change requests and salary review proposals WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition. ⚠ This authorises a change to someone's pay — grant it deliberately.",
+            CategoryCompensation),
+        new(ApproveTraining, "Approve Training nominations (unconfigured)",
+            "Approve or reject training nominations WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition.",
+            CategoryTraining),
+        new(ApproveRecruitment, "Approve Recruitment records (unconfigured)",
+            "Approve or reject staff requisitions and job offers WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition. ⚠ Approving an offer authorises binding terms to someone outside the organisation. It does not let you approve a requisition you raised or an offer you prepared.",
+            CategoryRecruitment),
+        new(ApproveTravel, "Approve Staff Travel (unconfigured)",
+            "Approve or reject travel requests WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition.",
+            CategoryTravel),
+        new(ApprovePerformance, "Approve Performance records (unconfigured)",
+            "Approve or reject appraisal templates, improvement plans and employment-action proposals WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition. ⚠ An improvement plan becomes binding on the employee when approved.",
+            CategoryPerformance),
+        new(ApproveAssets, "Approve Asset requests (unconfigured)",
+            "Approve or reject asset requisitions, transfers and surcharges WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition.",
+            CategoryAssets),
+        new(ApproveMovements, "Approve Staff Movements (unconfigured)",
+            "Approve or reject promotions and transfers WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition. It does not let you approve a movement you requested.",
+            CategoryMovements),
+        new(ApproveDiscipline, "Approve Disciplinary actions (unconfigured)",
+            "Approve or reject disciplinary actions WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition. ⚠ The natural-justice rules — who may decide a case, and that the employee was queried and heard — are enforced on the record by the service and are NOT granted here.",
+            CategoryDiscipline),
+        new(ApproveCompany, "Approve Team records (unconfigured)",
+            "Approve or reject team objectives and terms of reference WHERE NO APPROVAL WORKFLOW IS PUBLISHED. Interim, superseded by a published definition.",
+            CategoryCompany),
+
+        // ── Defined, but deliberately NOT granted to the HR desk ─────────────────────────────
+        // Each carries a requirement-driven objection to HR approving. See HrStaffGrants for the
+        // reasoning; the grant is where the decision lives, so that is where to reverse it.
+
+        // ⚠ No separation entry. See the note where these constants are declared: FR-HR-092 lives
+        // on the record in SeparationService.RequireDecisionAuthority, and a permission gate there
+        // would refuse the Managing Director.
+        new(ApproveProbation, "Approve Probation outcomes (unconfigured)",
+            "Approve or reject a probation outcome WHERE NO APPROVAL WORKFLOW IS PUBLISHED. ⚠ NOT granted to the HR desk: confirming, extending or terminating probation decides whether someone's employment becomes permanent. FR-HR-032 names the chain as system → head confirms → HR issues the letter.",
+            CategoryProbation),
+        new(ApproveSuccession, "Approve Succession plans (unconfigured)",
+            "Approve a succession plan or finalise calibration WHERE NO APPROVAL WORKFLOW IS PUBLISHED. ⚠ NOT granted to the HR desk: approving names a person as the intended successor to a post, and a finalised nine-box placement feeds promotion and movement decisions. Management acts, not record-keeping.",
+            CategorySuccession),
+        new(ApproveJobArchitecture, "Approve Job descriptions (unconfigured)",
+            "Approve or reject a job description WHERE NO APPROVAL WORKFLOW IS PUBLISHED. ⚠ NOT granted to the HR desk: FR-HR-134 — an approved job description is what a position is measured against, and it carries the job valuation and the suggested salary grade.",
+            CategoryJobArchitecture),
+        new(ApproveManpowerBudget, "Approve Manpower budgets (unconfigured)",
+            "Approve or reject a manpower budget WHERE NO APPROVAL WORKFLOW IS PUBLISHED. ⚠ NOT granted to the HR desk: approving one sets the approved establishment, which gates whether a vacancy may be approved at all under FR-HR-136.",
+            CategoryManpowerBudget)
     };
 
     public static readonly string[] AllNames = All.Select(permission => permission.Name).ToArray();
@@ -562,7 +692,50 @@ public static class HrPermissions
         ViewAssets, MaintainAssets,
         ViewMovements, MaintainMovements,
         ViewDiscipline, MaintainDiscipline,
-        ViewCompany, MaintainCompany
+        ViewCompany, MaintainCompany,
+
+        // ── The Approve tier (2026-09-16) ────────────────────────────────────────────────────
+        // Interim authority to rule on a record whose entity type has NO published workflow
+        // definition. See the block where these are declared for why this is a new tier rather
+        // than the Admin one. The HR desk gets eleven of the sixteen.
+        //
+        // ⚠ These are the reason a submitted record does not sit unapprovable. Before them,
+        // Submit approved the record outright (no approver at all); the fix stops that, and
+        // without somewhere for the authority to come from it would simply strand every record
+        // instead — which is the worse of the two failures.
+        ApproveLeave,
+        ApproveAttendance,
+        ApproveCompensation,
+        ApproveTraining,
+        ApproveRecruitment,
+        ApproveTravel,
+        ApprovePerformance,
+        ApproveAssets,
+        ApproveMovements,
+        ApproveDiscipline,
+        ApproveCompany,
+
+        // ⚠ FOUR ARE ABSENT AND THAT IS THE POINT. ApproveProbation, ApproveSuccession,
+        // ApproveJobArchitecture and ApproveManpowerBudget are deliberately NOT here, each for a
+        // reason this map already argues elsewhere. (Separation has no Approve permission at all —
+        // its authority is FR-HR-092 on the record; see the declaration block.)
+        //
+        //   • Probation       — confirm / extend / terminate decide whether employment becomes
+        //                       permanent. The remarks above warn against making the outcome
+        //                       "reachable by anyone HR-shaped".
+        //   • Succession      — approving names the intended successor to a post; calibration
+        //                       fixes a nine-box placement that feeds promotion decisions.
+        //   • JobArchitecture — FR-HR-134: an approved JD carries the job valuation and the
+        //                       suggested salary grade.
+        //   • ManpowerBudget  — approving sets the approved establishment, which gates whether a
+        //                       vacancy may be approved at all under FR-HR-136.
+        //
+        // The effect: those five stop auto-approving like everything else, but their approval
+        // stalls until SuperAdmin/TenantAdmin/Admin acts or — the real answer — a workflow
+        // definition names the authority. A stalled approval is the documented intent.
+        //
+        // If a tenant needs HR to approve one of these, publish a definition naming the right
+        // approver. Adding the grant here is the wrong lever and undoes a requirement.
     };
 
     /// <summary>

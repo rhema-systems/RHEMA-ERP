@@ -1,4 +1,4 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
@@ -151,7 +151,7 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         else
         {
             HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "approve an employment action proposal", HrPermissions.AdministerPerformance);
+                _currentUserProvider, "approve an employment action proposal", HrPermissions.ApprovePerformance);
             approvalOutcome = WorkflowOutcome.Approved;
         }
 
@@ -187,7 +187,7 @@ public class EmploymentActionProposalService : IEmploymentActionProposalService
         else
         {
             HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "reject an employment action proposal", HrPermissions.AdministerPerformance);
+                _currentUserProvider, "reject an employment action proposal", HrPermissions.ApprovePerformance);
             rejectionOutcome = WorkflowOutcome.Rejected;
         }
 

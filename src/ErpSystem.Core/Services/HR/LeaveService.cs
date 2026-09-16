@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.Common;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.Enums;
@@ -461,13 +462,23 @@ public class LeaveService : ILeaveService
             return true;
         }
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        // ⚠ Note what this is NOT. The block above — LeaveType.RequiresApproval == false — is a
+        // deliberate, configured auto-approval for low-risk leave types, and it is correct. This is
+        // the other path: approval IS required for this type, and with no published definition the
+        // engine returned Approved anyway, so the request was approved with nobody asked. The
+        // configured opt-out is the right way to make a leave type auto-approve; falling through
+        // the engine is not.
+        //
+        // Defence in depth — a LEAVE_REQUEST definition is seeded, so this bites only on a tenant
+        // where seeding has not run. See HrWorkflowFallbackAuthority.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
 
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(request, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(request, submitOutcome, userId);
 
         await _leaveRepository.UpdateAsync(request);
         await _unitOfWork.SaveChangesAsync();
@@ -490,18 +501,14 @@ public class LeaveService : ILeaveService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var comments = dto.Comments ?? dto.ApprovalNotes;
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve", comments);
 
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval.");
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Approve", comments, "approve a leave request", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(request, workflowResult.Outcome, userId);
+        adapter.ApplyApprovalOutcome(request, approvalOutcome, userId);
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {
@@ -523,18 +530,14 @@ public class LeaveService : ILeaveService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = !string.IsNullOrWhiteSpace(dto.RejectionReason) ? dto.RejectionReason : "Rejected";
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
 
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Reject", rejectionText, "reject a leave request", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(request, workflowResult.Outcome, userId, rejectionText);
+        adapter.ApplyApprovalOutcome(request, rejectionOutcome, userId, rejectionText);
 
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>
         {

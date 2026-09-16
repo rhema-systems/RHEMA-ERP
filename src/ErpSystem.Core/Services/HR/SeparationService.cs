@@ -509,13 +509,24 @@ public class SeparationService : ISeparationService
         await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var submitted = await _workflow.SubmitAsync(EntityType, entity.Id);
+        // ⚠ Submitting must never approve, and here that is the whole of FR-HR-092.
+        //
+        // With no published definition the engine returns WorkflowOutcome.Approved, and the
+        // adapter maps it to SeparationStatus.Approved — so Submit ENDED SOMEONE'S EMPLOYMENT with
+        // nobody having signed it. Worse, it did so by never reaching ApproveAsync, which is where
+        // RequireDecisionAuthority lives: the Managing Director's signature was not refused, it was
+        // never asked for. That is the single most consequential instance of this defect in HR.
+        //
+        // Defence in depth — an EMPLOYEE_SEPARATION definition IS seeded (mdOnly), so this bites
+        // only on a tenant where seeding has not run. See HrWorkflowFallbackAuthority.
+        var (submitted, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflow, EntityType, entity.Id);
         if (!submitted.ExecutionResult.Success)
             throw new InvalidOperationException(
                 submitted.ExecutionResult.Message ?? "Failed to start the separation approval workflow.");
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, submitted.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         if (!string.IsNullOrWhiteSpace(dto.Notes))
         {
@@ -681,18 +692,41 @@ public class SeparationService : ISeparationService
         // definition assigned. A definition can express the same procedural split for assignment,
         // but the guarantee lives in the service.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current step of this separation.");
 
-        var approval = await _workflow.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Approve", dto.Notes);
-        if (!approval.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                approval.ExecutionResult.Message ?? "Failed to process the separation approval.");
+        // ⚠ NO PERMISSION GATE ON THE NO-WORKFLOW BRANCH, and that is deliberate.
+        //
+        // Everywhere else in this programme the fallback authority is an HR.<Module>.Approve
+        // permission. Here it must not be, because **RequireDecisionAuthority above already IS the
+        // authority** — it is FR-HR-092 itself, it is role-based (the MD signs any exit; HR only a
+        // procedural one), and its own comment says it holds "even if the definition is missing or
+        // wrong". It is stronger than a permission check and it has already run.
+        //
+        // Adding HR.Separation.Approve on top would BLOCK THE MANAGING DIRECTOR, who holds only
+        // ViewSeparation by design (ApprovalReaderGrants: "the authority to decide is not a
+        // permission at all, it is read off the record"). The gate that exists is the right one;
+        // a second gate here would refuse the very person the requirement names.
+        WorkflowOutcome approvalOutcome;
+        if (await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException(
+                    "You are not assigned as an approver for the current step of this separation.");
+
+            var approval = await _workflow.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Approve", dto.Notes);
+            if (!approval.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    approval.ExecutionResult.Message ?? "Failed to process the separation approval.");
+
+            approvalOutcome = approval.Outcome;
+        }
+        else
+        {
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, approval.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, actingUserId);
 
         // The engine names the ApplicationUser who acted; the record wants the Employee, because
         // ApprovedById is an Employee FK and "who signed this exit" is a person, not a login.
@@ -828,20 +862,32 @@ public class SeparationService : ISeparationService
 
         RequireDecisionAuthority(entity);
 
-        // Same two gates as approving, same order and for the same reasons.
+        // Same two gates as approving, same order and for the same reasons — and the same absence
+        // of a permission gate on the no-workflow branch, for the reason given there.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current step of this separation.");
 
-        var refusal = await _workflow.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Reject", dto.Reason);
-        if (!refusal.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                refusal.ExecutionResult.Message ?? "Failed to process the separation refusal.");
+        WorkflowOutcome refusalOutcome;
+        if (await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException(
+                    "You are not assigned as an approver for the current step of this separation.");
+
+            var refusal = await _workflow.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Reject", dto.Reason);
+            if (!refusal.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    refusal.ExecutionResult.Message ?? "Failed to process the separation refusal.");
+
+            refusalOutcome = refusal.Outcome;
+        }
+        else
+        {
+            refusalOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, refusal.Outcome, actingUserId, dto.Reason);
+            .ApplyApprovalOutcome(entity, refusalOutcome, actingUserId, dto.Reason);
 
         entity.RejectedById = actorEmployeeId;
         entity.RejectedOn = DateTime.UtcNow;

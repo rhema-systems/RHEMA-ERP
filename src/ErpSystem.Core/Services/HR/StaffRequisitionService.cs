@@ -391,12 +391,17 @@ public class StaffRequisitionService : IStaffRequisitionService
         // active definition exists for the entity type — a deliberate "approval is not configured,
         // use the direct lifecycle" signal that nine modules share. The requisition adapter maps
         // Approved straight to StaffRequisitionStatus.Approved, so on a tenant with no published
-        // StaffRequisition definition (which is every tenant: none is seeded anywhere in the
-        // solution) pressing Submit took a requisition Draft → Approved in one step, with no
+        // StaffRequisition definition pressing Submit took a requisition Draft → Approved in one
+        // step, with no
         // approver, no CanUserApproveAsync check, and — the part that matters — no segregation of
         // duties, because "you cannot approve a requisition you raised yourself" lives in
         // ApproveAsync, which was never called. The history row recorded the transition, so
         // afterwards it was indistinguishable from a reviewed approval.
+        //
+        // ⚠ Corrected 2026-09-16: an earlier version of this comment added "(which is every
+        // tenant: none is seeded anywhere in the solution)". That was false —
+        // EnsureHrWorkflowsSeededAsync seeds a published StaffRequisition definition, so on a
+        // seeded tenant this never fired. Kept as defence in depth; see HrWorkflowFallbackAuthority.
         //
         // The shared fallback is left alone; it is load-bearing for the other eight applications.
         // Here we simply ask the question first and refuse to let submission decide. With no

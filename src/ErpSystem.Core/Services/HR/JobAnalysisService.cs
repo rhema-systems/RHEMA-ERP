@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
@@ -699,31 +700,36 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
-        var result = await _workflowIntegration.ProcessApprovalAsync(WorkflowEntityType, jobDescriptionId, userId, "Approve");
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the job description approval.");
+        // ⚠ Submit above already handles the no-definition case correctly — it sets PendingReview
+        // directly rather than letting the engine's Approved through. But nothing handled it HERE,
+        // so a job description submitted on an unseeded tenant reached PendingReview and could
+        // then never be approved: CanUserApproveAsync answers false with no workflow instance to
+        // name an approver. The record was stranded. That is the failure this programme's helper
+        // exists to prevent, and it was already present in this service.
+        //
+        // ⚠ HR.JobArchitecture.Approve is NOT granted to the HR desk — see HrStaffGrants. FR-HR-134:
+        // an approved job description carries the job valuation and the suggested salary grade.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, WorkflowEntityType, jobDescriptionId, userId,
+            "Approve", null, "approve a job description", HrPermissions.ApproveJobArchitecture);
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         // ⚠ The consequences, which the adapter cannot apply because it sees only this one entity.
         // Superseding matters beyond tidiness: OfferLetterService selects a position's job
         // description by SupersededByVersionId == null, so two unsuperseded approved versions make
         // an offer letter ambiguous. Only run when the engine actually approved — an intermediate
-        // step returns Pending, and a mid-chain approval must not retire anything.
-        if (result.Outcome == WorkflowOutcome.Approved)
+        // step returns Pending, and a mid-chain approval must not retire anything. On the
+        // no-workflow branch there is no chain, so the single approval is the whole of it.
+        if (approvalOutcome == WorkflowOutcome.Approved)
             await ApplyApprovalConsequencesAsync(entity, approvedById, cancellationToken);
 
         await _jobDescriptionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job description {Number} approval step processed: {Outcome}",
-            entity.JobDescriptionNumber, result.Outcome);
+            entity.JobDescriptionNumber, approvalOutcome);
 
         return true;
     }
@@ -734,19 +740,14 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
-        var result = await _workflowIntegration.ProcessApprovalAsync(
-            WorkflowEntityType, jobDescriptionId, userId, "Reject", rejectionText);
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the job description rejection.");
+
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, WorkflowEntityType, jobDescriptionId, userId,
+            "Reject", rejectionText, "reject a job description", HrPermissions.ApproveJobArchitecture);
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _jobDescriptionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2544,22 +2545,24 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var entity = await GetOwnedBudgetAsync(budgetId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
-        var result = await _workflowIntegration.ProcessApprovalAsync(BudgetWorkflowEntityType, budgetId, userId, "Approve");
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the manpower budget approval.");
+        // Same strand as the job description above: submit already lands at Submitted with no
+        // definition, and this could then never approve it.
+        //
+        // ⚠ HR.ManpowerBudget.Approve is NOT granted to the HR desk — see HrStaffGrants. Approving
+        // sets the approved establishment, which gates whether a vacancy may be approved at all
+        // under FR-HR-136.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, BudgetWorkflowEntityType, budgetId, userId,
+            "Approve", null, "approve a manpower budget", HrPermissions.ApproveManpowerBudget);
 
         _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         // ⚠ Only when the chain actually completes. FR-HR-135 has three steps, and a Department
         // Head approving the first must not stamp the budget as approved — the engine returns
         // Pending for a mid-chain step, and an approver is not the approver until the last one.
-        if (result.Outcome == WorkflowOutcome.Approved)
+        // With no definition there is no chain, so the single approval completes it.
+        if (approvalOutcome == WorkflowOutcome.Approved)
         {
             entity.ApprovedById = approvedById;
             // Only now. A department head approving step 1 of 3 has authorised nothing yet, and
@@ -2572,7 +2575,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Manpower budget {Number} approval step processed: {Outcome}",
-            entity.BudgetNumber, result.Outcome);
+            entity.BudgetNumber, approvalOutcome);
 
         return true;
     }
@@ -2583,19 +2586,14 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var entity = await GetOwnedBudgetAsync(budgetId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
-        var result = await _workflowIntegration.ProcessApprovalAsync(
-            BudgetWorkflowEntityType, budgetId, userId, "Reject", rejectionText);
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the manpower budget rejection.");
+
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, BudgetWorkflowEntityType, budgetId, userId,
+            "Reject", rejectionText, "reject a manpower budget", HrPermissions.ApproveManpowerBudget);
 
         _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

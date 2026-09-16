@@ -18,6 +18,15 @@ only visible once they are all read. Start at chapter 16 if you want the conclus
 > **`docs/HR/HR-RECRUITMENT-GAP-CLOSURE-PLAN.md`**. Start there if you want to know the state of
 > the module rather than its history.
 >
+> **⚠ One correction you should know before reading any gap about workflow approval.** G-4.1,
+> G-10.1 and Appendix C's auto-approve note all asserted that *no HR workflow definition is seeded
+> anywhere in the solution*. **That is false, and was false when written** —
+> `EnsureHrWorkflowsSeededAsync` seeds 28 published definitions covering every HR entity type, and
+> landed twelve days before this walk. Those gaps are still correctly closed (the unseeded state is
+> reachable, and the offer's missing segregation-of-duties check was real either way), but the
+> severity was overstated. Corrected in place on 2026-09-16; the full account is in
+> `docs/HR/HR-WORKFLOW-AUTOAPPROVE-CLOSURE-PLAN.md`.
+>
 > **Still open, deliberately:**
 >
 > | | Why it is still open |
@@ -1097,9 +1106,17 @@ for `StaffRequisition`, or no active definition against it — it returns early 
 So pressing Submit takes the requisition Draft → **Approved** in one step, with no approver, no
 `CanUserApproveAsync` check, and — critically — **no segregation-of-duties check**, because the
 "you cannot approve a requisition you raised yourself" rule lives in `ApproveAsync`, which is
-never called. The history row records the transition, so it looks deliberate afterwards. No
-`StaffRequisition` workflow definition is seeded anywhere in the solution, so this is the
-out-of-the-box behaviour.
+never called. The history row records the transition, so it looks deliberate afterwards.
+
+> ⚠ **This finding said "no `StaffRequisition` workflow definition is seeded anywhere in the
+> solution, so this is the out-of-the-box behaviour". That was false when written** (corrected
+> 2026-09-16). `DatabaseSeedingService.EnsureHrWorkflowsSeededAsync` seeds 28 HR definitions —
+> `StaffRequisition` among them — `IsActive` and `Published`, and it landed 2026-09-02, twelve days
+> before this walk. On a seeded tenant this never fired.
+>
+> The gap is still correctly closed, because the unseeded state is reachable and two other HR
+> services' authors hit it and wrote their own guards. But the severity was overstated. See the
+> *note on method* in Appendix C — this is its fifth instance, and the costliest.
 
 The budget and establishment enforcement *does* still run, since it happens before the workflow
 call — that is the only guard left standing.
@@ -2563,8 +2580,13 @@ guarantees the outcome it exists to avoid."*
 `HrJobOfferWorkflowStatusAdapters` maps `WorkflowOutcome.Approved` to
 `OfferStatus = Approved` *and stamps `ApprovedDate`*. As established in G-4.1,
 `WorkflowIntegrationService.SubmitAsync` returns that outcome whenever no active workflow
-definition exists for the entity type — and no `JobOffer` definition is seeded anywhere in the
-solution.
+definition exists for the entity type.
+
+> ⚠ **This said "and no `JobOffer` definition is seeded anywhere in the solution". False** — a
+> `JOB_OFFER` definition is seeded, published and active (corrected 2026-09-16; see G-4.1). What
+> remains true of this finding regardless of any definition: **the offer had no
+> segregation-of-duties check at all**, so whoever prepared the terms could approve them. That is
+> closed too.
 
 So pressing **Submit** takes an offer Draft → **Approved** in one step, with `ApprovedDate` set and
 no approver, which immediately unlocks **Issue to candidate**. Here that matters more than it does
@@ -3954,11 +3976,24 @@ during the walk itself; two more were caught during the closure pass, by the sam
   before the walk, which appears to have read a stale checkout. G-12.4 was recorded as a downstream
   consequence of G-7.1, so it fell with it.
 
-> **The habit that caught all four is the same one**, and it is worth more than any individual
-> finding here: **before acting on "X does not exist", open X.** Two of these were caught by the
-> author mid-walk and two by the person closing them; in both directions the cost of not checking
-> would have been building something that already existed, or documenting a defect that was not
-> there. A gap list is a set of claims about code, and claims decay.
+- **The seeding premise under G-4.1, G-10.1 and the auto-approve note** (caught 2026-09-16, while
+  extending the fix to the rest of HR): all three said no HR workflow definition was seeded
+  anywhere in the solution. **`EnsureHrWorkflowsSeededAsync` seeds 28 of them**, published and
+  active, covering every entity type named — and it landed 2026-09-02, **twelve days before this
+  walk**. So the auto-approve fired only on a tenant where seeding had not run. The findings are
+  still correctly closed, and the offer's missing segregation-of-duties check was real regardless;
+  what was wrong was "on every tenant, out of the box".
+
+> **The habit that caught all five is the same one**, and it is worth more than any individual
+> finding here: **before acting on "X does not exist", open X.** Some were caught by the author
+> mid-walk and some by the person closing them; in both directions the cost of not checking was
+> building something that already existed, or documenting a defect that was not there.
+>
+> **The fifth is the one to learn from**, because it was not a detail inside a finding — it was the
+> *premise* under six of them, it was stated with confidence in three places, and it survived a
+> full closure pass before anyone opened `DatabaseSeedingService`. A `grep` that finds nothing is
+> not evidence of absence; it is evidence about the `grep`. A gap list is a set of claims about
+> code, and claims decay — but a claim that was never true does not decay, it just propagates.
 
 **The counter-example.** Chapter 14 is the reply to most of this appendix.
 `RecruitmentAnalyticsService` derives its figures from **records rather than statuses** — hired

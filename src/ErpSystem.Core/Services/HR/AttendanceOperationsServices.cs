@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Models.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -321,7 +322,11 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
     {
         try
         {
-            var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+            // Submitting must never approve — with no published definition the engine returns
+            // Approved and the adapter marks the request approved with nobody asked. Defence in
+            // depth; a definition IS seeded for this type. See HrWorkflowFallbackAuthority.
+            var (workflowResult, submitOutcome) =
+                await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
             if (!workflowResult.ExecutionResult.Success)
             {
                 _logger.LogWarning(
@@ -332,7 +337,7 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
             }
 
             var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-            adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, entity.EmployeeId);
+            adapter.ApplySubmitOutcome(entity, submitOutcome, entity.EmployeeId);
 
             await _repository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
@@ -389,19 +394,18 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
         if (currentUserId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, currentUserId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, currentUserId, action, decisionText);
-
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the decision.");
+        // Engine when a definition is published; the Approve tier when none is. Without the second
+        // branch a request submitted on an unseeded tenant could not be decided at all --
+        // CanUserApproveAsync answers false with no instance to name an approver.
+        var decisionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, entity.Id, currentUserId,
+            action, decisionText,
+            (isReject ? "reject " : "approve ") + "a remote work request",
+            HrPermissions.ApproveAttendance);
 
         // ApprovedById is an Employee foreign key, so the adapter gets the employee id.
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, employeeId, isReject ? decisionText : null);
+        adapter.ApplyApprovalOutcome(entity, decisionOutcome, employeeId, isReject ? decisionText : null);
 
         if (!isReject)
             entity.ApprovalComments = comments;
@@ -414,7 +418,7 @@ public class RemoteWorkRequestService : IRemoteWorkRequestService
 
         _logger.LogInformation(
             "Remote work request {Number} decision '{Action}' processed by {UserId}; outcome {Outcome}",
-            entity.RequestNumber, action, currentUserId, workflowResult.Outcome);
+            entity.RequestNumber, action, currentUserId, decisionOutcome);
 
         return await ReadDetailAsync(entity.Id, ct) ?? entity.ToDto();
     }

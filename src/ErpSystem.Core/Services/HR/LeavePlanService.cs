@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -198,13 +199,16 @@ public class LeavePlanService : ILeavePlanService
         if (entity.Status != LeavePlanStatus.Draft)
             throw new InvalidOperationException("Only draft leave plans can be submitted.");
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        // Submitting must never approve — see HrWorkflowFallbackAuthority. Defence in depth; a
+        // LEAVE_PLAN definition is seeded, so this bites only on an unseeded tenant.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
 
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
+        adapter.ApplySubmitOutcome(entity, submitOutcome, GetCurrentUserId());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -221,17 +225,12 @@ public class LeavePlanService : ILeavePlanService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve", null);
-
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process approval.");
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Approve", null, "approve a leave plan", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+        adapter.ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -248,18 +247,14 @@ public class LeavePlanService : ILeavePlanService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = !string.IsNullOrWhiteSpace(reason) ? reason : "Rejected";
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
 
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process rejection.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
+            "Reject", rejectionText, "reject a leave plan", HrPermissions.ApproveLeave);
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+        adapter.ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -280,16 +275,32 @@ public class LeavePlanService : ILeavePlanService
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
 
-        var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
-        if (!canApprove)
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        // Suggesting changes is a third decision verb alongside approve and reject, and it needs
+        // the same two paths they have. With no definition published there is no instance, so
+        // CanUserApproveAsync answers false for everybody and nothing could be sent back to the
+        // employee — and CancelWorkflowAsync would have no instance to cancel either. A plan can
+        // now sit at Submitted on such a tenant (that is the point of this programme), so without
+        // this branch that plan would be stuck with cancellation as its only exit.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var canApprove = await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId);
+            if (!canApprove)
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        // Suggesting changes sends the plan back to the employee, so the active approval
-        // workflow is cancelled; a fresh one starts when the employee re-submits.
-        var cancelResult = await _workflowIntegrationService.CancelWorkflowAsync(
-            EntityType, id, "Manager suggested alternative dates");
-        if (!cancelResult.Success)
-            throw new InvalidOperationException(cancelResult.Message ?? "Failed to update the approval workflow.");
+            // Suggesting changes sends the plan back to the employee, so the active approval
+            // workflow is cancelled; a fresh one starts when the employee re-submits.
+            var cancelResult = await _workflowIntegrationService.CancelWorkflowAsync(
+                EntityType, id, "Manager suggested alternative dates");
+            if (!cancelResult.Success)
+                throw new InvalidOperationException(cancelResult.Message ?? "Failed to update the approval workflow.");
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserService.Roles,
+                "send a leave plan back with suggested changes",
+                HrPermissions.ApproveLeave);
+        }
 
         entity.Status = LeavePlanStatus.ChangesSuggested;
         entity.SuggestedStartDate = dto.SuggestedStartDate;
@@ -346,12 +357,15 @@ public class LeavePlanService : ILeavePlanService
         entity.SuggestedEndDate = null;
         entity.ManagerSuggestionNotes = null;
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
+        // The resubmission path, and it needs the same guard as the first submit above: without it
+        // a plan sent back for changes would approve itself on its way back in.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start approval workflow.");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, GetCurrentUserId());
+        adapter.ApplySubmitOutcome(entity, submitOutcome, GetCurrentUserId());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();

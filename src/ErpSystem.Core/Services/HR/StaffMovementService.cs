@@ -474,7 +474,10 @@ public class StaffMovementService : IStaffMovementService
         // WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved whenever no
         // active definition exists for the entity type, and StaffMovementWorkflowStatusAdapter
         // maps Approved to Approved (or EmployeeAcceptancePending) and stamps AuthorizationDate.
-        // No StaffMovement definition is seeded anywhere in the solution, so pressing Submit took
+        // ⚠ Corrected 2026-09-16: this said "No StaffMovement definition is seeded anywhere in the
+        // solution". It IS seeded, published and active by EnsureHrWorkflowsSeededAsync, so on a
+        // seeded tenant this path never ran. Kept as defence in depth for an unseeded tenant — see
+        // HrWorkflowFallbackAuthority. Where it DID run, pressing Submit took
         // a promotion or transfer Draft → Approved in one step with nobody having reviewed it —
         // and the block below then wrote AuthorizedById = the submitter, recording the person who
         // asked for the move as the person who authorised it. That is a false audit fact, not just
@@ -546,6 +549,18 @@ public class StaffMovementService : IStaffMovementService
 
         var submitted = await _movementRepo.GetPendingApprovalAsync(tenantId);
 
+        // With no definition published there is no instance, so CanUserApproveAsync answers false
+        // about every movement and this inbox would come back EMPTY for everyone - while movements
+        // sit in it, because that is where submitting now leaves them. Whoever holds the fallback
+        // authority sees them all; they are the people who can actually decide one.
+        if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            return HrWorkflowFallbackAuthority.CanRuleWithoutWorkflow(
+                       _currentUserProvider, HrPermissions.ApproveMovements)
+                ? submitted.ToSummaryDtoList()
+                : Enumerable.Empty<StaffMovementSummaryDto>();
+        }
+
         var mine = new List<StaffMovement>();
         foreach (var movement in submitted)
         {
@@ -589,7 +604,7 @@ public class StaffMovementService : IStaffMovementService
         else
         {
             HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "approve a staff movement", HrPermissions.AdministerMovements);
+                _currentUserProvider, "approve a staff movement", HrPermissions.ApproveMovements);
             approvalOutcome = WorkflowOutcome.Approved;
         }
 
@@ -755,7 +770,7 @@ public class StaffMovementService : IStaffMovementService
         else
         {
             HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "reject a staff movement", HrPermissions.AdministerMovements);
+                _currentUserProvider, "reject a staff movement", HrPermissions.ApproveMovements);
             rejectionOutcome = WorkflowOutcome.Rejected;
         }
 
@@ -783,6 +798,12 @@ public class StaffMovementService : IStaffMovementService
 
         // Cancelling a movement that is out for approval must take its workflow instance with it,
         // or the approvers keep a live task pointing at a cancelled record.
+        //
+        // No HasActiveApprovalWorkflowAsync guard here, unlike recall: with nothing published there
+        // is no instance, and SimpleWorkflowService.CancelWorkflowAsync answers Success = false /
+        // "No active workflow found" rather than throwing. The result is deliberately discarded, so
+        // the cancellation goes through either way. (It would throw only if the WorkflowEntityType
+        // row itself were missing, which is a misconfiguration, not the unseeded-definition case.)
         if (entity.Status == StaffMovementStatus.Submitted)
             await _workflowIntegrationService.CancelWorkflowAsync(
                 EntityType, entity.Id, dto.CancellationReason ?? "Movement cancelled");

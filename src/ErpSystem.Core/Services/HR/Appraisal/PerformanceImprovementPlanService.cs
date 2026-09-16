@@ -607,7 +607,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         else
         {
             HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "approve an improvement plan", HrPermissions.AdministerPerformance);
+                _currentUserProvider, "approve an improvement plan", HrPermissions.ApprovePerformance);
             approvalOutcome = WorkflowOutcome.Approved;
         }
 
@@ -643,7 +643,7 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         else
         {
             HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-                _currentUserProvider, "reject an improvement plan", HrPermissions.AdministerPerformance);
+                _currentUserProvider, "reject an improvement plan", HrPermissions.ApprovePerformance);
             rejectionOutcome = WorkflowOutcome.Rejected;
         }
 

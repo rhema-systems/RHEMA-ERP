@@ -1,4 +1,4 @@
-using ErpSystem.Core.Interfaces;
+﻿using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Core.Services.HR.Recruitment;
@@ -16,10 +16,16 @@ namespace ErpSystem.Core.Services.HR.Recruitment;
 /// to their own <i>approved</i> status, so pressing <b>Submit</b> took a requisition Draft →
 /// Approved and an offer Draft → Approved-with-an-ApprovedDate, in one step, with no approver and
 /// no segregation-of-duties check — because that check lives in <c>ApproveAsync</c>, which was
-/// never reached. No <c>StaffRequisition</c> or <c>JobOffer</c> definition is seeded anywhere in
-/// the solution, so that was the out-of-the-box behaviour on every tenant. For the offer it is the
-/// step that authorises sending legally-meaningful terms — salary, start date, notice, probation —
-/// to a person outside the organisation.</para>
+/// never reached. For the offer it is the step that authorises sending legally-meaningful terms —
+/// salary, start date, notice, probation — to a person outside the organisation.
+///
+/// <para>⚠ <b>This said "no <c>StaffRequisition</c> or <c>JobOffer</c> definition is seeded
+/// anywhere in the solution, so that was the out-of-the-box behaviour on every tenant". False</b>
+/// (corrected 2026-09-16): both are seeded, published and active by
+/// <c>EnsureHrWorkflowsSeededAsync</c>. On a seeded tenant this path never ran. It is kept as
+/// defence in depth — see <see cref="HrWorkflowFallbackAuthority"/> for why that is worth having.
+/// Note also that the offer's <b>segregation-of-duties check was genuinely missing</b> regardless
+/// of any definition, and was added in the same change.</para></para>
 ///
 /// <para><b>What changed.</b> Both services now ask <c>HasActiveApprovalWorkflowAsync</c> before
 /// applying a submit outcome, and hand the adapter <c>Pending</c> rather than the engine's
@@ -35,13 +41,14 @@ namespace ErpSystem.Core.Services.HR.Recruitment;
 /// shape of G-4.2, which this programme is also closing. So each of those steps now takes a
 /// no-workflow branch: skip the engine, check authority here, and apply the outcome directly.</para>
 ///
-/// <para><b>Who decides, with no definition to name an approver.</b> The recruitment administer
-/// tier — <c>HR.Recruitment.Admin</c>. It is the same "interim home" reasoning
-/// <see cref="HrPermissions"/> already records for probation's three outcomes and job
-/// architecture's two approvals: until the instance-level check does the real work, a management
-/// act sits on Admin. As of the same date that permission is held by the HR desk
-/// (<see cref="HrPermissions.RoleGrants"/>, G-3.1), so the approval is reachable by exactly the
-/// people who run the function, and not by the manager who raised the request.</para>
+/// <para><b>Who decides, with no definition to name an approver.</b>
+/// <see cref="HrPermissions.ApproveRecruitment"/>. This started on the recruitment <i>administer</i>
+/// tier and was moved once the mechanism went HR-wide: the administer tiers are
+/// destructive-operations permissions, so approving on them would have widened HR's destructive
+/// reach as a side effect. The <c>.Approve</c> block exists for this and nothing else, and is
+/// granted to the HR desk (<see cref="HrPermissions.HrStaffGrants"/>) — so the approval is
+/// reachable by exactly the people who run the function, and not by the manager who raised the
+/// request.</para>
 ///
 /// <para>⚠ <b>The segregation-of-duties checks in the calling services still run and are the
 /// stronger half of this gate.</b> Holding the permission does not let you approve your own
@@ -69,7 +76,7 @@ public static class RecruitmentApprovalAuthority
     /// </summary>
     public static bool CanRuleWithoutWorkflow(ICurrentUserProvider currentUser)
         => HrWorkflowFallbackAuthority.CanRuleWithoutWorkflow(
-            currentUser, HrPermissions.AdministerRecruitment);
+            currentUser, HrPermissions.ApproveRecruitment);
 
     /// <summary>
     /// Refuses unless the caller may rule on an unconfigured recruitment record.
@@ -78,5 +85,5 @@ public static class RecruitmentApprovalAuthority
     /// <param name="action">Filled into the message, e.g. <c>"approve a requisition"</c>.</param>
     public static void EnsureCanRuleWithoutWorkflow(ICurrentUserProvider currentUser, string action)
         => HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
-            currentUser, action, HrPermissions.AdministerRecruitment);
+            currentUser, action, HrPermissions.ApproveRecruitment);
 }
