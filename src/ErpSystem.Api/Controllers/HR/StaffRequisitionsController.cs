@@ -21,9 +21,16 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <para><b>Approval authority comes from the published <c>StaffRequisition</c> workflow
 /// definition, not from a role attribute.</b> <c>Approve</c> and <c>Reject</c> therefore carry no
 /// <c>[Authorize(Roles = …)]</c> — the service asks the engine whether the caller is an approver
-/// for the current step. Until a definition is published and
-/// <c>POST api/Workflow/entity-types/seed</c> has been re-run, submit and approve are inoperable
-/// <i>by design</i>.</para>
+/// for the current step.</para>
+///
+/// <para>⚠ <b>This used to claim that submit and approve are "inoperable by design" until a
+/// definition is published. They were not inoperable — submit auto-approved</b> (G-4.1, corrected
+/// 2026-09-15). With no definition the engine's "approval is not configured" signal reached the
+/// status adapter as <c>Approved</c>. The service now asks
+/// <c>HasActiveApprovalWorkflowAsync</c> first and lands an unconfigured submission at
+/// <c>Submitted</c>, where <c>ApproveAsync</c> — and the segregation-of-duties rule it carries —
+/// can do its job. Authority on that path falls to <c>HR.Recruitment.Admin</c>; see
+/// <c>RecruitmentApprovalAuthority</c>.</para>
 ///
 /// <para>Everything that is not an approval decision is gated here: retiring, parking, fulfilling
 /// and costing a requisition are HR's, while raising, editing, submitting and recalling one belong

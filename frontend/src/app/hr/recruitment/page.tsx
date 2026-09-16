@@ -134,9 +134,41 @@ const EVERYONE_ITEMS: NavCardItem[] = [
   },
 ];
 
+/**
+ * What a tile shows while it does not have a number (G-2.1).
+ *
+ * ⚠ Every tile used to render `data?.field ?? '—'`. There was no error branch and no loading state,
+ * so an endpoint returning 500, an expired token, and a request still in flight all displayed the
+ * same em dash — a user could not tell *"we are still counting"* from *"we could not count"*.
+ * Misleading rather than wrong, but on five of the module's front-page numbers.
+ *
+ * Three states, three appearances: `…` while loading, `—` when there is genuinely no figure, and —
+ * for a failure — `—` **plus** the banner below the tiles, because a wrong-looking number with no
+ * explanation is what caused the confusion in the first place.
+ *
+ * `0` is deliberately still `0`, not a dash: a genuine zero is an answer.
+ */
+function tileValue(
+  query: { isLoading: boolean; isError: boolean },
+  value: number | undefined,
+): string | number {
+  if (query.isLoading) return '…';
+  if (query.isError) return '—';
+  return value ?? '—';
+}
+
 export default function RecruitmentLandingPage() {
-  const { hasAnyRole } = useAuth();
-  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  const { hasAnyPermission } = useAuth();
+  // G-2.3 (2026-09-15): this was hasAnyRole(['SuperAdmin', 'HR']) while every recruitment endpoint
+  // behind it authorises on HR.Recruitment.*, which TenantAdmin, Admin and the legacy HR User role
+  // also hold. Those three were served by the whole API and shown nothing here but the two
+  // self-service cards — they could reach /hr/recruitment/requisitions by typing the URL and it
+  // worked. The page now asks the question the API asks.
+  const isHr = hasAnyPermission([
+    'HR.Recruitment.Read',
+    'HR.Recruitment.Write',
+    'HR.Recruitment.Admin',
+  ]);
 
   const requisitions = useQuery({
     queryKey: ['hr', 'requisitions', 'summary'],
@@ -175,22 +207,45 @@ export default function RecruitmentLandingPage() {
       {isHr && (
         <MetricTiles
           tiles={[
-            { label: 'Open establishment gaps', value: gaps.data?.totalOpen ?? '—' },
+            {
+              label: 'Open establishment gaps',
+              value: tileValue(gaps, gaps.data?.totalOpen),
+              href: '/hr/recruitment/establishment',
+            },
             {
               label: 'Awaiting approval',
-              value: r ? r.submitted + r.underReview : '—',
+              value: tileValue(requisitions, r ? r.submitted + r.underReview : undefined),
               hint: 'Requisitions with an approver',
+              href: '/hr/recruitment/requisitions',
             },
-            { label: 'Approved requisitions', value: r?.approved ?? '—' },
-            { label: 'Live adverts', value: adverts.data?.length ?? '—' },
+            {
+              label: 'Approved requisitions',
+              value: tileValue(requisitions, r?.approved),
+              href: '/hr/recruitment/requisitions',
+            },
+            {
+              label: 'Live adverts',
+              value: tileValue(adverts, adverts.data?.length),
+              href: '/hr/recruitment/postings',
+            },
             {
               label: 'Offers expiring soon',
-              value: expiringOffers.data?.length ?? '—',
-              hint: 'Within 7 days',
+              value: tileValue(expiringOffers, expiringOffers.data?.length),
+              hint: 'Sent, unanswered, and running out within 7 days',
               tone: (expiringOffers.data?.length ?? 0) > 0 ? 'warning' : 'default',
+              href: '/hr/recruitment/offers',
             },
           ]}
         />
+      )}
+
+      {/* G-2.1: the difference between "nothing to count" and "could not count". Without this a
+          failed query is an em dash, which reads as a real and reassuring zero-ish answer. */}
+      {isHr && [requisitions, gaps, adverts, expiringOffers].some((q) => q.isError) && (
+        <p className="text-sm text-destructive">
+          Some of these counters could not be loaded, so the figures above are incomplete. Refresh
+          to try again.
+        </p>
       )}
 
       <NavCardGrid items={isHr ? [...HR_ITEMS, ...EVERYONE_ITEMS] : EVERYONE_ITEMS} />

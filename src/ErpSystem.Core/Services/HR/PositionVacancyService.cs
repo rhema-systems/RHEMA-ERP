@@ -161,12 +161,30 @@ public class PositionVacancyService : IPositionVacancyService
             throw new InvalidOperationException(
                 "Use 'Raise Requisition' or the hiring flow to move a vacancy to that status.");
 
+        // ⚠ G-3.8 (2026-09-15): this was a back door around the mandatory close reason. Closing
+        // through the dedicated dialog requires one — enforced client-side (the button is
+        // disabled) and server-side ([Required] on a string, which does bite). Setting the status
+        // to Closed through this override dialog reached here instead, which set Status and
+        // ClosedDate and left ClosedReason null, because this method's Notes field is optional.
+        // Two paths to the same terminal state, one of which dropped the audit reason the other
+        // insisted on. The override path now asks for the same thing, and records it in the same
+        // column rather than only in the free-text note.
+        if (dto.NewStatus == PositionVacancyStatus.Closed && string.IsNullOrWhiteSpace(dto.Notes))
+            throw new InvalidOperationException(
+                "Say why the vacancy is being closed. Closing a gap is the one status change that " +
+                "ends the record, so it carries a reason whichever way it is reached.");
+
         entity.Status = dto.NewStatus;
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.Notes = AppendNote(entity.Notes, dto.Notes!);
 
         if (dto.NewStatus == PositionVacancyStatus.Closed)
+        {
             entity.ClosedDate = DateTime.UtcNow;
+            entity.ClosedReason = dto.Notes!.Trim().Length > 500
+                ? dto.Notes!.Trim()[..500]
+                : dto.Notes!.Trim();
+        }
 
         Stamp(entity, userId);
         await _repository.UpdateAsync(entity);
@@ -289,19 +307,43 @@ public class PositionVacancyService : IPositionVacancyService
         {
             if (p.IsEstablished && p.VacantCount > 0 && p.OpenVacancyId == null)
             {
+                // ⚠ G-3.4 / G-3.5 (2026-09-15). Reconcile stamps what it can actually know and no
+                // more. It sweeps for gaps nobody logged — so by construction it has no departing
+                // employee, no reason and no real vacated date, and the three columns it used to
+                // fill with `Other`, null and `DateTime.UtcNow` read on screen as *why the post is
+                // empty*, *who left* and *how long it has stood empty*. The last was the
+                // misleading one: "Since" meant "when somebody last pressed a button".
+                //
+                // Those columns now stay honestly empty on a reconcile row, and the note says why.
+                // PositionVacancyLog fills them in when a real departure explains the gap — it
+                // upgrades an existing row rather than opening a second one — so a reconcile row is
+                // a placeholder that the next departure completes, not a fact of its own.
+                //
+                // Classification is computed rather than hardcoded to WithinEstablishment. This
+                // branch only runs on established posts below headcount, so it genuinely is a
+                // shortfall within establishment; stating it as a calculation keeps the one writer
+                // of that column consistent with PositionVacancyLog's, which can produce all three.
                 await _repository.AddAsync(new PositionVacancy
                 {
                     TenantId = current,
                     PositionId = p.PositionId,
                     OrganizationUnitId = p.OrganizationUnitId,
+                    VacatedByEmployeeId = null,
                     Reason = VacancyReason.Other,
                     VacatedDate = DateTime.UtcNow,
                     IsAnticipated = false,
                     Status = PositionVacancyStatus.Open,
-                    Classification = VacancyClassification.WithinEstablishment,
+                    Classification = p.FilledCount < p.ExpectedHeadcount
+                        ? VacancyClassification.WithinEstablishment
+                        : p.FilledCount > p.ExpectedHeadcount
+                            ? VacancyClassification.OverEstablishment
+                            : VacancyClassification.NoShortfall,
                     ExpectedHeadcount = p.ExpectedHeadcount,
                     ActiveHeadcountAtDetection = p.FilledCount,
-                    Notes = "Opened by reconcile — position headcount is below establishment.",
+                    Notes = "Opened by reconcile — position headcount is below establishment. "
+                          + "No departure was logged for this gap, so the reason, the person who "
+                          + "vacated and the date it fell empty are not known; \"Since\" is the "
+                          + "date of this reconcile, not the date the seat emptied.",
                     CreatedById = userId,
                     CreatedBy = "reconcile",
                 });

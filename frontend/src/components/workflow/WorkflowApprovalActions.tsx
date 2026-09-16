@@ -1,7 +1,7 @@
 'use client';
 
 import * as React from 'react';
-import { CheckCircle, CornerUpLeft, FileText, Loader2, RotateCcw, Send, Upload, UserRoundCog, XCircle } from 'lucide-react';
+import { CheckCircle, CornerUpLeft, FileText, Loader2, RotateCcw, Send, Undo2, Upload, UserRoundCog, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 
 import { Button } from '@/components/ui/button';
@@ -49,6 +49,21 @@ export interface WorkflowApprovalActionsProps {
   // Action enablement (defaults based on status if omitted)
   canSubmit?: boolean;
   canApproveReject?: boolean;
+  /**
+   * Whether the requester may withdraw this record from approval.
+   *
+   * ⚠ **G-4.3 / G-10.4 (2026-09-15): recall had no UI anywhere.** The endpoints existed
+   * (`POST /{id}/recall` on both requisitions and offers), the services enforced requester-only,
+   * the adapters handled `WorkflowOutcome.Recalled`, and the client methods existed — and nothing
+   * called any of it, because this component's command surface was submit / approve / reject and
+   * had no recall concept at all. Meanwhile the requisition edit page told users, in as many
+   * words, *"Recall it first if it is still awaiting approval."* Advice for a control the UI did
+   * not have.
+   *
+   * The caller decides who may recall and when — it is the requester's own act, not an approver's,
+   * so it does not key off `canApproveReject`.
+   */
+  canRecall?: boolean;
   forwardActionsDisabled?: boolean;
   forwardActionsDisabledReason?: string;
 
@@ -56,6 +71,8 @@ export interface WorkflowApprovalActionsProps {
   onSubmit?: () => Promise<void>;
   onApprove?: (comments: string, checklistResponses?: WorkflowApprovalChecklistResponseDto[], signature?: WorkflowSignatureSubmissionDto) => Promise<void>;
   onReject?: (comments: string, checklistResponses?: WorkflowApprovalChecklistResponseDto[]) => Promise<void>;
+  /** Withdraws the record from approval, returning it to Draft. See {@link canRecall}. */
+  onRecall?: (reason: string) => Promise<void>;
   onAfterAction?: () => Promise<void>;
   onOpenWorkflows?: () => void;
   onCompleteTask?: (request: {
@@ -99,11 +116,13 @@ export function WorkflowApprovalActions({
   loadWorkflowSummary = true,
   canSubmit,
   canApproveReject,
+  canRecall,
   forwardActionsDisabled = false,
   forwardActionsDisabledReason,
   onSubmit,
   onApprove,
   onReject,
+  onRecall,
   onAfterAction,
   onOpenWorkflows,
   onCompleteTask,
@@ -159,6 +178,10 @@ export function WorkflowApprovalActions({
   const [resubmitOpen, setResubmitOpen] = React.useState(false);
   const [resubmitComments, setResubmitComments] = React.useState('');
   const [resubmitProcessing, setResubmitProcessing] = React.useState(false);
+  // Recall — G-4.3 / G-10.4.
+  const [recallOpen, setRecallOpen] = React.useState(false);
+  const [recallReason, setRecallReason] = React.useState('');
+  const [recallProcessing, setRecallProcessing] = React.useState(false);
 
   const [summaryLoading, setSummaryLoading] = React.useState(false);
   const [summaryStepName, setSummaryStepName] = React.useState<string | undefined>(undefined);
@@ -486,6 +509,38 @@ export function WorkflowApprovalActions({
     }
   };
 
+  /**
+   * Withdraws the record from approval (G-4.3 / G-10.4).
+   *
+   * The reason is optional deliberately: recalling is the requester correcting their own
+   * submission before anybody has ruled on it, which is not an act that needs justifying to the
+   * system. Rejection demands a reason because somebody is ruling against someone else.
+   */
+  const confirmRecall = async () => {
+    if (!onRecall) return false;
+    try {
+      setRecallProcessing(true);
+      await onRecall(recallReason.trim());
+      const refreshedSummary = await runAfter();
+      toast.success(`${entityLabel} recalled`, {
+        description: buildActionDescription(
+          entityNumber ? `${entityNumber} is back with you as a draft.` : undefined,
+          refreshedSummary,
+        ),
+      });
+      setRecallOpen(false);
+      setRecallReason('');
+      return true;
+    } catch (e: any) {
+      toast.error(`Failed to recall ${entityLabel.toLowerCase()}`, {
+        description: e?.body?.message || e?.message || undefined,
+      });
+      return false;
+    } finally {
+      setRecallProcessing(false);
+    }
+  };
+
   const openApproval = (mode: WorkflowApprovalDialogMode) => {
     if (mode === 'approve' && forwardActionsDisabled) {
       toast.error(forwardActionsDisabledReason || 'Complete all required inputs before approving.');
@@ -805,6 +860,41 @@ export function WorkflowApprovalActions({
         </div>
         <DialogFooter><Button variant="outline" onClick={() => setGovernanceOpen(false)} disabled={governanceProcessing}>Cancel</Button>
           <Button onClick={() => void confirmGovernanceAction()} disabled={governanceProcessing}>{governanceMode === 'delegate' ? 'Delegate' : 'Send back'}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  const recallDialog = (
+    <Dialog open={recallOpen} onOpenChange={setRecallOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Recall {entityLabel.toLowerCase()}</DialogTitle>
+          <DialogDescription>{entityNumber || entityLabel}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            This takes it back from approval and returns it to draft, so you can change it and
+            submit again. Only the person who raised it can do this, and only while nobody has
+            ruled on it yet.
+          </p>
+          <div className="space-y-2">
+            <Label>Reason (optional)</Label>
+            <Textarea
+              value={recallReason}
+              onChange={(event) => setRecallReason(event.target.value)}
+              placeholder="e.g. the start date was wrong"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setRecallOpen(false)} disabled={recallProcessing}>
+            Cancel
+          </Button>
+          <Button onClick={() => void confirmRecall()} disabled={recallProcessing}>
+            {recallProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Recall
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -1187,6 +1277,7 @@ export function WorkflowApprovalActions({
         </Dialog>
         {!hideGovernanceActions && governanceDialogs}
         {resubmitDialog}
+        {recallDialog}
       </>
     );
   }
@@ -1215,6 +1306,23 @@ export function WorkflowApprovalActions({
           >
             <Send className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
             {!iconOnly && (approvalSubmitCopy ? 'Submit for Approval' : 'Finalize')}
+          </Button>
+        )}
+
+        {/* G-4.3 / G-10.4: the requester taking their own submission back, before anybody has ruled
+            on it. Distinct from Reject, which is somebody ruling against it, and from Send back,
+            which is an approver returning it for correction. The server enforces requester-only. */}
+        {canRecall && onRecall && (
+          <Button
+            size={size}
+            variant="outline"
+            onClick={() => setRecallOpen(true)}
+            disabled={recallProcessing || processing}
+            title={iconOnly ? `Recall ${entityLabel}` : undefined}
+            aria-label={iconOnly ? `Recall ${entityLabel}` : undefined}
+          >
+            <Undo2 className={iconOnly ? 'h-4 w-4' : 'h-4 w-4 mr-1'} />
+            {!iconOnly && 'Recall'}
           </Button>
         )}
 
@@ -1563,6 +1671,7 @@ export function WorkflowApprovalActions({
       </Dialog>
       {!hideGovernanceActions && governanceDialogs}
       {resubmitDialog}
+      {recallDialog}
     </div>
   );
 }

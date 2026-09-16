@@ -176,8 +176,60 @@ public class PreEmploymentCheckService : IPreEmploymentCheckService
 
         entity.UpdateEntity(updateDto, updatedByUserId);
         await _itemRepository.UpdateAsync(entity);
+        await PromoteCheckToInProgressAsync(entity.PreEmploymentCheckId, cancellationToken);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Moves a check set from <c>Pending</c> to <c>InProgress</c> once any of its items has been
+    /// started (G-11.1).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b><c>PreEmploymentCheckStatus.InProgress</c> was written by nothing.</b>
+    /// <c>OverallStatus</c> had exactly three writers: <c>Pending</c> at creation, and
+    /// <c>Completed</c> or <c>Failed</c> from <c>CompleteAsync</c>. Nothing ever wrote
+    /// <c>InProgress</c>, <c>CompletedWithCaution</c> or <c>Waived</c>.</para>
+    ///
+    /// <para>The clearance queue screen <b>defaults to In Progress</b>, and its own comment explains
+    /// the choice: *"Pending/Completed/Failed/Waived read as 'nothing to chase' or 'already
+    /// resolved'."* The one status it picked as the live queue was the one status the application
+    /// never set — so on a real tenant that screen opened permanently empty, and three of its six
+    /// dropdown options could never match a row. The only writer of those three values anywhere in
+    /// the solution was <c>TdcDemoRecruitmentHistorySeeder</c>, assigning them by a modulo, so the
+    /// demo tenant was populated and convincing. Appendix C's fourth pattern at its sharpest: a
+    /// whole screen that works in a demo and is inert in production.</para>
+    ///
+    /// <para>What the screen means to show — a check set started but not finished — was real and
+    /// identifiable all along (<c>Pending</c> with some item past <c>Pending</c>); there was simply
+    /// no status recording it. There is now, and it is written where the transition actually
+    /// happens rather than derived at read time, so every reader agrees.</para>
+    ///
+    /// <para>Deliberately one-way and narrow: it only ever moves <c>Pending → InProgress</c>. It
+    /// never touches a completed, failed or waived set, and never moves back — a check set does not
+    /// become un-started because somebody reset one item.</para>
+    /// </remarks>
+    private async Task PromoteCheckToInProgressAsync(Guid checkId, CancellationToken cancellationToken)
+    {
+        var check = await _checkRepository.GetByIdAsync(checkId);
+        if (check is null || check.TenantId != GetTenantId()) return;
+        if (check.OverallStatus != PreEmploymentCheckStatus.Pending) return;
+
+        var items = await _itemRepository.GetByPreEmploymentCheckIdAsync(checkId);
+        var anyStarted = items.Any(i =>
+            i.TenantId == check.TenantId &&
+            !i.IsDeleted &&
+            i.Status != CheckItemStatus.Pending);
+
+        if (!anyStarted) return;
+
+        check.OverallStatus = PreEmploymentCheckStatus.InProgress;
+        check.UpdatedAt = DateTime.UtcNow;
+        await _checkRepository.UpdateAsync(check);
+
+        _logger.LogInformation(
+            "Pre-employment check {CheckId} moved to InProgress — its first item has been started.",
+            checkId);
     }
 
     public async Task<bool> DeleteItemAsync(Guid itemId, CancellationToken cancellationToken = default)

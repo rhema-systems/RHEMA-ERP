@@ -1,6 +1,10 @@
 ﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
+// For JobVacancyService.AllowedNextStatuses (G-5.7). ⚠ The folder is Services/HR/Extensions but the
+// namespace is ErpSystem.Application.HR.Extensions, so nothing under Core.Services.HR resolves here
+// implicitly — the path does not imply the namespace in this file.
+using ErpSystem.Core.Services.HR;
 
 namespace ErpSystem.Application.HR.Extensions;
 
@@ -71,6 +75,8 @@ public static class RecruitmentMappingExtensions
             TestScoreWeight = entity.TestScoreWeight,
             InternalCandidateBoostPoints = entity.InternalCandidateBoostPoints,
             IsBlindScreeningEnabled = entity.IsBlindScreeningEnabled,
+            // G-5.7: the picker asks the server what is legal rather than guessing.
+            AllowedNextStatuses = JobVacancyService.AllowedNextStatuses(entity.VacancyStatus).ToList(),
             WorkflowInstanceId = entity.WorkflowInstanceId,
             ShortlistApprovalStatus  = entity.ShortlistApprovalStatus,
             ShortlistSubmittedAt     = entity.ShortlistSubmittedAt,
@@ -106,6 +112,8 @@ public static class RecruitmentMappingExtensions
             AllowExternalCandidates = entity.AllowExternalCandidates,
             ApplicationCount = entity.ApplicationCount,
             ShortlistedCount = entity.ShortlistedCount,
+            // G-15.1: the dashboard's funnel needs a people-count for the interview stage.
+            InterviewCount = entity.InterviewCount,
             OfferCount = entity.OfferCount,
             CreatedAt = entity.CreatedAt,
         };
@@ -169,6 +177,8 @@ public static class RecruitmentMappingExtensions
             TestScoreWeight = entity.TestScoreWeight,
             InternalCandidateBoostPoints = entity.InternalCandidateBoostPoints,
             IsBlindScreeningEnabled = entity.IsBlindScreeningEnabled,
+            // G-5.7: the picker asks the server what is legal rather than guessing.
+            AllowedNextStatuses = JobVacancyService.AllowedNextStatuses(entity.VacancyStatus).ToList(),
             WorkflowInstanceId = entity.WorkflowInstanceId,
             Attachments = entity.Attachments?.Select(a => a.ToDto()).ToList() ?? new(),
             JobPostings = entity.JobPostings?.Select(p => p.ToSummaryDto()).ToList() ?? new(),
@@ -205,6 +215,10 @@ public static class RecruitmentMappingExtensions
             RequiresWrittenTest = dto.RequiresWrittenTest,
             RequiresPracticalTest = dto.RequiresPracticalTest,
             IsBlindScreeningEnabled = dto.IsBlindScreeningEnabled,
+            // G-5.2: carried on the write DTOs since 2026-09-15. Before that these two lived on the
+            // read DTO alone, so both scoring branches were permanently switched off at 0.
+            TestScoreWeight = dto.TestScoreWeight,
+            InternalCandidateBoostPoints = dto.InternalCandidateBoostPoints,
             RecruitmentPipelineId = dto.RecruitmentPipelineId,
             AutoShortlistMinScore            = dto.AutoShortlistMinScore,
             AutoShortlistRequireAllMandatory = dto.AutoShortlistRequireAllMandatory,
@@ -214,6 +228,9 @@ public static class RecruitmentMappingExtensions
 
     public static void UpdateEntity(this JobVacancy entity, UpdateJobVacancyDto dto, Guid userId)
     {
+        // G-5.2: see the note in the create mapping above.
+        entity.TestScoreWeight = dto.TestScoreWeight;
+        entity.InternalCandidateBoostPoints = dto.InternalCandidateBoostPoints;
         entity.CustomAdvertTitle = dto.CustomAdvertTitle;
         entity.NumberOfPositions = dto.NumberOfPositions;
         entity.HiringManagerId = dto.HiringManagerId;
@@ -247,6 +264,9 @@ public static class RecruitmentMappingExtensions
     /// </summary>
     public static void UpdateEntity(this JobVacancy entity, TransitionJobVacancyDto dto, Guid userId)
     {
+        // G-5.2: see the note in the create mapping above.
+        entity.TestScoreWeight = dto.TestScoreWeight;
+        entity.InternalCandidateBoostPoints = dto.InternalCandidateBoostPoints;
         entity.CustomAdvertTitle = dto.CustomAdvertTitle;
         entity.NumberOfPositions = dto.NumberOfPositions;
         entity.HiringManagerId = dto.HiringManagerId;
@@ -956,6 +976,8 @@ public static class RecruitmentMappingExtensions
             PostalAddress = dto.PostalAddress,
             DigitalAddress = dto.DigitalAddress,
             City = dto.City,
+            // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
+            Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim(),
             // Guid.Empty is read as "no country", not refused: a client written against the old
             // [Required] Guid contract sent it, and that used to be an FK 547 / 500.
             CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId,
@@ -984,6 +1006,8 @@ public static class RecruitmentMappingExtensions
         entity.PostalAddress = dto.PostalAddress;
         entity.DigitalAddress = dto.DigitalAddress;
         entity.City = dto.City;
+        // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
+        entity.Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim();
         entity.CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId;
         entity.NationalIdTypeId = dto.NationalIdTypeId;
         entity.NationalIdNumber = string.IsNullOrWhiteSpace(dto.NationalIdNumber) ? null : dto.NationalIdNumber.Trim();
@@ -2794,6 +2818,7 @@ public static class RecruitmentMappingExtensions
             OfferDate = entity.OfferDate,
             ExpiryDate = entity.ExpiryDate,
             Version = entity.Version,
+            IsLatestVersion = entity.IsLatestVersion,
             CreatedAt = entity.CreatedAt,
         };
     }

@@ -36,7 +36,25 @@ public class RecruitmentAnalyticsService : IRecruitmentAnalyticsService
         JobVacancyStatus.OfferStage,
     };
 
-    /// <summary>Position-vacancy statuses that represent a seat still standing empty.</summary>
+    /// <summary>Position-vacancy statuses that represent a seat standing empty <b>now</b>.</summary>
+    /// <remarks>
+    /// <para>⚠ G-14.3 (2026-09-15): this differs from the establishment screen's own stats by one
+    /// member. That screen counts <c>Anticipated, Open, UnderReview, RequisitionRaised</c>; this
+    /// one excludes <c>Anticipated</c>. <b>The difference is deliberate and both are right</b>,
+    /// because they answer different questions: an anticipated vacancy is a seat that <i>will</i>
+    /// fall empty — notice has been given — not one standing empty today, and this tile is labelled
+    /// "seats standing empty". The establishment register is a planning view and wants the ones
+    /// coming.</para>
+    ///
+    /// <para>What was wrong was that nothing said so, on either screen, so the same underlying
+    /// question got two different answers with no explanation. Stated here and on the tile.</para>
+    ///
+    /// <para>⚠ The difference used to be invisible in practice because nothing ever wrote
+    /// <c>Anticipated</c> (G-3.6). It is written now — a separation with a future effective date
+    /// opens one — so these two numbers will genuinely diverge from 2026-09-15 onward. That is the
+    /// intended behaviour, not a regression: if they are ever equal again, check that anticipated
+    /// vacancies are still being logged.</para>
+    /// </remarks>
     private static readonly PositionVacancyStatus[] OpenPositionVacancyStatuses =
     {
         PositionVacancyStatus.Open,

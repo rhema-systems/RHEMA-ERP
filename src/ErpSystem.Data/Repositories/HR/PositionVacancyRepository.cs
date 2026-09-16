@@ -150,13 +150,23 @@ public class PositionVacancyRepository : GenericRepository<PositionVacancy>, IPo
             .ToList();
     }
 
+    /// <summary>
+    /// How many people are serving in this post.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ G-3.9 (2026-09-15): this used to spell the condition out by hand and <b>omitted
+    /// <c>IsActive</c></b>, so an employee with <c>IsActive = false</c> but a live
+    /// <c>StaffStatus</c> was counted here and not by the establishment grid — which uses
+    /// <see cref="HrServingEmployees.Predicate"/>. The headcount returned after a status, notes or
+    /// close mutation could therefore disagree with the grid it came from. The shared predicate
+    /// exists precisely to stop that, and this was one of the call sites not using it.
+    /// </remarks>
     public async Task<int> CountActiveOnPositionAsync(Guid tenantId, Guid positionId)
     {
         return await _context.Set<Employee>().AsNoTracking()
-            .CountAsync(e => e.TenantId == tenantId && e.PositionId == positionId && !e.IsDeleted
-                          && e.StaffStatus != StaffStatus.Terminated
-                          && e.StaffStatus != StaffStatus.Retired
-                          && e.StaffStatus != StaffStatus.Inactive);
+            .Where(e => e.TenantId == tenantId && e.PositionId == positionId)
+            .Where(HrServingEmployees.Predicate)
+            .CountAsync();
     }
 
     public async Task<PositionVacancyStatsDto> GetStatsAsync()

@@ -49,12 +49,35 @@ public class JobPostingRepository : GenericRepository<JobPosting>, IJobPostingRe
             .ToListAsync();
     }
 
+    /// <summary>
+    /// Adverts genuinely open for applications.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-2.2 (2026-09-15): this filtered on <c>IsActive &amp;&amp; Status == Published</c>
+    /// and <b>never looked at <see cref="JobPosting.ExpiryDate"/></b>, so a posting whose closing
+    /// date had passed still counted as live until somebody manually unpublished it. It feeds the
+    /// recruitment landing page's *Live adverts* tile, which therefore overstated how many roles
+    /// were open — one of only five numbers on the module's front page.</para>
+    ///
+    /// <para>The evidence that this was known to happen sat one method away:
+    /// <see cref="GetExpiredActivePostingsAsync"/> finds exactly these rows, and the adverts screen
+    /// exposes it as a whole view — *"Past expiry but still live"*, with an amber warning. The
+    /// distinction was understood and used elsewhere in the module; this query simply did not make
+    /// it. The root cause was that <b>nothing expired an advert on its closing date</b> (G-6.2), so
+    /// the overdue set was not an edge case but the normal resting state of any advert past its
+    /// deadline. The nightly sweep now writes <c>Expired</c>; this bound means a sweep that has not
+    /// run yet cannot overstate the tile in the meantime.</para>
+    /// </remarks>
     public async Task<IEnumerable<JobPosting>> GetActivePostingsAsync()
     {
+        var now = DateTime.UtcNow;
         return await _dbSet
             .Include(p => p.JobVacancy).ThenInclude(v => v.Position)
             .Include(p => p.PostedBy)
-            .Where(p => p.IsActive && p.Status == JobPostingStatus.Published && !p.IsDeleted)
+            .Where(p => p.IsActive
+                     && p.Status == JobPostingStatus.Published
+                     && (p.ExpiryDate == null || p.ExpiryDate >= now)
+                     && !p.IsDeleted)
             .OrderByDescending(p => p.PublishDate)
             .ToListAsync();
     }

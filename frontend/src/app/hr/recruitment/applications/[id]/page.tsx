@@ -246,9 +246,14 @@ export default function ApplicationDetailPage() {
             tone: a.scoreIsStale ? 'warning' : 'default',
           },
           {
-            label: 'Panel score',
+            // G-9.5 (2026-09-15): "Panel score" was ambiguous in the one way that matters here.
+            // This is AggregatedReviewScore — the average of finalised ShortlistReview rows, i.e.
+            // the SHORTLISTING panel — and a recruiter reading an application after interviews have
+            // run would reasonably take it for the interview panel's verdict. Two different panels,
+            // two different decisions, one label. The hint below was accurate but never said which.
+            label: 'Shortlisting panel score',
             value: a.aggregatedReviewScore != null ? a.aggregatedReviewScore.toFixed(2) : '—',
-            hint: 'Finalized reviews only',
+            hint: 'Finalized shortlisting reviews only — not the interview panel',
           },
           { label: 'Current stage', value: a.currentStageName ?? 'Not in a stage' },
         ]}

@@ -24,6 +24,12 @@
  *
  * ⚠ `Rejected` means *an approver* turned the offer down and it is resubmittable — it is not the
  * candidate declining, which is `Declined`. Two different people saying no at two different points.
+ *
+ * ⚠ `Superseded` is what a version becomes when a revision replaces it (G-10.2, added 2026-09-15).
+ * Distinct from `Withdrawn`, which is the organisation taking a live offer back — nobody revoked a
+ * superseded version, better terms simply replaced it. `Expired` is now written too, by the nightly
+ * recruitment sweep (G-2.4); before that job existed no offer ever reached it, so the analytics
+ * screen's Expired bucket was structurally zero and the lapsed offers sat in Pending instead.
  */
 export const JOB_OFFER_STATUSES = [
   'Draft',
@@ -39,6 +45,7 @@ export const JOB_OFFER_STATUSES = [
   'ConditionallyAccepted',
   'ChecksCleared',
   'Rejected',
+  'Superseded',
 ] as const;
 export type JobOfferStatus = (typeof JOB_OFFER_STATUSES)[number];
 

@@ -95,25 +95,48 @@ function CandidateTable({
 /**
  * Candidates — the people behind applications.
  *
- * ⚠ HR-only, including the reads: these records carry date of birth, contact details, CVs and
- * recruiters' private notes.
+ * ⚠ **Gated on `HR.Recruitment.*`, including the reads** — these records carry date of birth,
+ * contact details, identity numbers, CVs and recruiters' private notes. The comment here used to
+ * read "HR-only", which overstated it (G-7.5): the gate is the permission, not the role, so
+ * `TenantAdmin`, `Admin` and the legacy `HR User` role read every candidate record too. Whether
+ * that is right is a question about the tenant's role design; what was wrong was the comment
+ * describing a restriction the code does not implement. Narrowing it would have to be done on the
+ * controller, and deliberately — not by a role check on one page.
  *
- * The list has no server-side search, so the search box resolves an **exact email** through
- * `GET /email/{email}` — the endpoint that exists for spotting a duplicate before creating one.
- * It returns null rather than 404 when nobody matches.
+ * **Two lookups, doing two different jobs** (G-7.6, 2026-09-15):
+ *
+ * - **Search the register** filters the list server-side across name, email, phone, headline,
+ *   current title and current employer. This did not exist: the register's only lookup was the
+ *   exact-email one below, so finding a candidate whose address you did not know meant paging
+ *   twenty at a time through the whole register — the gap that grows fastest with the size of the
+ *   candidate base. The talent-pool screen already had exactly this search, over the same table;
+ *   the register now uses the same predicate rather than inventing a second one.
+ * - **Find by email address** stays, because it answers a different question: *is this address
+ *   already taken?* It is an exact match by design, used before creating a record, and it returns
+ *   null rather than 404 when nobody matches.
  */
 export default function CandidatesPage() {
-  const { hasAnyRole } = useAuth();
-  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  const { hasAnyPermission } = useAuth();
+  // Same correction as G-2.3 / G-3.10: the API authorises on permissions, so the page must too.
+  const isHr = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
 
   const [page, setPage] = useState(1);
   const [emailTerm, setEmailTerm] = useState('');
   const [lookupEmail, setLookupEmail] = useState('');
+  // `searchTerm` is what is typed; `search` is what has been submitted. Kept apart so the register
+  // is not re-queried on every keystroke.
+  const [searchTerm, setSearchTerm] = useState('');
+  const [search, setSearch] = useState('');
 
   const list = useQuery({
-    queryKey: ['hr', 'candidates', page],
-    queryFn: () => jobCandidateService.getPaged(page, 20),
+    queryKey: ['hr', 'candidates', page, search],
+    queryFn: () => jobCandidateService.getPaged(page, 20, search || undefined),
   });
+
+  const applySearch = (value: string) => {
+    setSearch(value.trim());
+    setPage(1);
+  };
 
   const pool = useQuery({
     queryKey: ['hr', 'candidates', 'talent-pool'],
@@ -149,6 +172,42 @@ export default function CandidatesPage() {
 
       <Card>
         <CardContent className="flex flex-wrap items-end gap-3 pt-6">
+          {/* G-7.6 — the register search the screen never had. */}
+          <div className="min-w-[280px] flex-1 space-y-1.5">
+            <label className="text-xs text-muted-foreground" htmlFor="candidate-search">
+              Search the register
+            </label>
+            <div className="flex gap-2">
+              <Input
+                id="candidate-search"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && applySearch(searchTerm)}
+                placeholder="Name, email, phone, job title or employer"
+              />
+              <Button variant="secondary" onClick={() => applySearch(searchTerm)}>
+                <Search className="mr-2 h-4 w-4" />
+                Search
+              </Button>
+              {search && (
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setSearchTerm('');
+                    applySearch('');
+                  }}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {search
+                ? `Showing candidates matching “${search}”.`
+                : 'Matches any part of a name, email, phone, headline, current title or employer.'}
+            </p>
+          </div>
+
           <div className="min-w-[280px] flex-1 space-y-1.5">
             <label className="text-xs text-muted-foreground" htmlFor="candidate-email">
               Find by email address

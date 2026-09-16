@@ -44,9 +44,11 @@ export default function CandidateDetailPage() {
   const params = useParams();
   const id = (params?.id as string) ?? '';
   const { toast } = useToast();
-  const { hasAnyRole, hasAnyPermission, hasPermission } = useAuth();
-  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  const { hasAnyPermission, hasPermission } = useAuth();
+  // G-2.3's shape (2026-09-15): this page held a role gate and a permission gate side by side,
+  // asking two different questions about the same user. Both now ask the permission.
   const canRecruit = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
+  const isHr = canRecruit;
   const canRecruitAdmin = hasPermission('HR.Recruitment.Admin');
   const [tab, setTab] = useState('overview');
   const [photoOpen, setPhotoOpen] = useState(false);

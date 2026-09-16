@@ -108,6 +108,33 @@ public sealed class ApplicationPipelineService : IApplicationPipelineService
 
         var targetStage = await GetOwnedStageAsync(targetStageId);
 
+        // ── G-8.3 (2026-09-15): the stage move and the decision status, reconciled ────────────
+        // Two systems write ApplicationStatus — the decision bar (shortlist / waitlist / reject /
+        // withdraw) and this stage map — and the move always won, silently. Two consequences, of
+        // very different severity, fixed differently:
+        //
+        //  • **A shortlist decision being overwritten** was the common case: shortlist someone,
+        //    move them into a review stage, and the status no longer said Shortlisted. That is no
+        //    longer a loss of information, because `IsShortlisted` is now derived from
+        //    `ShortlistedDate` on BOTH sides (G-8.1) rather than from the status on one of them.
+        //    The decision survives the move, which is right — being shortlisted is an event that
+        //    happened, and the process moving on does not un-happen it.
+        //
+        //  • **A terminal decision being overwritten** was the dangerous one, and is refused here.
+        //    Rejected and Withdrawn are decisions somebody made and recorded a reason for; a stage
+        //    move would have quietly reinstated the application with no trace it had ever been
+        //    closed. AutoAdvanceToStageTypeAsync already returned early on terminal statuses, so
+        //    the automatic callers were safe — it was the manual move dialog that was not.
+        //
+        // Guarded here, before anything is written, rather than beside the status assignment lower
+        // down: by that point the stage-history row has already been staged on the change tracker.
+        if (application.Status is ApplicationStatus.Rejected
+                               or ApplicationStatus.Withdrawn
+                               or ApplicationStatus.Hired)
+            throw new InvalidOperationException(
+                $"This application is {application.Status} and cannot be moved through stages. " +
+                "Reopen it from the decision bar first if that was recorded in error.");
+
         // ── 3. Validate pipeline membership ──────────────────────────────────
 
         var vacancy = await GetOwnedVacancyAsync(application.JobVacancyId);

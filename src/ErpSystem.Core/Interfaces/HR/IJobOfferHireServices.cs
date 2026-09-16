@@ -1,3 +1,4 @@
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Enums;
 
@@ -15,6 +16,20 @@ public interface IJobOfferService
     Task<JobOfferDto> GetWithFullDetailsAsync(Guid id, CancellationToken cancellationToken = default);
     Task<JobOfferDto?> GetByApplicationIdAsync(Guid applicationId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobOfferSummaryDto>> GetAllSummaryAsync(CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// One page of the tenant's offers, newest first.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ G-10.3 (2026-09-15). The offers list's <b>default</b> view called
+    /// <see cref="GetAllSummaryAsync"/>, which returns every offer in the tenant in one response.
+    /// That is worse than the requisitions and vacancies lists, where the unpaged read only fires
+    /// when a status filter is chosen — here it was what loaded when the screen was opened, with
+    /// no pager, no total and no disclosure. This was the only recruitment list with no bound at
+    /// all. <see cref="GetAllSummaryAsync"/> is kept for callers that genuinely need every row.
+    /// </remarks>
+    Task<PagedResult<JobOfferSummaryDto>> GetPagedSummaryAsync(
+        int pageNumber, int pageSize, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobOfferSummaryDto>> GetByStatusAsync(JobOfferStatus status, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobOfferSummaryDto>> GetExpiringOffersAsync(int daysAhead = 7, CancellationToken cancellationToken = default);
 
@@ -32,7 +47,16 @@ public interface IJobOfferService
     /// any rule added here is enforced for API callers but bypassed by that button — the same split
     /// PIP and requisitions have.
     /// </summary>
-    Task<bool> RecallApprovalAsync(Guid offerId, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// Withdraws an offer awaiting approval back to Draft.
+    /// </summary>
+    /// <param name="recalledByEmployeeId">
+    /// The caller's <b>Employee</b> id, compared against <c>PreparedById</c> so only the person who
+    /// prepared the offer can take it back. Added 2026-09-15 with G-10.1: with no workflow
+    /// definition published there is no engine instance to enforce its own requester-only rule, so
+    /// the check has to be made here. On the configured path the engine still enforces it too.
+    /// </param>
+    Task<bool> RecallApprovalAsync(Guid offerId, Guid recalledByEmployeeId, CancellationToken cancellationToken = default);
     Task<bool> ApproveAsync(ApproveJobOfferDto dto, Guid approvedByUserId, CancellationToken cancellationToken = default);
     Task<bool> RejectApprovalAsync(RejectJobOfferDto dto, Guid rejectedByUserId, CancellationToken cancellationToken = default);
     Task<bool> IssueAsync(IssueJobOfferDto dto, Guid issuedByUserId, CancellationToken cancellationToken = default);

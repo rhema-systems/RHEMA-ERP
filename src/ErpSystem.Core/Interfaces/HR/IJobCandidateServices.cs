@@ -17,7 +17,12 @@ public interface IJobCandidateService
     Task<JobCandidateDto?> GetByCandidateNumberAsync(string candidateNumber, CancellationToken cancellationToken = default);
     Task<JobCandidateDetailDto> GetWithFullDetailsAsync(Guid id, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobCandidateSummaryDto>> GetAllAsync(CancellationToken cancellationToken = default);
-    Task<PagedResult<JobCandidateSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default);
+    /// <summary>
+    /// One page of the candidate register, optionally narrowed by <paramref name="search"/> across
+    /// name, email, phone, headline, current title and current employer (G-7.6).
+    /// </summary>
+    Task<PagedResult<JobCandidateSummaryDto>> GetPagedAsync(
+        int pageNumber, int pageSize, string? search = null, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobCandidateSummaryDto>> GetTalentPoolAsync(CancellationToken cancellationToken = default);
     Task<IEnumerable<JobCandidateSummaryDto>> GetByVacancyIdAsync(Guid vacancyId, CancellationToken cancellationToken = default);
     Task<JobCandidateDto?> GetByEmailAsync(string email, CancellationToken cancellationToken = default);
@@ -34,7 +39,14 @@ public interface IJobCandidateService
     /// </summary>
     Task<JobCandidateDto> SetProfilePhotoAsync(Guid candidateId, Guid fileUploadRecordId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 
-    // Talent pool — basic (kept for backwards compat)
+    // ⚠ Talent pool — the SUPERSEDED pair. No caller since 2026-09-15 (G-7.4): both HTTP endpoints
+    // were retired from JobCandidateController and both client methods removed. Do NOT wire a new
+    // door onto these. They set IsInTalentPool with no source, no reason and no review date, which
+    // is precisely the data loss the rich operations below were written to stop — and a superseded
+    // path that still works is how a replaced feature quietly keeps being used.
+    //
+    // Kept only because nothing forces their removal and deleting an interface member is a wider
+    // change than this gap asks for. Use AddToTalentPoolWithDetailsAsync / the TalentPool endpoints.
     Task<bool> AddToTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> RemoveFromTalentPoolAsync(Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default);
 

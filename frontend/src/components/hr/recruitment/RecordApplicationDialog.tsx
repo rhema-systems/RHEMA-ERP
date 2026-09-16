@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Loader2, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -65,13 +66,31 @@ export function RecordApplicationDialog({
     if (open) setVacancyId(defaultVacancyId ?? '');
   }, [open, defaultVacancyId]);
 
+  /**
+   * ⚠ **G-8.5 (2026-09-15): this used to resolve a candidate by EXACT email only.**
+   * `getByEmail(lookupEmail)` was the whole lookup, and the dialog's own copy admitted the
+   * consequence — *"The candidate must already exist; create them first if not."* A walk-in whose
+   * email you did not have could not be recorded at all without leaving the dialog, creating the
+   * candidate, and starting over. Which was most walk-ins: the person is standing in front of you
+   * with a printed CV.
+   *
+   * It now uses the register search added in the same change (G-7.6) — name, email, phone, headline,
+   * current title or employer — so the receptionist can type "Kwame" or a phone number. Matches are
+   * listed to pick from rather than auto-selected, because a name search can legitimately return
+   * several people and choosing the wrong one files an application against a stranger.
+   */
   const lookup = useQuery({
-    queryKey: ['hr', 'candidate-by-email', lookupEmail],
-    queryFn: () => jobCandidateService.getByEmail(lookupEmail),
+    queryKey: ['hr', 'candidate-search', lookupEmail],
+    queryFn: () => jobCandidateService.getPaged(1, 10, lookupEmail),
     enabled: lookupEmail.length > 0,
   });
+  const matches = lookup.data?.items ?? [];
+
+  // One unambiguous match selects itself; anything else waits for a human.
   useEffect(() => {
-    if (lookup.isSuccess) setCandidate(lookup.data ?? null);
+    if (!lookup.isSuccess) return;
+    const found = lookup.data?.items ?? [];
+    setCandidate(found.length === 1 ? (found[0] as unknown as JobCandidate) : null);
   }, [lookup.isSuccess, lookup.data]);
 
   const postings = useQuery({
@@ -116,7 +135,8 @@ export function RecordApplicationDialog({
           <DialogTitle>Record an application</DialogTitle>
           <DialogDescription>
             For an applicant who did not apply through the careers site — a walk-in, an agency
-            submission, a referral. The candidate must already exist; create them first if not.
+            submission, a referral. Search by name, email or phone; if nobody matches, you can
+            create the candidate without losing what you have typed here.
           </DialogDescription>
         </DialogHeader>
 
@@ -139,22 +159,62 @@ export function RecordApplicationDialog({
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="record-email">Candidate (by email)</Label>
+            <Label htmlFor="record-email">Candidate</Label>
             <div className="flex gap-2">
               <Input
                 id="record-email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && setLookupEmail(email.trim())}
-                placeholder="candidate@example.com"
+                placeholder="Name, email or phone"
               />
               <Button type="button" variant="secondary" onClick={() => setLookupEmail(email.trim())} disabled={!email.trim()}>
                 {lookup.isFetching ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
               </Button>
             </div>
-            {lookupEmail && !lookup.isFetching && (
+
+            {lookupEmail && !lookup.isFetching && matches.length === 0 && (
               <p className="text-xs text-muted-foreground">
-                {candidate ? `${candidate.fullName} · ${candidate.candidateNumber}` : 'No candidate has that email — create the candidate first.'}
+                Nobody matches “{lookupEmail}”.{' '}
+                <Link
+                  href={`/hr/recruitment/candidates/new?email=${encodeURIComponent(
+                    lookupEmail.includes('@') ? lookupEmail : '',
+                  )}`}
+                  className="text-primary hover:underline"
+                  target="_blank"
+                >
+                  Create the candidate
+                </Link>{' '}
+                — opens in a new tab so this dialog keeps what you have typed.
+              </p>
+            )}
+
+            {/* More than one match: pick. A name search returning several people is normal, and
+                selecting the wrong one files an application against a stranger. */}
+            {matches.length > 1 && (
+              <div className="space-y-1 rounded-md border p-2">
+                {matches.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => setCandidate(m as unknown as JobCandidate)}
+                    className={`flex w-full items-center justify-between rounded px-2 py-1.5 text-left text-sm hover:bg-muted ${
+                      candidate?.id === m.id ? 'bg-muted' : ''
+                    }`}
+                  >
+                    <span>{m.fullName}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {m.candidateNumber} · {m.email}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {candidate && (
+              <p className="text-xs text-muted-foreground">
+                Recording against <strong>{candidate.fullName}</strong> ·{' '}
+                {candidate.candidateNumber}
               </p>
             )}
           </div>

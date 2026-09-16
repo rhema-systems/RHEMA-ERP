@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -469,16 +470,34 @@ public class StaffMovementService : IStaffMovementService
         var previousStatus = entity.Status;
         entity.RequestSubmissionDate = DateTime.UtcNow;
 
+        // ── Submitting must never approve (2026-09-15) ─────────────────────────────────────────
+        // WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved whenever no
+        // active definition exists for the entity type, and StaffMovementWorkflowStatusAdapter
+        // maps Approved to Approved (or EmployeeAcceptancePending) and stamps AuthorizationDate.
+        // No StaffMovement definition is seeded anywhere in the solution, so pressing Submit took
+        // a promotion or transfer Draft → Approved in one step with nobody having reviewed it —
+        // and the block below then wrote AuthorizedById = the submitter, recording the person who
+        // asked for the move as the person who authorised it. That is a false audit fact, not just
+        // a missing gate.
+        //
+        // Found through recruitment's G-4.1/G-10.1; see HrWorkflowFallbackAuthority for the full
+        // mechanism and why approve, reject and recall below needed changing at the same time.
+        var hasWorkflow = await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType);
+
         var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the movement approval workflow.");
 
+        var submitOutcome = hasWorkflow ? workflowResult.Outcome : WorkflowOutcome.Pending;
+
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         // A definition with one step approves on submission, so the authoriser has to be stamped
         // here too — the adapter only knows the ApplicationUser id, and this column is an Employee FK.
+        // Reachable only on the configured path now: with no definition the movement lands at
+        // Submitted, so there is no authoriser yet to stamp.
         if (entity.Status == StaffMovementStatus.Approved)
             entity.AuthorizedById = submittedByEmployeeId;
 
@@ -542,17 +561,40 @@ public class StaffMovementService : IStaffMovementService
         var entity = await GetOwnedMovementAsync(movementId);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, movementId, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        // Segregation of duties. RequestedById and approvingEmployeeId are both Employee ids, so
+        // this compares like with like. It runs on both paths: a published definition's
+        // preventInitiatorApproval covers the same ground by ApplicationUser, and this one still
+        // catches a requester approving through a second login.
+        if (entity.RequestedById == approvingEmployeeId)
+            throw new InvalidOperationException("You cannot approve a movement that you requested yourself.");
 
         var previousStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, movementId, userId, "Approve", comments);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // Two paths — see HrWorkflowFallbackAuthority. With no definition published the engine has
+        // no instance to answer about: CanUserApproveAsync returns false and ProcessApprovalAsync
+        // has nothing to process, so a movement submitted on an unconfigured tenant would be
+        // unapprovable. Authority then falls to the movements administer tier.
+        WorkflowOutcome approvalOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, movementId, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, movementId, userId, "Approve", comments);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+            approvalOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "approve a staff movement", HrPermissions.AdministerMovements);
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         // ⚠ EmployeeAcceptancePending counts as cleared, and leaving it out meant a movement that
         // requires employee acceptance NEVER recorded who authorised it. This condition read
@@ -588,9 +630,19 @@ public class StaffMovementService : IStaffMovementService
 
         var previousStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, movementId, userId, reason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the movement.");
+        // Skipped when nothing is published: RecallWorkflowAsync answers "No active workflow found"
+        // without an instance. On the configured path the engine enforces requester-only; on the
+        // unconfigured one that rule has to be made here, against the Employee id the caller passed.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, movementId, userId, reason);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the movement.");
+        }
+        else if (entity.RequestedById != recallingEmployeeId)
+        {
+            throw new InvalidOperationException("Only the person who requested a movement can recall it.");
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId, reason);
 
@@ -683,16 +735,32 @@ public class StaffMovementService : IStaffMovementService
         var previousStatus = entity.Status;
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, dto.MovementId, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        // Same two paths as ApproveAsync. Note that the docstring above — "every rejection goes
+        // through the engine, so the instance is closed" — describes the configured path; with no
+        // definition there is no instance to close, and without this branch a submitted movement
+        // could be neither approved nor rejected nor recalled.
+        WorkflowOutcome rejectionOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, dto.MovementId, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, dto.MovementId, userId, "Reject", dto.RejectionReason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, dto.MovementId, userId, "Reject", dto.RejectionReason);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+            rejectionOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "reject a staff movement", HrPermissions.AdministerMovements);
+            rejectionOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, dto.RejectionReason);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, dto.RejectionReason);
 
         entity.RejectedById    = rejectedByEmployeeId;
         entity.RejectionReason = dto.RejectionReason;
@@ -1109,6 +1177,7 @@ public class StaffMovementService : IStaffMovementService
             ?? throw new ArgumentException($"The employee for movement {movement.MovementNumber} was not found.");
 
         var effective = movement.EffectiveDate.Date;
+        var vacatedPositionId = employee.PositionId;
 
         // ── The live employee record ──────────────────────────────────────────
         employee.PositionId = movement.NewPositionId;
@@ -1130,6 +1199,28 @@ public class StaffMovementService : IStaffMovementService
         employee.UpdatedAt = DateTime.UtcNow;
         employee.UpdatedBy = actorEmployeeId.ToString();
         await _unitOfWork.Repository<Employee>().UpdateAsync(employee);
+
+        // G-3.2: the post they came FROM is now a seat short. This is the promotion/transfer half
+        // of the guarantee PositionVacancy's documentation made and nothing kept — and it is the
+        // half most likely to be missed, because unlike a termination nobody has left the company,
+        // so no exit process runs. Skipped when the movement does not actually change post (a
+        // salary-only or reporting-line movement), which would otherwise log a phantom vacancy on
+        // a seat still occupied by the same person.
+        if (vacatedPositionId != Guid.Empty && vacatedPositionId != movement.NewPositionId)
+        {
+            await PositionVacancyLog.LogDepartureAsync(
+                _unitOfWork,
+                movement.TenantId,
+                employee.Id,
+                vacatedPositionId,
+                movement.MovementType == StaffMovementType.Promotion
+                    ? VacancyReason.Promotion
+                    : VacancyReason.Transfer,
+                effective,
+                _currentUserProvider.UserId,
+                note: $"Vacated by movement {movement.MovementNumber}.",
+                cancellationToken: cancellationToken);
+        }
 
         // ── The terms of employment ───────────────────────────────────────────
         //

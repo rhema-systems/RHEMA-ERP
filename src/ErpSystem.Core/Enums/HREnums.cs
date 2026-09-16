@@ -2423,7 +2423,33 @@ public enum JobOfferStatus
     /// <summary>All blocking pre-employment checks have passed; hire record may now be created.</summary>
     ChecksCleared = 12,
     /// <summary>Offer was rejected by an approver during the approval workflow. The preparer must revise and resubmit.</summary>
-    Rejected = 13
+    Rejected = 13,
+
+    /// <summary>
+    /// This version of the offer has been replaced by a revision. Terminal: the terms it carries
+    /// are no longer on the table, and the live offer is the one at <c>IsLatestVersion = true</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Added for G-2.4/G-10.2 (2026-09-15). <c>ReviseOfferAsync</c> set
+    /// <c>original.IsLatestVersion = false</c> and <b>did not change the status</b>, so v1 stayed
+    /// <c>Sent</c> or <c>Negotiating</c> for ever — and since nothing filtered on
+    /// <c>IsLatestVersion</c>, superseded versions were listed by <c>GET /offers/status/Sent</c>,
+    /// counted as chasable by <c>GET /offers/expiring</c>, inflated the landing page's "offers
+    /// expiring soon" tile permanently, and inflated the dashboard's "offers pending response".
+    /// Every revision added one more row to a chase list that could never fall.</para>
+    ///
+    /// <para><b>Why not reuse <see cref="Withdrawn"/>.</b> Withdrawing is a decision somebody makes
+    /// about a live offer — the organisation taking the terms back. Being superseded is what
+    /// happens to a version when better terms replace it; nobody revoked anything. Collapsing the
+    /// two would answer "how many offers did we withdraw this year?" wrongly, which is the same
+    /// class of reporting defect this programme is closing.</para>
+    ///
+    /// <para>⚠ Appended as 14, after <see cref="Rejected"/>. This column is a plain int, so
+    /// appending is schema-safe and needs no migration — but members must be APPENDED, never
+    /// renumbered, or existing rows silently change meaning. Same call as
+    /// <c>EmployeeTerminationType.SummaryDismissal</c>.</para>
+    /// </remarks>
+    Superseded = 14
 }
 
 public enum EmploymentType

@@ -11,6 +11,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR;
+using ErpSystem.Core.Services.HR.Recruitment;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -385,13 +386,34 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         var fromStatus = entity.Status;
 
+        // ── G-4.1 (2026-09-15): submitting must never approve ──────────────────────────────────
+        // WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved whenever no
+        // active definition exists for the entity type — a deliberate "approval is not configured,
+        // use the direct lifecycle" signal that nine modules share. The requisition adapter maps
+        // Approved straight to StaffRequisitionStatus.Approved, so on a tenant with no published
+        // StaffRequisition definition (which is every tenant: none is seeded anywhere in the
+        // solution) pressing Submit took a requisition Draft → Approved in one step, with no
+        // approver, no CanUserApproveAsync check, and — the part that matters — no segregation of
+        // duties, because "you cannot approve a requisition you raised yourself" lives in
+        // ApproveAsync, which was never called. The history row recorded the transition, so
+        // afterwards it was indistinguishable from a reviewed approval.
+        //
+        // The shared fallback is left alone; it is load-bearing for the other eight applications.
+        // Here we simply ask the question first and refuse to let submission decide. With no
+        // definition the requisition lands at Submitted and waits for a human — ApproveAsync then
+        // runs its own checks, including the ones the engine would have run. See
+        // RequiresFallbackApprovalAsync for who may give that decision.
+        var hasWorkflow = await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType);
+
         var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the requisition approval workflow.");
 
+        var submitOutcome = hasWorkflow ? workflowResult.Outcome : WorkflowOutcome.Pending;
+
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = submittedByUserId.ToString();
 
@@ -432,19 +454,37 @@ public class StaffRequisitionService : IStaffRequisitionService
         // entity stores (RequestedById, the history row's ChangedById) is an Employee FK and gets
         // the id the controller passed. See hr-attendance-actor-conventions.
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var fromStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Approve", approveDto.Comments);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // With a definition published, the engine names the approver and rules on the step. With
+        // none, it has no instance to answer about — CanUserApproveAsync returns false and
+        // ProcessApprovalAsync has nothing to process — so authority falls to the recruitment
+        // administer tier and the outcome is applied directly. See RecruitmentApprovalAuthority
+        // for why that tier, and note that the segregation-of-duties check above has already run
+        // either way: holding the permission never lets you approve your own requisition.
+        WorkflowOutcome approvalOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Approve", approveDto.Comments);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+            approvalOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            RecruitmentApprovalAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "approve a staff requisition");
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, actingUserId);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = approvedByUserId.ToString();
 
@@ -466,20 +506,35 @@ public class StaffRequisitionService : IStaffRequisitionService
             throw new InvalidOperationException("Only Submitted or UnderReview requisitions can be rejected.");
 
         var actingUserId = _currentUserProvider.UserId;
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var fromStatus = entity.Status;
         var rejectionText = string.IsNullOrWhiteSpace(rejectDto.Comments) ? "Rejected" : rejectDto.Comments.Trim();
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, entity.Id, actingUserId, "Reject", rejectionText);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+        // Same two paths as ApproveAsync. Rejection matters as much as approval here: without the
+        // no-workflow branch, a requisition submitted on an unconfigured tenant could be neither
+        // approved nor rejected nor recalled, and Cancel would be its only exit.
+        WorkflowOutcome rejectionOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, entity.Id, actingUserId, "Reject", rejectionText);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+            rejectionOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            RecruitmentApprovalAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "reject a staff requisition");
+            rejectionOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, actingUserId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, actingUserId, rejectionText);
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = rejectedByUserId.ToString();
 
@@ -509,10 +564,18 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         var fromStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, entity.Id, _currentUserProvider.UserId);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(
-                workflowResult.ExecutionResult.Message ?? "Failed to recall the requisition.");
+        // The requester-only rule above is the whole gate, so there is no permission branch here —
+        // but the engine still has to be skipped when nothing is published, because
+        // RecallWorkflowAsync answers "No active workflow found" and the recall would fail. Before
+        // G-4.1 this branch could not be reached at all: submission went straight to Approved, and
+        // an approved requisition is past recalling. Closing that opened this.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, entity.Id, _currentUserProvider.UserId);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(
+                    workflowResult.ExecutionResult.Message ?? "Failed to recall the requisition.");
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
             .ApplyRecallOutcome(entity, _currentUserProvider.UserId, reason);
@@ -589,6 +652,28 @@ public class StaffRequisitionService : IStaffRequisitionService
 
         if (fulfillDto.PositionsFilled < 1 || fulfillDto.PositionsFilled > entity.NumberOfPositions)
             throw new InvalidOperationException($"Positions filled must be between 1 and {entity.NumberOfPositions}.");
+
+        // ── G-4.5 (2026-09-15): the other half of reconciling the two writers ──────────────────
+        // This path sets an ABSOLUTE total from what a user types; ConfirmStartAsync derives one
+        // from the confirmed hire records. They used to be additive, so a manual "2" followed by a
+        // confirmed start read 3. They are now reconciled on the rule that **a confirmed hire is a
+        // fact and a typed number is a claim**: the claim may exceed the facts (a seat filled by a
+        // transfer or secondment that produced no hire record is real), but it may not contradict
+        // them by going below. Saying "1 filled" when two people have started is not a correction,
+        // it is a mistake, and it used to be silently accepted.
+        var confirmedHires = await _unitOfWork.Repository<JobHireRecord>().GetQueryable()
+            .Where(h => h.TenantId == entity.TenantId
+                     && !h.IsDeleted
+                     && h.Status == JobHireStatus.Active
+                     && h.Application != null
+                     && h.Application.JobVacancy != null
+                     && h.Application.JobVacancy.StaffRequisitionId == entity.Id)
+            .CountAsync(cancellationToken);
+
+        if (fulfillDto.PositionsFilled < confirmedHires)
+            throw new InvalidOperationException(
+                $"{confirmedHires} hire(s) have already been confirmed against this requisition, so " +
+                $"the number filled cannot be {fulfillDto.PositionsFilled}. Record {confirmedHires} or more.");
 
         var fromStatus = entity.Status;
         entity.PositionsFilled = fulfillDto.PositionsFilled;
@@ -1210,8 +1295,16 @@ public class StaffRequisitionService : IStaffRequisitionService
         var mode = settings.EstablishmentEnforcementMode;
         var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable().AsNoTracking()
             .FirstOrDefaultAsync(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId, cancellationToken);
+        // ⚠ G-4.4 (2026-09-15): this counted `e.IsActive` ONLY, ignoring StaffStatus entirely —
+        // a third definition of "how many people are in this post", alongside the establishment
+        // grid's and the vacancy mutation's. A terminated employee whose IsActive flag was never
+        // cleared counted as filled here but not on the establishment screen, so the two screens
+        // could disagree about whether a gap existed — and this is the count that REFUSES a
+        // submission, so the disagreement had teeth. All three now use the shared predicate.
         var occupied = await _unitOfWork.Repository<Employee>().GetQueryable()
-            .CountAsync(e => e.TenantId == entity.TenantId && e.PositionId == entity.PositionId && e.IsActive, cancellationToken);
+            .Where(e => e.TenantId == entity.TenantId && e.PositionId == entity.PositionId)
+            .Where(HrServingEmployees.Predicate)
+            .CountAsync(cancellationToken);
 
         var dto = new RequisitionEstablishmentCheckDto { Mode = mode, Filled = occupied };
         if (position?.EstablishmentApprovedOn == null)

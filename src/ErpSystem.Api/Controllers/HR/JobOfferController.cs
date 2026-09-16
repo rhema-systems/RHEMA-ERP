@@ -1,5 +1,6 @@
 ﻿using ErpSystem.Api.Filters;
 using ErpSystem.Api.Services.HR;
+using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Enums;
@@ -70,6 +71,19 @@ public class JobOfferController : ControllerBase
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<IEnumerable<JobOfferSummaryDto>>> GetAll()
         => Ok(await _service.GetAllSummaryAsync());
+
+    /// <summary>One page of the tenant's offers, newest first.</summary>
+    /// <remarks>
+    /// G-10.3 (2026-09-15): the offers screen's default view used <c>GET /api/job-offers</c>, which
+    /// returns every offer in the tenant in one response — the only recruitment list with no bound
+    /// at all. The unpaged route stays for callers that need every row.
+    /// </remarks>
+    [HttpGet("paged")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<PagedResult<JobOfferSummaryDto>>> GetPaged(
+        [FromQuery] int pageNumber = 1,
+        [FromQuery] int pageSize = 20)
+        => Ok(await _service.GetPagedSummaryAsync(pageNumber, pageSize));
 
     [HttpGet("{id:guid}")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
@@ -198,7 +212,11 @@ public class JobOfferController : ControllerBase
     [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
     public async Task<IActionResult> Recall(Guid id)
     {
-        await _service.RecallApprovalAsync(id);
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        await _service.RecallApprovalAsync(id, employeeId.Value);
         return Ok(new { message = "Offer recalled." });
     }
 

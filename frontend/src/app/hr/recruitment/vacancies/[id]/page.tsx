@@ -4,7 +4,16 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, ListFilter, Loader2, Megaphone, Send, SlidersHorizontal, Workflow } from 'lucide-react';
+import {
+  Ban,
+  ListFilter,
+  Loader2,
+  Megaphone,
+  Pencil,
+  Send,
+  SlidersHorizontal,
+  Workflow,
+} from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
@@ -60,19 +69,22 @@ function InfoCard({ title, children }: { title: string; children: React.ReactNod
 }
 
 /**
- * The hiring stages a vacancy walks through after publication, in order.
+ * ⚠ **The list of stages this picker offers used to live here** — a hardcoded
+ * `['ClosedForApplications', 'Shortlisting', 'Interviewing', 'OfferStage', 'Filled']` offered in
+ * full, minus the current status, from any non-terminal state. So a Draft vacancy was offered
+ * *Filled* and a Published one *Interviewing*; both were refused on arrival, and clicking was the
+ * only way to find out (G-5.7).
  *
- * ⚠ This is only what the "Advance to" picker offers. **The server owns the real state machine**
- * and refuses an illegal move with a message naming the legal next states — so a mismatch here
- * shows up as an explained refusal rather than a wrong write. Do not try to mirror the full map.
+ * The server now sends `allowedNextStatuses` on the vacancy, computed from the same
+ * `AllowedTransitions` map that guards the write. **The server still owns the state machine** — the
+ * point of the change is that the screen stops guessing at it, not that it now knows better. A
+ * mirrored constant here would be a second source of truth, and it would have drifted immediately:
+ * `OnHold` became reachable in the same change (G-5.3).
+ *
+ * `Cancelled` is filtered out of the picker because cancellation has its own destructive-styled
+ * button with a mandatory closure reason; offering it as an innocuous dropdown item would route
+ * users around that.
  */
-const HIRING_STAGES: JobVacancyStatus[] = [
-  'ClosedForApplications',
-  'Shortlisting',
-  'Interviewing',
-  'OfferStage',
-  'Filled',
-];
 
 export default function VacancyDetailPage() {
   const router = useRouter();
@@ -81,9 +93,11 @@ export default function VacancyDetailPage() {
   const id = (params?.id as string) ?? '';
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyRole, hasPermission } = useAuth();
+  const { hasAnyPermission, hasPermission } = useAuth();
 
-  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  // G-2.3's shape (2026-09-15): a role gate sitting next to the permission gate below, asking a
+  // different question about the same user. Both now ask the permission the API asks.
+  const isHr = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
   // Deleting a shortlisting criterion sits on RecruitmentAdminPolicy, a tier above the write
   // policy that guards adding one, so isHr is not the right gate for the remove control.
   const canAdministerRecruitment = hasPermission('HR.Recruitment.Admin');
@@ -192,6 +206,17 @@ export default function VacancyDetailPage() {
               </Link>
             </Button>
 
+            {/* G-5.1: there was no Edit button and no [id]/edit route, so every field set at
+                creation was fixed for the vacancy's life — including the pipeline, without which
+                its applications could never be moved through stages at all. */}
+            {isHr && !terminal && (
+              <Button variant="outline" asChild>
+                <Link href={`/hr/recruitment/vacancies/${id}/edit`}>
+                  <Pencil className="mr-2 h-4 w-4" /> Edit
+                </Link>
+              </Button>
+            )}
+
             {isHr && canApprove && (
               <Button
                 variant="outline"
@@ -220,7 +245,7 @@ export default function VacancyDetailPage() {
               </Button>
             )}
 
-            {isHr && !terminal && (
+            {isHr && !terminal && (v.allowedNextStatuses ?? []).some((s) => s !== 'Cancelled') && (
               <Select
                 value=""
                 onValueChange={(next) => changeStatus.mutate(next as JobVacancyStatus)}
@@ -230,11 +255,13 @@ export default function VacancyDetailPage() {
                   <SelectValue placeholder="Advance to…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {HIRING_STAGES.filter((s) => s !== v.vacancyStatus).map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {humanizeEnum(s)}
-                    </SelectItem>
-                  ))}
+                  {(v.allowedNextStatuses ?? [])
+                    .filter((s) => s !== 'Cancelled')
+                    .map((s) => (
+                      <SelectItem key={s} value={s}>
+                        {humanizeEnum(s)}
+                      </SelectItem>
+                    ))}
                 </SelectContent>
               </Select>
             )}

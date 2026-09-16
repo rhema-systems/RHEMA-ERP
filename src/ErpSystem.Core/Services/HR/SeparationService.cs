@@ -527,12 +527,85 @@ public class SeparationService : ISeparationService
         await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
+        // ── G-3.6: an ANTICIPATED vacancy, which nothing in the solution had ever written ────────
+        // PositionVacancyStatus.Anticipated was set by no service, IsAnticipated was only ever
+        // assigned false, and ExpectedVacancyDate was never written at all — so the establishment
+        // screen's Anticipated tile read 0 unless a human had manually overridden a row into it,
+        // despite the entity carrying two fields for exactly this.
+        //
+        // Notice given with a future end date is precisely the condition those fields describe: the
+        // seat is not empty yet, and HR knows the day it will be. Logging it here — at submission,
+        // when the date is first derived and frozen — is what gives succession and recruitment the
+        // lead time the register exists to provide. ApplySeparationOutcomeAsync later logs the real
+        // departure, and PositionVacancyLog promotes this row from Anticipated to Open rather than
+        // opening a second one.
+        //
+        // Deliberately not gated on approval: an exit that is later rejected leaves an anticipated
+        // row that reconcile closes once the seat is seen to be occupied, which is the cheaper
+        // error. Telling HR late about a departure is the expensive one.
+        // EffectiveDate is a DateOnly; PositionVacancy dates the register in DateTime, so the
+        // comparison is made in DateOnly and the value converted once, at the call.
+        if (entity.EffectiveDate is { } expectedVacancy &&
+            expectedVacancy > DateOnly.FromDateTime(DateTime.UtcNow))
+        {
+            var expectedVacancyOn = expectedVacancy.ToDateTime(TimeOnly.MinValue);
+
+            var separatingEmployee = await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+                .Where(e => e.Id == entity.EmployeeId && e.TenantId == tenantId)
+                .Select(e => new { e.PositionId })
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (separatingEmployee is not null)
+            {
+                await PositionVacancyLog.LogDepartureAsync(
+                    _unitOfWork,
+                    tenantId,
+                    entity.EmployeeId,
+                    separatingEmployee.PositionId,
+                    VacancyReasonForSeparation(entity.SeparationType),
+                    expectedVacancyOn,
+                    _currentUserProvider.UserId,
+                    isAnticipated: true,
+                    expectedVacancyDate: expectedVacancyOn,
+                    note: $"Notified by separation {entity.SeparationNumber}.",
+                    cancellationToken: cancellationToken);
+
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
+            }
+        }
+
         _logger.LogInformation(
             "Separation {Number} submitted for approval (effective {Effective:yyyy-MM-dd})",
             entity.SeparationNumber, entity.EffectiveDate);
 
         return ToDetailDto(await ReloadAsync(tenantId, entity.Id, cancellationToken));
     }
+
+    /// <summary>
+    /// Translates the separation type into why the seat will be empty (G-3.4 / G-3.6).
+    /// </summary>
+    /// <remarks>
+    /// The three involuntary types and the two dismissals all map to <c>Termination</c>: the
+    /// establishment register records that the post emptied by termination, not how gravely. Only
+    /// redundancy is different in kind, because a redundant post is a restructure from the
+    /// establishment's point of view rather than a seat to refill — and classifying it that way is
+    /// what stops reconcile treating an abolished post as a gap.
+    /// </remarks>
+    private static VacancyReason VacancyReasonForSeparation(EmployeeTerminationType type) => type switch
+    {
+        EmployeeTerminationType.VoluntaryResignation   => VacancyReason.Resignation,
+        EmployeeTerminationType.VoluntaryRetirement    => VacancyReason.Retirement,
+        EmployeeTerminationType.CompulsoryRetirement   => VacancyReason.Retirement,
+        EmployeeTerminationType.MedicalRetirement      => VacancyReason.Retirement,
+        EmployeeTerminationType.Death                  => VacancyReason.Death,
+        EmployeeTerminationType.InvoluntaryRedundancy  => VacancyReason.Restructure,
+        EmployeeTerminationType.InvoluntaryForCause    => VacancyReason.Termination,
+        EmployeeTerminationType.InvoluntaryPerformance => VacancyReason.Termination,
+        EmployeeTerminationType.SummaryDismissal       => VacancyReason.Termination,
+        EmployeeTerminationType.MutualAgreement        => VacancyReason.Termination,
+        EmployeeTerminationType.ContractExpiry         => VacancyReason.Termination,
+        _                                              => VacancyReason.Other,
+    };
 
     // ── FR-HR-092: the decision ───────────────────────────────────────────────
 

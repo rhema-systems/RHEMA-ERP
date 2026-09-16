@@ -99,8 +99,15 @@ public interface IStaffMovementService
     // ── Workflow ──────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Submits a Draft movement into the approval workflow. Inoperable until a StaffMovement
-    /// workflow definition is published for the tenant.
+    /// Submits a Draft movement into the approval workflow.
+    ///
+    /// <para>⚠ This used to say "Inoperable until a StaffMovement workflow definition is published
+    /// for the tenant". <b>It was not inoperable — it auto-approved</b> (corrected 2026-09-15).
+    /// With no definition the engine's "approval is not configured" signal reached the status
+    /// adapter as <c>Approved</c>, so Submit took a promotion or transfer straight to Approved and
+    /// the service then stamped the submitter as its own authoriser. With no definition published
+    /// the movement now lands at <c>Submitted</c> and waits for a person; authority to rule on it
+    /// falls to <c>HR.Movements.Admin</c>. See <c>HrWorkflowFallbackAuthority</c>.</para>
     /// </summary>
     Task<bool> SubmitAsync(SubmitStaffMovementDto dto, Guid submittedByEmployeeId, CancellationToken cancellationToken = default);
 

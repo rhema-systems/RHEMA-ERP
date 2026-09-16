@@ -391,6 +391,15 @@ export interface CreateJobCandidate {
   postalAddress?: string | null;
   digitalAddress?: string | null;
   city: string;
+  /**
+   * The candidate's nationality, as free text.
+   *
+   * ⚠ G-7.3: settable since 2026-09-15. It existed on the read DTO alone, so the Personal card
+   * rendered it and nothing could ever write it — the only assignment anywhere in the solution was
+   * the TDC demo seeder, which sets "Ghanaian". On a real tenant the row always read "—"; on the
+   * demo tenant it always looked fine. Distinct from `countryId`, which is where they are.
+   */
+  nationality?: string | null;
   /** Optional since 2026-09-14, matching the entity — send null for "no country". */
   countryId?: string | null;
   linkedInProfile?: string | null;

@@ -753,6 +753,11 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffDisciplineLegalReviewService, StaffDisciplineLegalReviewService>();
         services.AddScoped<IStaffRequisitionService, StaffRequisitionService>();
         services.AddScoped<IPositionVacancyService, PositionVacancyService>();
+        // The recruitment module's only date-driven job (G-2.4, G-6.2). Scoped so the run-now
+        // endpoint and RecruitmentLifecycleSweepBackgroundService share one code path; the hosted
+        // service that actually schedules it is registered in ServiceCollectionExtensions.
+        services.AddScoped<IRecruitmentLifecycleSweepService,
+            ErpSystem.Core.Services.HR.Recruitment.RecruitmentLifecycleSweepService>();
         services.AddScoped<IExternalAssociateRepository, ExternalAssociateRepository>();
         services.AddScoped<IExternalAssociateService, ExternalAssociateService>();
         services.AddScoped<ITrainingVendorRepository, TrainingVendorRepository>();

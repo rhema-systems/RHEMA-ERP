@@ -134,6 +134,10 @@ export default function EditRequisitionPage() {
     !!form.requisitionTitle.trim() &&
     !!form.businessJustification.trim() &&
     !!form.desiredStartDate &&
+    // G-4.7 (2026-09-15): the *new* page has always required this and *edit* did not. The server
+    // carries [Range(1, 100)] on both DTOs so the write was refused either way — but on edit it
+    // surfaced as a raw ModelState 400 instead of a disabled button.
+    form.numberOfPositions >= 1 &&
     audienceChosen;
 
   return (
@@ -150,10 +154,13 @@ export default function EditRequisitionPage() {
         }
       />
 
+      {/* ⚠ Until 2026-09-15 this sentence was advice for a control that did not exist (G-4.3):
+          recall was built server-side, had a client method, and had no button anywhere in the
+          frontend. It is now on the requisition's own page, for the person who raised it. */}
       {!editable && (
         <EmptyState
           title={`A ${data.status} requisition cannot be edited`}
-          description="Only drafts and rejected requisitions can be changed. Recall it first if it is still awaiting approval."
+          description="Only drafts and rejected requisitions can be changed. If it is still awaiting approval, open it and use Recall to take it back."
         />
       )}
 

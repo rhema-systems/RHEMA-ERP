@@ -486,6 +486,23 @@ export interface JobVacancy {
   autoShortlistRequireAllMandatory?: boolean;
   /** Derived on the read (round 3, lane K; D-7): a Gender or Age criterion is on this vacancy. */
   usesProtectedCharacteristicCriterion?: boolean;
+
+  /** See `testScoreWeight` on {@link CreateJobVacancy} — both are settable since 2026-09-15. */
+  testScoreWeight?: number;
+  internalCandidateBoostPoints?: number;
+
+  /**
+   * The statuses this vacancy may legally move to from where it is now, computed server-side from
+   * the same `AllowedTransitions` map the write path guards with.
+   *
+   * ⚠ G-5.7: the "Advance to…" picker used to hold a hardcoded list of the five hiring stages and
+   * offer all of them minus the current one, from any non-terminal status — so a Draft vacancy was
+   * offered *Filled* and a Published one *Interviewing*, and the only way to discover that was to
+   * click and read the refusal. Sending the map beats mirroring it: a mirrored constant is a second
+   * source of truth that drifts the first time the real one changes, and the real one just did
+   * (`OnHold` became reachable, G-5.3).
+   */
+  allowedNextStatuses?: JobVacancyStatus[];
 }
 
 export interface JobVacancySummary {
@@ -543,6 +560,20 @@ export interface CreateJobVacancy {
   isBlindScreeningEnabled: boolean;
   autoShortlistMinScore?: number | null;
   autoShortlistRequireAllMandatory: boolean;
+
+  /**
+   * Weight (0–100) given to test scores in the composite shortlist score; 0 ignores them.
+   *
+   * ⚠ G-5.2: this and `internalCandidateBoostPoints` existed on the **read** DTO alone until
+   * 2026-09-15 — neither write DTO carried them and no frontend file mentioned either name — so
+   * both sat at 0 permanently and the two branches of the scoring algorithm that depend on them
+   * could never execute. The *Requires a written test* / *Requires a practical test* checkboxes
+   * recorded a requirement whose results could not affect any score.
+   */
+  testScoreWeight: number;
+
+  /** Flat bonus (0–20) added to an internal candidate's composite score; 0 disables it. */
+  internalCandidateBoostPoints: number;
 }
 
 export type UpdateJobVacancy = Omit<CreateJobVacancy, 'staffRequisitionId'> & { id: string };

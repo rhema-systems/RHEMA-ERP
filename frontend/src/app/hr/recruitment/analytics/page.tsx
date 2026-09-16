@@ -316,10 +316,14 @@ export default function RecruitmentAnalyticsPage() {
             label: 'Seats standing empty',
             value: analytics.openPositionVacanciesCount,
             icon: Building2,
+            // G-14.3: this excludes Anticipated vacancies — seats where notice has been given but
+            // the person has not left — while the establishment screen's own stats include them.
+            // Both are right, for different questions; what was missing was either screen saying
+            // so, which left the same question looking like it had two answers.
             hint:
               analytics.avgPositionVacancyAgeDays == null
-                ? 'No open seats right now'
-                : `${analytics.avgPositionVacancyAgeDays} days empty on average`,
+                ? 'Empty now — excludes seats with notice served'
+                : `${analytics.avgPositionVacancyAgeDays} days empty on average · excludes seats with notice served`,
           },
         ]}
       />
@@ -423,11 +427,19 @@ export default function RecruitmentAnalyticsPage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Funnel</CardTitle>
+            {/* ⚠ G-14.4 (2026-09-15): this was titled **Funnel**. The caption was accurate and said
+                so — a share of applications, not stage-to-stage conversion — but "Funnel", drawn as
+                a descending ramp, is the visual grammar of conversion, and a reader who takes the
+                picture at face value reads drop-off rates the numbers do not support. The text was
+                right and the form contradicted it; of the two, the form is what gets believed.
+                Renamed rather than redrawn: the bars themselves are a perfectly good answer to
+                "how far did applications get", which is the question this data can answer. */}
+            <CardTitle>How far applications got</CardTitle>
             <CardDescription>
               Applications received in {analytics.year}, each counted against every stage it
-              reached. The bars are a share of applications rather than stage-to-stage conversion,
-              because an application can be interviewed without having been formally shortlisted.
+              reached — so the bars overlap rather than divide up a total. Not stage-to-stage
+              conversion: an application can be interviewed without having been formally
+              shortlisted, so a lower bar is not the drop-off from the one above it.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">

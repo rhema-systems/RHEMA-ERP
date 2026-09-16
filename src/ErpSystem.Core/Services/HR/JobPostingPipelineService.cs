@@ -74,35 +74,87 @@ public class JobPostingService : IJobPostingService
     {
         var tenantId = GetTenantId();
         var entities = await _postingRepository.GetByVacancyIdAsync(vacancyId);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return await WithApplicationCountsAsync(entities.Where(e => e.TenantId == tenantId), cancellationToken);
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetActivePostingsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _postingRepository.GetActivePostingsAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return await WithApplicationCountsAsync(entities.Where(e => e.TenantId == tenantId), cancellationToken);
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetByStatusAsync(JobPostingStatus status, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _postingRepository.GetByStatusAsync(status);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return await WithApplicationCountsAsync(entities.Where(e => e.TenantId == tenantId), cancellationToken);
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetByChannelAsync(JobPostingChannel channel, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _postingRepository.GetByChannelAsync(channel);
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return await WithApplicationCountsAsync(entities.Where(e => e.TenantId == tenantId), cancellationToken);
     }
 
     public async Task<IEnumerable<JobPostingSummaryDto>> GetExpiredActivePostingsAsync(CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var entities = await _postingRepository.GetExpiredActivePostingsAsync();
-        return entities.Where(e => e.TenantId == tenantId).ToSummaryDtoList();
+        return await WithApplicationCountsAsync(entities.Where(e => e.TenantId == tenantId), cancellationToken);
+    }
+
+    /// <summary>
+    /// Fills in each posting's <c>ApplicationCount</c> by counting the applications that name it
+    /// (G-6.1).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b><c>JobPosting.ApplicationCount</c> is a stored column that nothing ever wrote.</b>
+    /// It was read into both the detail and the summary DTO and rendered as the *Applications*
+    /// column on the adverts screen — the one column that answers *"which channel is working?"* —
+    /// and it was `0` on every row, always. (The similarly-named <c>JobVacancy.ApplicationCount</c>
+    /// <i>is</i> maintained; the posting-level one was not.)</para>
+    ///
+    /// <para><b>The link exists.</b> <c>JobApplication.JobPostingId</c> is set automatically by the
+    /// candidate portal when an external applicant applies, and manually by HR through the
+    /// source-correction dialog, validated against the vacancy's own adverts. So per-advert
+    /// attribution data was there all along; what was missing was anything that counted it. The
+    /// number was derivable and never derived.</para>
+    ///
+    /// <para><b>Derived rather than maintained, deliberately.</b> A stored counter needs every
+    /// writer of <c>JobPostingId</c> to remember to adjust it — including the source-correction
+    /// path, which moves an application from one advert to another and would have to decrement one
+    /// and increment the other. That is precisely the shape of G-4.5, where two writers of a
+    /// counter disagreed and the register drifted. Counting the rows cannot drift. The column stays
+    /// on the entity because removing it is a migration; it is simply no longer the source of
+    /// truth, and nothing writes it.</para>
+    ///
+    /// <para>One grouped query for the whole page, not one per row.</para>
+    /// </remarks>
+    private async Task<IEnumerable<JobPostingSummaryDto>> WithApplicationCountsAsync(
+        IEnumerable<JobPosting> postings, CancellationToken cancellationToken)
+    {
+        var list = postings.ToList();
+        if (list.Count == 0) return Array.Empty<JobPostingSummaryDto>();
+
+        var ids = list.Select(p => p.Id).ToList();
+        var tenantId = GetTenantId();
+
+        var counts = await _unitOfWork.Repository<JobApplication>().GetQueryable()
+            .Where(a => a.TenantId == tenantId
+                     && !a.IsDeleted
+                     && a.JobPostingId != null
+                     && ids.Contains(a.JobPostingId!.Value))
+            .GroupBy(a => a.JobPostingId!.Value)
+            .Select(g => new { PostingId = g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.PostingId, x => x.Count, cancellationToken);
+
+        var dtos = list.ToSummaryDtoList().ToList();
+        foreach (var dto in dtos)
+            dto.ApplicationCount = counts.TryGetValue(dto.Id, out var n) ? n : 0;
+
+        return dtos;
     }
 
     /// <summary>

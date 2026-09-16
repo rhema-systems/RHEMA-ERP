@@ -136,7 +136,11 @@ export default function JobHireDetailPage() {
   const isActive = hire.status === 'Active';
   const availableTransitions = HIRE_TRANSITIONS[hire.status] ?? [];
   const canChangeStatus = availableTransitions.length > 0;
-  const canConfirmStart = !isActive && !hire.employeeId;
+  // ⚠ G-12.2 (2026-09-15): `!isActive && !hire.employeeId` let a **Cancelled** hire through, and so
+  // did the server. Pressing Confirm start on one created the employee, the contract, the probation
+  // period and the position history, and burned an employee number — all irreversible, on a hire
+  // somebody had explicitly called off. Every other terminal state in this module is guarded.
+  const canConfirmStart = !isActive && !hire.employeeId && hire.status !== 'Cancelled';
 
   return (
     <div className="space-y-6 p-6">
@@ -277,6 +281,14 @@ export default function JobHireDetailPage() {
               Confirming burns an employee number and creates the employee, their contract, probation
               period, salary assignment and position history. It cannot be undone — a retry is safe
               (it refuses once linked), but there is no way to detach the employee afterwards.
+              {/* G-12.3 (2026-09-15): the warning was admirably honest about being irreversible and
+                  said nothing about what to do if it happened anyway, which is the question somebody
+                  asks at exactly the moment they most need an answer. */}
+              <span className="mt-2 block">
+                If you confirm one in error: terminate the employee through Separations and cancel
+                this hire record. The employee number stays spent, and the departure opens a
+                position vacancy — both are permanent, so check the name and the start date first.
+              </span>
             </AlertDescription>
           </Alert>
           <div className="grid gap-4 py-2">

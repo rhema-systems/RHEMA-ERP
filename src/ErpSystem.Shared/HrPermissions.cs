@@ -508,6 +508,22 @@ public static class HrPermissions
     /// Head → HR → Managing Director. As with probation, they may relax to Write once the
     /// instance-level check does the real work, and not before.</para>
     ///
+    /// <para><b>Recruitment is the exception to the Admin line above</b>, added 2026-09-15 to close
+    /// G-3.1 and G-4.8 of <c>docs/HR/HR-RECRUITMENT-SYSTEM-GUIDE.md</c>. Everywhere else Admin is
+    /// the home for a management <i>decision</i>; in recruitment it had drifted onto ordinary
+    /// record-keeping, and the result was that the HR function could not run its own module.
+    /// <c>POST /position-vacancies/reconcile</c> is the <b>only</b> writer of the vacancy register
+    /// anywhere in the solution, and it sits on Admin — so an HR user saw the Reconcile button,
+    /// pressed it and got a 403, and the establishment register, the "seats standing empty" tile
+    /// and every downstream count stayed empty for ever. The four deletes behind the same policy
+    /// (requisition, cost, comment, attachment) are equally routine: removing a draft raised in
+    /// error, or an attachment added to the wrong row. None of the 36 endpoints on
+    /// <c>RecruitmentAdminPolicy</c> decides anything about a person the way confirming a
+    /// probation or approving a succession plan does — the decisions in this module (approve a
+    /// requisition, approve an offer) are gated by the workflow adapters instead, and as of the
+    /// same date they no longer auto-approve. So <c>AdministerRecruitment</c> joins the HR desk's
+    /// grants.</para>
+    ///
     /// <para>⚠ Note what is <b>absent</b>: no grant reaches the <c>Employee</c> role. Succession
     /// deliberately inverts the self-service rule the rest of HR follows. A candidate's readiness
     /// level, retention-risk flag and nine-box placement are assessments made about them, not
@@ -526,7 +542,7 @@ public static class HrPermissions
         ViewAttendance, MaintainAttendance,
         ViewCompensation, MaintainCompensation,
         ViewTraining, MaintainTraining,
-        ViewRecruitment, MaintainRecruitment,
+        ViewRecruitment, MaintainRecruitment, AdministerRecruitment,
         ViewMedicalRecords, MaintainMedicalRecords,
         ViewTravel, MaintainTravel,
         ViewSuccession, MaintainSuccession,
@@ -670,4 +686,43 @@ public static class HrPermissions
         => RoleGrants.TryGetValue(roleName, out var permissions)
             ? permissions
             : Array.Empty<string>();
+
+    /// <summary>
+    /// True when any of <paramref name="roleNames"/> is granted any of
+    /// <paramref name="permissions"/> by <see cref="RoleGrants"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>For <b>service-layer</b> checks that need to ask "does this caller hold a permission"
+    /// where only the role list is to hand. Added 2026-09-15 for G-9.1: the interview service
+    /// asked <c>HasRole("HR") || HasRole("SuperAdmin")</c> while every other recruitment surface
+    /// authorised on <c>HR.Recruitment.*</c>, so <c>TenantAdmin</c>, <c>Admin</c> and the legacy
+    /// <c>HR User</c> role could raise a requisition and reject a candidate but could not schedule
+    /// an interview — or read one, unless they happened to sit on the panel.</para>
+    ///
+    /// <para>⚠ This resolves from the role map, <b>not</b> from the database, so a permission
+    /// granted directly to a custom role is not seen here. It is a second layer behind the
+    /// controller's <c>[Authorize(Policy = …)]</c>, which does run the full database check — the
+    /// same relationship <see cref="RoleGrants"/> already has with
+    /// <c>HrPermissionRoleFallbackAuthorizationHandler</c>. Do not use it as a sole gate on an
+    /// endpoint.</para>
+    /// </remarks>
+    public static bool RolesGrantAny(IEnumerable<string>? roleNames, params string[] permissions)
+    {
+        if (roleNames is null || permissions.Length == 0) return false;
+
+        foreach (var roleName in roleNames)
+        {
+            if (string.IsNullOrWhiteSpace(roleName)) continue;
+
+            var granted = GrantsFor(roleName);
+            if (granted.Length == 0) continue;
+
+            foreach (var permission in permissions)
+            {
+                if (granted.Contains(permission, StringComparer.OrdinalIgnoreCase)) return true;
+            }
+        }
+
+        return false;
+    }
 }

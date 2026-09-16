@@ -60,9 +60,11 @@ export default function RequisitionDetailPage() {
     queryFn: () => staffRequisitionService.checkBudget(id),
     enabled: !!id,
   });
-  const { hasAnyRole } = useAuth();
+  const { hasAnyPermission, user } = useAuth();
 
-  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  // G-2.3's shape (2026-09-15): the API gates this screen's writes on HR.Recruitment.Write, which
+  // TenantAdmin, Admin and the legacy HR User role hold; the page asked for a role instead.
+  const isHr = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
 
   const [action, setAction] = useState<null | 'hold' | 'cancel' | 'fulfill'>(null);
   const [reason, setReason] = useState('');
@@ -92,8 +94,18 @@ export default function RequisitionDetailPage() {
    * drive it and then apply the resulting status through StaffRequisitionWorkflowStatusAdapter —
    * so this page never sets a status itself, it just refetches.
    *
-   * ⚠ Inoperable until a `StaffRequisition` workflow definition is published. The actions surface
-   * the engine's own error in that case, which is clearer than anything we could guess at here.
+   * ⚠ **This comment used to say "Inoperable until a `StaffRequisition` workflow definition is
+   * published", and that was exactly backwards** (G-4.1, corrected 2026-09-15). With no definition
+   * published, `WorkflowIntegrationService.SubmitAsync` returned `Approved` and the adapter mapped
+   * it straight to `StaffRequisitionStatus.Approved` — so Submit took a requisition Draft →
+   * Approved in one step, with no approver and no segregation-of-duties check, and the history row
+   * made it look deliberate afterwards. It was not inoperable; it auto-approved.
+   *
+   * What happens now, with no definition published: Submit lands the requisition at **Submitted**
+   * and it waits for a person. Approve and Reject then work, with authority falling to the
+   * recruitment administrators (`HR.Recruitment.Admin`) and the "you cannot approve what you
+   * raised yourself" rule still running. Publish a definition and the engine names the approver
+   * instead — none of the fallback runs. See `RecruitmentApprovalAuthority` for the reasoning.
    */
   const workflow = useWorkflowRecord({
     entityType: 'StaffRequisition',
@@ -103,11 +115,20 @@ export default function RequisitionDetailPage() {
     status: r?.status ?? 'Draft',
     canSubmit: r?.status === 'Draft' || r?.status === 'Rejected',
     canApproveReject: r?.status === 'Submitted' || r?.status === 'UnderReview',
+    // G-4.3: recall is the REQUESTER's act, not an approver's, so it gates on who raised it rather
+    // than on permissions. The service enforces the same rule — this only decides whether to draw
+    // a button that would otherwise refuse. Available exactly while it is awaiting a decision:
+    // before that there is nothing to take back, after it somebody has ruled.
+    canRecall:
+      (r?.status === 'Submitted' || r?.status === 'UnderReview') &&
+      !!user?.employeeId &&
+      r?.requestedById === user.employeeId,
     enabled: !!r,
     commands: {
       submit: () => staffRequisitionService.submit(id),
       approve: (ctx) => staffRequisitionService.approve(id, ctx.comments || null),
       reject: (ctx) => staffRequisitionService.reject(id, ctx.comments || 'Rejected'),
+      recall: (reason) => staffRequisitionService.recall(id, reason || null),
       afterAction: refresh,
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),

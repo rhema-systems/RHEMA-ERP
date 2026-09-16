@@ -140,8 +140,24 @@ class RecruitmentPipelineService {
 class JobCandidateService {
   private readonly baseUrl = '/job-candidates';
 
-  getPaged(pageNumber = 1, pageSize = 20): Promise<HrPagedResult<JobCandidateSummary>> {
-    return apiService.get<HrPagedResult<JobCandidateSummary>>(this.baseUrl, { pageNumber, pageSize });
+  /**
+   * One page of the candidate register.
+   *
+   * `search` (G-7.6, 2026-09-15) matches name, email, phone, headline, current title and current
+   * employer — the same predicate the talent-pool screen has always used. Before it, the register's
+   * only lookup was an exact-email match, so finding someone whose address you did not know meant
+   * paging twenty at a time through the whole register.
+   */
+  getPaged(
+    pageNumber = 1,
+    pageSize = 20,
+    search?: string,
+  ): Promise<HrPagedResult<JobCandidateSummary>> {
+    return apiService.get<HrPagedResult<JobCandidateSummary>>(this.baseUrl, {
+      pageNumber,
+      pageSize,
+      ...(search?.trim() ? { search: search.trim() } : {}),
+    });
   }
 
   getAll(): Promise<JobCandidateSummary[]> {
@@ -181,13 +197,10 @@ class JobCandidateService {
     return apiService.delete<void>(`${this.baseUrl}/${id}`);
   }
 
-  addToTalentPool(id: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/${id}/add-to-talent-pool`, {});
-  }
-
-  removeFromTalentPool(id: string): Promise<void> {
-    return apiService.post<void>(`${this.baseUrl}/${id}/remove-from-talent-pool`, {});
-  }
+  // ⚠ `addToTalentPool` / `removeFromTalentPool` were REMOVED on 2026-09-15 (G-7.4), along with the
+  // two endpoints behind them. They set `isInTalentPool` with no source, no reason and no review
+  // date — the data loss the `talentPoolService` endpoints were written to stop. Use those instead:
+  // entry and exit both record who, why and when to look again.
 
   // ── files ────────────────────────────────────────────────────────────────
   // Candidate files live in private storage with no public URL — always fetched as a blob.

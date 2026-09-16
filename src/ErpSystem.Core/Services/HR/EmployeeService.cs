@@ -1031,6 +1031,21 @@ public class EmployeeService : IEmployeeService
             await posHistoryRepo.UpdateAsync(currentHistory);
         }
 
+        // G-3.2: log the seat this departure has emptied. Before 2026-09-15 nothing did — the
+        // vacancy register was only as current as the last manual Reconcile, which the HR role
+        // could not even run. Committed by the SaveChangesAsync below, in the same transaction as
+        // the termination, so a failed termination cannot leave a vacancy behind.
+        await PositionVacancyLog.LogDepartureAsync(
+            _unitOfWork,
+            employee.TenantId,
+            employee.Id,
+            employee.PositionId,
+            VacancyReasonFor(employee.TerminationReason),
+            dto.TerminationDate,
+            _currentUserProvider.UserId,
+            note: employee.TerminationNotes,
+            cancellationToken: cancellationToken);
+
         await _employeeRepository.UpdateAsync(employee);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
@@ -1038,6 +1053,30 @@ public class EmployeeService : IEmployeeService
         if (terminated == null) throw new InvalidOperationException("Employee terminated but could not be reloaded.");
         return terminated.ToDetailDto();
     }
+
+    /// <summary>
+    /// Translates why employment ended into why the seat is empty (G-3.4).
+    /// </summary>
+    /// <remarks>
+    /// Two vocabularies for adjacent facts: <see cref="TerminationReason"/> is about the person's
+    /// employment, <see cref="VacancyReason"/> is about the post. They overlap but are not the same
+    /// list — there is no "Redundancy" vacancy reason because a redundant post is a restructure
+    /// from the establishment's point of view, and no "Dismissal" because the register cares that
+    /// the seat emptied by termination, not how badly. Anything with no counterpart maps to
+    /// <c>Other</c>, which is what every reconcile-created row said before this existed.
+    /// </remarks>
+    private static VacancyReason VacancyReasonFor(TerminationReason? reason) => reason switch
+    {
+        TerminationReason.Resignation     => VacancyReason.Resignation,
+        TerminationReason.Retirement      => VacancyReason.Retirement,
+        TerminationReason.Death           => VacancyReason.Death,
+        TerminationReason.Redundancy      => VacancyReason.Restructure,
+        TerminationReason.Dismissal       => VacancyReason.Termination,
+        TerminationReason.ContractExpiry  => VacancyReason.Termination,
+        TerminationReason.MutualAgreement => VacancyReason.Termination,
+        TerminationReason.EndOfInternship => VacancyReason.Termination,
+        _                                 => VacancyReason.Other,
+    };
 
     public async Task<EmployeeDetailDto> ReinstateEmployeeAsync(Guid employeeId, string? notes = null, CancellationToken cancellationToken = default)
     {
@@ -3901,6 +3940,20 @@ public class EmployeeService : IEmployeeService
             current.ChangeReason = PositionChangeReason.Termination;
             await posHistoryRepo.UpdateAsync(current);
         }
+
+        // G-3.2, the same log as the direct path. This is the route most real exits take — a
+        // separation completing — so without it the register would have stayed empty even after
+        // the direct path was wired.
+        await PositionVacancyLog.LogDepartureAsync(
+            _unitOfWork,
+            employee.TenantId,
+            employee.Id,
+            employee.PositionId,
+            VacancyReasonFor(reason),
+            effectiveDate,
+            _currentUserProvider.UserId,
+            note: notes,
+            cancellationToken: cancellationToken);
 
         await _employeeRepository.UpdateAsync(employee);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

@@ -51,8 +51,15 @@ export default function EstablishmentPage() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { hasAnyRole } = useAuth();
-  const isHr = hasAnyRole(['SuperAdmin', 'HR']);
+  const { hasAnyPermission } = useAuth();
+  // G-3.10 (2026-09-15): was hasAnyRole(['SuperAdmin', 'HR']). The reads on this page are not
+  // role-gated, so TenantAdmin, Admin and the legacy HR User role saw both tables and had no way
+  // to act on either — the inverse of the landing page's problem, from the same cause.
+  const isHr = hasAnyPermission(['HR.Recruitment.Write', 'HR.Recruitment.Admin']);
+  // Reconcile is the one action here on the Admin policy, and it is the ONLY writer of the
+  // vacancy register anywhere in the solution (G-3.2). Drawing it for someone who cannot run it
+  // is how G-3.1 presented: a button that 403s, and an empty register for ever.
+  const canReconcile = hasAnyPermission(['HR.Recruitment.Admin']);
 
   const [onlyVacant, setOnlyVacant] = useState(true);
   const [includeClosed, setIncludeClosed] = useState(false);
@@ -70,7 +77,11 @@ export default function EstablishmentPage() {
   const [closing, setClosing] = useState<{ id: string; title: string } | null>(null);
   const [closeReason, setCloseReason] = useState('');
   const [noting, setNoting] = useState<{ id: string; title: string; notes: string } | null>(null);
-  const [statusing, setStatusing] = useState<{ id: string; title: string; status: string } | null>(null);
+  // `notes` added with G-3.8: closing through this override used to leave ClosedReason null, while
+  // the dedicated close dialog insists on one. The server now asks for it either way.
+  const [statusing, setStatusing] = useState<
+    { id: string; title: string; status: string; notes: string } | null
+  >(null);
 
   const stats = useQuery({
     queryKey: ['hr', 'position-vacancy-stats'],
@@ -159,7 +170,10 @@ export default function EstablishmentPage() {
   const setStatus = useMutation({
     mutationFn: () => {
       if (!statusing) throw new Error('Nothing to set.');
-      return positionVacancyService.setStatus(statusing.id, { newStatus: statusing.status });
+      return positionVacancyService.setStatus(statusing.id, {
+        newStatus: statusing.status,
+        notes: statusing.notes.trim() || undefined,
+      });
     },
     onSuccess: async () => {
       await refresh();
@@ -191,14 +205,16 @@ export default function EstablishmentPage() {
                 <ShieldCheck className="mr-2 h-4 w-4" />
                 Manual Establishment
               </Button>
-              <Button
-                variant="outline"
-                onClick={() => reconcile.mutate()}
-                disabled={reconcile.isPending}
-              >
-                <RefreshCw className={`mr-2 h-4 w-4 ${reconcile.isPending ? 'animate-spin' : ''}`} />
-                Reconcile
-              </Button>
+              {canReconcile && (
+                <Button
+                  variant="outline"
+                  onClick={() => reconcile.mutate()}
+                  disabled={reconcile.isPending}
+                >
+                  <RefreshCw className={`mr-2 h-4 w-4 ${reconcile.isPending ? 'animate-spin' : ''}`} />
+                  Reconcile
+                </Button>
+              )}
               {/* Round 2b, R4a: the establishment is where a budget starts. */}
               <Button onClick={() => setPlanning(true)}>
                 <Banknote className="mr-2 h-4 w-4" />
@@ -337,7 +353,12 @@ export default function EstablishmentPage() {
                               size="sm"
                               title="Set the status by hand"
                               onClick={() =>
-                                setStatusing({ id: pv.id, title: pv.positionTitle, status: pv.status })
+                                setStatusing({
+                                  id: pv.id,
+                                  title: pv.positionTitle,
+                                  status: pv.status,
+                                  notes: '',
+                                })
                               }
                             >
                               <RefreshCw className="h-4 w-4" />
@@ -532,23 +553,58 @@ export default function EstablishmentPage() {
               Reconcile normally decides this. Setting it by hand is for when it is wrong.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <Select
-              value={statusing?.status ?? ''}
-              onValueChange={(v) => statusing && setStatusing({ ...statusing, status: v })}
-            >
-              <SelectTrigger><SelectValue placeholder="Choose a status" /></SelectTrigger>
-              <SelectContent>
-                {['Anticipated', 'Open', 'UnderReview', 'RequisitionRaised', 'Filled', 'Closed'].map((v) => (
-                  <SelectItem key={v} value={v}>{humanizeEnum(v)}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select
+                value={statusing?.status ?? ''}
+                onValueChange={(v) => statusing && setStatusing({ ...statusing, status: v })}
+              >
+                <SelectTrigger><SelectValue placeholder="Choose a status" /></SelectTrigger>
+                <SelectContent>
+                  {/* G-3.7 (2026-09-15): 'RequisitionRaised' and 'Filled' used to be offered here
+                      and the service refuses both — "Use 'Raise Requisition' or the hiring flow to
+                      move a vacancy to that status." Picking either produced a toast reading
+                      "Refused". Two of six options were always going to fail, and the only way to
+                      find out was to click. They are system-driven statuses; the paths that write
+                      them are elsewhere. */}
+                  {['Anticipated', 'Open', 'UnderReview', 'Closed'].map((v) => (
+                    <SelectItem key={v} value={v}>{humanizeEnum(v)}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="statusNotes">
+                {statusing?.status === 'Closed' ? 'Why is this being closed?' : 'Note (optional)'}
+              </Label>
+              <Textarea
+                id="statusNotes"
+                value={statusing?.notes ?? ''}
+                onChange={(e) => statusing && setStatusing({ ...statusing, notes: e.target.value })}
+                placeholder={
+                  statusing?.status === 'Closed'
+                    ? 'e.g. post abolished in the restructure, or filled outside the system'
+                    : 'Anything worth recording against this change'
+                }
+              />
+              {statusing?.status === 'Closed' && (
+                <p className="text-xs text-muted-foreground">
+                  Closing ends the record, so it carries a reason — the same one the dedicated
+                  Close action asks for.
+                </p>
+              )}
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setStatusing(null)}>Cancel</Button>
-            <Button disabled={setStatus.isPending} onClick={() => setStatus.mutate()}>
+            <Button
+              disabled={
+                setStatus.isPending ||
+                (statusing?.status === 'Closed' && !statusing.notes.trim())
+              }
+              onClick={() => setStatus.mutate()}
+            >
               {setStatus.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Set
             </Button>

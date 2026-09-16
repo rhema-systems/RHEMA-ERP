@@ -27,6 +27,9 @@ export const candidateSchema = z.object({
   postalAddress: z.string().max(200).optional().nullable(),
   digitalAddress: z.string().max(30).optional().nullable(),
   city: z.string().min(1, 'City is required').max(100),
+  // G-7.3: free text, and optional. Nationality is not the same question as country of residence —
+  // a dual national or a stateless applicant is not served by a single FK into the country table.
+  nationality: z.string().max(100).optional().nullable(),
   // Optional since 2026-09-14, matching the entity. It was `min(1)`, which meant a candidate
   // with no country — every shadow record minted from a countryless employee by the internal job
   // board — could not be saved from this form at all, whatever else you were trying to change.
@@ -58,6 +61,7 @@ export const emptyCandidate: CandidateFormValues = {
   postalAddress: null,
   digitalAddress: null,
   city: '',
+  nationality: null,
   countryId: '',
   linkedInProfile: null,
   portfolioUrl: null,
@@ -161,7 +165,10 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
               label="Country"
               options={(countries.data ?? []).map((c: any) => ({ value: c.id, label: c.name }))}
             />
-            <div />
+            {/* G-7.3: displayed on the Personal card since the module was built and settable by
+                nothing — the demo seeder was its only writer, which is why it read "Ghanaian" in
+                every walkthrough and "—" on every real tenant. */}
+            <TextField form={form} name="nationality" label="Nationality" />
           </FieldRow>
         </CardContent>
       </Card>

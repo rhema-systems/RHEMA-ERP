@@ -52,6 +52,8 @@ export default function EditCandidatePage() {
       postalAddress: data.postalAddress ?? null,
       digitalAddress: data.digitalAddress ?? null,
       city: data.city,
+      // G-7.3: seeded so an edit that does not touch it does not clear it.
+      nationality: data.nationality ?? null,
       // Optional on the read since slice 13b (internal shadow candidates carry no country), but
       // still required on this form — HR filling in a candidate record must name one.
       countryId: data.countryId ?? '',

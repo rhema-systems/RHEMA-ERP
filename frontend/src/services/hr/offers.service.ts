@@ -43,6 +43,7 @@ import type {
   CreatePreEmploymentCheckProviderServices,
   PreEmploymentCheckType,
 } from '@/types/hr/offers';
+import type { HrPagedResult } from '@/types/hr/recruitment';
 
 /**
  * api/job-offers — the terms, their approval, the issue to the candidate and the response.
@@ -61,9 +62,24 @@ class JobOfferService {
 
   // ── queries ──────────────────────────────────────────────────────────────
 
-  /** ⚠ Unpaged and unfiltered — the whole tenant's offers. Filter client-side. */
+  /**
+   * ⚠ Unpaged and unfiltered — the whole tenant's offers.
+   *
+   * Prefer {@link getPaged} for anything a person looks at. This was the offers screen's **default**
+   * view until 2026-09-15 (G-10.3): opening the screen fetched every offer in the tenant in one
+   * response, with no pager, no total and no disclosure — the only recruitment list with no bound
+   * at all. Kept for callers that genuinely need every row.
+   */
   getAll(): Promise<JobOfferSummary[]> {
     return apiService.get<JobOfferSummary[]>(this.baseUrl);
+  }
+
+  /** One page of the tenant's offers, newest first. */
+  getPaged(pageNumber = 1, pageSize = 20): Promise<HrPagedResult<JobOfferSummary>> {
+    return apiService.get<HrPagedResult<JobOfferSummary>>(`${this.baseUrl}/paged`, {
+      pageNumber,
+      pageSize,
+    });
   }
 
   getById(id: string): Promise<JobOffer> {

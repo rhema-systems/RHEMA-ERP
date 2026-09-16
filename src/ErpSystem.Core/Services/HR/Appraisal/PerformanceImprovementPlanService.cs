@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Performance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -519,8 +520,17 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
     // sets those three itself. PerformanceImprovementPlanWorkflowStatusAdapter maps the engine's
     // outcome onto the entity.
     //
-    // ⚠ Inoperable until a PerformanceImprovementPlan workflow definition has been published —
-    // the authority to approve comes from the definition, not from a role attribute.
+    // ⚠ This used to say "Inoperable until a PerformanceImprovementPlan workflow definition has
+    // been published". It was NOT inoperable — it auto-approved (corrected 2026-09-15). With no
+    // definition, WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved and the
+    // adapter maps it to Active, so submitting a plan put it straight into force against the
+    // employee, unreviewed — and AfterApprovalStepAsync then notified the employee, the supervisor
+    // and the HR owner that it was binding. All four methods below now take a no-workflow branch;
+    // see HrWorkflowFallbackAuthority for the mechanism and for why submit could not be fixed on
+    // its own.
+    //
+    // The second half of the old sentence still holds and is the point of the engine: when a
+    // definition IS published, the authority to approve comes from it and not from a role.
 
     public async Task<PerformanceImprovementPlanDto> SubmitForApprovalAsync(Guid id, CancellationToken cancellationToken = default)
     {
@@ -559,12 +569,16 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
                     : $"This employee is already on improvement plan {competing.PipNumber}. " +
                       "Complete or cancel it before putting another into force.");
 
+        var hasWorkflow = await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType);
+
         var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start the improvement plan approval workflow.");
 
+        var submitOutcome = hasWorkflow ? workflowResult.Outcome : WorkflowOutcome.Pending;
+
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -578,15 +592,27 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         var entity = await GetOwnedPipAsync(id, cancellationToken);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        WorkflowOutcome approvalOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Approve");
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+            approvalOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "approve an improvement plan", HrPermissions.AdministerPerformance);
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -600,16 +626,29 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         var entity = await GetOwnedPipAsync(id, cancellationToken);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+        WorkflowOutcome rejectionOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, id, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, id, userId, "Reject", rejectionText);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+            rejectionOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "reject an improvement plan", HrPermissions.AdministerPerformance);
+            rejectionOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _improvementPlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -626,9 +665,15 @@ public class PerformanceImprovementPlanService : IPerformanceImprovementPlanServ
         if (entity.Status != PipStatus.PendingApproval)
             throw new InvalidOperationException("Only a plan still awaiting approval can be recalled.");
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, id, userId);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the plan.");
+        // Skipped when nothing is published: RecallWorkflowAsync answers "No active workflow found"
+        // without an instance, so the recall would fail on exactly the tenants where submitting now
+        // leaves a plan at PendingApproval.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, id, userId);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the plan.");
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId);
 

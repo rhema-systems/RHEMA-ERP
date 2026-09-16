@@ -305,12 +305,44 @@ public class JobCandidateService : IJobCandidateService
         return entities.Where(c => c.TenantId == tenantId).ToSummaryDtoList();
     }
 
-    public async Task<PagedResult<JobCandidateSummaryDto>> GetPagedAsync(int pageNumber, int pageSize, CancellationToken cancellationToken = default)
+    /// <summary>
+    /// One page of the candidate register, optionally narrowed by a free-text search.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-7.6 (2026-09-15): <c>search</c> did not exist. The only lookup on the candidate
+    /// register was <c>GET /email/{email}</c> — an <b>exact</b> email match, which exists to spot a
+    /// duplicate before creating one. There was no name search, no phone search, no filter by
+    /// talent-pool status and no sort, so finding a candidate whose email you did not know meant
+    /// paging twenty at a time through the whole register. It is the gap that grows fastest with
+    /// the size of the candidate base.</para>
+    ///
+    /// <para>The predicate is deliberately the same one <c>GetTalentPoolFilteredAsync</c> has
+    /// always used — name, email, headline, current title, current employer — because the talent
+    /// pool screen already had exactly the server-side multi-field search the register lacked, and
+    /// two searches over one table that disagree about what "matches" is its own defect. The only
+    /// difference is scope: the pool's is filtered to <c>IsInTalentPool</c>, this one is not.</para>
+    /// </remarks>
+    public async Task<PagedResult<JobCandidateSummaryDto>> GetPagedAsync(
+        int pageNumber, int pageSize, string? search = null, CancellationToken cancellationToken = default)
     {
         (pageNumber, pageSize) = PagingGuard.Clamp(pageNumber, pageSize);
 
         var tenantId = GetTenantId();
         var query = _candidateRepository.GetQueryable().Where(c => c.TenantId == tenantId);
+
+        if (!string.IsNullOrWhiteSpace(search))
+        {
+            var s = search.Trim().ToLower();
+            query = query.Where(c =>
+                c.FirstName.ToLower().Contains(s) ||
+                c.LastName.ToLower().Contains(s)  ||
+                c.Email.ToLower().Contains(s)     ||
+                c.Phone.Contains(s)               ||
+                (c.Headline != null && c.Headline.ToLower().Contains(s)) ||
+                (c.CurrentJobTitle != null && c.CurrentJobTitle.ToLower().Contains(s)) ||
+                (c.CurrentEmployer != null && c.CurrentEmployer.ToLower().Contains(s)));
+        }
+
         var totalCount = await query.CountAsync(cancellationToken);
 
         var items = await query
@@ -376,6 +408,29 @@ public class JobCandidateService : IJobCandidateService
     public async Task<JobCandidateDto> UpdateAsync(UpdateJobCandidateDto updateDto, Guid updatedByUserId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCandidateAsync(updateDto.Id);
+
+        // ── G-7.2 (2026-09-15): the duplicate-email check ran on create only ───────────────────
+        // CreateAsync has always refused a duplicate; this method performed no such check, and
+        // IX_JobCandidate_Email is a plain lookup index rather than a unique one, so the database
+        // did not catch it either. Two candidates could therefore end up sharing an address by
+        // editing one of them — and the duplicate-check the list page recommends before creating a
+        // record (GET /email/{email}) would then return whichever row the query happened to hit
+        // first, silently. The careers-site account link (UserId) IS uniquely indexed, so account
+        // adoption stayed safe; it was the plain email that was unguarded.
+        //
+        // ⚠ A unique index on Email is NOT added here. Soft delete leaves rows in place and they
+        // still occupy a unique index, so a tenant carrying historical duplicates — or a deleted
+        // candidate whose address is being reused — would fail the migration. Closing the writer is
+        // what stops new duplicates; making the index unique needs a data check on the live tenant
+        // first, and is recorded in HR-RECRUITMENT-GAP-CLOSURE-PLAN.md rather than guessed at.
+        if (!string.IsNullOrWhiteSpace(updateDto.Email) &&
+            !string.Equals(entity.Email, updateDto.Email, StringComparison.OrdinalIgnoreCase))
+        {
+            var clash = await _candidateRepository.GetByEmailAsync(updateDto.Email, entity.TenantId);
+            if (clash != null && clash.Id != entity.Id)
+                throw new InvalidOperationException(
+                    $"A candidate with email '{updateDto.Email}' already exists ({clash.CandidateNumber}).");
+        }
 
         await RequireIdentificationTypeAsync(updateDto.NationalIdTypeId);
         await RequireCountryAsync(updateDto.CountryId);
@@ -505,14 +560,83 @@ public class JobCandidateService : IJobCandidateService
         entity.UpdatedBy = updatedByUserId.ToString();
     }
 
-    private static void ApplyPoolExit(JobCandidate entity, string? reason, Guid updatedByUserId)
+    /// <summary>
+    /// Takes a candidate out of the talent pool.
+    /// </summary>
+    /// <param name="exitStatus">
+    /// How they left. Defaults to <c>Expired</c> — somebody removed them — but a hire leaves as
+    /// <c>Converted</c>.
+    /// </param>
+    /// <remarks>
+    /// <para>⚠ <b>G-13.3 (2026-09-15): this used to force <c>Expired</c> unconditionally</b>, and it
+    /// was the only thing that ever cleared <c>IsInTalentPool</c>. The two facts combined into a
+    /// contradiction with no way out: marking somebody <c>Converted</c> through the status dropdown
+    /// left <c>IsInTalentPool = true</c>, so they went on appearing in the pool list, in
+    /// <c>TotalInPool</c>, and in the Active set that matching draws from — until someone
+    /// separately removed them, which overwrote <c>Converted</c> with <c>Expired</c> and destroyed
+    /// the conversion the analytics tile counts. <b>The two states could not both be true.</b></para>
+    ///
+    /// <para>Exit and outcome are now separate: leaving the pool is one thing, why you left is
+    /// another.</para>
+    ///
+    /// <para><b>On dating a conversion (G-13.1).</b> The "Converted this year" tile dated conversion
+    /// by <c>UpdatedAt</c>, which moves on any edit — so a candidate converted two years ago whose
+    /// notes were touched last week counted as converted this year. There was no
+    /// <c>ConvertedDate</c> column to use instead, and one is not being added: a conversion IS an
+    /// exit from the pool, so <c>TalentPoolRemovedDate</c> — written right here, and never moved by
+    /// an unrelated edit — is the date, and needs no migration to become one.</para>
+    /// </remarks>
+    private static void ApplyPoolExit(
+        JobCandidate entity,
+        string? reason,
+        Guid updatedByUserId,
+        ErpSystem.Core.Enums.TalentPoolCandidateStatus exitStatus =
+            ErpSystem.Core.Enums.TalentPoolCandidateStatus.Expired)
     {
         entity.IsInTalentPool = false;
-        entity.TalentPoolStatus = ErpSystem.Core.Enums.TalentPoolCandidateStatus.Expired;
+        entity.TalentPoolStatus = exitStatus;
         entity.TalentPoolRemovedDate = DateTime.UtcNow;
         entity.TalentPoolRemovalReason = reason;
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = updatedByUserId.ToString();
+    }
+
+    /// <summary>
+    /// Records that a pooled candidate has been hired (G-13.1).
+    /// </summary>
+    /// <remarks>
+    /// <para>Nothing set <c>Converted</c> automatically. <c>TalentPoolStatus</c> was written on
+    /// entry (<c>Active</c>), on removal (<c>Expired</c>), and otherwise only by a human choosing a
+    /// value in a dropdown — and <c>ConfirmStartAsync</c> never touched it. So a pooled candidate
+    /// who was genuinely hired stayed <c>Active</c> in the pool unless a recruiter remembered to
+    /// change it.</para>
+    ///
+    /// <para>That mattered more than the average unset flag, because conversion is the <b>only</b>
+    /// measure the module has of whether the talent pool works at all — whether keeping people warm
+    /// actually produces hires. It measured neither reliably: not set when it happened, and dated
+    /// by a proxy when it was.</para>
+    ///
+    /// <para>A no-op for a candidate who was never in the pool, which is most of them.</para>
+    /// </remarks>
+    public async Task<bool> MarkConvertedFromPoolAsync(
+        Guid candidateId, Guid updatedByUserId, CancellationToken cancellationToken = default)
+    {
+        var entity = await _candidateRepository.GetByIdAsync(candidateId);
+        if (entity is null || entity.TenantId != GetTenantId()) return false;
+        if (!entity.IsInTalentPool) return false;
+
+        ApplyPoolExit(
+            entity,
+            "Hired — converted from the talent pool.",
+            updatedByUserId,
+            ErpSystem.Core.Enums.TalentPoolCandidateStatus.Converted);
+
+        await _candidateRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Candidate {CandidateNumber} converted from the talent pool on hire.", entity.CandidateNumber);
+        return true;
     }
 
     public async Task<TalentPoolPagedResultDto> GetTalentPoolFilteredAsync(TalentPoolFilterDto filter, CancellationToken cancellationToken = default)
@@ -567,6 +691,28 @@ public class JobCandidateService : IJobCandidateService
         var startOfYear = new DateTime(now.Year, 1, 1);
         var startOfMonth = new DateTime(now.Year, now.Month, 1);
 
+        // ── G-13.1: conversions are counted OUTSIDE the pool, and dated by a real date ─────────
+        // Two changes in one line. It used to read
+        //   candidates.Count(c => c.TalentPoolStatus == Converted && c.UpdatedAt >= startOfYear)
+        // over `candidates`, which is the IsInTalentPool set — and it dated conversion by
+        // `UpdatedAt`, which moves on ANY edit, so a candidate converted two years ago whose notes
+        // were touched last week counted as converted this year.
+        //
+        // Now that a conversion EXITS the pool (G-13.3 — the two states could not both be true
+        // before), a converted candidate is no longer in `candidates` at all, so this has to be its
+        // own query. It dates off TalentPoolRemovedDate, which is written at the moment of exit and
+        // is never moved by an unrelated edit.
+        //
+        // This is the module's only measure of whether the talent pool works — whether keeping
+        // people warm actually produces hires — so it is worth it being right.
+        var convertedThisYear = await _candidateRepository.GetQueryable()
+            .Where(c => c.TenantId == current
+                     && !c.IsDeleted
+                     && c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Converted
+                     && c.TalentPoolRemovedDate != null
+                     && c.TalentPoolRemovedDate >= startOfYear)
+            .CountAsync(cancellationToken);
+
         var analytics = new TalentPoolAnalyticsDto
         {
             TotalInPool         = candidates.Count,
@@ -574,7 +720,7 @@ public class JobCandidateService : IJobCandidateService
             Passive             = candidates.Count(c => c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Passive),
             Dormant             = candidates.Count(c => c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Dormant),
             OverdueForReview    = candidates.Count(c => c.TalentPoolReviewDate.HasValue && c.TalentPoolReviewDate.Value < now),
-            ConvertedThisYear   = candidates.Count(c => c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Converted && c.UpdatedAt >= startOfYear),
+            ConvertedThisYear   = convertedThisYear,
             AddedThisMonth      = candidates.Count(c => c.TalentPoolAddedDate.HasValue && c.TalentPoolAddedDate.Value >= startOfMonth),
             AddedThisYear       = candidates.Count(c => c.TalentPoolAddedDate.HasValue && c.TalentPoolAddedDate.Value >= startOfYear),
             AvgDaysInPool       = candidates.Any(c => c.TalentPoolAddedDate.HasValue)
@@ -722,43 +868,90 @@ public class JobCandidateService : IJobCandidateService
         foreach (var c in (await _candidateRepository.GetTalentPoolCandidatesAsync(tenantId))
                      .Where(c => c.TalentPoolStatus == ErpSystem.Core.Enums.TalentPoolCandidateStatus.Active))
         {
+            // ── G-13.2 (2026-09-15): absence of a constraint is not evidence of fit ───────────
+            // The rubric awarded its points for the ABSENCE of a constraint as readily as for a
+            // genuine match: a vacancy stating no minimum experience gave +40 to everybody, a
+            // candidate open to "Any" arrangement gave +30, and a candidate with no AvailableFrom
+            // on file gave +20 with the reason "Available now". So a candidate with an entirely
+            // empty profile scored **90 out of 90** against a vacancy that stated no requirements —
+            // the top of the list. And per § 7.5 an empty professional profile is the NORMAL state
+            // for any candidate HR typed in by hand, because those fields are candidate-supplied.
+            // The ranking was plausible-looking and inverted for exactly the candidates HR knew
+            // least about.
+            //
+            // Three tiers now, and the middle one is the point: a genuine match scores full, an
+            // unconstrained-but-evidenced situation scores partial, and silence scores little.
+            // "We have no idea" must not outrank "we checked and they fit".
             var score   = 0;
             var reasons = new List<string>();
 
-            // Experience match (+40)
-            if (vacancy.RequiredMinExperienceYears is null ||
-                (c.TotalYearsExperience.HasValue &&
-                 c.TotalYearsExperience.Value >= vacancy.RequiredMinExperienceYears.Value))
+            // Experience (0–40)
+            if (vacancy.RequiredMinExperienceYears is { } required)
             {
-                score += 40;
-                reasons.Add(vacancy.RequiredMinExperienceYears is null
-                    ? "No minimum experience required"
-                    : $"Meets experience requirement ({vacancy.RequiredMinExperienceYears} yr)");
+                if (c.TotalYearsExperience is { } held && held >= required)
+                {
+                    score += 40;
+                    reasons.Add($"Meets experience requirement ({required} yr, has {held})");
+                }
+                else if (c.TotalYearsExperience is null)
+                {
+                    reasons.Add($"Experience not on file — requirement is {required} yr");
+                }
+                else
+                {
+                    reasons.Add($"Below the {required} yr requirement (has {c.TotalYearsExperience})");
+                }
             }
-
-            // Work mode match (+30) — PreferredWorkArrangement.Any always matches
-            if (c.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any ||
-                c.PreferredWorkArrangement.ToString() == vacancy.WorkMode.ToString())
+            else if (c.TotalYearsExperience is { } known)
             {
-                score += 30;
-                reasons.Add(c.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any
-                    ? "Open to any work arrangement"
-                    : $"Work mode match ({vacancy.WorkMode})");
-            }
-
-            // Availability (+20)
-            if (c.AvailableFrom is null || c.AvailableFrom.Value <= now)
-            {
-                score += 20;
-                reasons.Add("Available now");
+                // No bar to clear, and we know what they have: cannot be a mismatch, but neither is
+                // it a demonstrated fit.
+                score += 25;
+                reasons.Add($"No minimum experience required ({known} yr on file)");
             }
             else
             {
-                reasons.Add($"Available from {c.AvailableFrom.Value:dd MMM yyyy}");
+                score += 10;
+                reasons.Add("No minimum experience required, and none on file");
             }
 
-            if (reasons.Count == 0)
-                reasons.Add("Active pool member");
+            // Work arrangement (0–30)
+            if (c.PreferredWorkArrangement.ToString() == vacancy.WorkMode.ToString())
+            {
+                score += 30;
+                reasons.Add($"Work mode match ({vacancy.WorkMode})");
+            }
+            else if (c.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any)
+            {
+                // Genuine flexibility is worth something, but it is not the same as wanting this.
+                score += 20;
+                reasons.Add("Open to any work arrangement");
+            }
+            else
+            {
+                reasons.Add($"Prefers {c.PreferredWorkArrangement}, vacancy is {vacancy.WorkMode}");
+            }
+
+            // Availability (0–20)
+            if (c.AvailableFrom is { } from)
+            {
+                if (from <= now)
+                {
+                    score += 20;
+                    reasons.Add("Available now");
+                }
+                else
+                {
+                    reasons.Add($"Available from {from:dd MMM yyyy}");
+                }
+            }
+            else
+            {
+                // ⚠ This used to score the full 20 and say "Available now". A blank field is not a
+                // statement of availability; it is the absence of one.
+                score += 5;
+                reasons.Add("Availability not on file");
+            }
 
             results.Add(new TalentPoolVacancyMatchResultDto
             {
@@ -799,39 +992,73 @@ public class JobCandidateService : IJobCandidateService
             var reasons = new List<string>();
 
             // Experience match (+40)
-            if (v.RequiredMinExperienceYears is null ||
-                (candidate.TotalYearsExperience.HasValue &&
-                 candidate.TotalYearsExperience.Value >= v.RequiredMinExperienceYears.Value))
+            // G-13.2, the same rubric in the other direction — see MatchToVacancyAsync above for
+            // why absence of a constraint no longer scores the same as a demonstrated fit. Kept
+            // deliberately symmetrical: two matchers over one pool that rank differently would be a
+            // worse defect than the one being fixed.
+            if (v.RequiredMinExperienceYears is { } required)
             {
-                score += 40;
-                reasons.Add(v.RequiredMinExperienceYears is null
-                    ? "No minimum experience required"
-                    : $"Meets experience requirement ({v.RequiredMinExperienceYears} yr)");
+                if (candidate.TotalYearsExperience is { } held && held >= required)
+                {
+                    score += 40;
+                    reasons.Add($"Meets experience requirement ({required} yr, has {held})");
+                }
+                else if (candidate.TotalYearsExperience is null)
+                {
+                    reasons.Add($"Your experience is not on file — this asks for {required} yr");
+                }
+                else
+                {
+                    reasons.Add($"Asks for {required} yr (you have {candidate.TotalYearsExperience})");
+                }
+            }
+            else if (candidate.TotalYearsExperience is { } known)
+            {
+                score += 25;
+                reasons.Add($"No minimum experience required ({known} yr on file)");
+            }
+            else
+            {
+                score += 10;
+                reasons.Add("No minimum experience required, and none on file");
             }
 
-            // Work mode match (+30) — PreferredWorkArrangement.Any always matches
-            var workModeMatch =
-                candidate.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any ||
-                candidate.PreferredWorkArrangement.ToString() == v.WorkMode.ToString();
-            if (workModeMatch)
+            // Work arrangement (0–30)
+            if (candidate.PreferredWorkArrangement.ToString() == v.WorkMode.ToString())
             {
                 score += 30;
-                reasons.Add(candidate.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any
-                    ? "Open to any work arrangement"
-                    : $"Work mode match ({v.WorkMode})");
+                reasons.Add($"Work mode match ({v.WorkMode})");
             }
-
-            // Deadline not yet passed (+20)
-            if (v.ApplicationDeadline is null || v.ApplicationDeadline.Value > now)
+            else if (candidate.PreferredWorkArrangement == ErpSystem.Core.Enums.PreferredWorkArrangement.Any)
             {
                 score += 20;
-                reasons.Add(v.ApplicationDeadline is null
-                    ? "No application deadline"
-                    : $"Apply by {v.ApplicationDeadline.Value:dd MMM yyyy}");
+                reasons.Add("Open to any work arrangement");
+            }
+            else
+            {
+                reasons.Add($"Prefers {candidate.PreferredWorkArrangement}, vacancy is {v.WorkMode}");
             }
 
-            if (reasons.Count == 0)
-                reasons.Add("Open vacancy");
+            // Still open to apply (0–20)
+            if (v.ApplicationDeadline is { } deadline)
+            {
+                if (deadline > now)
+                {
+                    score += 20;
+                    reasons.Add($"Apply by {deadline:dd MMM yyyy}");
+                }
+                else
+                {
+                    reasons.Add($"Applications closed {deadline:dd MMM yyyy}");
+                }
+            }
+            else
+            {
+                // An open-ended vacancy is genuinely still open — unlike a blank availability on a
+                // candidate, this absence IS the fact, so it scores well but not top.
+                score += 15;
+                reasons.Add("No application deadline set");
+            }
 
             results.Add(new CandidateVacancyMatchResultDto
             {

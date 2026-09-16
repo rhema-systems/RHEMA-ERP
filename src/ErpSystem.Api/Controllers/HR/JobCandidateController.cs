@@ -219,8 +219,11 @@ public class JobCandidateController : ControllerBase
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PagedResult<JobCandidateSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
-        [FromQuery] int pageSize = 20)
-        => Ok(await _service.GetPagedAsync(pageNumber, pageSize));
+        [FromQuery] int pageSize = 20,
+        // G-7.6: name, email, phone, headline, current title or employer. The register's only
+        // lookup used to be an exact-email match.
+        [FromQuery] string? search = null)
+        => Ok(await _service.GetPagedAsync(pageNumber, pageSize, search));
 
     [HttpGet("all")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
@@ -305,29 +308,15 @@ public class JobCandidateController : ControllerBase
     // TALENT POOL
     // =========================================================================
 
-    [HttpPost("{id:guid}/add-to-talent-pool")]
-    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
-    public async Task<IActionResult> AddToTalentPool(Guid id)
-    {
-        var employeeId = _currentUser.EmployeeId;
-        if (employeeId == null)
-            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        await _service.AddToTalentPoolAsync(id, employeeId.Value);
-        return Ok(new { message = "Candidate added to talent pool." });
-    }
-
-    [HttpPost("{id:guid}/remove-from-talent-pool")]
-    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
-    public async Task<IActionResult> RemoveFromTalentPool(Guid id)
-    {
-        var employeeId = _currentUser.EmployeeId;
-        if (employeeId == null)
-            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        await _service.RemoveFromTalentPoolAsync(id, employeeId.Value);
-        return Ok(new { message = "Candidate removed from talent pool." });
-    }
+    // ⚠ POST {id}/add-to-talent-pool and POST {id}/remove-from-talent-pool were RETIRED here on
+    // 2026-09-15 (G-7.4). Both were superseded by the richer TalentPoolController endpoints the UI
+    // now uses, and neither had a caller left — but leaving a live door onto them mattered, because
+    // the old pair set IsInTalentPool with **no source, no reason and no review date**, which is
+    // exactly the data loss the replacement was written to stop. An endpoint that silently
+    // downgrades a record is worse than one that does not exist.
+    //
+    // Entry to and exit from the pool now go through TalentPoolController, which records who put
+    // the candidate there, why, and when they should next be looked at.
 
     // =========================================================================
     // QUALIFICATIONS

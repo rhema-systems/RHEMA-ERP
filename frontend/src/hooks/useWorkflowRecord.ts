@@ -14,6 +14,20 @@ export interface WorkflowRecordCommands {
   submit?: () => Promise<unknown>;
   approve?: (context: WorkflowRecordCommandContext) => Promise<unknown>;
   reject?: (context: WorkflowRecordCommandContext) => Promise<unknown>;
+  /**
+   * Withdraws a submitted record back to draft.
+   *
+   * ⚠ **G-4.3 / G-10.4 (2026-09-15): this hook had no recall concept at all.** Its command surface
+   * was submit / approve / reject, and a search of the whole frontend found no caller of either
+   * `staffRequisitionService.recall()` or `jobOfferService.recall()` — both of which existed, as
+   * did their endpoints, their services (enforcing requester-only) and their adapters. Other HR
+   * modules wire recall to a button; recruitment never did, while the requisition edit page told
+   * users *"Recall it first if it is still awaiting approval."*
+   *
+   * A requester who submitted prematurely had to ask an approver to reject it instead — which
+   * leaves a rejection on the record for something nobody actually ruled against.
+   */
+  recall?: (reason: string) => Promise<unknown>;
   afterAction?: () => Promise<unknown>;
 }
 
@@ -26,6 +40,8 @@ export interface UseWorkflowRecordOptions {
   currentStepName?: string;
   canSubmit?: boolean;
   canApproveReject?: boolean;
+  /** Whether the current user may withdraw this record from approval. See {@link WorkflowRecordCommands.recall}. */
+  canRecall?: boolean;
   enabled?: boolean;
   commands: WorkflowRecordCommands;
   onOpenWorkflows?: () => void;
@@ -49,6 +65,7 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     currentStepName,
     canSubmit,
     canApproveReject,
+    canRecall,
     enabled = true,
     commands,
     onOpenWorkflows,
@@ -97,6 +114,10 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
     loadWorkflowSummary: false,
     canSubmit,
     canApproveReject,
+    canRecall,
+    onRecall: commands.recall
+      ? async (reason: string) => { await commands.recall?.(reason); }
+      : undefined,
     onSubmit: commands.submit ? async () => { await commands.submit?.(); } : undefined,
     onApprove: commands.approve
       ? async (comments, checklistResponses, signature) => {
@@ -113,8 +134,10 @@ export function useWorkflowRecord(options: UseWorkflowRecordOptions): WorkflowRe
   }), [
     afterAction,
     canApproveReject,
+    canRecall,
     canSubmit,
     commands.approve,
+    commands.recall,
     commands.reject,
     commands.submit,
     currentStepName,

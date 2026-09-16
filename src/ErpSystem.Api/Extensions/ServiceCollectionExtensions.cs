@@ -2491,6 +2491,14 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // (IAssetReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.AssetReminderBackgroundService>();
 
+            // Recruitment lifecycle sweep (G-2.4, G-6.2): daily — an offer whose expiry passed
+            // unanswered, an advert past its closing date, and an anticipated vacancy whose day has
+            // come. ⚠ This is the recruitment module's FIRST scheduled job: before it, no offer was
+            // ever marked Expired and no advert ever closed itself, so every counter built on those
+            // statuses drifted without bound. Sweep logic is scoped
+            // (IRecruitmentLifecycleSweepService) so run-now shares it.
+            services.AddHostedService<ErpSystem.Api.Services.HR.RecruitmentLifecycleSweepBackgroundService>();
+
             // Team reminder engine (round 2, lane F2): daily sweep — a task due within the tenant's
             // lead time, a task already overdue, an objective past its date, a meeting tomorrow, and
             // terms of reference lapsing within thirty days. Sweep logic is scoped

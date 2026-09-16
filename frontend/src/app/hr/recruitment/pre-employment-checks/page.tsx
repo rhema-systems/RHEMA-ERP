@@ -23,8 +23,20 @@ import { PRE_EMPLOYMENT_CHECK_STATUSES, type PreEmploymentCheckStatus } from '@/
 
 /**
  * The cross-offer view of pre-employment checks — the queue HR chases outstanding clearances from,
- * rather than opening every conditional offer to see what's stuck. Defaults to In Progress, since
- * Pending/Completed/Failed/Waived read as "nothing to chase" or "already resolved".
+ * rather than opening every conditional offer to see what's stuck.
+ *
+ * ⚠ **G-11.4 (2026-09-15): this screen diagnosed and could not cure.** It existed to find
+ * outstanding clearances and offered no way to act on any of them — every row had to be opened via
+ * its offer, then the checks tab, then the item. Rows and offer links now deep-link straight to
+ * `?tab=checks`, so the queue lands you on the thing it just pointed at rather than on Overview.
+ *
+ * The recording of a result stays on the check item itself, deliberately: a clearance result is
+ * evidence about a named person, and a bulk "mark these done" control over a list is the wrong
+ * shape for it. What was wrong was the number of clicks between finding the work and doing it, not
+ * the absence of a bulk action.
+ *
+ * ⚠ See also G-11.1 — the default status this screen opens on is one nothing in the application
+ * ever writes, which is why the queue reads empty on a real tenant and full on the demo one.
  */
 export default function PreEmploymentChecksQueuePage() {
   const router = useRouter();
@@ -91,12 +103,14 @@ export default function PreEmploymentChecksQueuePage() {
                   <TableRow
                     key={c.id}
                     className="cursor-pointer hover:bg-muted/50"
-                    onClick={() => router.push(`/hr/recruitment/offers/${c.jobOfferId}`)}
+                    onClick={() =>
+                      router.push(`/hr/recruitment/offers/${c.jobOfferId}?tab=checks`)
+                    }
                   >
                     <TableCell className="font-medium">{c.candidateName}</TableCell>
                     <TableCell>
                       <Link
-                        href={`/hr/recruitment/offers/${c.jobOfferId}`}
+                        href={`/hr/recruitment/offers/${c.jobOfferId}?tab=checks`}
                         className="text-primary hover:underline"
                       >
                         {c.offerNumber}

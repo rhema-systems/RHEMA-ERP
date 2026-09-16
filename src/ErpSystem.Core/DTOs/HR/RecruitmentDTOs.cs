@@ -89,6 +89,22 @@ public class JobVacancyDto : BaseDto
     /// </summary>
     public bool UsesProtectedCharacteristicCriterion { get; set; }
 
+    /// <summary>
+    /// The statuses this vacancy may legally move to from where it is now.
+    /// </summary>
+    /// <remarks>
+    /// <para>Derived from the service's own <c>AllowedTransitions</c> map, so the screen and the
+    /// server cannot disagree (G-5.7, 2026-09-15). The "Advance to…" picker previously held a
+    /// hardcoded list of the five hiring stages and offered all of them minus the current one from
+    /// any non-terminal status — so a Draft vacancy was offered <i>Filled</i> and a Published one
+    /// <i>Interviewing</i>, both refused on arrival.</para>
+    ///
+    /// <para>Sending the map rather than mirroring it in TypeScript is the point: a mirrored
+    /// constant is a second source of truth that drifts silently the first time the real map
+    /// changes, and this one just did change — <c>OnHold</c> became reachable (G-5.3).</para>
+    /// </remarks>
+    public List<JobVacancyStatus> AllowedNextStatuses { get; set; } = new();
+
     public Guid? WorkflowInstanceId { get; set; }
 
     // Shortlist approval
@@ -124,6 +140,18 @@ public class JobVacancySummaryDto
     public bool AllowExternalCandidates { get; set; }
     public int ApplicationCount { get; set; }
     public int ShortlistedCount { get; set; }
+
+    /// <summary>
+    /// How many of this vacancy's candidates have reached the interview stage.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-09-15 for G-15.1. The entity has always maintained it — the same stage movement
+    /// that maintains the three counts around it — but the summary DTO omitted it, so the
+    /// dashboard's Pipeline card had no people-count for the middle of its funnel and used a count
+    /// of interview <i>sessions</i> instead, on a shared scale beside three counts of people.
+    /// </remarks>
+    public int InterviewCount { get; set; }
+
     public int OfferCount { get; set; }
     public DateTime CreatedAt { get; set; }
 }
@@ -182,6 +210,31 @@ public class CreateJobVacancyDto : CreateDtoBase
     /// </summary>
     public bool IsBlindScreeningEnabled { get; set; }
 
+    /// <summary>
+    /// Weight (0–100) given to test scores in the composite shortlist score. 0 ignores them.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-5.2 (2026-09-15). This and <see cref="InternalCandidateBoostPoints"/> appeared on
+    /// <c>JobVacancyDto</c> — the <b>read</b> DTO — and nowhere else. Neither the create DTO nor
+    /// the update DTO carried them, and no frontend file mentioned either name, so both defaulted
+    /// to 0 and could not be changed by any means. Since the scoring algorithm's step 5 requires
+    /// <c>TestScoreWeight &gt; 0</c> and step 6 requires <c>InternalCandidateBoostPoints &gt; 0</c>,
+    /// two documented, implemented branches of it could never execute.</para>
+    ///
+    /// <para>The visible consequence: the form's *Requires a written test* and *Requires a
+    /// practical test* checkboxes recorded a requirement whose results could never affect a score,
+    /// and <c>JobApplicantTestResult</c> rows were captured and never weighed.</para>
+    /// </remarks>
+    [Range(0, 100)]
+    public int TestScoreWeight { get; set; }
+
+    /// <summary>
+    /// Flat point bonus (0–20) added to an internal candidate's composite score. 0 disables it.
+    /// </summary>
+    /// <remarks>See <see cref="TestScoreWeight"/> — same gap, same fix.</remarks>
+    [Range(0, 20)]
+    public int InternalCandidateBoostPoints { get; set; }
+
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
     public bool AutoShortlistRequireAllMandatory { get; set; } = true;
@@ -216,6 +269,15 @@ public class UpdateJobVacancyDto : UpdateDtoBase
     public bool RequiresWrittenTest { get; set; }
     public bool RequiresPracticalTest { get; set; }
     public bool IsBlindScreeningEnabled { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.TestScoreWeight"/>
+    [Range(0, 100)]
+    public int TestScoreWeight { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.InternalCandidateBoostPoints"/>
+    [Range(0, 20)]
+    public int InternalCandidateBoostPoints { get; set; }
+
     public DateTime? PublishDate { get; set; }
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
@@ -255,6 +317,15 @@ public class TransitionJobVacancyDto
     public bool RequiresWrittenTest { get; set; }
     public bool RequiresPracticalTest { get; set; }
     public bool IsBlindScreeningEnabled { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.TestScoreWeight"/>
+    [Range(0, 100)]
+    public int TestScoreWeight { get; set; }
+
+    /// <inheritdoc cref="CreateJobVacancyDto.InternalCandidateBoostPoints"/>
+    [Range(0, 20)]
+    public int InternalCandidateBoostPoints { get; set; }
+
     public DateTime? PublishDate { get; set; }
     public Guid? RecruitmentPipelineId { get; set; }
     public decimal? AutoShortlistMinScore { get; set; }
@@ -1021,6 +1092,27 @@ public class CreateJobCandidateDto : CreateDtoBase
     public string City { get; set; } = string.Empty;
 
     /// <summary>
+    /// The candidate's nationality, as free text.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-7.3 (2026-09-15). This field exists on the entity and is rendered on the Personal
+    /// card, but appeared on the <b>read</b> DTO only — no create DTO, no update DTO, no form field,
+    /// and no candidate-portal path wrote it. The <b>only</b> assignment anywhere in the solution
+    /// was <c>TdcDemoRecruitmentHistorySeeder</c>, which sets <c>"Ghanaian"</c>.</para>
+    ///
+    /// <para>So on a real tenant the Nationality row always read "—", and on the demo tenant it
+    /// always read "Ghanaian": a field that looked populated in every walkthrough and was
+    /// unreachable in production. Appendix C's fourth pattern — when a field looks fine on the demo
+    /// tenant, check who writes it before concluding it works.</para>
+    ///
+    /// <para>Free text rather than a lookup, deliberately. Nationality is not the same question as
+    /// <see cref="CountryId"/>, which is where the candidate is; a dual national or a stateless
+    /// applicant is not served by a single foreign key into the country table.</para>
+    /// </remarks>
+    [MaxLength(100)]
+    public string? Nationality { get; set; }
+
+    /// <summary>
     /// The candidate's country. <b>Optional</b>, matching the entity: the FK was made nullable on
     /// 2026-08-27 (<c>MakeJobCandidateCountryOptional</c>) because "a country is a requirement the
     /// foreign key invented". ⚠ This was <c>[Required] Guid</c> until 2026-09-14 — and
@@ -1091,6 +1183,27 @@ public class UpdateJobCandidateDto : UpdateDtoBase
     [Required]
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The candidate's nationality, as free text.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ G-7.3 (2026-09-15). This field exists on the entity and is rendered on the Personal
+    /// card, but appeared on the <b>read</b> DTO only — no create DTO, no update DTO, no form field,
+    /// and no candidate-portal path wrote it. The <b>only</b> assignment anywhere in the solution
+    /// was <c>TdcDemoRecruitmentHistorySeeder</c>, which sets <c>"Ghanaian"</c>.</para>
+    ///
+    /// <para>So on a real tenant the Nationality row always read "—", and on the demo tenant it
+    /// always read "Ghanaian": a field that looked populated in every walkthrough and was
+    /// unreachable in production. Appendix C's fourth pattern — when a field looks fine on the demo
+    /// tenant, check who writes it before concluding it works.</para>
+    ///
+    /// <para>Free text rather than a lookup, deliberately. Nationality is not the same question as
+    /// <see cref="CountryId"/>, which is where the candidate is; a dual national or a stateless
+    /// applicant is not served by a single foreign key into the country table.</para>
+    /// </remarks>
+    [MaxLength(100)]
+    public string? Nationality { get; set; }
 
     /// <summary>
     /// The candidate's country. <b>Optional</b>, matching the entity: the FK was made nullable on
@@ -3063,6 +3176,18 @@ public class JobOfferSummaryDto
     public DateTime? OfferDate { get; set; }
     public DateTime? ExpiryDate { get; set; }
     public int Version { get; set; }
+
+    /// <summary>
+    /// False when a revision has replaced this version.
+    /// </summary>
+    /// <remarks>
+    /// Added 2026-09-15 for G-10.2 / G-15.2. <c>Version</c> alone cannot answer "is this the live
+    /// offer?" — a v1 is the live offer until a v2 exists — so every reader that wanted to exclude
+    /// superseded offers had to load the whole chain or guess. The dashboard's "offers pending
+    /// response" guessed, and counted them.
+    /// </remarks>
+    public bool IsLatestVersion { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }
 
@@ -5975,6 +6100,24 @@ public class CreateCandidateTalentSegmentDto
     public Guid?   JobFamilyId      { get; set; }
 }
 
+/// <summary>
+/// Updating a talent segment.
+/// </summary>
+/// <remarks>
+/// <para>⚠ <b>This is a whole-record payload, not a patch (G-13.4).</b> Every field is assigned
+/// unconditionally by <c>UpdateEntity</c>, so <b>a field you omit is a field you clear</b> —
+/// including <c>OwnerEmployeeId</c>, <c>Purpose</c>, <c>TargetPositionId</c> and
+/// <c>JobFamilyId</c>. That is deliberate: clearing a segment's owner on the form has to be
+/// possible, and a null that means "leave it alone" cannot also mean "remove it".</para>
+///
+/// <para>The risk is a client that does not know. The talent-pool page handles this correctly and
+/// says why, but the contract lived only in that page's comment — so any other caller, or a future
+/// partial-update screen, would silently wipe a segment's owner and purpose while changing its
+/// colour. Stated here because this is what a new client reads.</para>
+///
+/// <para><b>Always send every field.</b> Load the segment, change what you mean to change, send
+/// the whole thing back. Same convention as the other replace-set payloads in this module.</para>
+/// </remarks>
 public class UpdateCandidateTalentSegmentDto
 {
     [Required]
@@ -6183,6 +6326,12 @@ public class TalentPoolVacancyMatchResultDto
     public string?  PreferredWorkArrangementName  { get; set; }
     public DateTime? AvailableFrom  { get; set; }
     public int      MatchScore      { get; set; }
+
+    /// <summary>The highest score the rubric can award, so a reader knows what 65 means (G-13.2).</summary>
+    /// <remarks>The score was rendered bare, with no denominator and no unit, so nobody could tell
+    /// whether it was out of 90 or 100 or what a good one looked like. Sent rather than hardcoded
+    /// client-side: the weights live in the service and a mirrored constant would drift.</remarks>
+    public int      MatchScoreMax   { get; set; } = 90;
     public List<string> MatchReasons { get; set; } = new();
 }
 
@@ -6198,6 +6347,9 @@ public class CandidateVacancyMatchResultDto
     public string?   HiringManagerName  { get; set; }
     public int       NumberOfPositions  { get; set; }
     public int       MatchScore         { get; set; }
+
+    /// <inheritdoc cref="TalentPoolVacancyMatchResultDto.MatchScoreMax"/>
+    public int       MatchScoreMax      { get; set; } = 90;
     public List<string> MatchReasons    { get; set; } = new();
 }
 

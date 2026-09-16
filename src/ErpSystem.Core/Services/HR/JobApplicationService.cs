@@ -2713,7 +2713,17 @@ public class JobApplicationService : IJobApplicationService
             YearsOfExperience   = entity.YearsOfExperience,
             AvailableFrom       = entity.AvailableFrom,
             CoverLetter         = entity.CoverLetter,
-            IsShortlisted       = entity.Status == ApplicationStatus.Shortlisted,
+            // ⚠ G-8.1 (2026-09-15): this read `entity.Status == ApplicationStatus.Shortlisted`
+            // while every HR-side view computed the same flag as `ShortlistedDate.HasValue`
+            // (RecruitmentMappingExtensions, ×2). The two agreed only while the status was still
+            // Shortlisted — and a stage move overwrites the status (§ 8.6) while ShortlistedDate
+            // keeps its value. From that moment **HR saw the candidate as shortlisted and the
+            // candidate saw themselves as not**, which is the worst direction for this particular
+            // disagreement to run: the applicant is told they were passed over when they were not.
+            //
+            // One definition now, and it is the date: being shortlisted is an event that happened,
+            // not a state you stop being in because the process moved on.
+            IsShortlisted       = entity.ShortlistedDate.HasValue,
             ShortlistedDate     = entity.ShortlistedDate,
             WithdrawnDate       = entity.WithdrawnDate,
             WithdrawalReason    = entity.WithdrawalReason,

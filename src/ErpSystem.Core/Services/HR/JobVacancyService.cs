@@ -419,15 +419,84 @@ public class JobVacancyService : IJobVacancyService
             [JobVacancyStatus.Draft]                 = new[] { JobVacancyStatus.PendingApproval, JobVacancyStatus.Approved, JobVacancyStatus.Cancelled },
             [JobVacancyStatus.PendingApproval]       = new[] { JobVacancyStatus.Approved, JobVacancyStatus.Rejected, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
             [JobVacancyStatus.Rejected]              = new[] { JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Approved]              = new[] { JobVacancyStatus.Published, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Published]             = new[] { JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Shortlisting, JobVacancyStatus.Draft, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.ClosedForApplications] = new[] { JobVacancyStatus.Shortlisting, JobVacancyStatus.Published, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Shortlisting]          = new[] { JobVacancyStatus.Interviewing, JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.Interviewing]          = new[] { JobVacancyStatus.OfferStage, JobVacancyStatus.Shortlisting, JobVacancyStatus.Cancelled },
-            [JobVacancyStatus.OfferStage]            = new[] { JobVacancyStatus.Filled, JobVacancyStatus.Interviewing, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Approved]              = new[] { JobVacancyStatus.Published, JobVacancyStatus.Draft, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Published]             = new[] { JobVacancyStatus.ClosedForApplications, JobVacancyStatus.Shortlisting, JobVacancyStatus.Draft, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.ClosedForApplications] = new[] { JobVacancyStatus.Shortlisting, JobVacancyStatus.Published, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Shortlisting]          = new[] { JobVacancyStatus.Interviewing, JobVacancyStatus.ClosedForApplications, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.Interviewing]          = new[] { JobVacancyStatus.OfferStage, JobVacancyStatus.Shortlisting, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+            [JobVacancyStatus.OfferStage]            = new[] { JobVacancyStatus.Filled, JobVacancyStatus.Interviewing, JobVacancyStatus.OnHold, JobVacancyStatus.Cancelled },
+
+            // ⚠ G-5.3 (2026-09-15): OnHold appeared in NO transition in this map and in no service
+            // code, so it could not be reached at all — by UI or by API — despite being a declared
+            // JobVacancyStatus. It is now reachable from every live status and, critically, has a
+            // way OUT to each of them. That second half is the lesson from G-4.2, the requisition's
+            // On Hold: it could be entered and never left, every other route out closed by its own
+            // precondition, with Cancel the only remaining action — while the dialog told the user
+            // it could be taken off hold later. A hold that cannot be released is not a hold.
+            //
+            // Resuming returns the vacancy to whichever stage it was at, chosen by the user, rather
+            // than to a remembered one: this map is stateless by design, and a "resume to where you
+            // were" would need a column nothing writes.
+            [JobVacancyStatus.OnHold]                = new[]
+            {
+                JobVacancyStatus.Approved,
+                JobVacancyStatus.Published,
+                JobVacancyStatus.ClosedForApplications,
+                JobVacancyStatus.Shortlisting,
+                JobVacancyStatus.Interviewing,
+                JobVacancyStatus.OfferStage,
+                JobVacancyStatus.Cancelled,
+            },
+
             [JobVacancyStatus.Filled]                = Array.Empty<JobVacancyStatus>(),
             [JobVacancyStatus.Cancelled]             = Array.Empty<JobVacancyStatus>(),
         };
+
+    /// <summary>
+    /// The statuses a vacancy may legally move to from where it is now.
+    /// </summary>
+    /// <remarks>
+    /// Exposed so the detail page's "Advance to…" picker can offer only legal moves (G-5.7). It
+    /// used to list all five hiring stages from any non-terminal status, so a Draft vacancy was
+    /// offered <i>Filled</i> and a Published one <i>Interviewing</i>; both were refused, and the
+    /// only way to find out was to click. The refusal names the legal next states, so it failed
+    /// safely and informatively — but the picker can simply ask.
+    /// </remarks>
+    public static IReadOnlyCollection<JobVacancyStatus> AllowedNextStatuses(JobVacancyStatus from)
+        => AllowedTransitions.TryGetValue(from, out var allowed) ? allowed : Array.Empty<JobVacancyStatus>();
+
+    /// <summary>
+    /// Segregation of duties on the approval step (G-5.4, 2026-09-15).
+    /// </summary>
+    /// <remarks>
+    /// <para>A vacancy has <b>no workflow integration at all</b> — <c>JobVacancy</c> appears
+    /// nowhere in the workflow services — so unlike a requisition or an offer there is no engine
+    /// to name an approver. <i>Approve</i> was a plain status change guarded only by
+    /// <c>RecruitmentWrite</c>: no separate approver, no check that the person approving was not
+    /// the person who opened it. Given that a vacancy is what authorises advertising and hiring
+    /// against approved headcount, that was a lighter gate than the requisition behind it.</para>
+    ///
+    /// <para>This is the same rule the requisition has always carried, on the same comparison:
+    /// <c>CreatedById</c> is an Employee id (<c>JobVacancyService</c> stamps it from the
+    /// controller's <c>EmployeeId</c>), and so is the acting id passed in. It is deliberately
+    /// narrow — it says who may <i>not</i> approve, not who may. Widening it into a named approver
+    /// chain means putting <c>JobVacancy</c> on the workflow engine, which is a larger change than
+    /// this gap asks for.</para>
+    ///
+    /// <para>Only the approval step is guarded. Publishing, closing for applications and the
+    /// hiring stages are the vacancy being worked by whoever is running it, and are not approvals.
+    /// </para>
+    /// </remarks>
+    private static void GuardApprovalSeparation(JobVacancy entity, JobVacancyStatus toStatus, Guid actingEmployeeId)
+    {
+        if (toStatus != JobVacancyStatus.Approved) return;
+        if (actingEmployeeId == Guid.Empty) return;
+        if (entity.CreatedById != actingEmployeeId) return;
+
+        throw new InvalidOperationException(
+            "You cannot approve a vacancy that you opened yourself. Approval authorises advertising " +
+            "and hiring against this headcount, so it needs a second pair of eyes.");
+    }
 
     private static void GuardTransition(JobVacancy entity, JobVacancyStatus toStatus)
     {
@@ -464,6 +533,7 @@ public class JobVacancyService : IJobVacancyService
             throw new InvalidOperationException("A closed or filled vacancy cannot be edited.");
 
         GuardTransition(entity, dto.NewStatus);
+        GuardApprovalSeparation(entity, dto.NewStatus, userId);
 
         var fromStatus = entity.VacancyStatus;
 
@@ -513,6 +583,7 @@ public class JobVacancyService : IJobVacancyService
         var entity = await GetOwnedAsync(dto.VacancyId);
 
         GuardTransition(entity, dto.NewStatus);
+        GuardApprovalSeparation(entity, dto.NewStatus, changedByUserId);
 
         var from = entity.VacancyStatus;
         entity.VacancyStatus = dto.NewStatus;
@@ -569,7 +640,30 @@ public class JobVacancyService : IJobVacancyService
                                    && !hasExternalPosting;
 
         var publishDate = entity.PublishDate ?? DateTime.UtcNow;
-        var postingTitle = entity.CustomAdvertTitle ?? entity.VacancyNumber;
+
+        // ── G-5.6 (2026-09-15): the advert candidates actually see ─────────────────────────────
+        // Both auto-created postings were built with Description = string.Empty and a title of
+        // `CustomAdvertTitle ?? VacancyNumber`. A vacancy published without a custom advert title
+        // therefore produced a live advert headed with an internal reference number — "VAC-2026-041"
+        // — and no text at all, on the company website. That is what an external applicant saw.
+        //
+        // The vacancy already carries everything a serviceable advert needs; nothing assembled it.
+        // A recruiter can still overwrite either field afterwards on the Adverts tab, and the
+        // six-field print-advert composition block (G-6.4) is a richer path for newspaper copy —
+        // this is the floor, not the ceiling.
+        var positionTitle = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .AsNoTracking()
+            .Where(p => p.Id == entity.PositionId && p.TenantId == entity.TenantId)
+            .Select(p => p.Title)
+            .FirstOrDefaultAsync();
+
+        var postingTitle = !string.IsNullOrWhiteSpace(entity.CustomAdvertTitle)
+            ? entity.CustomAdvertTitle!
+            : !string.IsNullOrWhiteSpace(positionTitle)
+                ? positionTitle!
+                : entity.VacancyNumber;
+
+        var postingBody = ComposeAdvertBody(entity, positionTitle);
 
         if (shouldCreateInternal)
         {
@@ -580,7 +674,7 @@ public class JobVacancyService : IJobVacancyService
                 JobVacancyId = entity.Id,
                 Channel      = JobPostingChannel.InternalPortal,
                 Title        = postingTitle,
-                Description  = string.Empty,
+                Description  = postingBody,
                 Status       = JobPostingStatus.Published,
                 IsActive     = true,
                 PublishDate  = publishDate,
@@ -600,7 +694,7 @@ public class JobVacancyService : IJobVacancyService
                 JobVacancyId = entity.Id,
                 Channel      = JobPostingChannel.CompanyWebsite,
                 Title        = postingTitle,
-                Description  = string.Empty,
+                Description  = postingBody,
                 Status       = JobPostingStatus.Published,
                 IsActive     = true,
                 PublishDate  = publishDate,
@@ -619,6 +713,64 @@ public class JobVacancyService : IJobVacancyService
                 shouldCreateInternal,
                 shouldCreateExternal);
         }
+    }
+
+    /// <summary>
+    /// Builds the body of an auto-created advert from what the vacancy already knows (G-5.6).
+    /// </summary>
+    /// <remarks>
+    /// <para>Deliberately plain text with blank-line paragraphs rather than HTML or Markdown: this
+    /// string is rendered by the internal portal, the careers site and whatever an external board
+    /// is given, and only the lowest common denominator is safe in all three. A recruiter who
+    /// wants formatting edits the advert afterwards.</para>
+    ///
+    /// <para>Salary appears only when <c>IsSalaryVisible</c> is set — the vacancy's own answer to
+    /// whether the range is publishable, and an advert is the most public thing in the module, so
+    /// getting this backwards would disclose a pay band to every applicant.</para>
+    /// </remarks>
+    private static string ComposeAdvertBody(JobVacancy entity, string? positionTitle)
+    {
+        var role = !string.IsNullOrWhiteSpace(positionTitle) ? positionTitle! : "this role";
+        var parts = new List<string>
+        {
+            entity.NumberOfPositions > 1
+                ? $"We are recruiting {entity.NumberOfPositions} {role} posts."
+                : $"We are recruiting a {role}.",
+            $"Employment type: {entity.EmploymentType}. Work mode: {entity.WorkMode}."
+        };
+
+        if (entity.RequiredMinExperienceYears is > 0 and { } years)
+            parts.Add($"Minimum experience: {years} year{(years == 1 ? "" : "s")}.");
+
+        if (entity.IsSalaryVisible && entity.SalaryRangeMin.HasValue && entity.SalaryRangeMax.HasValue)
+        {
+            var currency = string.IsNullOrWhiteSpace(entity.SalaryCurrencyCode)
+                ? string.Empty
+                : entity.SalaryCurrencyCode + " ";
+            parts.Add($"Salary range: {currency}{entity.SalaryRangeMin:N0} – {currency}{entity.SalaryRangeMax:N0}.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(entity.KeyBenefitsSummary))
+            parts.Add($"What we offer: {entity.KeyBenefitsSummary!.Trim()}");
+
+        if (entity.RequiresWrittenTest || entity.RequiresPracticalTest)
+        {
+            var tests = entity.RequiresWrittenTest && entity.RequiresPracticalTest
+                ? "a written and a practical test"
+                : entity.RequiresWrittenTest ? "a written test" : "a practical test";
+            parts.Add($"Shortlisted candidates will sit {tests}.");
+        }
+
+        if (entity.TargetStartDate is { } start)
+            parts.Add($"Expected start date: {start:dd MMM yyyy}.");
+
+        parts.Add(entity.ApplicationDeadline is { } deadline
+            ? $"Closing date for applications: {deadline:dd MMM yyyy}."
+            : "Applications are open until further notice.");
+
+        parts.Add($"Reference: {entity.VacancyNumber}.");
+
+        return string.Join("\n\n", parts);
     }
 
     /// <summary>
@@ -669,8 +821,18 @@ public class JobVacancyService : IJobVacancyService
     {
         var entity = await GetOwnedAsync(dto.VacancyId);
 
-        if (entity.VacancyStatus == JobVacancyStatus.Cancelled)
-            throw new InvalidOperationException("Vacancy is already closed.");
+        // G-5.5 (2026-09-15): this used to check only "is it already Cancelled?" and never call
+        // GuardTransition, so a **Filled** vacancy — terminal in the map — could be cancelled
+        // through the API, undoing a completed hire's vacancy record. The UI hides the button when
+        // the vacancy is terminal, so it was reachable only by calling the endpoint directly; but
+        // the map is the thing that is supposed to make that impossible, and this was the third
+        // door into a status change that did not go through it. (The first two were closed when
+        // TransitionAsync and ChangeStatusAsync were unified onto the map — see AllowedTransitions.)
+        //
+        // Cancellation is reachable from every live status, so in practice this refuses exactly
+        // two things: cancelling an already-Cancelled vacancy, which was already refused with a
+        // friendlier sentence above, and cancelling a Filled one, which is the defect.
+        GuardTransition(entity, JobVacancyStatus.Cancelled);
 
         var from = entity.VacancyStatus;
         entity.VacancyStatus = JobVacancyStatus.Cancelled;
