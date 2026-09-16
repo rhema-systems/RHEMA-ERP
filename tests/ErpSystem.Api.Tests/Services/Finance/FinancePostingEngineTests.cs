@@ -1362,7 +1362,7 @@ public sealed class FinancePostingEngineTests
             .Options;
         using var discoveryContext = new ApplicationDbContext(options);
         discoveryContext.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
     }
 
     [Fact]
