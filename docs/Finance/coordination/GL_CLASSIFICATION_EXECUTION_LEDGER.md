@@ -3143,3 +3143,23 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   Independent review and rerun of self-test, deterministic generation/verification, and source/storage/semantic
   tamper-refusal tests pass. This renews authority only; the merged-tree full schema/DBCC rehearsal and
   development-database reset remain pending. `RhemaERP` was not modified.
+
+### Merged-tree full scratch verification (2026-09-16)
+
+- The renewed authority was committed at `9a0b979547c8f5ecb37ed38f4d36778fda986c31` (tree
+  `02bee2593b40cd58a97fc4b5cda6ffa3d5da9425`). The full launcher targeted only the new absent
+  `RhemaERP_GL_Scratch_20260916_02` catalog on `localhost\EXPRESS22`, with C6/C7/C8 false. An initial wrapper
+  invocation refused before SQL or output creation because a project-file SHA pin omitted one character. The
+  launcher, wrapper, and static suite were corrected; all 10 launcher and six wrapper file pins then passed live
+  hash checks, the complete offline suite passed, and an independent reviewer approved the frozen package.
+- The reviewed launcher SHA-256 was `5336B208F6FFD388D9769433CE9312ABF7A48589888D05524E22D757EEFDDAA8`.
+  Its single scratch application finished `SCHEMA_VERIFIED_PASS_DROPPED`. Terminal manifest SHA-256 is
+  `7C05F995670DAE72088A089B3930F80AF1E0C95FC1F7E63090DC16E4350588B0`; an independent reviewer
+  verified all 47 bound artifacts and the operator-log hash. The sole baseline has zero orphan history,
+  1,630 user tables, 835 exact checks including all 675 archived-final checks, 493 enabled triggers, five functions,
+  one view, six exact stored programmable definitions, 835 exact SQL storage and structural-semantic matches with
+  zero drift/unsupported syntax, and DBCC PASS. One publish and one apply were recorded.
+- The launcher's exact-owned drop proof and separate read-only `DB_ID` checks show the `_02` scratch catalog
+  absent. No `RhemaERP` mutation or C6/C7/C8 activation occurred. This is a fresh-empty-catalog baseline proof,
+  not a proof of the existing development catalog's reset, reseed, application smoke paths, or frontend release
+  build. Those gates remain separate.
