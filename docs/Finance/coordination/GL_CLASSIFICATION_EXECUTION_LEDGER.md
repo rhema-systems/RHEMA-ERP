@@ -3108,7 +3108,7 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   `20260916132000_DisposableDevelopmentCurrentModelBaseline`, with 1,630 tables and 835 checks. The inspector
   derives 675 exact archived-final checks through 872 ordered lifecycle events, 493 triggers through 108 patches,
   five functions and one view. Deterministic generation/verification, SQL Server EF one-baseline/no-pending-model,
-  and zero-to-current TSql160 grammar pass; the final structural gate is still running.
+  zero-to-current TSql160 grammar, and the final structural gate pass.
 - API build passes with zero errors. Focused Finance API tests pass 140/140 after provider-correct SQL Server-only
   archived-check binding; a separate InMemory/SQLite provider run passes 8/8. Focused frontend AP service tests
   pass 12/12 and new-account tests pass 3/3. Broad frontend type-check still reports errors in newer-master areas
@@ -3117,3 +3117,29 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   scratch SQL Server storage-hash authority is therefore stale. A new exact-tree isolated scratch capture and
   independent review are required before any claim of schema verification or development reset readiness.
   C6/C7/C8 activation and `RhemaERP` reset remain `NO-GO` at this checkpoint.
+
+### Merged-tree scratch capture and dual-authority renewal (2026-09-16)
+
+- The clean integration commit `52f238dfd07a7c426c0ceb091ab18219cec66cf8` (tree
+  `1d7523f7e57cf723a59fc2fe159e9eb75ec6fd8f`) was independently reviewed before the isolated
+  `localhost\EXPRESS22` scratch capture. The pinned launcher had SHA-256
+  `EF1F66761B5EA4F6B70711E45E36291F230D46C7E60624271BE02388D92B5912`; its offline static suite passed.
+  The unique `RhemaERP_GL_Scratch_20260916_01` catalog was absent before creation.
+- One baseline application completed. The capture produced 835 ordered source and 835 SQL Server storage check
+  definitions with tuple-keyset SHA-256 `46593A80E6CAF68DDC12A2F76C0BBF7ACCF0D8F6F8D774A75FBFB6D58D7BBCB3`.
+  Its terminal result was `RAW_CHECK_CAPTURE_COMPLETE_REVIEW_REQUIRED_DROPPED`; terminal manifest SHA-256 is
+  `0EC348E7259485FF1C14ED4F993B8CA354D67BAE3B8AC5C024E0BAAED53224F1`. The exact-owned catalog drop
+  proof and a separate read-only `DB_ID` query both show the catalog absent. No DBCC or schema-PASS claim was made.
+  The command runner reported exit 1 because its outer PowerShell wrapper normalizes nonzero exits; a separate
+  probe showed nested `exit 3` is reported as outer 1 while `$LASTEXITCODE` retains 3. The launcher's intended
+  review-required exit is 3, and the complete signed terminal evidence is authoritative for this disposition.
+- Independent comparison with attempt 15 found exactly one source and one storage identity change, both at ordinal
+  149: `InventoryAllocations|CK_InventoryAllocations_ProjectLineage`. The other 834 tuples are unchanged. The
+  source change reflects the latest-master Organization Unit lineage; the optional capture analyzer's known 230
+  function-case drifts remain non-authoritative.
+- A fresh repository dual authority was deterministically generated from the immutable attempt-01 raw corpora.
+  All 835 closed ScriptDom structural identities match with zero drift and zero unsupported syntax. The authority
+  JSON SHA-256 is `B95095979A14FBD84D0CEF95250FD75BF998BD7C817C3A11719DD0693EF4CA99`.
+  Independent review and rerun of self-test, deterministic generation/verification, and source/storage/semantic
+  tamper-refusal tests pass. This renews authority only; the merged-tree full schema/DBCC rehearsal and
+  development-database reset remain pending. `RhemaERP` was not modified.

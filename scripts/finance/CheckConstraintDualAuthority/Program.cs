@@ -10,21 +10,21 @@ const string ActualSchema = "RHEMA_RAW_CHECK_ACTUAL_V2";
 const string Comparator = "ORDINAL_ASCII_TABLE_THEN_NAME_V1";
 const string KeySerialization = "COUNT32BE|TABLE_LENGTH32BE|TABLE_UTF8|NAME_LENGTH32BE|NAME_UTF8";
 const string BaselineFile = "20260916132000_DisposableDevelopmentCurrentModelBaseline.cs";
-const string BaselineBlob = "8ab077153bbed273f6302b156ceccbbad1c8b0d6";
-const int BaselineBytes = 8998463;
-const string BaselineSha256 = "B9FE09EFA8538107B5230095FA9292F9C5B4C3E85DC5DD4F322CFFDBD3EDD578";
-const string TerminalManifestSha256 = "858FC627204D5A78DF181E1351828E56DAE1AAC1296939CA2184C770A5EE35EC";
+const string BaselineBlob = "4d72559fab6ccdb66ae877458074090b9c3afa03";
+const int BaselineBytes = 9037402;
+const string BaselineSha256 = "1EF7083FEDEC179824B3C262E7E67888A7607163915B45EB2F2DFD8F69A9D1E3";
+const string TerminalManifestSha256 = "0EC348E7259485FF1C14ED4F993B8CA354D67BAE3B8AC5C024E0BAAED53224F1";
 const string TerminalOutcome = "RAW_CHECK_CAPTURE_COMPLETE_REVIEW_REQUIRED_DROPPED";
-const string ReviewedCommit = "dac0ce8eb9fad30b65584ee4f90a17ea88f7e4f5";
-const string ReviewedTree = "39013e19b887c2c7a8d9767089e709b9b58dc7d4";
-const string SourceCorpusSha256 = "716A7DD2CB8584B565C5EFD572582EE04F62F23A377D5D5FDAACEBD5BEBC229C";
-const string ActualCorpusSha256 = "ECE6645A27F20545629F647E4EAF52E51FD012B635BD56D30E6F920F3634C0CE";
-const string ComparisonSha256 = "C603CFE64EC04613CCB33C229F1F78916023AB0C3401820A6B8FA7034A7674C7";
+const string ReviewedCommit = "52f238dfd07a7c426c0ceb091ab18219cec66cf8";
+const string ReviewedTree = "1d7523f7e57cf723a59fc2fe159e9eb75ec6fd8f";
+const string SourceCorpusSha256 = "6516B6354BF98DA827B91CD80E6D6E958B4555C94977C7E3F33B204A968067BB";
+const string ActualCorpusSha256 = "88FFA04BDE7112F47C4DAB05FCF15D5E99255725218DF0A6B84F6CE8F5F862FB";
+const string ComparisonSha256 = "35AD38968D1476AC2337B23779F4233AE5C0D0AA870E3D01191A6EEEC19CB040";
 const string KeysetSha256 = "46593A80E6CAF68DDC12A2F76C0BBF7ACCF0D8F6F8D774A75FBFB6D58D7BBCB3";
-const string PreDropManifestSha256 = "0EC548B529B639FB50F19950101B6F3E8C359B245A25C98EDB5E4C112711DF34";
-const string SourceIdentitySetSha256 = "6DE783A26DA95BC08A5434FCF8D910A711ACC0F72458D6F4C45B2E2E6B00D783";
-const string StorageIdentitySetSha256 = "C7927443B4F57E4B161C594D10EA894B4290D7E888D8E0D3E29CEEA0443EEA67";
-const string SemanticIdentitySetSha256 = "F7E31699B655C81901268BAE0A239170A88FA85CC8E073B0076F9EDCD25684E6";
+const string PreDropManifestSha256 = "6088E52B76F5008EC180F8312C26B19C0411DD0E055CCBD2FB6AE96B86B8CFD8";
+const string SourceIdentitySetSha256 = "AE873AFD1FD3C0EEE613896C7F7C97D2661BB83C7B5403717BB1A97DBE27995D";
+const string StorageIdentitySetSha256 = "A5C2357FA6EBD29A80647CBF44A2FC7CE262A08382CF1A1EDB02B2A3EA719398";
+const string SemanticIdentitySetSha256 = "428164F6B9AB86261BCDE85664AB3B32F1791C101B71F12735B58489FD369655";
 
 if (args.Length == 1 && args[0] == "--self-test")
 {
@@ -91,7 +91,7 @@ static void Generate(string baselinePath, string sourcePath, string actualPath, 
     var document = new AuthorityDocument(
         AuthoritySchema, 835, Comparator, KeySerialization, KeysetSha256,
         new BaselineBinding(BaselineFile, "100644", BaselineBlob, BaselineBytes, BaselineSha256),
-        new CaptureBinding("GL-Scratch-Baseline-Evidence-20260915-15", TerminalManifestSha256,
+        new CaptureBinding("GL-Scratch-Baseline-Evidence-20260916-01", TerminalManifestSha256,
             TerminalOutcome, ReviewedCommit, ReviewedTree, SourceCorpusSha256, ActualCorpusSha256,
             ComparisonSha256, PreDropManifestSha256, "CATALOG_DROPPED", false),
         new SemanticBinding("SCRIPT_DOM_TSQL160_CLOSED_V1", "BUILTIN_FUNCTION_IDENTIFIERS_CASE_INSENSITIVE_V1",
@@ -121,7 +121,7 @@ static AuthorityDocument LoadAuthority(string path)
         value.storageIdentitySetSha256 != Aggregate(value.entries, AuthorityIdentityKind.Storage) ||
         value.semanticIdentitySetSha256 != Aggregate(value.entries, AuthorityIdentityKind.Semantic) ||
         value.baseline != new BaselineBinding(BaselineFile, "100644", BaselineBlob, BaselineBytes, BaselineSha256) ||
-        value.capture != new CaptureBinding("GL-Scratch-Baseline-Evidence-20260915-15", TerminalManifestSha256,
+        value.capture != new CaptureBinding("GL-Scratch-Baseline-Evidence-20260916-01", TerminalManifestSha256,
             TerminalOutcome, ReviewedCommit, ReviewedTree, SourceCorpusSha256, ActualCorpusSha256,
             ComparisonSha256, PreDropManifestSha256, "CATALOG_DROPPED", false))
         throw new InvalidOperationException("Authority header or provenance drifted.");
