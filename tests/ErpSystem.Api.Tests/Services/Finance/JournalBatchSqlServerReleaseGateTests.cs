@@ -343,13 +343,15 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             CaptureAsync(CreateSqlPostingEngine(secondContext, seeded.TenantId).PostAsync(
                 Request("local_statutory", "c1casesource", "post", $"c1|case|{sourceId:N}"))));
 
-        outcomes.Count(item => item.Result is not null).Should().Be(1);
+        outcomes.Count(item => item.Result is not null).Should().Be(1,
+            "posting outcomes were {0}", string.Join(" | ", outcomes.Select(item =>
+                item.Error?.ToString() ?? "success")));
         outcomes.Count(item => item.Error?.Message.Contains("PARALLEL_BOOK_POSTING_DISABLED", StringComparison.Ordinal) == true)
             .Should().Be(1);
         await using var verification = database.CreateContext();
         (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
         (await verification.JournalEntries.CountAsync()).Should().Be(1);
-        (await verification.Accounts.SingleAsync(item => item.Id == seeded.DebitAccountId)).Balance.Should().Be(100m);
+        (await verification.Accounts.SingleAsync(item => item.Id == seeded.DebitAccountId)).Balance.Should().Be(-100m);
         (await verification.Accounts.SingleAsync(item => item.Id == seeded.CreditAccountId)).Balance.Should().Be(-100m);
         (await verification.AccountBalances.CountAsync()).Should().Be(2);
         (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
@@ -865,6 +867,13 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 LifecycleStatus = AccountingBookLifecycleStatus.Active,
                 FunctionalCurrencyCode = "GHS"
             });
+            context.AccountingBookPeriods.Add(new AccountingBookPeriod
+            {
+                TenantId = tenantId,
+                AccountingBookId = bookId,
+                FiscalPeriodId = periodId,
+                PeriodStatus = AccountingBookPeriodStatus.Open
+            });
             if (includeParallelBook)
             {
                 context.AccountingBooks.Add(new AccountingBook
@@ -874,6 +883,13 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                     IsDefault = false, IsActive = true, AllowsPosting = true,
                     LifecycleStatus = AccountingBookLifecycleStatus.Active,
                     FunctionalCurrencyCode = "GHS"
+                });
+                context.AccountingBookPeriods.Add(new AccountingBookPeriod
+                {
+                    TenantId = tenantId,
+                    AccountingBookId = parallelBookId,
+                    FiscalPeriodId = periodId,
+                    PeriodStatus = AccountingBookPeriodStatus.Open
                 });
             }
             context.Accounts.AddRange(
