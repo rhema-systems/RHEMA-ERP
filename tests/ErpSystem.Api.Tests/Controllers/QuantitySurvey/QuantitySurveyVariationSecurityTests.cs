@@ -43,7 +43,7 @@ public sealed class QuantitySurveyVariationSecurityTests
     [Fact]
     public void Sql_guard_uses_procurement_requisition_project_lineage_not_the_project_customer()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations", "20260810234912_AddQuantitySurveyVariationLifecycle.cs");
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260810234912_AddQuantitySurveyVariationLifecycle.cs");
         source.Should().Contain("LEFT JOIN dbo.PurchaseRequisitions pr")
             .And.Contain("pr.ProjectId = i.ProjectId")
             .And.NotContain("p.BusinessPartnerId <> i.ContractorBusinessPartnerId");
@@ -70,7 +70,7 @@ public sealed class QuantitySurveyVariationSecurityTests
     public void Approved_application_reuses_owned_commercial_records_and_requires_the_sql_capability()
     {
         var service = Source("src", "ErpSystem.Api", "Services", "QuantitySurvey", "QuantitySurveyVariationService.cs");
-        var migration = Source("src", "ErpSystem.Data", "Migrations", "20260811022852_AddQuantitySurveyVariationApplications.cs");
+        var migration = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260811022852_AddQuantitySurveyVariationApplications.cs");
         service.Should().Contain("ContractAmendments.Add")
             .And.Contain("ProjectBudgetRevisions.Add")
             .And.Contain("ProjectForecastVersions.Add")

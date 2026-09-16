@@ -1,6 +1,6 @@
 'use client';
 
-import { ChangeEvent, useCallback, useEffect, useState } from 'react';
+import { ChangeEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { ArrowLeft, BadgeCheck, CheckCircle2, FileText, Landmark, Loader2, RotateCcw, Send, Upload, XCircle } from 'lucide-react';
@@ -11,6 +11,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import {
+    SettlementDimensionEvidence,
+    SourceDocumentDimensionEvidence,
+    SourceDocumentDimensionPanel,
+} from '@/components/finance/dimensions/source-document-dimension-panel';
+import {
+    toFinancePostingDimensionValues,
+    toFinanceSourceDimensionFormState,
+} from '@/lib/finance/source-document-dimensions';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import type { BankDeposit } from '@/types/cash-management';
 
@@ -19,6 +28,9 @@ export default function BankDepositDetailPage() {
     const [deposit, setDeposit] = useState<BankDeposit | null>(null);
     const [loading, setLoading] = useState(true);
     const [working, setWorking] = useState(false);
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
     const [confirmationEvidenceName, setConfirmationEvidenceName] = useState('');
     const [confirmationForm, setConfirmationForm] = useState({
         bankConfirmationReference: '',
@@ -27,22 +39,30 @@ export default function BankDepositDetailPage() {
         notes: '',
     });
 
+    const acceptDeposit = useCallback((value: BankDeposit) => {
+        setDeposit(value);
+        const dimensionForm = toFinanceSourceDimensionFormState(value.financeDimensions);
+        setDefaultDimensionValues(dimensionForm.defaultValues);
+        setLineDimensionValues(dimensionForm.lineValues);
+        setApplyDefaultToAll(false);
+    }, []);
+
     const load = useCallback(async () => {
         try {
-            setDeposit(await cashManagementDataService.getBankDeposit(params.id));
+            acceptDeposit(await cashManagementDataService.getBankDeposit(params.id));
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Could not load deposit.');
         } finally {
             setLoading(false);
         }
-    }, [params.id]);
+    }, [acceptDeposit, params.id]);
 
     useEffect(() => { void load(); }, [load]);
 
     const run = async (operation: () => Promise<BankDeposit>, message: string) => {
         setWorking(true);
         try {
-            setDeposit(await operation());
+            acceptDeposit(await operation());
             toast.success(message);
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'The action failed.');
@@ -57,7 +77,7 @@ export default function BankDepositDetailPage() {
         setWorking(true);
         try {
             const fileId = await cashManagementDataService.uploadBankingEvidence(file);
-            setDeposit(await cashManagementDataService.linkBankDepositAttachment(deposit.id, fileId));
+            acceptDeposit(await cashManagementDataService.linkBankDepositAttachment(deposit.id, fileId));
             toast.success('Deposit slip attached.');
         } catch (error) {
             toast.error(error instanceof Error ? error.message : 'Could not attach evidence.');
@@ -101,6 +121,36 @@ export default function BankDepositDetailPage() {
         );
     };
 
+    const dimensionLines = useMemo(() => deposit ? [
+        {
+            id: deposit.id,
+            accountId: deposit.bankGLAccountId,
+            accountLabel: `Bank · ${deposit.bankAccountName}`,
+        },
+        ...deposit.allocations.map(item => ({
+            id: item.id,
+            accountId: item.glAccountId,
+            accountLabel: `${item.entryNumber} · ${item.liquidityAccountName}`,
+        })),
+    ] : [], [deposit]);
+    const financeDimensionInput = useMemo(() => ({
+        defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+        lines: dimensionLines.flatMap(line => line.accountId ? [{
+            sourceLineId: line.id,
+            accountId: line.accountId,
+            dimensions: toFinancePostingDimensionValues(lineDimensionValues[line.id] || {}),
+        }] : []),
+        applyDefaultToEligibleLines: applyDefaultToAll,
+    }), [applyDefaultToAll, defaultDimensionValues, dimensionLines, lineDimensionValues]);
+
+    const saveDimensions = async () => {
+        if (!deposit) return;
+        await run(
+            () => cashManagementDataService.updateBankDepositDimensions(deposit.id, financeDimensionInput),
+            'Finance coding dimensions saved.',
+        );
+    };
+
     if (loading || !deposit) {
         return <div className="flex min-h-[50vh] items-center justify-center"><Loader2 className="h-7 w-7 animate-spin" /></div>;
     }
@@ -119,7 +169,10 @@ export default function BankDepositDetailPage() {
                     {editable && (
                         <>
                             <Button variant="outline" asChild><label className="cursor-pointer"><FileText className="mr-2 h-4 w-4" />Attach deposit slip<input className="hidden" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={upload} /></label></Button>
-                            <Button disabled={working || !deposit.attachments.some(item => item.isPrimaryEvidence)} onClick={() => void run(() => cashManagementDataService.submitBankDeposit(deposit.id), 'Deposit submitted to the Chief Accountant.')}><Send className="mr-2 h-4 w-4" />Submit</Button>
+                            <Button disabled={working || !deposit.attachments.some(item => item.isPrimaryEvidence)} onClick={() => void run(async () => {
+                                await cashManagementDataService.updateBankDepositDimensions(deposit.id, financeDimensionInput);
+                                return cashManagementDataService.submitBankDeposit(deposit.id);
+                            }, 'Deposit submitted to the Chief Accountant.')}><Send className="mr-2 h-4 w-4" />Submit</Button>
                         </>
                     )}
                     {submitted && (
@@ -139,6 +192,49 @@ export default function BankDepositDetailPage() {
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Approved deductions</CardTitle></CardHeader><CardContent className="text-2xl font-semibold text-red-600">{deposit.currency} {deposit.totalDeductions.toLocaleString(undefined, { minimumFractionDigits: 2 })}</CardContent></Card>
                 <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Net on deposit slip</CardTitle></CardHeader><CardContent className="text-2xl font-bold">{deposit.currency} {deposit.netAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</CardContent></Card>
             </div>
+            <Card className="no-print">
+                <CardHeader>
+                    <CardTitle>Finance coding dimensions</CardTitle>
+                    <CardDescription>
+                        Stable settlement-line identities retain their coding through draft edits. Submitted evidence is immutable.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                    {editable ? (
+                        <>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'CASHBANK',
+                                    sourceDocumentType: 'BankDepositBatch',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.cash.bank-deposits',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={deposit.depositDate.slice(0, 10)}
+                                lines={dimensionLines}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={lineDimensionValues}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={setLineDimensionValues}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                certificationState={deposit.financeDimensions?.certificationState}
+                                disabled={working}
+                            />
+                            <div className="flex justify-end">
+                                <Button type="button" disabled={working} onClick={() => void saveDimensions()}>
+                                    Save Finance coding
+                                </Button>
+                            </div>
+                        </>
+                    ) : (
+                        <SourceDocumentDimensionEvidence evidence={deposit.financeDimensions} />
+                    )}
+                    <SettlementDimensionEvidence evidence={deposit.settlementDimensionEvidence} />
+                </CardContent>
+            </Card>
             <div className="grid gap-6 xl:grid-cols-[2fr_1fr]">
                 <Card>
                     <CardHeader><CardTitle>Settlement lines</CardTitle><CardDescription>Partial allocations are reserved while this batch remains open.</CardDescription></CardHeader>

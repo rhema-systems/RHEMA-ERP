@@ -6,6 +6,7 @@ import { apiService } from '@/services/api.service';
 import { documentOutputService } from '@/services/document-output.service';
 import type {
   FixedAsset,
+  FixedAssetLocationOption,
   FixedAssetCategory,
   CreateFixedAssetDto,
   UpdateFixedAssetDto,
@@ -13,6 +14,7 @@ import type {
   UpdateFixedAssetCategoryDto,
   RunDepreciationDto,
   AssetDepreciationSchedule,
+  FixedAssetDepreciationRun,
   FixedAssetGlAccountOptions,
   AssetTransfer,
   RequestAssetTransferDto,
@@ -32,6 +34,8 @@ import type {
   FixedAssetCapitalizationReversal,
   RequestFixedAssetCapitalizationReversalDto,
   ReviewFixedAssetCapitalizationReversalDto,
+  SubmitFixedAssetCapitalizationDto,
+  FixedAssetApprovalActionDto,
   FixedAssetDepreciationReversal,
   RequestFixedAssetDepreciationReversalDto,
   ReviewFixedAssetDepreciationReversalDto,
@@ -80,6 +84,20 @@ class FixedAssetsDataService {
 
   async deleteAsset(id: string): Promise<void> {
     return apiService.delete(`/finance/fixed-assets/${id}`);
+  }
+
+  async submitCapitalizationForApproval(
+    id: string,
+    dto: SubmitFixedAssetCapitalizationDto
+  ): Promise<FixedAsset> {
+    return apiService.post<FixedAsset>(`/finance/fixed-assets/${id}/capitalization/submit`, dto);
+  }
+
+  async postApprovedCapitalization(
+    id: string,
+    dto: FixedAssetApprovalActionDto = {}
+  ): Promise<FixedAsset> {
+    return apiService.post<FixedAsset>(`/finance/fixed-assets/${id}/capitalize`, dto);
   }
 
   // ===== CAPITALIZATION CORRECTIONS =====
@@ -157,6 +175,21 @@ class FixedAssetsDataService {
 
   async getPeriodSchedule(fiscalPeriodId: string): Promise<AssetDepreciationSchedule[]> {
     return apiService.get<AssetDepreciationSchedule[]>(`/finance/fixed-assets/depreciation/period/${fiscalPeriodId}`);
+  }
+
+  async getLocationOptions(): Promise<FixedAssetLocationOption[]> {
+    return apiService.get<FixedAssetLocationOption[]>('/finance/fixed-assets/location-options');
+  }
+
+  async getDepreciationRuns(fiscalPeriodId?: string): Promise<FixedAssetDepreciationRun[]> {
+    const query = fiscalPeriodId ? `?fiscalPeriodId=${encodeURIComponent(fiscalPeriodId)}` : '';
+    return apiService.get<FixedAssetDepreciationRun[]>(`/finance/fixed-assets/depreciation/runs${query}`);
+  }
+
+  async postApprovedDepreciationRun(runId: string): Promise<AssetDepreciationSchedule[]> {
+    return apiService.post<AssetDepreciationSchedule[]>(
+      `/finance/fixed-assets/depreciation/runs/${runId}/post-approved`
+    );
   }
 
   // A posted depreciation correction is deliberately split into request, independent review,

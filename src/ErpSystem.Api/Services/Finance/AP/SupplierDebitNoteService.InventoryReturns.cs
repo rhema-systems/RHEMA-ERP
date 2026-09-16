@@ -4,8 +4,10 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.AP;
@@ -352,10 +354,10 @@ public sealed partial class SupplierDebitNoteService
             var postedEvent = await _db.Set<FinancePostingEvent>().AsNoTracking().AnyAsync(x => x.TenantId == TenantId &&
                 x.Id == existing.PostingEventId && !x.IsDeleted && x.PostingStatus == "Posted" && x.PostedAt.HasValue &&
                 x.JournalEntryId == existing.JournalEntryId && x.SourceDocumentId == source.Id &&
-                x.SourceDocumentType == "InventorySupplierReturnDispatch", cancellationToken);
+                x.SourceDocumentType == "SupplierReturnDispatch", cancellationToken);
             var postedJournal = await _db.JournalEntries.AsNoTracking().AnyAsync(x => x.TenantId == TenantId &&
                 x.Id == existing.JournalEntryId && !x.IsDeleted && !x.IsReversed && x.PostingStatus == "Posted" &&
-                x.SourceDocumentId == source.Id && x.SourceDocumentType == "InventorySupplierReturnDispatch", cancellationToken);
+                x.SourceDocumentId == source.Id && x.SourceDocumentType == "SupplierReturnDispatch", cancellationToken);
             if (!postedEvent || !postedJournal)
                 throw new InvalidOperationException("RTV_DISPATCH_POSTING_INVALID: the recorded Finance handoff is missing or reversed.");
             await ReadDispatchInventoryAccountsAsync(existing, cancellationToken);
@@ -379,15 +381,28 @@ public sealed partial class SupplierDebitNoteService
         }
         var currency = NormalizeCurrency(settings.BaseCurrency, "GHS");
         var postingLines = BuildReturnDispatchLines(source, clearing, inventoryByLine, carryingByLine, currency, postingDate);
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var producer = FinanceExternalProducerContractCatalog.GetRequired(
+            FinanceExternalProducerContractId.ProcurementSupplierReturnDispatch);
+        if (_sourceDimensions == null)
+            throw new InvalidOperationException("Finance source dimensions are not configured for supplier-return dispatch.");
+        var contexts = postingLines.Select(line => new FinanceSourceDocumentLineContext(
+            line.SourceDocumentLineId!.Value, line.AccountId)).ToArray();
+        await _sourceDimensions.SynchronizeDraftAsync(producer, source.Id, postingDate, contexts, null, false, null,
+            "Supplier-return dispatch Finance adapter capture", cancellationToken);
+        await _sourceDimensions.ValidateAndFreezeAsync(producer, source.Id, postingDate, contexts, false, cancellationToken);
+        foreach (var line in postingLines)
+            line.Dimensions = await _sourceDimensions.ResolvePostingDimensionsAsync(
+                producer, source.Id, line.SourceDocumentLineId!.Value, line.AccountId, postingDate, cancellationToken);
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
-            SourceModule = "Inventory", SourceDocumentType = "InventorySupplierReturnDispatch", SourceDocumentId = source.Id,
+            SourceModule = "Procurement", OriginModuleCode = FinanceModuleLockCatalog.Procurement,
+            SourceDocumentType = "SupplierReturnDispatch", SourceDocumentId = source.Id,
             SourceDocumentTenantId = TenantId, SourceDocumentReference = source.ReturnNumber,
-            PostingAction = "Dispatch", PostingDate = postingDate, JournalType = "Supplier Return Dispatch", BookClassification = "IFRS",
+            PostingAction = "Dispatch", PostingDate = postingDate, JournalType = "Supplier Return Dispatch", AccountingBookCode = "IFRS",
             Description = $"Dispatched supplier return {source.ReturnNumber}", FunctionalCurrencyCode = currency,
             IdempotencyKey = $"Inventory:SupplierReturn:{TenantId:N}:{source.Id:N}:Dispatch", ReturnExistingOnDuplicate = true,
             Lines = postingLines
-        }, cancellationToken);
+        }, producer, cancellationToken);
         var record = new InventorySupplierReturnPosting
         {
             Id = Guid.NewGuid(), TenantId = TenantId, InventoryPurchaseReturnId = source.Id, OriginalVendorInvoiceId = invoice.Id,
@@ -415,14 +430,19 @@ public sealed partial class SupplierDebitNoteService
             throw new InvalidOperationException("RTV_DISPATCH_VALUE_INVALID: total dispatched carrying value must be positive.");
         var lines = new List<FinancePostingLineDto>
         {
-            PostingLine(clearing, $"Supplier return clearing {source.ReturnNumber}", carrying, 0, carrying, currency, currency, 1, postingDate, source.ReturnNumber, 1, "RTV-Dispatch-Clearing")
+            PostingLine(clearing, $"Supplier return clearing {source.ReturnNumber}", carrying, 0, carrying, currency, currency, 1,
+                postingDate, source.ReturnNumber, 1, "RTV-Dispatch-Clearing",
+                FinanceExternalDimensionIdentity.SourceLine(FinanceExternalProducerContractId.ProcurementSupplierReturnDispatch,
+                    source.Id, "return-clearing"))
         };
         foreach (var group in source.Items.GroupBy(line => inventoryByLine[line.Id]).OrderBy(group => group.Key))
         {
             var amount = Round(group.Sum(line => carryingByLine[line.Id]));
             if (amount == 0m) continue;
             lines.Add(PostingLine(group.Key, $"Dispatched Inventory {source.ReturnNumber}", 0, amount, amount,
-                currency, currency, 1, postingDate, source.ReturnNumber, lines.Count + 1, "RTV-Dispatch-Inventory"));
+                currency, currency, 1, postingDate, source.ReturnNumber, lines.Count + 1, "RTV-Dispatch-Inventory",
+                FinanceExternalDimensionIdentity.SourceLine(FinanceExternalProducerContractId.ProcurementSupplierReturnDispatch,
+                    source.Id, $"inventory-control:{group.Key:N}")));
         }
         if (Round(lines.Sum(line => line.DebitAmount - line.CreditAmount)) != 0m)
             throw new InvalidOperationException("RTV_DISPATCH_UNBALANCED: mapped Inventory values do not balance.");
@@ -446,7 +466,7 @@ public sealed partial class SupplierDebitNoteService
             throw new InvalidOperationException("RTV_ACCOUNTS_MUST_DIFFER: cost variance must not use Inventory or clearing.");
     }
 
-    private async Task PrepareInventoryReturnPostingAsync(SupplierDebitNote note, FinancePostingRequestDto request, CancellationToken cancellationToken)
+    private async Task PrepareInventoryReturnPostingAsync(SupplierDebitNote note, FinancePostingRequestV2Dto request, CancellationToken cancellationToken)
     {
         var source = await RequireDispatchedReturnAsync(note.InventoryPurchaseReturnId!.Value, cancellationToken);
         var invoice = note.OriginalVendorInvoice ?? throw new InvalidOperationException("RTV_ORIGINAL_INVOICE_REQUIRED");

@@ -17,6 +17,10 @@ This is the reference for future adapters because it demonstrates the central ru
 | AR/Cash / `IPaymentService` | Immediate receipt, allocation, cash/bank destination and receipt posting | Disposal gain/loss policy |
 | Finance posting engine | Period/lock checks, balanced journals, idempotency, origin metadata and posting audit | Producer workflow approval |
 
+The Finance-owned dimension identities are `finance.fixed-assets.disposal-sales.ar-invoices` and
+`finance.fixed-assets.disposal-sales.ar-receipts` (contract 1.0). These typed contexts are established
+by the disposal orchestrator, never supplied by a browser, and do not certify the manual AR routes.
+
 ## Preconditions
 
 - The disposal is approved under maker-checker control and the asset/book is eligible for disposal.
@@ -48,6 +52,9 @@ Creating the invoice first is intentional. It gives taxable cash sales the same 
 ## Idempotency and failure behaviour
 
 - Disposal completion and each downstream posting use stable source identities and Finance idempotency protection.
+- The statutory invoice lines use deterministic disposal-derived IDs and inherit the frozen disposal
+  proceeds combination. Immediate receipt allocation evidence is derived from those exact invoice
+  lines; the cash/bank destination remains an independent source line subject to its own account rule.
 - Existing linked invoice/payment evidence is reused on a safe retry; a second economic sale must not be created.
 - The orchestration runs in the disposal completion transaction. A downstream exception leaves the disposal unsettled/failed and prevents a false completed outcome.
 - Changed approval-sensitive details invalidate stale approval before posting.

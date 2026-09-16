@@ -7,9 +7,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
+using ErpSystem.Core.Entities.Finance.FixedAssets;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.Fiscal;
 using ErpSystem.Shared;
 
 namespace ErpSystem.Api.Services.Finance.MultiCurrency
@@ -221,12 +224,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
             var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
             var rateType = ParseRateType(dto.RateType);
+            EnsureOperationalRateType(rateType);
             var quoteSide = ParseQuoteSide(dto.QuoteSide);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
                 ? requestedApprovalStatus
                 : RateApprovalStatus.Pending;
             ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
+            await ValidateClosingRateDateAsync(rateType, dto.EffectiveDate, cancellationToken);
 
             var baseCurrencyExists = await _unitOfWork.Repository<Currency>()
                 .GetQueryable(c => c.TenantId == TenantId && c.CurrencyCode == baseCurrencyCode)
@@ -242,13 +247,14 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (!targetCurrencyExists)
                 throw new ArgumentException($"Target currency '{targetCurrencyCode}' not found.");
 
-            await EnsureNoOverlappingRateAsync(
+            await EnsureSubmissionDoesNotConflictAsync(
                 baseCurrencyCode,
                 targetCurrencyCode,
                 rateType,
                 quoteSide,
                 dto.EffectiveDate.Date,
                 dto.ExpiryDate?.Date,
+                approvalStatus,
                 excludeId: null,
                 cancellationToken);
 
@@ -296,6 +302,12 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             if (rate == null)
                 throw new ArgumentException($"Exchange rate with ID '{id}' not found.");
 
+            if (rate.ApprovalStatus is RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved)
+            {
+                throw new InvalidOperationException(
+                    "Approved exchange rates are immutable. Submit a new rate to change the approved schedule.");
+            }
+
             if (await IsRateUsedAsync(rate, cancellationToken))
             {
                 await RecordExchangeRateAuditAsync(
@@ -308,19 +320,23 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             }
 
             var rateType = ParseRateType(dto.RateType);
+            if (rateType != rate.RateType)
+                EnsureOperationalRateType(rateType);
             var quoteSide = ParseQuoteSide(dto.QuoteSide);
             var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
             var approvalStatus = _workflowService == null
                 ? requestedApprovalStatus
                 : RateApprovalStatus.Pending;
             ValidateRateWindow(dto.Rate, rate.EffectiveDate, dto.ExpiryDate);
-            await EnsureNoOverlappingRateAsync(
+            await ValidateClosingRateDateAsync(rateType, rate.EffectiveDate, cancellationToken);
+            await EnsureSubmissionDoesNotConflictAsync(
                 rate.BaseCurrencyCode,
                 rate.TargetCurrencyCode,
                 rateType,
                 quoteSide,
                 rate.EffectiveDate.Date,
                 dto.ExpiryDate?.Date,
+                approvalStatus,
                 excludeId: rate.Id,
                 cancellationToken);
 
@@ -395,19 +411,22 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     var baseCurrencyCode = NormalizeCurrency(dto.BaseCurrencyCode, "Base currency");
                     var targetCurrencyCode = NormalizeCurrency(dto.TargetCurrencyCode, "Target currency");
                     var rateType = ParseRateType(dto.RateType);
+                    EnsureOperationalRateType(rateType);
                     var quoteSide = ParseQuoteSide(dto.QuoteSide);
                     var requestedApprovalStatus = ParseApprovalStatus(dto.ApprovalStatus);
                     var approvalStatus = _workflowService == null
                         ? requestedApprovalStatus
                         : RateApprovalStatus.Pending;
                     ValidateRateWindow(dto.Rate, dto.EffectiveDate, dto.ExpiryDate);
-                    await EnsureNoOverlappingRateAsync(
+                    await ValidateClosingRateDateAsync(rateType, dto.EffectiveDate, cancellationToken);
+                    await EnsureSubmissionDoesNotConflictAsync(
                         baseCurrencyCode,
                         targetCurrencyCode,
                         rateType,
                         quoteSide,
                         dto.EffectiveDate.Date,
                         dto.ExpiryDate?.Date,
+                        approvalStatus,
                         excludeId: null,
                         cancellationToken);
 
@@ -559,23 +578,38 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                 return true;
             }
 
-            return await _unitOfWork.Repository<AccountTransaction>()
+            if (await _unitOfWork.Repository<AccountTransaction>()
                 .GetQueryable(t => t.TenantId == rate.TenantId && t.ExchangeRateId == rate.Id && !t.IsDeleted)
+                .AnyAsync(cancellationToken))
+            {
+                return true;
+            }
+
+            return await _unitOfWork.Repository<FixedAsset>()
+                .GetQueryable(asset =>
+                    asset.TenantId == rate.TenantId &&
+                    asset.CapitalizationApprovalExchangeRateId == rate.Id &&
+                    asset.CapitalizationApprovalInvalidatedAt == null &&
+                    (asset.Status == FixedAssetStatus.PendingApproval ||
+                     asset.Status == FixedAssetStatus.Acquired) &&
+                    !asset.IsDeleted)
                 .AnyAsync(cancellationToken);
         }
 
-        private async Task EnsureNoOverlappingRateAsync(
+        private async Task EnsureSubmissionDoesNotConflictAsync(
             string baseCurrencyCode,
             string targetCurrencyCode,
             ExchangeRateType rateType,
             ExchangeRateQuoteSide quoteSide,
             DateTime effectiveDate,
             DateTime? expiryDate,
+            RateApprovalStatus approvalStatus,
             Guid? excludeId,
             CancellationToken cancellationToken)
         {
             var start = effectiveDate.Date;
             var end = expiryDate?.Date ?? DateTime.MaxValue.Date;
+            var submittedForWorkflow = approvalStatus == RateApprovalStatus.Pending;
             var overlapExists = await _unitOfWork.Repository<ExchangeRate>()
                 .GetQueryable(r => r.TenantId == TenantId
                     && !r.IsDeleted
@@ -584,14 +618,22 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
                     && r.TargetCurrencyCode == targetCurrencyCode
                     && r.RateType == rateType
                     && r.QuoteSide == quoteSide
-                    && r.EffectiveDate.Date <= end
-                    && (r.EndDate == null || r.EndDate.Value.Date >= start))
+                    && (submittedForWorkflow
+                        ? r.ApprovalStatus == RateApprovalStatus.Pending
+                            && r.EffectiveDate.Date == start
+                        : (r.ApprovalStatus == RateApprovalStatus.Approved
+                                || r.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                            && r.EffectiveDate.Date <= end
+                            && (r.EndDate == null || r.EndDate.Value.Date >= start)))
                 .AnyAsync(cancellationToken);
 
             if (overlapExists)
             {
+                var conflict = submittedForWorkflow
+                    ? "A pending exchange-rate submission already has the same effective date"
+                    : "Exchange rate range overlaps an existing approved rate";
                 throw new InvalidOperationException(
-                    $"Exchange rate range overlaps an existing {baseCurrencyCode}/{targetCurrencyCode} {rateType}/{quoteSide} rate for this tenant.");
+                    $"{conflict} for {baseCurrencyCode}/{targetCurrencyCode} {rateType}/{quoteSide} in this tenant.");
             }
         }
 
@@ -638,6 +680,78 @@ namespace ErpSystem.Api.Services.Finance.MultiCurrency
             }
 
             return rateType;
+        }
+
+        private static void EnsureOperationalRateType(ExchangeRateType rateType)
+        {
+            if (rateType is ExchangeRateType.Budget or ExchangeRateType.Spot)
+            {
+                throw new InvalidOperationException(
+                    $"{rateType} exchange rates are reserved for future governed workflows and cannot be created yet.");
+            }
+        }
+
+        private async Task ValidateClosingRateDateAsync(
+            ExchangeRateType rateType,
+            DateTime effectiveDate,
+            CancellationToken cancellationToken)
+        {
+            var date = effectiveDate.Date;
+            if (rateType == ExchangeRateType.MonthEnd)
+            {
+                var calendarMonthEnd = new DateTime(date.Year, date.Month, 1).AddMonths(1).AddDays(-1);
+                if (date != calendarMonthEnd)
+                {
+                    throw new InvalidOperationException(
+                        $"MonthEnd exchange rates must be dated on the actual calendar month-end ({calendarMonthEnd:yyyy-MM-dd}).");
+                }
+
+                return;
+            }
+
+            if (rateType == ExchangeRateType.QuarterEnd)
+            {
+                var matchingPeriods = await _unitOfWork.Repository<FiscalPeriod>()
+                    .GetQueryable(period => period.TenantId == TenantId
+                        && !period.IsDeleted
+                        && period.EndDate.Date == date)
+                    .Select(period => new { period.FiscalYearId, period.PeriodType, period.PeriodNumber })
+                    .ToListAsync(cancellationToken);
+
+                var fiscalYearIds = matchingPeriods.Select(period => period.FiscalYearId).Distinct().ToList();
+                var fiscalYearPeriodCounts = fiscalYearIds.Count == 0
+                    ? new Dictionary<Guid, int>()
+                    : await _unitOfWork.Repository<FiscalYear>()
+                        .GetQueryable(year => year.TenantId == TenantId
+                            && !year.IsDeleted
+                            && fiscalYearIds.Contains(year.Id))
+                        .ToDictionaryAsync(year => year.Id, year => year.NumberOfPeriods, cancellationToken);
+
+                var isFiscalQuarterEnd = matchingPeriods.Any(period =>
+                    fiscalYearPeriodCounts.TryGetValue(period.FiscalYearId, out var periodCount)
+                    && FiscalCalendarBoundaryPolicy.IsQuarterEnd(period.PeriodType, period.PeriodNumber, periodCount));
+                if (!isFiscalQuarterEnd)
+                {
+                    throw new InvalidOperationException(
+                        $"QuarterEnd exchange rates must be dated on a configured fiscal quarter-end; {date:yyyy-MM-dd} is not one.");
+                }
+
+                return;
+            }
+
+            if (rateType == ExchangeRateType.YearEnd)
+            {
+                var isFiscalYearEnd = await _unitOfWork.Repository<FiscalYear>()
+                    .GetQueryable(year => year.TenantId == TenantId
+                        && !year.IsDeleted
+                        && year.EndDate.Date == date)
+                    .AnyAsync(cancellationToken);
+                if (!isFiscalYearEnd)
+                {
+                    throw new InvalidOperationException(
+                        $"YearEnd exchange rates must be dated on a configured fiscal year-end; {date:yyyy-MM-dd} is not one.");
+                }
+            }
         }
 
         private static RateApprovalStatus ParseApprovalStatus(string? value)

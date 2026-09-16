@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -33,7 +34,7 @@ namespace ErpSystem.Api.Controllers.Finance
     ///
     /// **Authorization:** Requires authenticated user with Finance module access
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     [ApiController]
     [Route("api/finance/accounts")]
     public class AccountController : ControllerBase
@@ -41,15 +42,32 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IAccountService _accountService;
         private readonly IGeneralLedgerService _glService;
         private readonly IAccountCombinationService _combinationService;
+        private readonly IAccountSegmentIdentityService _segmentIdentityService;
+        private readonly ICurrentUserService _currentUserService;
 
         public AccountController(
             IAccountService accountService,
             IGeneralLedgerService glService,
-            IAccountCombinationService combinationService)
+            IAccountCombinationService combinationService,
+            IAccountSegmentIdentityService segmentIdentityService,
+            ICurrentUserService currentUserService)
         {
             _accountService = accountService;
             _glService = glService;
             _combinationService = combinationService;
+            _segmentIdentityService = segmentIdentityService;
+            _currentUserService = currentUserService;
+        }
+
+        [HttpGet("{id:guid}/segment-readiness")]
+        public async Task<ActionResult<AccountSegmentReadinessDto>> GetSegmentReadiness(Guid id, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Ok(await _segmentIdentityService.GetReadinessAsync(
+                    _currentUserService.GetRequiredFinanceTenantId(), id, cancellationToken));
+            }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         }
 
         /// <summary>
@@ -343,6 +361,41 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             var balance = await _glService.GetAccountBalanceAsync(id, currencyCode);
             return Ok(balance);
+        }
+
+        /// <summary>
+        /// Returns a stable, tenant- and accounting-book-scoped page of posted GL lines for an account.
+        /// </summary>
+        [HttpGet("{accountId:guid}/transactions")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<AccountTransactionInquiryPageDto>> GetAccountTransactions(
+            Guid accountId,
+            [FromQuery] string accountingBookCode,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10,
+            CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                return Ok(await _accountService.GetTransactionsAsync(
+                    accountId,
+                    accountingBookCode,
+                    page,
+                    pageSize,
+                    cancellationToken));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message, parameter = ex.ParamName });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
         }
 
         #region Account Combination Generator

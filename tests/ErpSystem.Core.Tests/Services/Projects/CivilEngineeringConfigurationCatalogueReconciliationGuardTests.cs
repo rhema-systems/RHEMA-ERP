@@ -9,7 +9,7 @@ public sealed class CivilEngineeringConfigurationCatalogueReconciliationGuardTes
     public void Forward_repair_is_draft_only_audited_and_registered_for_deployment()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue.cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260822003600_ReconcileCivilEngineeringConfigurationDecisionCatalogue.cs"));
         var seeder = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Seeders", "CivilEngineeringConfigurationProfileSeeder.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 

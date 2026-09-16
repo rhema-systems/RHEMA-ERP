@@ -152,6 +152,27 @@ Accountant approval:
 
 The default charge treatment and clearing-period days are tenant settings.
 
+## Finance coding dimensions
+
+Bank deposits and returned cheques use the generic Finance source-assignment and settlement-evidence
+stores; no route-specific dimension columns are added. Both routes deploy as `CaptureOptional`.
+Supplied, Fixed and Prohibited values are always validated, and missing account-required coding fails
+before workflow approval or posting.
+
+For a deposit, the batch ID is the stable destination-bank line and each persisted allocation ID is
+its stable settlement line. Draft allocation edits update retained rows in place, so reopening a draft
+hydrates the same assignments. Each allocation stores its canonical set, frozen snapshot, exact amount
+and available source exchange-rate comparison evidence.
+
+For a returned cheque, stable bank, customer-balance and expense identities are deterministic from the
+case ID. Principal and discount components copy the original receipt's exact frozen allocation evidence.
+Derived reversals remain split by combination; proportional rounding assigns the final residual to the
+last deterministic evidence line so the journal reconciles exactly. A future `Enforced` route rejects a
+case whose originating receipt evidence is unavailable.
+
+Internal deposit detail and returned-cheque inquiry screens expose the source and settlement evidence.
+Supplier/customer-facing documents are unchanged.
+
 ## Reconciliation
 
 Statement import remains in `/finance/cash/reconciliation`. Download the statement

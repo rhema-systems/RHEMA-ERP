@@ -14,6 +14,13 @@ public sealed class ArCollectionWorkItemDto
     public string CustomerName { get; set; } = string.Empty;
     public string? CustomerEmail { get; set; }
     public string? CustomerPhone { get; set; }
+    public string? CustomerAddress { get; set; }
+    public string? CustomerCity { get; set; }
+    public string? CustomerState { get; set; }
+    public string? CustomerCountry { get; set; }
+    public string? CustomerPostalCode { get; set; }
+    public bool IsPartnerResolved { get; set; }
+    public string? PartnerResolutionMessage { get; set; }
     public Guid InvoiceId { get; set; }
     public string InvoiceNumber { get; set; } = string.Empty;
     public DateTime TransactionDate { get; set; }
@@ -58,8 +65,21 @@ public sealed class ArCollectionSummaryDto
     public int OverdueFollowUpCount { get; set; }
     public int PromiseToPayCount { get; set; }
     public int BreachedPromiseCount { get; set; }
-    public decimal TotalOutstanding { get; set; }
-    public decimal TotalPromised { get; set; }
+    public IReadOnlyList<ArCollectionCurrencyTotalDto> NativeCurrencyTotals { get; set; } =
+        Array.Empty<ArCollectionCurrencyTotalDto>();
+    public string? FunctionalCurrencyCode { get; set; }
+    public decimal? FunctionalOutstandingTotal { get; set; }
+    public decimal? FunctionalPromisedTotal { get; set; }
+    public string FunctionalTotalBasis { get; set; } =
+        "Historical posting and settlement carrying basis";
+    public string? FunctionalTotalUnavailableReason { get; set; }
+}
+
+public sealed class ArCollectionCurrencyTotalDto
+{
+    public string CurrencyCode { get; set; } = string.Empty;
+    public decimal OutstandingAmount { get; set; }
+    public decimal PromisedAmount { get; set; }
 }
 
 public sealed class ArCollectionAssigneeDto
@@ -92,6 +112,7 @@ public sealed class GenerateArCollectionTasksResultDto
     public int RefreshedCount { get; set; }
     public int AutoResolvedCount { get; set; }
     public int ReactivatedCount { get; set; }
+    public int SkippedUnresolvedPartnerCount { get; set; }
 }
 
 public sealed class CreateArCollectionTaskDto

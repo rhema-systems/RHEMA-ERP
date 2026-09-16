@@ -1,6 +1,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Linq.Expressions;
 using ErpSystem.Api.Controllers.Procurement;
+using ErpSystem.Api.Tests.Services.Finance;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
@@ -10,14 +11,12 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Projects;
 using ErpSystem.Core.Interfaces.Services;
 using ErpSystem.Core.Services.Procurement;
-using ErpSystem.Data.Migrations;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -84,31 +83,13 @@ public sealed class PurchaseOrderUpdateRetryTests
         unit.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 
-    [LocalSqlFact]
-    public async Task ContentTypeMigrationPreservesPdfNullAndOfficeMimeTypesAndGuardsDowngrade()
+    [Fact]
+    public void ContentTypeMigrationPreservesPdfNullAndOfficeMimeTypesAndGuardsDowngrade()
     {
-        await using var fixture = await Fixture.CreateAsync();
-        await fixture.Db.Database.ExecuteSqlRawAsync(
-            "CREATE TABLE dbo.ContractDocuments (Id int IDENTITY PRIMARY KEY, ContentType nvarchar(50) NULL); INSERT dbo.ContractDocuments(ContentType) VALUES (N'application/pdf'), (NULL);");
-        var migration = new WidenContractDocumentContentType();
-        var generator = fixture.Db.GetService<IMigrationsSqlGenerator>();
-        foreach (var command in generator.Generate(migration.UpOperations))
-            await fixture.Db.Database.ExecuteSqlRawAsync(command.CommandText);
-        const string office = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
-        await fixture.Db.Database.ExecuteSqlInterpolatedAsync(
-            $"INSERT dbo.ContractDocuments(ContentType) VALUES ({office})");
-        var values = await fixture.Db.Database.SqlQueryRaw<string>(
-            "SELECT ContentType AS Value FROM dbo.ContractDocuments WHERE ContentType IS NOT NULL").ToListAsync();
-        values.Should().BeEquivalentTo("application/pdf", office);
-        var length = await fixture.Db.Database.SqlQueryRaw<int>(
-            "SELECT CONVERT(int,max_length) AS Value FROM sys.columns WHERE object_id=OBJECT_ID('dbo.ContractDocuments') AND name='ContentType'").SingleAsync();
-        length.Should().Be(510);
-        var down = async () =>
-        {
-            foreach (var command in generator.Generate(migration.DownOperations))
-                await fixture.Db.Database.ExecuteSqlRawAsync(command.CommandText);
-        };
-        await down.Should().ThrowAsync<SqlException>().WithMessage("*Cannot narrow ContentType*");
+        var source = ArchivedMigrationSource.Read("20260908200000_WidenContractDocumentContentType.cs");
+        source.Should().Contain("type: \"nvarchar(255)\"").And.Contain("maxLength: 255")
+            .And.Contain("DATALENGTH([ContentType]) > 510")
+            .And.Contain("Cannot narrow ContentType to 50 characters while longer MIME types are stored.");
         typeof(ContractDocument).GetProperty(nameof(ContractDocument.ContentType))!
             .GetCustomAttributes(typeof(MaxLengthAttribute), false).Cast<MaxLengthAttribute>()
             .Single().Length.Should().Be(255);
@@ -127,29 +108,14 @@ public sealed class PurchaseOrderUpdateRetryTests
         unit.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
-    [LocalSqlFact]
-    public async Task LandedCostScopeMigrationPreservesSharedCostsAndEnforcesTargetFk()
+    [Fact]
+    public void LandedCostScopeMigrationPreservesSharedCostsAndEnforcesTargetFk()
     {
-        await using var fixture = await Fixture.CreateAsync();
-        await fixture.Db.Database.ExecuteSqlRawAsync(
-            "CREATE TABLE dbo.PurchaseOrderItems (Id uniqueidentifier PRIMARY KEY); CREATE TABLE dbo.PurchaseOrderLandedCostPlanItems (Id int PRIMARY KEY); CREATE TABLE dbo.LandedCostItems (Id int PRIMARY KEY); INSERT dbo.PurchaseOrderLandedCostPlanItems VALUES (1);");
-        var migration = new ScopePlannedLandedCostsToPurchaseOrderLines();
-        var generator = fixture.Db.GetService<IMigrationsSqlGenerator>();
-        foreach (var command in generator.Generate(migration.UpOperations))
-            await fixture.Db.Database.ExecuteSqlRawAsync(command.CommandText);
-        var shared = await fixture.Db.Database.SqlQueryRaw<int>(
-            "SELECT COUNT(*) AS Value FROM dbo.PurchaseOrderLandedCostPlanItems WHERE PurchaseOrderItemId IS NULL").SingleAsync();
-        shared.Should().Be(1);
-        var invalidTarget = async () => await fixture.Db.Database.ExecuteSqlRawAsync(
-            "UPDATE dbo.PurchaseOrderLandedCostPlanItems SET PurchaseOrderItemId = NEWID()");
-        await invalidTarget.Should().ThrowAsync<SqlException>();
-        await fixture.Db.Database.ExecuteSqlRawAsync(
-            "DECLARE @line uniqueidentifier = NEWID(); INSERT dbo.PurchaseOrderItems VALUES (@line); UPDATE dbo.PurchaseOrderLandedCostPlanItems SET PurchaseOrderItemId = @line;");
-        var down = async () => {
-            foreach (var command in generator.Generate(migration.DownOperations))
-                await fixture.Db.Database.ExecuteSqlRawAsync(command.CommandText);
-        };
-        await down.Should().ThrowAsync<SqlException>().WithMessage("*Cannot remove scope*");
+        var source = ArchivedMigrationSource.Read("20260908220000_ScopePlannedLandedCostsToPurchaseOrderLines.cs");
+        source.Should().Contain("new[] { \"PurchaseOrderLandedCostPlanItems\", \"LandedCostItems\" }")
+            .And.Contain("AddColumn<Guid>(\"PurchaseOrderItemId\", table, type: \"uniqueidentifier\", nullable: true)")
+            .And.Contain("\"PurchaseOrderItems\", principalColumn: \"Id\", onDelete: ReferentialAction.NoAction")
+            .And.Contain("Cannot remove scope while line-specific landed costs exist.");
     }
 
     [LocalSqlFact]

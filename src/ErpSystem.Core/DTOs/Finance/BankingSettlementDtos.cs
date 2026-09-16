@@ -123,6 +123,7 @@ public class CreateBankDepositDto
     public string DepositReference { get; set; } = string.Empty;
     public string? Notes { get; set; }
     public List<BankDepositAllocationRequestDto> Allocations { get; set; } = new();
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class UpdateBankDepositDto : CreateBankDepositDto
@@ -153,6 +154,7 @@ public class BankDepositAllocationDto
     public string EntryNumber { get; set; } = string.Empty;
     public DateTime EntryDate { get; set; }
     public string LiquidityAccountName { get; set; } = string.Empty;
+    public Guid GLAccountId { get; set; }
     public LiquidityEntryType EntryType { get; set; }
     public BankDepositAllocationType AllocationType { get; set; }
     public decimal Amount { get; set; }
@@ -189,6 +191,7 @@ public class BankDepositDto
     public string DepositNumber { get; set; } = string.Empty;
     public Guid BankAccountId { get; set; }
     public string BankAccountName { get; set; } = string.Empty;
+    public Guid? BankGLAccountId { get; set; }
     public DateTime DepositDate { get; set; }
     public string DepositReference { get; set; } = string.Empty;
     public string Currency { get; set; } = "GHS";
@@ -226,6 +229,9 @@ public class BankDepositDto
     public string? CancellationReason { get; set; }
     public IReadOnlyList<BankDepositAllocationDto> Allocations { get; set; } = Array.Empty<BankDepositAllocationDto>();
     public IReadOnlyList<BankingAttachmentDto> Attachments { get; set; } = Array.Empty<BankingAttachmentDto>();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
+    public IReadOnlyList<FinanceSettlementDimensionComponentDto> SettlementDimensionEvidence { get; set; } =
+        Array.Empty<FinanceSettlementDimensionComponentDto>();
     public string RowVersion { get; set; } = string.Empty;
 }
 
@@ -277,6 +283,7 @@ public class CreateReturnedChequeCaseDto
     public decimal? ExpenseChargeAmount { get; set; }
     public string? DrawerBank { get; set; }
     public string? Notes { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class ReturnedChequeCaseDto
@@ -312,5 +319,8 @@ public class ReturnedChequeCaseDto
     public string? Notes { get; set; }
     public string? RejectionReason { get; set; }
     public IReadOnlyList<BankingAttachmentDto> Attachments { get; set; } = Array.Empty<BankingAttachmentDto>();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
+    public IReadOnlyList<FinanceSettlementDimensionComponentDto> SettlementDimensionEvidence { get; set; } =
+        Array.Empty<FinanceSettlementDimensionComponentDto>();
     public string RowVersion { get; set; } = string.Empty;
 }

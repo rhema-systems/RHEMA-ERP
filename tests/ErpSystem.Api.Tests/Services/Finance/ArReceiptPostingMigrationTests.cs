@@ -9,6 +9,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -94,6 +95,7 @@ public sealed class ArReceiptPostingMigrationTests
             e.SourceDocumentId == fixture.Payment.Id &&
             e.PostingAction == "Post");
         postingEvent.JournalEntryId.Should().Be(result.JournalEntryId);
+        postingEvent.OriginModuleCode.Should().Be(FinanceModuleLockCatalog.Finance);
 
         var journal = await db.JournalEntries
             .Include(j => j.Transactions)
@@ -1201,6 +1203,7 @@ public sealed class ArReceiptPostingMigrationTests
         Guid invoiceId,
         decimal amount)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var creditNote = new CreditNote
         {
             Id = Guid.NewGuid(),
@@ -1231,6 +1234,7 @@ public sealed class ArReceiptPostingMigrationTests
             SourceDocumentReference = creditNote.DocumentNumber,
             IdempotencyKey = $"AR:SalesCreditNote:{tenantId:N}:{creditNote.Id:N}:Post",
             JournalEntryId = creditNote.JournalEntryId,
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             PostingDate = creditNote.DocumentDate,
             RequestedAt = DateTime.UtcNow,
@@ -1253,6 +1257,13 @@ public sealed class ArReceiptPostingMigrationTests
             Code = code,
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
+        });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
         });
     }
 
@@ -1281,6 +1292,7 @@ public sealed class ArReceiptPostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -1308,6 +1320,8 @@ public sealed class ArReceiptPostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 
@@ -1415,6 +1429,7 @@ public sealed class ArReceiptPostingMigrationTests
         Guid? fiscalPeriodId = null,
         bool seedPostingEvent = true)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var invoice = new Invoice
         {
             Id = Guid.NewGuid(),
@@ -1450,6 +1465,7 @@ public sealed class ArReceiptPostingMigrationTests
             TotalCreditAmount = amount,
             IsBalanced = true,
             FiscalPeriodId = fiscalPeriodId ?? Guid.NewGuid(),
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = invoiceDate,
@@ -1475,6 +1491,7 @@ public sealed class ArReceiptPostingMigrationTests
                 SourceDocumentReference = invoice.InvoiceNumber,
                 IdempotencyKey = $"AR:CustomerInvoice:{tenantId:N}:{invoice.Id:N}:Post",
                 JournalEntryId = invoiceJournal.Id,
+                AccountingBookId = book.Id,
                 PostingStatus = "Posted",
                 PostingDate = invoiceDate,
                 RequestedAt = DateTime.UtcNow,

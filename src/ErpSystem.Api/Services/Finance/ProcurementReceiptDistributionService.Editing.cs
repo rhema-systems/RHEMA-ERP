@@ -152,7 +152,7 @@ public sealed partial class ProcurementReceiptDistributionService
         }
         catch (JsonException) { throw Invalid("The saved distribution could not be read. Reset and save it again before posting."); }
         var result = new ReceiptPostingDistribution(defaults.Currency,
-            defaults.Basis + " Saved account splits scale to final accepted values. Overrides apply to this receipt only; later stock movements use item defaults.");
+            defaults.Basis + " Saved account splits scale to final accepted values. Overrides apply to this receipt only; later stock movements use item defaults.", defaults.PostingDate);
         var groups = draft.Lines.GroupBy(value => (value.InventoryItemId, value.Purpose)).ToDictionary(value => value.Key, value => value.ToList());
         foreach (var source in defaults.Lines)
         {

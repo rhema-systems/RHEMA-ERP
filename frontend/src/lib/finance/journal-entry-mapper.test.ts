@@ -28,6 +28,7 @@ describe('journal entry mapper currency contract', () => {
           accountId: 'expense',
           description: 'USD expense',
           currencyCode: 'usd',
+          exchangeRateId: 'rate-1',
           exchangeRate: 12.5,
           debit: 1250,
           credit: 0,
@@ -51,6 +52,7 @@ describe('journal entry mapper currency contract', () => {
       expect.objectContaining({
         accountId: 'expense',
         currencyCode: 'USD',
+        exchangeRateId: 'rate-1',
         exchangeRate: 12.5,
         foreignAmount: 100,
         amount: 1250,
@@ -75,6 +77,7 @@ describe('journal entry mapper currency contract', () => {
             accountId: 'expense',
             description: 'USD expense',
             currencyCode: 'USD',
+            exchangeRateId: 'rate-1',
             exchangeRate: 12.5,
             debit: 1250,
             credit: 0,
@@ -84,6 +87,21 @@ describe('journal entry mapper currency contract', () => {
         'GHS'
       )
     ).toThrow('The original USD debit amount is required.');
+  });
+
+  it('fails closed when the approved foreign-rate record is missing', () => {
+    expect(() =>
+      mapJournalEntryFormToCreateDto(
+        header,
+        [{
+          id: '1', accountId: 'expense', description: 'USD expense',
+          currencyCode: 'USD', exchangeRate: 12.5, debit: 1250, credit: 0,
+          foreignDebit: 100,
+        }],
+        undefined,
+        'GHS'
+      )
+    ).toThrow('The approved USD exchange-rate record is required.');
   });
 
   it('maps line coding dimensions as structured Finance values', () => {

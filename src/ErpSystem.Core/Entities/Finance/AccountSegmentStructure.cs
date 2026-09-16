@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Finance
 {
@@ -63,13 +64,6 @@ namespace ErpSystem.Core.Entities.Finance
         public bool LookupTableRequired { get; set; } = false;
 
         /// <summary>
-        /// Determines if this segment must have a value for all accounts
-        /// True = Required, False = Optional
-        /// </summary>
-        [Required]
-        public bool IsMandatory { get; set; } = true;
-
-        /// <summary>
         /// NEW FEATURE: Controls if segment appears in reports and BI tools
         /// True = Available in report filters and pivot tables
         /// False = Hidden from reporting UI (but still stored)
@@ -90,6 +84,23 @@ namespace ErpSystem.Core.Entities.Finance
         /// Active status - allows deactivation without deletion
         /// </summary>
         public bool IsActive { get; set; } = true;
+
+        /// <summary>
+        /// Authoritative structure lifecycle. Active and Frozen segments are always required.
+        /// IsActive remains a read/query compatibility projection and is maintained from this state.
+        /// </summary>
+        public AccountSegmentLifecycleStatus LifecycleStatus { get; set; } = AccountSegmentLifecycleStatus.Draft;
+
+        public bool IsSystemDefined { get; set; }
+
+        [Timestamp]
+        public byte[] RowVersion { get; set; } = Array.Empty<byte>();
+
+        public Guid? FrozenByUserId { get; set; }
+        public DateTime? FrozenAtUtc { get; set; }
+
+        [MaxLength(500)]
+        public string? RetirementReason { get; set; }
 
         /// <summary>
         /// Optional description providing additional details about this segment

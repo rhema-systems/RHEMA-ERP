@@ -26,7 +26,7 @@ export default function SupplierDetailedLedgerPage() {
     refetch: refetchSuppliers,
   } = useQuery({
     queryKey: apSupplierDetailedLedgerQueryKey(currentTenantCode),
-    queryFn: () => accountsPayableService.getInvoiceSuppliers(),
+    queryFn: () => accountsPayableService.getInvoiceSupplierEntryOptions(),
     enabled: !isLoadingTenants && Boolean(currentTenantCode),
   });
   const partners = useMemo(

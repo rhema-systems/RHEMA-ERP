@@ -233,8 +233,8 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual Account? MigrationClearingAccount { get; set; }
 
         /// <summary>
-        /// When enabled, opening balance postings auto-route balancing/offset lines
-        /// to the Migration Clearing Account.
+        /// Retained for settings compatibility. The legacy opening-balance journal route remains
+        /// retired; governed opening balances use their dedicated Finance workflow.
         /// </summary>
         public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
 

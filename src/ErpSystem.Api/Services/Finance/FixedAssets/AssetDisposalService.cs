@@ -5,6 +5,8 @@ using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -18,8 +20,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
 public class AssetDisposalService : IAssetDisposalService
 {
-    private const string SourceModule = "FixedAssets";
-    private const string SourceDocumentType = "FixedAssetDisposal";
+    private const string SourceModule = "FA";
     private const string PostingAction = "Disposal";
 
     private readonly ApplicationDbContext _context;
@@ -30,6 +31,14 @@ public class AssetDisposalService : IAssetDisposalService
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IInvoiceService? _invoiceService;
     private readonly IPaymentService? _paymentService;
+    private readonly IFixedAssetDimensionService? _fixedAssetDimensions;
+
+    private static readonly FinancePostingProducerContext DisposalProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetDisposal);
+    private static readonly FinancePostingProducerContext DisposalSaleInvoiceProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleInvoice);
+    private static readonly FinancePostingProducerContext DisposalSaleReceiptProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetDisposalSaleReceipt);
 
     public AssetDisposalService(
         ApplicationDbContext context,
@@ -39,7 +48,8 @@ public class AssetDisposalService : IAssetDisposalService
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IInvoiceService? invoiceService = null,
-        IPaymentService? paymentService = null)
+        IPaymentService? paymentService = null,
+        IFixedAssetDimensionService? fixedAssetDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -49,6 +59,7 @@ public class AssetDisposalService : IAssetDisposalService
         _financeAuditService = financeAuditService;
         _invoiceService = invoiceService;
         _paymentService = paymentService;
+        _fixedAssetDimensions = fixedAssetDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -92,7 +103,7 @@ public class AssetDisposalService : IAssetDisposalService
 
         await ValidateDisposalRequestAsync(asset, dto);
         var bookValue = ResolveDefaultBookValue(asset);
-        var fiscalPeriod = await ResolveFiscalPeriodAsync(dto.DisposalDate)
+        FiscalPeriod fiscalPeriod = await ResolveFiscalPeriodAsync(dto.DisposalDate)
             ?? throw new InvalidOperationException("No fiscal period covers the disposal accounting date.");
         FinalDepreciationPreparation finalDepreciation;
         try
@@ -181,6 +192,8 @@ public class AssetDisposalService : IAssetDisposalService
             FinalDepreciationEligibleDays = finalDepreciation.EligibleDays,
             FinalDepreciationProrationBasis = finalDepreciation.ProrationBasis,
             FinalDepreciationMethodSnapshot = bookValue.DepreciationMethod,
+            FinalDepreciationConventionSnapshot = finalDepreciation.Calculation.Convention,
+            FinalDepreciationConventionFactor = finalDepreciation.Calculation.ConventionFactor,
             FinalDepreciationScheduleId = finalDepreciation.Amount > 0m ? Guid.NewGuid() : null,
             FinalDepreciationProductionUnits = finalDepreciation.Calculation.PeriodProductionUnits,
             FinalDepreciationDiminishingRatePercent = finalDepreciation.Calculation.EffectiveDiminishingBalanceRatePercent,
@@ -235,6 +248,33 @@ public class AssetDisposalService : IAssetDisposalService
 
         _context.AssetDisposals.Add(disposal);
         await _context.SaveChangesAsync();
+
+        if (_fixedAssetDimensions is not null)
+        {
+            var dimensionRequest = await BuildDisposalPostingRequestAsync(
+                disposal,
+                asset,
+                fiscalPeriod!,
+                await GetFunctionalCurrencyAsync(),
+                snapshot);
+            var inheritedByLine = asset.JournalEntryId.HasValue
+                ? dimensionRequest.Lines.Where(line => line.SourceDocumentLineId.HasValue)
+                    .ToDictionary(line => line.SourceDocumentLineId!.Value, _ => asset.JournalEntryId.Value)
+                : new Dictionary<Guid, Guid>();
+            await _fixedAssetDimensions.SynchronizeAsync(
+                DisposalProducer,
+                disposal.Id,
+                disposal.AccountingDate ?? disposal.DisposalDate,
+                dimensionRequest.Lines.ToList(),
+                dto.FinanceDimensions,
+                inheritedByLine,
+                "Fixed asset disposal components prepared for approval.");
+            await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                DisposalProducer,
+                disposal.Id,
+                disposal.AccountingDate ?? disposal.DisposalDate,
+                dimensionRequest.Lines.ToList());
+        }
 
         await RecordDisposalAuditAsync(
             FinanceAuditEvents.FixedAssetDisposalRequested,
@@ -425,6 +465,31 @@ public class AssetDisposalService : IAssetDisposalService
             ValidateApprovedAllocationSnapshot(disposal, snapshot);
             ApplySnapshot(disposal, snapshot);
             var postingRequest = await BuildDisposalPostingRequestAsync(disposal, asset, fiscalPeriod, functionalCurrency, snapshot);
+            var mutableDimensionLines = postingRequest.Lines.ToList();
+            if (_fixedAssetDimensions is not null)
+            {
+                var hasDimensionProvenance = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+                    .AnyAsync(item => item.TenantId == TenantId
+                        && item.RouteId == DisposalProducer.RouteId
+                        && item.SourceDocumentId == disposal.Id && !item.IsDeleted);
+                if (!hasDimensionProvenance)
+                {
+                    var inheritedByLine = asset.JournalEntryId.HasValue
+                        ? mutableDimensionLines.Where(line => line.SourceDocumentLineId.HasValue)
+                            .ToDictionary(line => line.SourceDocumentLineId!.Value, _ => asset.JournalEntryId.Value)
+                        : new Dictionary<Guid, Guid>();
+                    await _fixedAssetDimensions.SynchronizeAsync(
+                        DisposalProducer, disposal.Id, disposal.AccountingDate ?? disposal.DisposalDate,
+                        mutableDimensionLines, input: null, inheritedByLine,
+                        "Legacy approved fixed asset disposal adapted before posting.");
+                }
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DisposalProducer,
+                    disposal.Id,
+                    disposal.AccountingDate ?? disposal.DisposalDate,
+                    mutableDimensionLines);
+            }
+            postingRequest.Lines = mutableDimensionLines;
 
             await RecordDisposalAuditAsync(
                 FinanceAuditEvents.FixedAssetDisposalConfigurationUsed,
@@ -473,7 +538,7 @@ public class AssetDisposalService : IAssetDisposalService
                 BookNetBookValue = bookValue.NetBookValue
             };
 
-            var postingResult = await _financePostingEngine.PostAsync(postingRequest);
+            var postingResult = await _financePostingEngine.PostAsync(postingRequest, DisposalProducer);
             ApplyPostedDisposal(disposal, asset, bookValue, postingResult, snapshot);
 
             await _context.SaveChangesAsync();
@@ -656,10 +721,13 @@ public class AssetDisposalService : IAssetDisposalService
         // tax treatment. DisposalCost represents a buyer/auctioneer deduction from remitted
         // proceeds: it is a separate out-of-scope contra line so tax remains calculated on gross
         // consideration while the AR journal clears exactly the net amount debited by disposal.
+        var proceedsDimensions = await GetDisposalProceedsDimensionsAsync(disposal);
+        var saleLineId = FinanceSourceLineIdentity.Create(disposal.Id, "SALE-INVOICE-CONSIDERATION", disposal.FixedAssetId);
         var invoiceLines = new List<InvoiceLineItemCreateDto>
         {
             new()
             {
+                Id = saleLineId,
                 LineItemType = nameof(LineItemType.FixedAssetDisposal),
                 GLAccountId = disposal.ProceedsAccountId,
                 Description = $"Fixed asset sale - {disposal.FixedAsset.AssetCode} - {disposal.FixedAsset.Name}",
@@ -672,8 +740,11 @@ public class AssetDisposalService : IAssetDisposalService
         };
         if (disposal.DisposalCost > 0m)
         {
+            var deductionLineId = FinanceSourceLineIdentity.Create(
+                disposal.Id, "SALE-INVOICE-DEDUCTION", disposal.FixedAssetId);
             invoiceLines.Add(new InvoiceLineItemCreateDto
             {
+                Id = deductionLineId,
                 LineItemType = nameof(LineItemType.FixedAssetDisposalAdjustment),
                 GLAccountId = disposal.ProceedsAccountId,
                 Description = "Buyer/auctioneer deduction from remitted disposal proceeds",
@@ -684,7 +755,13 @@ public class AssetDisposalService : IAssetDisposalService
             });
         }
 
-        var invoice = await _invoiceService.CreateAsync(new InvoiceCreateDto
+        var invoiceDimensionLines = invoiceLines.Select(line => new FinanceSourceLineDimensionInputDto
+        {
+            SourceLineId = line.Id,
+            AccountId = line.GLAccountId!.Value,
+            Dimensions = proceedsDimensions
+        }).ToArray();
+        var invoiceRequest = new InvoiceCreateDto
         {
             CustomerId = disposal.BuyerBusinessPartnerId.Value,
             InvoiceDate = disposal.DisposalDate.Date,
@@ -697,9 +774,20 @@ public class AssetDisposalService : IAssetDisposalService
             ExchangeRate = disposal.ProceedsExchangeRateValue,
             PaymentTermId = disposal.SettlementPaymentTermId,
             TaxGroupId = disposal.SaleTaxTreatment == TaxTreatment.Standard ? disposal.SaleTaxGroupId : null,
-            LineItems = invoiceLines
-        });
-        invoice = await _invoiceService.SendInvoiceAsync(invoice.Id);
+            LineItems = invoiceLines,
+            FinanceDimensions = new FinanceSourceDocumentDimensionInputDto
+            {
+                DefaultDimensions = proceedsDimensions,
+                Lines = invoiceDimensionLines,
+                ApplyDefaultToEligibleLines = true
+            }
+        };
+        var invoice = _fixedAssetDimensions is null
+            ? await _invoiceService.CreateAsync(invoiceRequest)
+            : await _invoiceService.CreateAsync(invoiceRequest, DisposalSaleInvoiceProducer);
+        invoice = _fixedAssetDimensions is null
+            ? await _invoiceService.SendInvoiceAsync(invoice.Id)
+            : await _invoiceService.SendInvoiceAsync(invoice.Id, DisposalSaleInvoiceProducer);
 
         disposal.CustomerInvoiceId = invoice.Id;
         disposal.SettlementInvoiceAmount = RoundMoney(invoice.TotalAmount);
@@ -717,7 +805,7 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("AR receipt service is not configured for immediate fixed-asset sale settlement.");
         }
 
-        var receipt = await _paymentService.CreateAsync(new PaymentCreateDto
+        var receiptRequest = new PaymentCreateDto
         {
             CustomerId = disposal.BuyerBusinessPartnerId.Value,
             PaymentDate = disposal.DisposalDate.Date,
@@ -741,12 +829,59 @@ public class AssetDisposalService : IAssetDisposalService
                     Notes = $"Automatic settlement of fixed-asset disposal {disposal.ReferenceNumber}."
                 }
             }
-        });
-        receipt = await _paymentService.PostAsync(receipt.Id);
+        };
+        var receipt = _fixedAssetDimensions is null
+            ? await _paymentService.CreateAsync(receiptRequest)
+            : await _paymentService.CreateAsync(receiptRequest, DisposalSaleReceiptProducer);
+        receipt = _fixedAssetDimensions is null
+            ? await _paymentService.PostAsync(receipt.Id)
+            : await _paymentService.PostAsync(receipt.Id, DisposalSaleReceiptProducer);
 
         disposal.CustomerPaymentId = receipt.Id;
         disposal.SettlementStatus = AssetDisposalSettlementStatus.Settled;
         disposal.SettlementCompletedAt = DateTime.UtcNow;
+    }
+
+    private async Task<IReadOnlyList<FinancePostingDimensionValueDto>> GetDisposalProceedsDimensionsAsync(
+        AssetDisposal disposal)
+    {
+        if (_fixedAssetDimensions is null)
+            return Array.Empty<FinancePostingDimensionValueDto>();
+        var sourceLineId = FinanceSourceLineIdentity.Create(
+            disposal.Id, "FA-DISPOSAL-PROCEEDS", disposal.FixedAssetId);
+        var assignment = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Include(item => item.FinanceDimensionSnapshot)!
+                .ThenInclude(snapshot => snapshot!.Items)
+            .Include(item => item.FinanceDimensionSet)!
+                .ThenInclude(set => set!.Items)
+            .SingleOrDefaultAsync(item => item.TenantId == TenantId
+                && item.RouteId == FinanceDimensionRouteId.FinanceFixedAssetDisposal
+                && item.SourceDocumentId == disposal.Id
+                && item.SourceLineId == sourceLineId
+                && !item.IsDeleted)
+            ?? throw new InvalidOperationException(
+                "Frozen disposal-proceeds dimension evidence is missing for the sale invoice.");
+
+        if (!assignment.EvidenceFrozenAt.HasValue)
+            throw new InvalidOperationException(
+                "Disposal-proceeds dimensions must be frozen before sale settlement is created.");
+        if (assignment.FinanceDimensionSnapshot is not null)
+            return assignment.FinanceDimensionSnapshot.Items
+                .OrderBy(item => item.DimensionCodeSnapshot, StringComparer.Ordinal)
+                .Select(item => new FinancePostingDimensionValueDto
+                {
+                    DimensionCode = item.DimensionCodeSnapshot,
+                    ValueCode = item.DimensionValueCodeSnapshot
+                }).ToArray();
+        if (assignment.FinanceDimensionSet is not null)
+            return assignment.FinanceDimensionSet.Items
+                .OrderBy(item => item.DimensionCodeSnapshot, StringComparer.Ordinal)
+                .Select(item => new FinancePostingDimensionValueDto
+                {
+                    DimensionCode = item.DimensionCodeSnapshot,
+                    ValueCode = item.DimensionValueCodeSnapshot
+                }).ToArray();
+        return Array.Empty<FinancePostingDimensionValueDto>();
     }
 
     public async Task<AssetDisposalDto> RejectDisposalAsync(Guid disposalId, Guid rejectedById, string comments)
@@ -1245,13 +1380,6 @@ public class AssetDisposalService : IAssetDisposalService
         }
 
         var disposalDay = disposalDate.Date;
-        var startDate = new[] { fiscalPeriod.StartDate.Date, placedInService.Value.Date }
-            .Max();
-        if (bookValue.LastDepreciationDate.HasValue)
-        {
-            startDate = new[] { startDate, bookValue.LastDepreciationDate.Value.Date.AddDays(1) }.Max();
-        }
-
         var usage = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
             ? new FixedAssetProductionUsageDto
             {
@@ -1268,15 +1396,39 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("Final production usage may only be supplied for a units-of-production asset.");
         }
 
-        var calculation = FixedAssetDepreciationCalculator.Calculate(bookValue, usage);
+        var fiscalYear = fiscalPeriod.FiscalYear
+            ?? throw new InvalidOperationException("Disposal fiscal period is not linked to an authoritative fiscal year.");
+        var priorFiscalYearConventionFactor = bookValue.DepreciationConvention == DepreciationConvention.HalfYear
+            ? await _context.AssetDepreciationSchedules
+                .Where(schedule => schedule.TenantId == TenantId &&
+                    schedule.FixedAssetId == asset.Id &&
+                    schedule.BookClassification == bookValue.BookClassification &&
+                    schedule.IsPosted && !schedule.IsDeleted && !schedule.IsReversed &&
+                    schedule.AssetDisposalId == null &&
+                    schedule.FiscalPeriod.FiscalYearId == fiscalYear.Id &&
+                    schedule.FiscalPeriod.EndDate < fiscalPeriod.StartDate)
+                .SumAsync(schedule => schedule.ConventionFactor)
+            : 0m;
+        var calculation = FixedAssetDepreciationCalculator.Calculate(
+            bookValue,
+            usage,
+            new DepreciationTimingContext(
+                fiscalPeriod.StartDate,
+                fiscalPeriod.EndDate,
+                fiscalYear.StartDate,
+                fiscalYear.EndDate,
+                placedInService.Value,
+                bookValue.LastDepreciationDate,
+                disposalDay,
+                priorFiscalYearConventionFactor));
         var periodDays = (fiscalPeriod.EndDate.Date - fiscalPeriod.StartDate.Date).Days + 1;
-        var eligibleDays = startDate > disposalDay ? 0 : (disposalDay - startDate).Days + 1;
-        var basis = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
-            ? "ProductionUsage"
-            : "ActualDaysInclusive";
-        var wholeAssetAmount = bookValue.DepreciationMethod == DepreciationMethod.UnitsOfProduction
-            ? calculation.DepreciationAmount
-            : RoundMoney(calculation.DepreciationAmount * eligibleDays / periodDays);
+        var fromDate = calculation.EligibleFromDate;
+        var toDate = calculation.EligibleToDate;
+        var eligibleDays = fromDate.HasValue && toDate.HasValue && fromDate <= toDate
+            ? (toDate.Value.Date - fromDate.Value.Date).Days + 1
+            : 0;
+        var basis = calculation.ConventionBasis;
+        var wholeAssetAmount = calculation.DepreciationAmount;
         wholeAssetAmount = Math.Min(wholeAssetAmount, RoundMoney(bookValue.NetBookValue - bookValue.ResidualValue));
 
         // For a partial/component disposal, only the portion leaving service receives final
@@ -1291,12 +1443,16 @@ public class AssetDisposalService : IAssetDisposalService
 
         return new FinalDepreciationPreparation(
             Math.Max(0m, amount),
-            eligibleDays == 0 ? null : startDate,
-            eligibleDays == 0 ? null : disposalDay,
+            eligibleDays == 0 ? null : fromDate,
+            eligibleDays == 0 ? null : toDate,
             periodDays,
             eligibleDays,
             basis,
-            calculation);
+            calculation,
+            fiscalPeriod.StartDate.Date,
+            fiscalPeriod.EndDate.Date,
+            fiscalYear.StartDate.Date,
+            fiscalYear.EndDate.Date);
     }
 
     private static void ValidateApprovedFinalDepreciation(
@@ -1311,6 +1467,8 @@ public class AssetDisposalService : IAssetDisposalService
             disposal.FinalDepreciationEligibleDays != current.EligibleDays ||
             disposal.FinalDepreciationProrationBasis != current.ProrationBasis ||
             disposal.FinalDepreciationMethodSnapshot != currentMethod ||
+            disposal.FinalDepreciationConventionSnapshot != current.Calculation.Convention ||
+            disposal.FinalDepreciationConventionFactor != current.Calculation.ConventionFactor ||
             disposal.FinalDepreciationProductionUnits != current.Calculation.PeriodProductionUnits ||
             disposal.FinalDepreciationDiminishingRatePercent != current.Calculation.EffectiveDiminishingBalanceRatePercent ||
             disposal.FinalDepreciationLifetimeProductionCapacity != current.Calculation.LifetimeProductionCapacity ||
@@ -1326,7 +1484,7 @@ public class AssetDisposalService : IAssetDisposalService
         }
     }
 
-    private async Task<FinancePostingRequestDto> BuildDisposalPostingRequestAsync(
+    private async Task<FinancePostingRequestV2Dto> BuildDisposalPostingRequestAsync(
         AssetDisposal disposal,
         FixedAsset asset,
         FiscalPeriod fiscalPeriod,
@@ -1385,10 +1543,11 @@ public class AssetDisposalService : IAssetDisposalService
             throw new InvalidOperationException("Fixed asset disposal posting requires at least two balanced posting lines.");
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
-            SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceModule = DisposalProducer.Definition.PostingSourceModule,
+            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+            SourceDocumentType = DisposalProducer.Definition.DocumentType,
             SourceDocumentId = disposal.Id,
             SourceDocumentTenantId = disposal.TenantId,
             PostingAction = PostingAction,
@@ -1397,7 +1556,7 @@ public class AssetDisposalService : IAssetDisposalService
             PostingDate = (disposal.AccountingDate ?? disposal.DisposalDate).Date,
             FiscalPeriodId = fiscalPeriod.Id,
             JournalType = "Fixed Asset Disposal",
-            BookClassification = disposal.BookClassification,
+            AccountingBookCode = disposal.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = BuildPostingIdempotencyKey(disposal),
             ReturnExistingOnDuplicate = true,
@@ -1428,6 +1587,11 @@ public class AssetDisposalService : IAssetDisposalService
         lines.Add(new FinancePostingLineDto
         {
             AccountId = accountId.Value,
+            SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                disposal.Id,
+                tag,
+                asset.Id,
+                disposal.FinalDepreciationScheduleId ?? Guid.Empty),
             DebitAmount = debit,
             CreditAmount = credit,
             TransactionCurrency = functionalCurrency,
@@ -1467,6 +1631,8 @@ public class AssetDisposalService : IAssetDisposalService
         lines.Add(new FinancePostingLineDto
         {
             AccountId = accountId.Value,
+            SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                disposal.Id, "FA-DISPOSAL-PROCEEDS", asset.Id),
             DebitAmount = snapshot.ProceedsFunctionalAmount,
             CreditAmount = 0m,
             TransactionCurrency = snapshot.ProceedsCurrencyCode,
@@ -1617,6 +1783,15 @@ public class AssetDisposalService : IAssetDisposalService
             // satisfying the existing unique asset/period/book/sequence constraint.
             CorrectionSequence = ResolveDisposalScheduleSequence(asset, disposal),
             PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
+            DepreciationConventionSnapshot = finalDepreciation.Calculation.Convention,
+            ConventionFactor = finalDepreciation.Calculation.ConventionFactor,
+            ConventionBasis = finalDepreciation.Calculation.ConventionBasis,
+            ConventionEligibleFromDate = finalDepreciation.Calculation.EligibleFromDate,
+            ConventionEligibleToDate = finalDepreciation.Calculation.EligibleToDate,
+            FiscalPeriodStartDateSnapshot = finalDepreciation.FiscalPeriodStartDate,
+            FiscalPeriodEndDateSnapshot = finalDepreciation.FiscalPeriodEndDate,
+            FiscalYearStartDateSnapshot = finalDepreciation.FiscalYearStartDate,
+            FiscalYearEndDateSnapshot = finalDepreciation.FiscalYearEndDate,
             ApprovalStatus = "ApprovedWithDisposal",
             ApprovedAt = disposal.ApprovedAt,
             ApprovedById = disposal.ApprovedById,
@@ -1634,7 +1809,11 @@ public class AssetDisposalService : IAssetDisposalService
         // Although derecognition immediately zeroes the book, these counters remain meaningful
         // historical evidence and make the final schedule consistent with ordinary depreciation.
         bookValue.AccumulatedProductionUnits = finalDepreciation.Calculation.CumulativeProductionUnitsAfter;
-        bookValue.LastDepreciationDate = disposal.DisposalDate.Date;
+        // A partial disposal's final charge belongs only to the portion leaving service. The
+        // retained book has not yet been depreciated for this period and must remain eligible for
+        // its complete convention-aware ordinary run.
+        if (disposal.DisposalScope == AssetDisposalScope.WholeAsset)
+            bookValue.LastDepreciationDate = disposal.DisposalDate.Date;
 
         _context.AssetTransactions.Add(new AssetTransaction
         {
@@ -2200,6 +2379,7 @@ public class AssetDisposalService : IAssetDisposalService
     {
         var date = accountingDate.Date;
         return await _context.FiscalPeriods
+            .Include(p => p.FiscalYear)
             .FirstOrDefaultAsync(p => p.TenantId == TenantId && !p.IsDeleted && p.StartDate <= date && p.EndDate >= date);
     }
 
@@ -2236,8 +2416,8 @@ public class AssetDisposalService : IAssetDisposalService
         {
             EventType = eventType,
             TenantId = TenantId,
-            SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceModule = DisposalProducer.Definition.PostingSourceModule,
+            SourceDocumentType = DisposalProducer.Definition.DocumentType,
             SourceDocumentId = assetId,
             Resource = "Finance.FixedAssetDisposal",
             ResourceId = assetId.ToString(),
@@ -2273,8 +2453,8 @@ public class AssetDisposalService : IAssetDisposalService
         {
             EventType = eventType,
             TenantId = disposal.TenantId,
-            SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceModule = DisposalProducer.Definition.PostingSourceModule,
+            SourceDocumentType = DisposalProducer.Definition.DocumentType,
             SourceDocumentId = disposal.Id,
             JournalEntryId = journalEntryId ?? disposal.JournalEntryId,
             PostingEventId = postingEventId ?? disposal.PostingEventId,
@@ -2391,6 +2571,13 @@ public class AssetDisposalService : IAssetDisposalService
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
+    private void EnsureFixedAssetDimensionsConfigured()
+    {
+        if (_fixedAssetDimensions is null)
+            throw new InvalidOperationException(
+                "Finance fixed-asset dimensions are not configured for disposal posting.");
+    }
+
     private static string? NormalizeOptionalText(string? value)
     {
         var normalized = value?.Trim();
@@ -2486,6 +2673,8 @@ public class AssetDisposalService : IAssetDisposalService
             FinalDepreciationPeriodDays = d.FinalDepreciationPeriodDays,
             FinalDepreciationEligibleDays = d.FinalDepreciationEligibleDays,
             FinalDepreciationProrationBasis = d.FinalDepreciationProrationBasis,
+            FinalDepreciationConventionSnapshot = d.FinalDepreciationConventionSnapshot,
+            FinalDepreciationConventionFactor = d.FinalDepreciationConventionFactor,
             FinalDepreciationMethodSnapshot = d.FinalDepreciationMethodSnapshot,
             FinalDepreciationScheduleId = d.FinalDepreciationScheduleId,
             FinalDepreciationProductionUnits = d.FinalDepreciationProductionUnits,
@@ -2578,7 +2767,11 @@ public class AssetDisposalService : IAssetDisposalService
         int PeriodDays,
         int EligibleDays,
         string ProrationBasis,
-        DepreciationCalculation Calculation);
+        DepreciationCalculation Calculation,
+        DateTime FiscalPeriodStartDate,
+        DateTime FiscalPeriodEndDate,
+        DateTime FiscalYearStartDate,
+        DateTime FiscalYearEndDate);
 
     private sealed record RevaluationSurplusTransferPreparation(
         Guid? RevaluationSurplusAccountId,

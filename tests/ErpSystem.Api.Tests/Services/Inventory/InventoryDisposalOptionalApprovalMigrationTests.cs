@@ -1,44 +1,31 @@
 using System.Text.RegularExpressions;
-using ErpSystem.Data.Migrations;
+using ErpSystem.Api.Tests.Services.Finance;
 using FluentAssertions;
-using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Inventory;
 
 public sealed class InventoryDisposalOptionalApprovalMigrationTests
 {
-    private static string PatchSql => new InventoryDisposalOptionalApprovalAndDrafts().UpOperations
-        .OfType<SqlOperation>().Select(value => value.Sql.Replace("\r", string.Empty))
-        .Single(value => value.Contains("DECLARE @definition", StringComparison.Ordinal));
-
-    private static string Literal(string sql, string variable)
-    {
-        var match = Regex.Match(sql, $@"DECLARE @{variable} nvarchar\(max\)=N'((?:''|[^'])*)';", RegexOptions.Singleline);
-        match.Success.Should().BeTrue();
-        return match.Groups[1].Value.Replace("''", "'");
-    }
+    private const string MigrationFile = "20260912234000_InventoryDisposalOptionalApprovalAndDrafts.cs";
+    private static string Source => ArchivedMigrationSource.Read(MigrationFile);
+    private static string CaseGuard => ArchivedMigrationSource.RawStringConstant(MigrationFile, "CaseGuard");
+    private static string LineGuard => ArchivedMigrationSource.RawStringConstant(MigrationFile, "LineGuard");
+    private static string AdjustmentApprovalDelegation =>
+        ArchivedMigrationSource.RawStringConstant(MigrationFile, "AdjustmentApprovalDelegation");
 
     [Fact]
     public void ExistingDisposalsRemainApprovalRequired_AndNoOperationalRowsAreRewritten()
     {
-        var operations = new InventoryDisposalOptionalApprovalAndDrafts().UpOperations;
-        var added = operations.OfType<AddColumnOperation>().Should().ContainSingle().Which;
-        added.Table.Should().Be("InventoryDisposalCases");
-        added.Name.Should().Be("ApprovalRequired");
-        added.ColumnType.Should().Be("bit");
-        added.IsNullable.Should().BeFalse();
-        added.DefaultValue.Should().Be(true);
-        operations.OfType<AddCheckConstraintOperation>().Should().ContainSingle()
-            .Which.Sql.Should().Be("[Status] BETWEEN 1 AND 11");
-        operations.Should().NotContain(value => value.GetType() == typeof(UpdateDataOperation) ||
-            value.GetType() == typeof(DeleteDataOperation) || value.GetType() == typeof(InsertDataOperation));
+        Source.Should().Contain("migrationBuilder.AddColumn<bool>(\"ApprovalRequired\", \"InventoryDisposalCases\", type: \"bit\", nullable: false, defaultValue: true)")
+            .And.Contain("migrationBuilder.AddCheckConstraint(\"CK_InventoryDisposalCases_Status\", \"InventoryDisposalCases\", \"[Status] BETWEEN 1 AND 11\")")
+            .And.NotContain("UpdateData(").And.NotContain("DeleteData(").And.NotContain("InsertData(");
     }
 
     [Fact]
     public void DisposalDecision_RequiresCentralPolicyOnlyOnInitialNoApprovalTransition()
     {
-        var guard = InventoryDisposalOptionalApprovalAndDrafts.CaseGuard;
+        var guard = CaseGuard;
         guard.Should().Contain("d.Status IN (1,2,3,4) AND i.Status=11")
             .And.Contain("d.ApprovalRequired=1 AND i.ApprovalRequired=0")
             .And.Contain("dbo.WorkflowApprovalRequiredAtSubmission(i.TenantId,N'InventoryDisposal',i.Id)=0")
@@ -52,24 +39,24 @@ public sealed class InventoryDisposalOptionalApprovalMigrationTests
     [Fact]
     public void AdjustmentPatch_MatchesExactlyOnePriorEmittedPredicate()
     {
-        var prior = new InventoryOptionalApprovalSnapshots().UpOperations.OfType<SqlOperation>()
-            .Select(value => value.Sql.Replace("\r", string.Empty))
-            .Single(value => value.Contains("-- Approval requirement may be decided only once", StringComparison.Ordinal));
-        var priorReplacement = Regex.Match(prior,
-            @"SET @definition=REPLACE\(@definition,N'((?:''|[^'])*)',N'((?:''|[^'])*)'\);", RegexOptions.Singleline);
-        priorReplacement.Success.Should().BeTrue();
-        var priorPredicate = priorReplacement.Groups[2].Value.Replace("''", "'");
-        var before = Literal(PatchSql, "before");
-        var after = Literal(PatchSql, "after");
+        var priorSource = ArchivedMigrationSource.Read("20260912120000_InventoryOptionalApprovalSnapshots.cs");
+        var marker = priorSource.IndexOf("-- Approval requirement may be decided only once", StringComparison.Ordinal);
+        marker.Should().BeGreaterThan(0);
+        var rawStart = priorSource.LastIndexOf("\"\"\"", marker, StringComparison.Ordinal);
+        var rawEnd = priorSource.IndexOf("\"\"\"", marker, StringComparison.Ordinal);
+        rawStart.Should().BeGreaterThan(0);
+        rawEnd.Should().BeGreaterThan(marker);
+        var priorPredicate = priorSource[(rawStart + 3)..rawEnd].Replace("\r", string.Empty);
+        const string before = "dbo.WorkflowApprovalRequiredAtSubmission(i.TenantId,N'StockAdjustment',i.Id)=0";
+        var after = AdjustmentApprovalDelegation.Replace("\r", string.Empty);
 
         priorPredicate.Split(before, StringSplitOptions.None).Should().HaveCount(2);
-        after.Should().Be(InventoryDisposalOptionalApprovalAndDrafts.AdjustmentApprovalDelegation.Replace("\r", string.Empty));
         var changed = priorPredicate.Replace(before, after, StringComparison.Ordinal);
         changed.Should().Contain("d.Status=N'Draft' AND i.Status=N'ReadyToPost'")
             .And.Contain("d.ApprovedAt IS NULL")
             .And.Contain("i.SubmittedById IS NOT NULL AND i.SubmittedAtUtc IS NOT NULL")
             .And.Contain("INV_APPROVAL_SNAPSHOT_INVALID");
-        PatchSql.Should().Contain("TR_StockAdjustments_ControlledLifecycle")
+        Source.Should().Contain("TR_StockAdjustments_ControlledLifecycle")
             .And.Contain("/NULLIF(LEN(@before),0)<>1")
             .And.Contain("THROW 51998");
     }
@@ -77,17 +64,16 @@ public sealed class InventoryDisposalOptionalApprovalMigrationTests
     [Fact]
     public void AdjustmentPatch_NormalizesDefinitionAndWindowsSqlLiterals()
     {
-        PatchSql.Should().Contain("SET @definition=REPLACE(@definition,CHAR(13),N'')")
+        Source.Should().Contain("SET @definition=REPLACE(@definition,CHAR(13),N'')")
             .And.Contain("SET @before=REPLACE(@before,CHAR(13),N'')")
             .And.Contain("SET @after=REPLACE(@after,CHAR(13),N'')");
-        Literal(PatchSql.Replace("\n", "\r\n"), "after").Replace("\r", string.Empty)
-            .Should().Be(Literal(PatchSql, "after"));
+        Source.Should().Contain("static string Literal(string value) => value.Replace(\"'\", \"''\", StringComparison.Ordinal)");
     }
 
     [Fact]
     public void Delegation_IsAnAlternativeToOrdinaryPolicy_NotAGlobalOverride()
     {
-        var sql = InventoryDisposalOptionalApprovalAndDrafts.AdjustmentApprovalDelegation;
+        var sql = AdjustmentApprovalDelegation;
         sql.Should().StartWith("(dbo.WorkflowApprovalRequiredAtSubmission(i.TenantId,N'StockAdjustment',i.Id)=0")
             .And.Contain("OR EXISTS")
             .And.Contain("c.TenantId=i.TenantId AND c.IsDeleted=0 AND c.StockAdjustmentId=i.Id")
@@ -103,7 +89,7 @@ public sealed class InventoryDisposalOptionalApprovalMigrationTests
     [InlineData("w.EntityId=c.Id", "INVENTORYDISPOSAL")]
     public void RetainedSourceOrGeneratedAdjustmentWorkflowsCannotBeBypassed(string identity, string entity)
     {
-        var sql = InventoryDisposalOptionalApprovalAndDrafts.AdjustmentApprovalDelegation;
+        var sql = AdjustmentApprovalDelegation;
         sql.Should().Contain("w.TenantId=i.TenantId AND w.IsDeleted=0 AND w.Status IN (0,1,5,6)")
             .And.Contain(identity)
             .And.Contain($"dbo.WorkflowApprovalEntityKey(e.Code)=N'{entity}'")
@@ -118,7 +104,7 @@ public sealed class InventoryDisposalOptionalApprovalMigrationTests
     [InlineData("SerialNumber")]
     public void Delegation_RequiresBidirectionalExactSourceLineage(string field)
     {
-        var sql = InventoryDisposalOptionalApprovalAndDrafts.AdjustmentApprovalDelegation;
+        var sql = AdjustmentApprovalDelegation;
         sql.Should().Contain("AND EXISTS (SELECT 1 FROM dbo.InventoryDisposalLines l")
             .And.Contain("AND 1<>(SELECT COUNT(*) FROM dbo.InventoryDisposalLines l")
             .And.Contain("AND 1<>(SELECT COUNT(*) FROM dbo.StockAdjustmentItems a")
@@ -136,7 +122,7 @@ public sealed class InventoryDisposalOptionalApprovalMigrationTests
     [Fact]
     public void DraftLineEditing_AllowsOnlyRetirementAndReplacement_NotHistoryRewrites()
     {
-        var sql = InventoryDisposalOptionalApprovalAndDrafts.LineGuard;
+        var sql = LineGuard;
         sql.Should().Contain("INV_DISPOSAL_LINE_DELETE_PROHIBITED")
             .And.Contain("c.Status<>1 OR c.IsDeleted=1")
             .And.Contain("i.TenantId<>d.TenantId OR i.InventoryDisposalCaseId<>d.InventoryDisposalCaseId")
@@ -148,13 +134,11 @@ public sealed class InventoryDisposalOptionalApprovalMigrationTests
     [Fact]
     public void PostingAndProceedsGuardsRemain_AndDowngradeDoesNotDestroyHistory()
     {
-        InventoryDisposalOptionalApprovalAndDrafts.CaseGuard.Should()
+        CaseGuard.Should()
             .Contain("StockAdjustmentId IS NULL OR ExecutionReference IS NULL")
             .And.Contain("a.Status<>'Posted'")
             .And.Contain("i.ProceedsPostingEventId IS NULL OR i.ProceedsJournalEntryId IS NULL")
             .And.Contain("i.Method NOT IN (1,2) AND i.ProceedsAmount<>0");
-        var down = new InventoryDisposalOptionalApprovalAndDrafts().DownOperations;
-        down.Should().ContainSingle().Which.Should().BeOfType<SqlOperation>()
-            .Which.Sql.Should().Contain("THROW 51997").And.Contain("reviewed forward migration");
+        Source.Should().Contain("THROW 51997").And.Contain("reviewed forward migration");
     }
 }

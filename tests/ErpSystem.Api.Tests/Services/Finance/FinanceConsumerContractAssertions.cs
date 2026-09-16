@@ -14,7 +14,7 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public static class FinanceConsumerContractAssertions
 {
     public static void ShouldSatisfyPostingContract(
-        this FinancePostingRequestDto request,
+        this FinancePostingRequestV2Dto request,
         string expectedOriginModule,
         string expectedDocumentType,
         Guid expectedDocumentId,

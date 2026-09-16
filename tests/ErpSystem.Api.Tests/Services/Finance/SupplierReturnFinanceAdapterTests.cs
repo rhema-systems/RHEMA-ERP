@@ -30,7 +30,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.JournalEntryId.Should().BeNull();
         result.DecisionCodes.Should().Contain("FIN-INT-012-AUTHORITATIVE-EVIDENCE-LOOKUP");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -49,7 +49,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         retry.Status.Should().Be(SupplierReturnFinanceOutcomeStatus.DecisionRequired);
         first.DecisionCodes.Should().Equal(retry.DecisionCodes);
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.Status.Should().Be(SupplierReturnFinanceOutcomeStatus.DecisionRequired);
         result.DecisionCodes.Should().Contain("FIN-INT-012-INVOICED-RETURN-CLEARING");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -86,7 +86,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*tenant does not match*");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -142,7 +142,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.Status.Should().Be(SupplierReturnFinanceOutcomeStatus.DecisionRequired);
         result.DecisionCodes.Should().Contain("FIN-INT-012-DUPLICATE-GL-OWNER");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -163,7 +163,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.Status.Should().Be(SupplierReturnFinanceOutcomeStatus.DecisionRequired);
         result.DecisionCodes.Should().Contain("FIN-INT-012-RETURN-VARIANCE-POLICY");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -201,7 +201,7 @@ public sealed class SupplierReturnFinanceAdapterTests
 
         await action.Should().ThrowAsync<ArgumentException>().WithMessage("*canonical FIN-INT-012*");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -222,7 +222,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.Status.Should().Be(SupplierReturnFinanceOutcomeStatus.DecisionRequired);
         result.DecisionCodes.Should().Contain("FIN-INT-012-CORRECTION-REVERSAL-POLICY");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -241,7 +241,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.DecisionCodes.Should().Contain("FIN-INT-013-DURABLE-FINANCE-LINKAGE");
         result.DecisionCodes.Should().Contain("FIN-INT-013-RETURN-CLEARING-LINE-MODE");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -290,7 +290,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.DecisionCodes.Should().Contain("FIN-INT-013-DURABLE-FINANCE-LINKAGE");
         result.Message.Should().Contain("No journal is expected");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -328,7 +328,7 @@ public sealed class SupplierReturnFinanceAdapterTests
         result.Status.Should().Be(SupplierReturnFinanceOutcomeStatus.DecisionRequired);
         result.DecisionCodes.Should().Contain("FIN-INT-013-CLAIM-REJECTED-CUSTODY-WRITEOFF");
         posting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -394,12 +394,12 @@ public sealed class SupplierReturnFinanceAdapterTests
         return new SupplierReturnFinanceAdapter(currentUser.Object);
     }
 
-    private static Mock<IFinancePostingEngine> Posting(Action<FinancePostingRequestDto>? capture = null)
+    private static Mock<IFinancePostingEngine> Posting(Action<FinancePostingRequestV2Dto>? capture = null)
     {
         var posting = new Mock<IFinancePostingEngine>();
         posting.Setup(engine => engine.PostAsync(
-                It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => capture?.Invoke(request))
+                It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, CancellationToken>((request, _) => capture?.Invoke(request))
             .ReturnsAsync(() => new FinancePostingResultDto
             {
                 PostingEventId = Guid.NewGuid(),

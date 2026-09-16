@@ -212,7 +212,7 @@ public sealed class CoreFinancialReportingFoundationTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-Reporting")]
     [Trait("Category", "Reporting")]
-    public async Task CashFlow_ShouldRecognizeCashEquivalentCategoryAndUseSelectedBook()
+    public async Task CashFlow_ShouldRecognizeConfiguredCashRoleAndUseSelectedBook()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -224,10 +224,29 @@ public sealed class CoreFinancialReportingFoundationTests
             AccountType.Asset,
             "1000",
             "Treasury Float",
-            category: "Cash and Cash Equivalents");
+            category: "Legacy category is not authoritative");
         cash.CashFlowClassification = "Operating";
         var revenue = SeedAccount(db, tenantId, AccountType.Revenue, "4000", "Revenue", category: "Revenue");
         revenue.CashFlowClassification = "Operating";
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "MANAGEMENT", Name = "Management Reporting",
+            Purpose = "Management", IsActive = true, IsDefault = true, AllowsPosting = true
+        };
+        var cashClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id, Code = "CASH", Name = "Liquidity",
+            CoreAccountType = AccountType.Asset, IsPostingClassification = true, Status = AccountClassificationStatus.Active,
+            SystemRole = AccountClassificationSystemRole.Cash
+        };
+        var revenueClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id, Code = "REVENUE", Name = "Operating revenue",
+            CoreAccountType = AccountType.Revenue, IsPostingClassification = true, Status = AccountClassificationStatus.Active
+        };
+        db.AddRange(book, cashClassification, revenueClassification,
+            new AccountAccountingBook { TenantId = tenantId, AccountId = cash.Id, AccountingBookId = book.Id, AccountClassificationId = cashClassification.Id, IsEnabled = true },
+            new AccountAccountingBook { TenantId = tenantId, AccountId = revenue.Id, AccountingBookId = book.Id, AccountClassificationId = revenueClassification.Id, IsEnabled = true });
         SeedJournal(db, tenantId, period.Id, "JE-MGMT-CASH", "Posted", (cash.Id, 100m, 0m), (revenue.Id, 0m, 100m));
 
         foreach (var journal in db.JournalEntries.Local)

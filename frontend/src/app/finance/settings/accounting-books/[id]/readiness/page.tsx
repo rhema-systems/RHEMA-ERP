@@ -1,0 +1,135 @@
+'use client';
+
+import React from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useParams } from 'next/navigation';
+import { AlertCircle, ArrowLeft, Loader2, RefreshCw, ShieldCheck } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/hooks/use-auth';
+import { useToast } from '@/hooks/use-toast';
+import { getAccountingBookAccess } from '@/components/finance/accounting-books/accounting-book-access';
+import { financeDataService } from '@/services/finance/finance-data.service';
+import type { AccountingBook, AccountingBookActivationReadiness, AccountingBookInitialization,
+    AccountingBookInitializationLine, AccountingBookInitializationMode, AccountingBookInitializationPreparation,
+    AccountingBookPeriod, AccountingBookPeriodStatus, FiscalPeriod } from '@/types/finance';
+
+type PeriodAction = { period: AccountingBookPeriod; action: 'request' | 'approve' | 'reject'; target?: AccountingBookPeriodStatus };
+const transitions: Record<AccountingBookPeriodStatus, AccountingBookPeriodStatus[]> = {
+    Future: ['Open'], Open: ['Closed', 'Locked'], Closed: ['Open', 'Locked'], Locked: ['Open'],
+};
+const modes: AccountingBookInitializationMode[] = ['IndependentOpeningBalances', 'BaseBookCopyAtCutoff', 'BaseBalancesWithOpeningAdjustments'];
+const money = (value: number) => new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+
+export default function AccountingBookReadinessPage() {
+    const params = useParams<{ id: string }>();
+    const bookId = params.id;
+    const { hasPermission, isLoading: authLoading, error: authError } = useAuth();
+    const access = getAccountingBookAccess(hasPermission);
+    const { toast } = useToast();
+    const [book, setBook] = useState<AccountingBook | null>(null);
+    const [books, setBooks] = useState<AccountingBook[]>([]);
+    const [periods, setPeriods] = useState<AccountingBookPeriod[]>([]);
+    const [fiscalPeriods, setFiscalPeriods] = useState<FiscalPeriod[]>([]);
+    const [initialization, setInitialization] = useState<AccountingBookInitialization | null>(null);
+    const [readiness, setReadiness] = useState<AccountingBookActivationReadiness | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [busy, setBusy] = useState(false);
+    const [newPeriodId, setNewPeriodId] = useState('');
+    const [periodAction, setPeriodAction] = useState<PeriodAction | null>(null);
+    const [actionReason, setActionReason] = useState('');
+    const [mode, setMode] = useState<AccountingBookInitializationMode>('IndependentOpeningBalances');
+    const [cutoff, setCutoff] = useState('');
+    const [sourceBookId, setSourceBookId] = useState('');
+    const [initReason, setInitReason] = useState('');
+    const [idempotencyKey, setIdempotencyKey] = useState('');
+    const [preparation, setPreparation] = useState<AccountingBookInitializationPreparation | null>(null);
+    const [lines, setLines] = useState<AccountingBookInitializationLine[]>([]);
+    const [initDecision, setInitDecision] = useState<'approve' | 'reject' | null>(null);
+    const [initDecisionReason, setInitDecisionReason] = useState('');
+
+    const load = useCallback(async () => {
+        if (!access.canRead) return;
+        setLoading(true); setError(null);
+        try {
+            const [selected, allBooks, bookPeriods, allPeriods, current, state] = await Promise.all([
+                financeDataService.getAccountingBook(bookId), financeDataService.getAccountingBooks(true),
+                financeDataService.getAccountingBookPeriods(bookId), financeDataService.getFiscalPeriods(),
+                financeDataService.getAccountingBookInitialization(bookId), financeDataService.getAccountingBookActivationReadiness(bookId),
+            ]);
+            setBook(selected); setBooks(allBooks); setPeriods(bookPeriods); setFiscalPeriods(allPeriods);
+            setInitialization(current); setReadiness(state);
+        } catch (reason) { setError(reason instanceof Error ? reason.message : 'Book readiness could not be loaded.'); }
+        finally { setLoading(false); }
+    }, [access.canRead, bookId]);
+
+    useEffect(() => { if (!authLoading && access.canRead) void load(); if (!authLoading && !access.canRead) setLoading(false); }, [access.canRead, authLoading, load]);
+    const availablePeriods = useMemo(() => fiscalPeriods.filter(item => !periods.some(period => period.fiscalPeriodId === item.id)), [fiscalPeriods, periods]);
+    const sourceBooks = books.filter(item => item.id !== bookId && item.bookType !== 'Delta' && item.lifecycleStatus === 'Active');
+
+    const run = async (action: () => Promise<unknown>, success: string) => {
+        setBusy(true);
+        try { await action(); toast({ title: success }); setPeriodAction(null); setInitDecision(null); await load(); }
+        catch (reason) { toast({ title: 'Governed action failed', description: reason instanceof Error ? reason.message : 'The request failed.', variant: 'destructive' }); }
+        finally { setBusy(false); }
+    };
+
+    const prepare = async () => {
+        if (!cutoff || (mode !== 'IndependentOpeningBalances' && !sourceBookId)) return;
+        setBusy(true);
+        try {
+            const result = await financeDataService.prepareAccountingBookInitialization(bookId, mode, cutoff, sourceBookId || null);
+            setPreparation(result);
+            setLines(result.accounts.map(item => {
+                const signed = item.authoritativeSignedBalance;
+                return { accountId: item.accountId, currencyCode: result.functionalCurrencyCode,
+                    openingDebit: signed > 0 ? signed : 0, openingCredit: signed < 0 ? -signed : 0,
+                    baseBookSignedBalance: mode === 'IndependentOpeningBalances' ? 0 : signed, openingAdjustment: 0 };
+            }));
+        } catch (reason) { setPreparation(null); toast({ title: 'Preparation failed', description: reason instanceof Error ? reason.message : 'The request failed.', variant: 'destructive' }); }
+        finally { setBusy(false); }
+    };
+
+    const updateLine = (index: number, field: 'openingDebit' | 'openingCredit' | 'openingAdjustment', value: number) => setLines(current => current.map((line, position) => {
+        if (position !== index) return line;
+        const next = { ...line, [field]: value };
+        if (field === 'openingAdjustment' && mode === 'BaseBalancesWithOpeningAdjustments') {
+            const signed = next.baseBookSignedBalance + value;
+            next.openingDebit = signed > 0 ? signed : 0; next.openingCredit = signed < 0 ? -signed : 0;
+        }
+        return next;
+    }));
+
+    if (authLoading || loading) return <div className="flex min-h-[320px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" aria-label="Loading book readiness" /></div>;
+    if (authError) return <Alert variant="destructive"><AlertTitle>Authentication unavailable</AlertTitle><AlertDescription>Book readiness access could not be verified.</AlertDescription></Alert>;
+    if (!access.canRead) return <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Permission required</AlertTitle><AlertDescription>Finance.Read is required to view book readiness.</AlertDescription></Alert>;
+    if (error || !book) return <Alert variant="destructive"><AlertCircle className="h-4 w-4" /><AlertTitle>Book readiness unavailable</AlertTitle><AlertDescription>{error || 'The accounting book was not found.'} <Button variant="link" className="h-auto p-0" onClick={() => void load()}><RefreshCw className="mr-1 h-3.5 w-3.5" />Retry</Button></AlertDescription></Alert>;
+
+    return <div className="space-y-6 p-6">
+        <div><Button asChild variant="ghost" className="px-0"><Link href="/finance/settings/accounting-books"><ArrowLeft className="mr-2 h-4 w-4" />Accounting books</Link></Button><h1 className="text-2xl font-semibold">{book.code} readiness</h1><p className="text-muted-foreground">Govern exact-book periods and immutable initialization evidence. This does not enable automatic parallel posting.</p></div>
+        <Alert className={readiness?.isReady ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50'}><ShieldCheck className="h-4 w-4" /><AlertTitle>{readiness?.isReady ? 'Activation evidence ready' : 'Activation blocked'}</AlertTitle><AlertDescription>{readiness?.isReady ? `Approved initialization and ${readiness.readyPeriodCount} required open period(s) are ready.` : readiness?.blockers.join(' ') || 'Readiness evidence is incomplete.'}</AlertDescription></Alert>
+
+        <Card><CardHeader><CardTitle>Accounting-book periods</CardTitle><CardDescription>The tenant fiscal calendar remains the outer lock; these exact-book states can only restrict it further.</CardDescription></CardHeader><CardContent className="space-y-4">
+            {periods.length === 0 ? <p className="text-muted-foreground">No exact-book periods are configured.</p> : periods.map(period => <div key={period.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-3"><div><p className="font-medium">{period.fiscalPeriodCode}</p><p className="text-sm text-muted-foreground">{period.startDate.slice(0, 10)} – {period.endDate.slice(0, 10)}</p></div><div className="flex items-center gap-2"><Badge>{period.status}</Badge>{period.pendingStatus && <Badge variant="outline">Pending {period.pendingStatus}</Badge>}{access.canManagePeriods && !period.pendingStatus && transitions[period.status].map(target => <Button key={target} size="sm" variant="outline" onClick={() => { setPeriodAction({ period, action: 'request', target }); setActionReason(''); }}>Request {target}</Button>)}{access.canApprovePeriods && period.pendingStatus && <><Button size="sm" onClick={() => { setPeriodAction({ period, action: 'approve' }); setActionReason(''); }}>Approve</Button><Button size="sm" variant="destructive" onClick={() => { setPeriodAction({ period, action: 'reject' }); setActionReason(''); }}>Reject</Button></>}</div></div>)}
+            {access.canManagePeriods && <div className="flex gap-2"><Select value={newPeriodId} onValueChange={setNewPeriodId}><SelectTrigger aria-label="Fiscal period"><SelectValue placeholder="Select fiscal period" /></SelectTrigger><SelectContent>{availablePeriods.map(period => <SelectItem key={period.id} value={period.id}>{period.periodCode} — {period.periodName}</SelectItem>)}</SelectContent></Select><Button disabled={!newPeriodId || busy} onClick={() => void run(() => financeDataService.createAccountingBookPeriod(bookId, newPeriodId), 'Book period created')}>Add Future period</Button></div>}
+            {periodAction && <div className="space-y-2 rounded-md border p-3"><Label htmlFor="period-reason">{periodAction.action === 'request' ? `Reason to request ${periodAction.target}` : 'Checker reason'}</Label><Textarea id="period-reason" value={actionReason} onChange={event => setActionReason(event.target.value)} /><div className="flex gap-2"><Button variant="outline" onClick={() => setPeriodAction(null)}>Cancel</Button><Button disabled={!actionReason.trim() || busy} onClick={() => void run(() => periodAction.action === 'request' ? financeDataService.requestAccountingBookPeriodTransition(bookId, periodAction.period.id, periodAction.target ?? '', actionReason, periodAction.period.rowVersion) : financeDataService.decideAccountingBookPeriodTransition(bookId, periodAction.period.id, periodAction.action, actionReason, periodAction.period.rowVersion), 'Period authority updated')}>Submit governed action</Button></div></div>}
+        </CardContent></Card>
+
+        <Card><CardHeader><CardTitle>Book initialization</CardTitle><CardDescription>Opening evidence must cover every eligible mapped account and reconcile to posted exact-book authority.</CardDescription></CardHeader><CardContent className="space-y-4">
+            {initialization ? <div className="grid gap-2 text-sm sm:grid-cols-3"><div><span className="text-muted-foreground">Version</span><p>{initialization.version}</p></div><div><span className="text-muted-foreground">Status</span><div className="mt-1"><Badge>{initialization.status}</Badge></div></div><div><span className="text-muted-foreground">Mode</span><p>{initialization.mode}</p></div><div><span className="text-muted-foreground">Coverage</span><p>{initialization.coveredAccountCount}/{initialization.requiredAccountCount}</p></div><div><span className="text-muted-foreground">Balanced</span><p>{initialization.isBalanced ? 'Yes' : 'No'}</p></div><div><span className="text-muted-foreground">Cutoff period</span><p>{initialization.cutoffFiscalPeriodCode} · {initialization.cutoffDate.slice(0, 10)}</p></div>{initialization.decidedByUserId && <div className="sm:col-span-3"><span className="text-muted-foreground">Decision evidence</span><p>{initialization.status} by {initialization.decidedByUserId}{initialization.decisionReason ? ` — ${initialization.decisionReason}` : ''}</p></div>}<div className="sm:col-span-3 break-all"><span className="text-muted-foreground">Evidence fingerprint</span><p>{initialization.evidenceFingerprint}</p></div></div> : <p className="text-muted-foreground">No initialization evidence has been prepared.</p>}
+            {access.canManageInitialization && (!initialization || initialization.status === 'Draft' || initialization.status === 'Rejected') && <div className="space-y-3 rounded-md border p-4"><div className="grid gap-3 sm:grid-cols-2"><div><Label>Initialization mode</Label><Select value={mode} onValueChange={value => { setMode(value as AccountingBookInitializationMode); setPreparation(null); }}><SelectTrigger aria-label="Initialization mode"><SelectValue /></SelectTrigger><SelectContent>{modes.map(item => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectContent></Select></div><div><Label htmlFor="cutoff">Cutoff date</Label><Input id="cutoff" type="date" value={cutoff} onChange={event => { setCutoff(event.target.value); setPreparation(null); }} /></div>{mode !== 'IndependentOpeningBalances' && <div className="sm:col-span-2"><Label>Source full book</Label><Select value={sourceBookId} onValueChange={value => { setSourceBookId(value); setPreparation(null); }}><SelectTrigger aria-label="Source full book"><SelectValue placeholder="Select source book" /></SelectTrigger><SelectContent>{sourceBooks.map(item => <SelectItem key={item.id} value={item.id}>{item.code} — {item.name}</SelectItem>)}</SelectContent></Select></div>}<div><Label htmlFor="init-key">Idempotency key</Label><Input id="init-key" value={idempotencyKey} onChange={event => setIdempotencyKey(event.target.value)} /></div><div><Label htmlFor="init-reason">Preparation reason</Label><Input id="init-reason" value={initReason} onChange={event => setInitReason(event.target.value)} /></div></div><Button variant="outline" disabled={busy || !cutoff || (mode !== 'IndependentOpeningBalances' && !sourceBookId)} onClick={() => void prepare()}>Load governed preparation</Button>
+                {preparation && <><p className="text-sm text-muted-foreground">Resolved cutoff period: {preparation.cutoffFiscalPeriodCode}</p><div className="space-y-2">{preparation.accounts.map((account, index) => <div key={account.accountId} className="grid gap-2 rounded border p-2 sm:grid-cols-6"><div className="sm:col-span-2"><p className="font-medium">{account.accountNumber} — {account.accountName}</p><p className="text-xs text-muted-foreground">{account.accountClassificationCode}</p></div><div><Label>Debit</Label><Input aria-label={`${account.accountNumber} debit`} type="number" value={lines[index]?.openingDebit ?? 0} onChange={event => updateLine(index, 'openingDebit', Number(event.target.value))} /></div><div><Label>Credit</Label><Input aria-label={`${account.accountNumber} credit`} type="number" value={lines[index]?.openingCredit ?? 0} onChange={event => updateLine(index, 'openingCredit', Number(event.target.value))} /></div><div><Label>Base signed</Label><p className="pt-2">{money(lines[index]?.baseBookSignedBalance ?? 0)} {preparation.functionalCurrencyCode}</p></div><div><Label>Adjustment</Label><Input aria-label={`${account.accountNumber} adjustment`} type="number" disabled={mode !== 'BaseBalancesWithOpeningAdjustments'} value={lines[index]?.openingAdjustment ?? 0} onChange={event => updateLine(index, 'openingAdjustment', Number(event.target.value))} /></div></div>)}</div><Button disabled={busy || !idempotencyKey.trim() || !initReason.trim()} onClick={() => void run(() => financeDataService.configureAccountingBookInitialization(bookId, { mode, cutoffDate: cutoff, cutoffFiscalPeriodId: preparation.cutoffFiscalPeriodId, cutoffFiscalPeriodCode: preparation.cutoffFiscalPeriodCode, sourceAccountingBookId: sourceBookId || null, sourceAccountingBookCode: preparation.sourceAccountingBookCode ?? null, idempotencyKey: idempotencyKey.trim(), reason: initReason.trim(), lines, rowVersion: initialization?.rowVersion }), 'Initialization evidence saved')}>Save draft evidence</Button></>}
+            </div>}
+            {access.canManageInitialization && initialization?.status === 'Draft' && <Button disabled={busy} onClick={() => void run(() => financeDataService.submitAccountingBookInitialization(bookId), 'Initialization submitted for independent approval')}>Submit initialization</Button>}
+            {access.canApproveInitialization && initialization?.status === 'PendingApproval' && <div className="space-y-2"><Label htmlFor="init-decision">Independent checker reason</Label><Textarea id="init-decision" value={initDecisionReason} onChange={event => setInitDecisionReason(event.target.value)} /><div className="flex gap-2"><Button onClick={() => setInitDecision('approve')}>Approve</Button><Button variant="destructive" onClick={() => setInitDecision('reject')}>Reject</Button>{initDecision && <Button disabled={busy || !initDecisionReason.trim()} onClick={() => void run(() => financeDataService.decideAccountingBookInitialization(bookId, initDecision, initDecisionReason, initialization.rowVersion), `Initialization ${initDecision}d`)}>Confirm {initDecision}</Button>}</div></div>}
+        </CardContent></Card>
+    </div>;
+}

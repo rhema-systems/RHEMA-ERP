@@ -10,6 +10,13 @@ export interface ArCollectionWorkItem {
   customerName: string;
   customerEmail?: string;
   customerPhone?: string;
+  customerAddress?: string;
+  customerCity?: string;
+  customerState?: string;
+  customerCountry?: string;
+  customerPostalCode?: string;
+  isPartnerResolved: boolean;
+  partnerResolutionMessage?: string;
   invoiceId: string;
   invoiceNumber: string;
   transactionDate: string;
@@ -51,8 +58,18 @@ export interface ArCollectionSummary {
   overdueFollowUpCount: number;
   promiseToPayCount: number;
   breachedPromiseCount: number;
-  totalOutstanding: number;
-  totalPromised: number;
+  nativeCurrencyTotals: ArCollectionCurrencyTotal[];
+  functionalCurrencyCode?: string;
+  functionalOutstandingTotal?: number;
+  functionalPromisedTotal?: number;
+  functionalTotalBasis: string;
+  functionalTotalUnavailableReason?: string;
+}
+
+export interface ArCollectionCurrencyTotal {
+  currencyCode: string;
+  outstandingAmount: number;
+  promisedAmount: number;
 }
 
 export interface ArCollectionAssignee {
@@ -81,6 +98,7 @@ export interface GenerateArCollectionTasksResult {
   refreshedCount: number;
   autoResolvedCount: number;
   reactivatedCount: number;
+  skippedUnresolvedPartnerCount: number;
 }
 
 class ArCollectionDataService {

@@ -1,0 +1,39 @@
+Exact base: 7bc24b22c0624aec9acae580ba8049d5f5a83425
+Final evidence-bearing candidate: 0263b16acffce062ebc106bf6fe30e348431b7fe
+Expected candidate tree: ce279a45ec09d59936a7475721b0a9cf397a7353
+Expected LF-terminated sequence SHA-256: 83C5CE3DD66525AB7BEAFC869343AB7A70116DEECB06F7A90B6C72209E59C6C4
+
+Ancestry comparison command (PowerShell):
+$recorded = @(Get-Content docs/Finance/evidence/gl-cutover-stage-a1/review-2/commit-ancestry.txt | Where-Object { $_ -match '^[0-9a-f]{40}$' })
+$actual = @(git rev-list --ancestry-path --reverse 7bc24b22c0624aec9acae580ba8049d5f5a83425..0263b16acffce062ebc106bf6fe30e348431b7fe)
+$difference = @(Compare-Object -ReferenceObject $recorded -DifferenceObject $actual -SyncWindow 0)
+if ($difference.Count -ne 0 -or $recorded.Count -ne 10) { throw 'Recorded Stage A.1 ancestry differs from Git.' }
+
+Recorded result:
+10 commits; zero differences; last commit 0263b16acffce062ebc106bf6fe30e348431b7fe.
+
+Candidate-tree command:
+git rev-parse 0263b16acffce062ebc106bf6fe30e348431b7fe^{tree}
+
+Recorded result:
+ce279a45ec09d59936a7475721b0a9cf397a7353
+
+Deterministic integration-tree comparison after applying the recorded commits:
+git diff --exit-code 0263b16acffce062ebc106bf6fe30e348431b7fe <integration-head>
+git rev-parse <integration-head>^{tree}
+
+Required result:
+The diff is empty and the reconstructed integration tree is ce279a45ec09d59936a7475721b0a9cf397a7353.
+
+The metadata-only handoff correction is represented by the `HEAD` sentinel. It cannot embed its own final
+commit hash without changing that hash; its scope is limited to this ancestry/tree metadata, the coordination
+ledger, and the evidence manifest.
+
+Full final-branch ancestry comparison (run at the metadata-only correction HEAD):
+$recordedFinal = @($recorded) + @((git rev-parse HEAD).Trim())
+$actualFinal = @(git rev-list --ancestry-path --reverse 7bc24b22c0624aec9acae580ba8049d5f5a83425..HEAD)
+$finalDifference = @(Compare-Object -ReferenceObject $recordedFinal -DifferenceObject $actualFinal -SyncWindow 0)
+if ($finalDifference.Count -ne 0 -or $recordedFinal.Count -ne 11) { throw 'Final Stage A.1 ancestry differs from Git.' }
+
+Required result:
+11 commits; zero differences. The handoff reports the concrete hash produced by resolving HEAD.

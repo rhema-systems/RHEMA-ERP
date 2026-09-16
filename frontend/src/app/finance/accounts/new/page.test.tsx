@@ -7,6 +7,13 @@ import type { FinanceSettings, SegmentStructure } from '@/types/finance';
 
 const { toast, push } = vi.hoisted(() => ({ toast: vi.fn(), push: vi.fn() }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast }) }));
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ hasPermission: () => true, isLoading: false }) }));
+vi.mock('@/components/finance/accounts/account-book-assignments', () => ({
+    AccountBookAssignments: ({ onChange }: { onChange: (value: unknown[]) => void }) => {
+        React.useEffect(() => onChange([{ accountingBookId: 'ifrs', accountClassificationId: 'asset', isEnabled: true }]), [onChange]);
+        return null;
+    },
+}));
 vi.mock('next/navigation', () => ({ useRouter: () => ({ push, back: vi.fn() }) }));
 vi.mock('@/services/finance/finance-data.service', () => ({
     financeDataService: {
@@ -17,7 +24,9 @@ vi.mock('@/services/finance/finance-data.service', () => ({
 const segment = (id: string, segmentName: string, segmentPosition: number, segmentLength: number,
     isActive = true): SegmentStructure => ({
     id, segmentName, segmentCode: id, segmentPosition, segmentLength,
-    isActive, isMandatory: true, dataType: 'Numeric', separatorCharacter: '-',
+    isActive, lifecycleStatus: 'Active', isRequired: true, rowVersion: '',
+    accountUsageCount: 0, canActivate: false, canFreeze: false, isSystemDefined: false,
+    dataType: 'Numeric', separatorCharacter: '-',
     lookupTableRequired: false, isReportingDimension: false, isNaturalAccount: id === 'natural',
     lookupValues: [], lookupValueCount: 0, createdAt: '', updatedAt: '',
 });
@@ -62,7 +71,7 @@ describe('New account active segment structure', () => {
         await fillAccount();
         fireEvent.click(screen.getByRole('button', { name: 'Create Account' }));
         await waitFor(() => expect(financeDataService.createAccount).toHaveBeenCalledWith(expect.objectContaining({
-            accountCode: '000-1210-0000', accountNumber: '000-1210-0000',
+            accountCode: '1210', accountNumber: '000-1210-0000',
             segmentValues: [
                 { segmentStructureId: 'department', segmentPosition: 1, segmentValue: '000' },
                 { segmentStructureId: 'natural', segmentPosition: 2, segmentValue: '1210' },

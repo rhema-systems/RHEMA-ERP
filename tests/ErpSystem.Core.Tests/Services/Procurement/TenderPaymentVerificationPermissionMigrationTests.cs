@@ -13,9 +13,11 @@ public sealed class TenderPaymentVerificationPermissionMigrationTests
 {
     private const string MigrationId =
         "20260831194500_GrantTenderPaymentVerificationPermission";
+    private const string CurrentBaselineId =
+        "20260913162402_DisposableDevelopmentCurrentModelBaseline";
 
     [Fact]
-    public void MigrationIsDiscoverableAndRepairsPermissionAndRoleGrants()
+    public void ArchivedPermissionRepairIsRetainedWhileOnlyCurrentBaselineIsDiscoverable()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer(
@@ -23,8 +25,10 @@ public sealed class TenderPaymentVerificationPermissionMigrationTests
             .Options;
         using var context = new ApplicationDbContext(options);
 
-        context.GetService<IMigrationsAssembly>().Migrations
-            .Should().ContainKey(MigrationId);
+        var discovered = context.GetService<IMigrationsAssembly>().Migrations;
+        discovered.Should().ContainSingle();
+        discovered.Should().ContainKey(CurrentBaselineId);
+        discovered.Should().NotContainKey(MigrationId);
 
         var builder = new MigrationBuilder(
             "Microsoft.EntityFrameworkCore.SqlServer");

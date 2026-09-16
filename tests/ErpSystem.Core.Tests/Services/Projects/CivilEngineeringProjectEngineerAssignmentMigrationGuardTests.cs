@@ -11,7 +11,7 @@ public sealed class CivilEngineeringProjectEngineerAssignmentMigrationGuardTests
     public void Migration_is_scoped_and_protects_tenant_policy_lifecycle_and_append_only_history()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Split("migrationBuilder.CreateTable(").Length.Should().Be(3);

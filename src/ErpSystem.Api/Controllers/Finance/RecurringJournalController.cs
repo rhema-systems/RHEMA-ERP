@@ -92,6 +92,23 @@ public sealed class RecurringJournalController : ControllerBase
         return Ok(result);
     }
 
+    [HttpPost("process-due-reversals")]
+    [Authorize(Policy = FinancePermissions.PostJournalEntries)]
+    public async Task<ActionResult<RecurringJournalReversalProcessingResultDto>> ProcessDueReversals(
+        [FromQuery] DateOnly? asOfDate, CancellationToken cancellationToken)
+    {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        if (asOfDate > today)
+            return BadRequest(new { error = "Future recurring-journal reversals cannot be processed early." });
+        return Ok(await _service.ProcessDueReversalsAsync(asOfDate ?? today, null, cancellationToken));
+    }
+
+    [HttpPost("occurrences/{occurrenceId:guid}/retry-reversal")]
+    [Authorize(Policy = FinancePermissions.PostJournalEntries)]
+    public async Task<ActionResult<RecurringJournalReversalProcessingResultDto>> RetryReversal(
+        Guid occurrenceId, CancellationToken cancellationToken) =>
+        Ok(await _service.ProcessDueReversalsAsync(DateOnly.FromDateTime(DateTime.UtcNow), occurrenceId, cancellationToken));
+
     [HttpPost("occurrences/{occurrenceId:guid}/approve")]
     [Authorize(Policy = FinancePermissions.ApproveJournalEntries)]
     public async Task<ActionResult<RecurringJournalOccurrenceDto>> ApproveOccurrence(

@@ -76,7 +76,7 @@ public sealed class QuantitySurveyFinalAccountRulesTests
     [Fact]
     public void Migration_guards_lifecycle_sources_settlement_and_append_only_history()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260810202208_AddQuantitySurveyFinalAccountLifecycle.cs");
 
         source.Should().Contain("TR_ProjectFinalAccounts_QS0506Guard")

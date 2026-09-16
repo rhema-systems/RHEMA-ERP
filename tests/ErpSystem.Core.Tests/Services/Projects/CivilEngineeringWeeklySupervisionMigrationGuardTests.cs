@@ -8,7 +8,7 @@ public sealed class CivilEngineeringWeeklySupervisionMigrationGuardTests
     public void Migration_protects_weekly_report_tenant_lineage_lifecycle_dms_and_append_only_evidence()
     {
         var root = FindRepositoryRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260820213000_AddCivilEngineeringWeeklySupervisionReports.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260820213000_AddCivilEngineeringWeeklySupervisionReports.cs"));
         Assert.Contains("CREATE TABLE ProjectCivilWeeklySupervisionReports", sql, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE ProjectCivilWeeklySupervisionActivities", sql, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE ProjectCivilWeeklySupervisionEvidence", sql, StringComparison.Ordinal);
@@ -26,7 +26,7 @@ public sealed class CivilEngineeringWeeklySupervisionMigrationGuardTests
     public void Forward_migration_adds_governed_progress_without_replacing_the_existing_weekly_report_owner()
     {
         var root = FindRepositoryRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260822003200_GovernCivilWeeklyProgressControls.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260822003200_GovernCivilWeeklyProgressControls.cs"));
 
         Assert.Contains("ALTER TABLE dbo.ProjectCivilWeeklySupervisionReports ADD", sql, StringComparison.Ordinal);
         Assert.DoesNotContain("CREATE TABLE ProjectCivilWeekly", sql, StringComparison.Ordinal);
@@ -45,7 +45,7 @@ public sealed class CivilEngineeringWeeklySupervisionMigrationGuardTests
     public void Forward_schedule_snapshot_repair_preserves_legacy_reports_and_freezes_new_schedule_evidence()
     {
         var root = FindRepositoryRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260822003300_SnapshotCivilWeeklyMilestoneSchedule.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260822003300_SnapshotCivilWeeklyMilestoneSchedule.cs"));
 
         Assert.Contains("MilestoneTargetDateSnapshot", sql, StringComparison.Ordinal);
         Assert.Contains("MilestoneActualDateSnapshot", sql, StringComparison.Ordinal);

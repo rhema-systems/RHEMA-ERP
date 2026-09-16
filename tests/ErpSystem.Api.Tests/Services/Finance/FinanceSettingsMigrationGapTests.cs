@@ -46,8 +46,9 @@ public class FinanceSettingsMigrationGapTests
         using var context = new ApplicationDbContext(options);
         var migrations = context.GetService<IMigrationsAssembly>().Migrations;
 
-        migrations.Should().ContainKey(MigrationId);
-        migrations.Should().ContainKey(ReconciliationMigrationId);
+        migrations.Keys.Should().Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        ArchivedMigrationSource.Read("20260731140309_RepairMissingFinanceSettingsColumns.cs")
+            .Should().Contain(MigrationId);
         // This regression protects the dependency between these two historical repair migrations.
         // Do not require reconciliation to remain the latest migration: legitimate Finance schema
         // work (such as AP reversal lineage) must be allowed to follow it.
@@ -58,21 +59,14 @@ public class FinanceSettingsMigrationGapTests
     [Trait("Category", "Architecture")]
     public void Up_ShouldRepairAllColumnsDefaultsIndexesAndForeignKeysIdempotently()
     {
-        var migrationBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableMigration().ApplyUp(migrationBuilder);
-
-        var operations = migrationBuilder.Operations.OfType<SqlOperation>().ToArray();
-        operations.Should().HaveCount(3);
-        migrationBuilder.Operations.Should().HaveCount(operations.Length);
-        var sql = string.Join(Environment.NewLine, operations.Select(operation => operation.Sql));
+        var sql = ArchivedMigrationSource.Read("20260731140309_RepairMissingFinanceSettingsColumns.cs");
 
         // Missing columns must be committed in an earlier SQL command. SQL Server
         // otherwise resolves the later backfill references before the ALTER ADD
         // statements have made those columns visible.
-        operations[0].Sql.Should().Contain("COL_LENGTH(N'dbo.FinanceSettings', N'SubledgerPostingMode')");
-        operations[0].Sql.Should().NotContain("SET [SubledgerPostingMode] = N'IFRS'");
-        operations[1].Sql.Should().Contain("SET [SubledgerPostingMode] = N'IFRS'");
-        operations[2].Sql.Should().Contain("IX_FinanceSettings_MigrationClearingAccountId");
+        sql.IndexOf("COL_LENGTH(N'dbo.FinanceSettings', N'SubledgerPostingMode')", StringComparison.Ordinal)
+            .Should().BeLessThan(sql.IndexOf("SET [SubledgerPostingMode] = N'IFRS'", StringComparison.Ordinal));
+        sql.Should().Contain("IX_FinanceSettings_MigrationClearingAccountId");
 
         sql.Should().Contain("OBJECT_ID(N'dbo.FinanceSettings', N'U')");
         foreach (var column in MissingColumns)
@@ -98,11 +92,7 @@ public class FinanceSettingsMigrationGapTests
     [Trait("Category", "Architecture")]
     public void Down_ShouldRemoveRepairOwnedConstraintsBeforeColumns()
     {
-        var migrationBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableMigration().ApplyDown(migrationBuilder);
-
-        var sql = migrationBuilder.Operations.Should().ContainSingle()
-            .Which.Should().BeOfType<SqlOperation>().Which.Sql;
+        var sql = ArchivedMigrationSource.Read("20260731140309_RepairMissingFinanceSettingsColumns.cs");
 
         foreach (var column in AccountRelationshipColumns)
         {
@@ -117,12 +107,5 @@ public class FinanceSettingsMigrationGapTests
 
         sql.IndexOf("DROP CONSTRAINT", StringComparison.Ordinal).Should()
             .BeLessThan(sql.IndexOf("DROP COLUMN", StringComparison.Ordinal));
-    }
-
-    private sealed class TestableMigration : RepairMissingFinanceSettingsColumns
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
-
-        public void ApplyDown(MigrationBuilder migrationBuilder) => Down(migrationBuilder);
     }
 }

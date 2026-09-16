@@ -13,17 +13,21 @@ public sealed class PurchaseRequisitionLinePlanItemLineageMigrationTests
 {
     private const string MigrationId =
         "20260829170000_AddPurchaseRequisitionLinePlanItemLineage";
+    private const string CurrentBaselineId =
+        "20260913162402_DisposableDevelopmentCurrentModelBaseline";
 
     [Fact]
-    public void MigrationIsDiscoverableAndBackfillsLegacyLineLineage()
+    public void ArchivedMigrationBackfillIsRetainedWhileOnlyCurrentBaselineIsDiscoverable()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=PurchaseRequisitionLineageMigrationDiscovery;Trusted_Connection=True")
             .Options;
         using var context = new ApplicationDbContext(options);
 
-        context.GetService<IMigrationsAssembly>().Migrations
-            .Should().ContainKey(MigrationId);
+        var discovered = context.GetService<IMigrationsAssembly>().Migrations;
+        discovered.Should().ContainSingle();
+        discovered.Should().ContainKey(CurrentBaselineId);
+        discovered.Should().NotContainKey(MigrationId);
 
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
         new TestableMigration().ApplyUp(builder);

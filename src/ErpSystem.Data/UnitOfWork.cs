@@ -92,15 +92,40 @@ public class UnitOfWork : IUnitOfWork
                 "The transaction lock resource must contain 1 to 255 characters.",
                 nameof(resource));
 
+        var providerName = _context.Database.ProviderName;
+
         // The in-memory provider is used by focused service tests and has no
-        // database connection or application-lock primitive. SQL Server still
-        // takes the transaction-owned sp_getapplock below.
+        // database connection or application-lock primitive. It remains a
+        // provider-local no-op only after the shared active-transaction guard.
         if (string.Equals(
-                _context.Database.ProviderName,
+                providerName,
                 "Microsoft.EntityFrameworkCore.InMemory",
                 StringComparison.Ordinal))
         {
             return;
+        }
+
+        // SQLite supplies locking and serialization through its database
+        // transaction. This branch supports relational tests and embedded-provider
+        // semantics; it is not a substitute for production distributed locking.
+        if (string.Equals(
+                providerName,
+                "Microsoft.EntityFrameworkCore.Sqlite",
+                StringComparison.Ordinal))
+        {
+            _ = _context.Database.CurrentTransaction
+                ?? throw new InvalidOperationException(
+                    "The active database transaction could not be resolved.");
+            return;
+        }
+
+        if (!string.Equals(
+                providerName,
+                "Microsoft.EntityFrameworkCore.SqlServer",
+                StringComparison.Ordinal))
+        {
+            throw new NotSupportedException(
+                $"Transaction locks are not supported for database provider '{providerName ?? "<unknown>"}'.");
         }
 
         var transaction =

@@ -38,6 +38,9 @@ import type {
   // Response Types
   PaginatedResponse,
   TrendAnalysisDto,
+  CurrencyRevaluationPreviewDto,
+  CurrencyRevaluationPostingResultDto,
+  FxRevaluationBatchSummaryDto,
 } from '@/types/finance';
 
 /**
@@ -65,13 +68,22 @@ export interface FinanceSettings {
   baseCurrency: string;
   retainedEarningsAccountId?: string;
   unrealizedGainLossAccountId?: string;
+  unrealizedFxGainAccountId?: string;
+  unrealizedFxLossAccountId?: string;
   realizedGainLossAccountId?: string;
+  realizedFxGainAccountId?: string;
+  realizedFxLossAccountId?: string;
   suspenseAccountId?: string;
   discountAllowedAccountId?: string;
   discountReceivedAccountId?: string;
   directionalExchangeRatePolicyEnabled?: boolean;
+  defaultTransactionQuoteSide?: ExchangeRateQuoteSide;
   arInvoiceQuoteSide?: ExchangeRateQuoteSide;
+  arSettlementQuoteSide?: ExchangeRateQuoteSide;
   apInvoiceQuoteSide?: ExchangeRateQuoteSide;
+  apSettlementQuoteSide?: ExchangeRateQuoteSide;
+  closingQuoteSide?: ExchangeRateQuoteSide;
+  requireExchangeRateOverrideApproval?: boolean;
 }
 
 // --- Currency ---
@@ -240,14 +252,13 @@ export interface CreateSegmentDto {
   dataType: string;
   separatorCharacter?: string;
   lookupTableRequired: boolean;
-  isMandatory: boolean;
-  isReportingDimension: boolean;
   isNaturalAccount: boolean;
   description?: string;
 }
 
 export interface UpdateSegmentDto extends CreateSegmentDto {
   id: string;
+  rowVersion: string;
 }
 
 export interface CreateSegmentLookupValueDto {
@@ -369,10 +380,12 @@ export interface MultiCurrencyDetailRequestDto {
 export interface RevaluationRequestDto {
   revaluationDate: string;
   revaluationType: string;
+  accountingBookCode: string;
   currencyCode?: string;
   unrealizedGainLossAccountId: string;
   previewOnly: boolean;
   notes?: string;
+  expectedPreviewFingerprint?: string;
 }
 
 export interface RevaluationResultDto {
@@ -1025,15 +1038,28 @@ class FinanceService {
   /**
    * Run currency revaluation
    */
-  async runRevaluation(request: RevaluationRequestDto): Promise<RevaluationResultDto> {
-    return apiService.post<RevaluationResultDto>(`${this.baseUrl}/revaluation`, request);
+  async runRevaluation(request: RevaluationRequestDto): Promise<CurrencyRevaluationPostingResultDto> {
+    return apiService.post<CurrencyRevaluationPostingResultDto>(`${this.baseUrl}/revaluation`, request);
   }
 
   /**
    * Preview revaluation (no posting)
    */
-  async previewRevaluation(request: Omit<RevaluationRequestDto, 'previewOnly'>): Promise<RevaluationResultDto> {
-    return this.runRevaluation({ ...request, previewOnly: true });
+  async previewRevaluation(request: Omit<RevaluationRequestDto, 'previewOnly'>): Promise<CurrencyRevaluationPreviewDto> {
+    return apiService.post<CurrencyRevaluationPreviewDto>(`${this.baseUrl}/revaluation/preview`, {
+      ...request,
+      previewOnly: true,
+    });
+  }
+
+  async getRevaluationHistory(startDate: string, endDate: string, currencyCode?: string): Promise<FxRevaluationBatchSummaryDto[]> {
+    const params = new URLSearchParams({ startDate, endDate });
+    if (currencyCode) params.set('currencyCode', currencyCode);
+    return apiService.get<FxRevaluationBatchSummaryDto[]>(`${this.baseUrl}/revaluation/history?${params.toString()}`);
+  }
+
+  async reverseRevaluation(batchId: string, reversalDate: string, reason: string): Promise<{ id: string; status: string; reversalJournalEntryId?: string; reversedAt?: string }> {
+    return apiService.post(`${this.baseUrl}/revaluation/${batchId}/reverse`, { reversalDate, reason });
   }
 
   // ==========================================

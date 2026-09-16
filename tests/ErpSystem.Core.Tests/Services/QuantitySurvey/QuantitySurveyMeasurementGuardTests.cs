@@ -10,7 +10,7 @@ public sealed class QuantitySurveyMeasurementGuardTests
     {
         var root = FindRepositoryRoot();
         const string migrationId = "20260810023000_AddQuantitySurveyMeasurementSheets";
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", migrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", migrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
         migration.Should().Contain($"[Migration(\"{migrationId}\")] ".Trim());
         Count(migration, "CREATE TABLE [QuantitySurveyMeasurement").Should().Be(4);

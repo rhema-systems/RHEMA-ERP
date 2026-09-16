@@ -87,8 +87,10 @@ public sealed class RecurringJournalRecurrenceCalculatorTests
             CreatedById = Guid.NewGuid(),
             Lines =
             [
-                new() { Id = Guid.NewGuid(), TenantId = tenantId, LineNumber = 1, AccountId = Guid.NewGuid(), IsDebit = true, FixedAmount = 2500m },
-                new() { Id = Guid.NewGuid(), TenantId = tenantId, LineNumber = 2, AccountId = Guid.NewGuid(), IsDebit = false, FixedAmount = 2500m }
+                new() { Id = Guid.NewGuid(), TenantId = tenantId, LineNumber = 1, AccountId = Guid.NewGuid(), IsDebit = true, FixedAmount = 1500m, DimensionValuesJson = "{\"DEPT\":\"FIN\"}" },
+                new() { Id = Guid.NewGuid(), TenantId = tenantId, LineNumber = 2, AccountId = Guid.NewGuid(), IsDebit = true, FixedAmount = 1000m },
+                new() { Id = Guid.NewGuid(), TenantId = tenantId, LineNumber = 3, AccountId = Guid.NewGuid(), IsDebit = false, FixedAmount = 2000m },
+                new() { Id = Guid.NewGuid(), TenantId = tenantId, LineNumber = 4, AccountId = Guid.NewGuid(), IsDebit = false, FixedAmount = 500m }
             ]
         });
         await db.SaveChangesAsync();
@@ -113,6 +115,10 @@ public sealed class RecurringJournalRecurrenceCalculatorTests
         occurrence.Status.Should().Be(RecurringJournalOccurrenceStatus.PendingApproval);
         occurrence.JournalEntryId.Should().BeNull("the scheduler may prepare work but must never post money");
         occurrence.TemplateSnapshotJson.Should().Contain("Monthly rates accrual");
+        occurrence.TemplateSnapshotJson.Should().Contain("DEPT");
+        occurrence.TemplateSnapshotJson.Should().Contain("sourceLineId");
+        occurrence.TemplateSnapshotJson.Split("sourceLineId").Should().HaveCount(5,
+            "all four immutable source-line identities must be frozen into the occurrence");
         (await db.JournalEntries.CountAsync()).Should().Be(0);
         audit.Verify(service => service.RecordAsync(
             It.Is<FinanceAuditEventDto>(item => item.EventType == FinanceAuditEvents.RecurringJournalOccurrenceGenerated),

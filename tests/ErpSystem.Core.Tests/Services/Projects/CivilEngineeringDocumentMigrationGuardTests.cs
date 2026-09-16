@@ -14,9 +14,9 @@ public sealed class CivilEngineeringDocumentMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
         var metadata = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(
             root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
@@ -75,7 +75,7 @@ public sealed class CivilEngineeringDocumentMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", DmsGovernanceMigrationId + ".cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", DmsGovernanceMigrationId + ".cs"));
 
         migration.Should().Contain("TDC-CIV-ENGINEERING-FILE")
             .And.Contain("TDC-CIVIL-ENGINEERING-RESTRICTED")

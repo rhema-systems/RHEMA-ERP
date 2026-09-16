@@ -21,17 +21,20 @@ namespace ErpSystem.Api.Services.Finance.GL
         private readonly ICurrentUserService _currentUser;
         private readonly IAccountingBookService _accountingBookService;
         private readonly ILogger<AccountService> _logger;
+        private readonly IAccountSegmentIdentityService? _segmentIdentityService;
 
         public AccountService(
             IUnitOfWork unitOfWork,
             ICurrentUserService currentUser,
             IAccountingBookService accountingBookService,
-            ILogger<AccountService> logger)
+            ILogger<AccountService> logger,
+            IAccountSegmentIdentityService? segmentIdentityService = null)
         {
             _unitOfWork = unitOfWork;
             _currentUser = currentUser;
             _accountingBookService = accountingBookService;
             _logger = logger;
+            _segmentIdentityService = segmentIdentityService;
         }
 
         private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -48,6 +51,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                     .ThenInclude(v => v.SegmentStructure)
                 .Include(a => a.AccountingBooks)
                     .ThenInclude(mapping => mapping.AccountingBook)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountClassification)
                 .FirstOrDefaultAsync(cancellationToken);
 
             if (account == null)
@@ -78,9 +83,141 @@ namespace ErpSystem.Api.Services.Finance.GL
                     .ThenInclude(v => v.SegmentStructure)
                 .Include(a => a.AccountingBooks)
                     .ThenInclude(mapping => mapping.AccountingBook)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountClassification)
                 .FirstOrDefaultAsync(cancellationToken);
 
             return account == null ? null : MapToDto(account);
+        }
+
+        public async Task<AccountTransactionInquiryPageDto> GetTransactionsAsync(
+            Guid accountId,
+            string accountingBookCode,
+            int page = 1,
+            int pageSize = 10,
+            CancellationToken cancellationToken = default)
+        {
+            if (accountId == Guid.Empty)
+                throw new ArgumentException("Account ID is required.", nameof(accountId));
+            if (string.IsNullOrWhiteSpace(accountingBookCode))
+                throw new ArgumentException("An accounting book code is required.", nameof(accountingBookCode));
+            if (page < 1)
+                throw new ArgumentOutOfRangeException(nameof(page), "Page must be at least 1.");
+            if (pageSize is < 1 or > 100)
+                throw new ArgumentOutOfRangeException(nameof(pageSize), "Page size must be between 1 and 100.");
+
+            var tenantId = TenantId;
+            var normalizedBookCode = accountingBookCode.Trim().ToUpperInvariant();
+            var accountExists = await _unitOfWork.Repository<Account>()
+                .GetQueryable(item => item.TenantId == tenantId && item.Id == accountId && !item.IsDeleted)
+                .AsNoTracking()
+                .AnyAsync(cancellationToken);
+            if (!accountExists)
+                throw new KeyNotFoundException($"Account with ID {accountId} was not found.");
+
+            var books = await _unitOfWork.Repository<AccountingBook>()
+                .GetQueryable(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.Code == normalizedBookCode)
+                .AsNoTracking()
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (books.Count == 0)
+                throw new KeyNotFoundException($"Accounting book '{normalizedBookCode}' was not found.");
+            if (books.Count > 1)
+                throw new InvalidOperationException($"Accounting book code '{normalizedBookCode}' is ambiguous.");
+
+            var book = books[0];
+            if (!book.IsActive)
+                throw new InvalidOperationException($"Accounting book '{book.Code}' is inactive.");
+
+            var mappings = await _unitOfWork.Repository<AccountAccountingBook>()
+                .GetQueryable(item => item.TenantId == tenantId
+                    && item.AccountId == accountId
+                    && item.AccountingBookId == book.Id
+                    && !item.IsDeleted)
+                .AsNoTracking()
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (mappings.Count == 0)
+                throw new KeyNotFoundException("The account is not assigned to the requested accounting book.");
+            if (mappings.Count > 1)
+                throw new InvalidOperationException("The account's accounting-book authority is ambiguous.");
+            if (!mappings[0].IsEnabled)
+                throw new InvalidOperationException("The account is disabled for the requested accounting book.");
+
+            var candidateTransactions = _unitOfWork.Repository<AccountTransaction>()
+                .GetQueryable(item => item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.AccountId == accountId
+                    && item.AccountingBookId == book.Id
+                    && item.BookClassification == book.Code
+                    && item.PostingStatus == "Posted")
+                .AsNoTracking();
+            var hasInvalidJournalEvidence = await candidateTransactions.AnyAsync(item =>
+                item.JournalEntry.TenantId != tenantId
+                || item.JournalEntry.IsDeleted
+                || item.JournalEntry.AccountingBookId != book.Id
+                || item.JournalEntry.BookClassification != book.Code
+                || item.JournalEntry.PostingStatus != "Posted", cancellationToken);
+            if (hasInvalidJournalEvidence)
+                throw new InvalidOperationException("Posted account transaction journal evidence is inconsistent with the requested tenant and accounting book.");
+
+            var transactions = candidateTransactions
+                .Where(item => item.JournalEntry.TenantId == tenantId
+                    && !item.JournalEntry.IsDeleted
+                    && item.JournalEntry.AccountingBookId == book.Id
+                    && item.JournalEntry.BookClassification == book.Code
+                    && item.JournalEntry.PostingStatus == "Posted");
+
+            var totalCount = await transactions.CountAsync(cancellationToken);
+            var rows = await transactions
+                .Include(item => item.JournalEntry)
+                .Include(item => item.FinanceDimensionSnapshot)!
+                    .ThenInclude(snapshot => snapshot!.Items)
+                .Include(item => item.FinanceDimensionSet)!
+                    .ThenInclude(set => set!.Items)
+                .OrderByDescending(item => item.PostedDate ?? item.TransactionDate)
+                .ThenByDescending(item => item.JournalEntry.JournalEntryNumber)
+                .ThenByDescending(item => item.LineNumber)
+                .ThenByDescending(item => item.Id)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .AsSplitQuery()
+                .ToListAsync(cancellationToken);
+
+            await ValidateInquiryDimensionEvidenceAsync(rows, tenantId, cancellationToken);
+
+            var journalEntryIds = rows.Select(item => item.JournalEntryId).Distinct().ToList();
+            var postingEvents = journalEntryIds.Count == 0
+                ? new Dictionary<Guid, FinancePostingEvent>()
+                : (await _unitOfWork.Repository<FinancePostingEvent>()
+                    .GetQueryable(item => !item.IsDeleted
+                        && item.JournalEntryId.HasValue
+                        && item.AccountingBookId == book.Id
+                        && journalEntryIds.Contains(item.JournalEntryId.Value))
+                    .AsNoTracking()
+                    .OrderByDescending(item => item.PostedAt ?? item.PostingDate)
+                    .ThenByDescending(item => item.Id)
+                    .ToListAsync(cancellationToken))
+                    .GroupBy(item => item.JournalEntryId!.Value)
+                    .ToDictionary(
+                        group => group.Key,
+                        group => SelectAndValidatePostingEvent(group, rows, book, tenantId));
+
+            return new AccountTransactionInquiryPageDto
+            {
+                Items = rows.Select(row => MapInquiryItem(
+                    row,
+                    book,
+                    postingEvents.GetValueOrDefault(row.JournalEntryId))).ToList(),
+                TotalCount = totalCount,
+                Page = page,
+                PageSize = pageSize,
+                TotalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (double)pageSize),
+                AccountingBookCode = book.Code,
+                AccountingBookName = book.Name
+            };
         }
 
         public async Task<IReadOnlyList<AccountDto>> GetAllAsync(
@@ -92,13 +229,13 @@ namespace ErpSystem.Api.Services.Finance.GL
             int? take = null,
             CancellationToken cancellationToken = default)
         {
-            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
-
             IQueryable<Account> query = _unitOfWork.Accounts
                 .GetQueryable(a => a.TenantId == TenantId)
                 .Include(a => a.SegmentValues)
                 .Include(a => a.AccountingBooks)
-                    .ThenInclude(mapping => mapping.AccountingBook);
+                    .ThenInclude(mapping => mapping.AccountingBook)
+                .Include(a => a.AccountingBooks)
+                    .ThenInclude(mapping => mapping.AccountClassification);
 
             if (!string.IsNullOrWhiteSpace(accountType) &&
                 Enum.TryParse<AccountType>(accountType.Trim(), ignoreCase: true, out var parsedAccountType))
@@ -137,8 +274,11 @@ namespace ErpSystem.Api.Services.Finance.GL
                     a.AccountCode.Contains(term) ||
                     a.AccountNumber.Contains(term) ||
                     a.AccountName.Contains(term) ||
-                    (a.AccountCategory != null && a.AccountCategory.Contains(term)) ||
-                    (a.AccountSubCategory != null && a.AccountSubCategory.Contains(term)));
+                    a.AccountingBooks.Any(mapping => !mapping.IsDeleted
+                        && mapping.AccountClassification != null
+                        && !mapping.AccountClassification.IsDeleted
+                        && (mapping.AccountClassification.Code.Contains(term)
+                            || mapping.AccountClassification.Name.Contains(term))));
             }
 
             IQueryable<Account> orderedQuery = query
@@ -180,13 +320,15 @@ namespace ErpSystem.Api.Services.Finance.GL
             }
 
             var now = DateTime.UtcNow;
-            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
+            var identityService = _segmentIdentityService ?? throw new InvalidOperationException("The Finance account identity validator is unavailable.");
+            var identity = await identityService.ValidateAndComposeAsync(TenantId, dto.SegmentValues, dto.AccountNumber, cancellationToken: cancellationToken);
+            EnsureNaturalAccountCode(dto.AccountCode, identity.NaturalAccountCode);
 
             var account = new Account
             {
                 TenantId = TenantId,
-                AccountCode = dto.AccountCode ?? string.Empty,
-                AccountNumber = string.Empty, // Will be generated from segments
+                AccountCode = identity.NaturalAccountCode,
+                AccountNumber = identity.AccountNumber,
                 AccountName = dto.AccountName,
                 AccountType = Enum.Parse<AccountType>(dto.AccountType),
                 AccountCategory = dto.AccountCategory,
@@ -194,10 +336,6 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CashFlowClassification = NormalizeCashFlowClassification(dto.CashFlowClassification),
                 CurrencyCode = dto.CurrencyCode,
                 IsMultiCurrency = dto.IsMultiCurrency,
-                // Adjust property names to match Account entity:
-                IsIFRSClassified = dto.IsIFRSClassified,
-                IsBaseClassified = dto.IsBaseFrameworkClassified,
-                IsLocalClassified = dto.IsLocalFrameworkClassified,
                 IsControlAccount = dto.IsControlAccount,
                 AllowDirectPosting = dto.IsPostingAllowed,
                 ReferenceNumber = dto.ReferenceNumber ?? string.Empty,
@@ -213,13 +351,9 @@ namespace ErpSystem.Api.Services.Finance.GL
             };
 
             // Handle segments
-            if (dto.SegmentValues is { Count: > 0 })
+            if (identity.Values.Count > 0)
             {
-                var positions = dto.SegmentValues.Select(v => v.SegmentPosition).ToList();
-                if (positions.Count != positions.Distinct().Count())
-                    throw new InvalidOperationException("Segment positions must be unique per account.");
-
-                foreach (var seg in dto.SegmentValues.OrderBy(v => v.SegmentPosition))
+                foreach (var seg in identity.Values.OrderBy(v => v.SegmentPosition))
                 {
                     var segEntity = new AccountSegmentValue
                     {
@@ -239,24 +373,13 @@ namespace ErpSystem.Api.Services.Finance.GL
                     account.SegmentValues.Add(segEntity);
                 }
 
-                // Auto-generate AccountNumber from segments
-                var orderedSegmentValues = account.SegmentValues
-                    .OrderBy(v => v.SegmentPosition)
-                    .Select(v => v.SegmentValue);
-
-                // Get separator from settings
-                var settings = await _unitOfWork.Repository<FinanceSettings>()
-                    .GetQueryable(s => s.TenantId == TenantId)
-                    .FirstOrDefaultAsync(cancellationToken);
-                var separator = settings?.AccountSeparator ?? "-";
-
-                account.AccountNumber = string.Join(separator, orderedSegmentValues);
             }
 
             // Persist via repository/UnitOfWork
             await _unitOfWork.Accounts.AddAsync(account);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _accountingBookService.SyncAccountMappingsAsync(account, cancellationToken);
+            // Mapping validation runs before the shared context commits so a rejected book or
+            // classification cannot leave a partially-created account behind.
+            await _accountingBookService.SyncAccountMappingsAsync(account, dto.AccountingBooks, cancellationToken);
 
             return MapToDto(account);
         }
@@ -275,6 +398,23 @@ namespace ErpSystem.Api.Services.Finance.GL
 
             if (account == null)
                 throw new KeyNotFoundException($"Account with Id '{dto.Id}' not found.");
+
+            var submittedSegments = dto.SegmentValues.Count > 0
+                ? dto.SegmentValues.Select(seg => new AccountSegmentValueCreateDto
+                {
+                    SegmentStructureId = seg.SegmentStructureId, SegmentPosition = seg.SegmentPosition,
+                    SegmentValue = seg.SegmentValue, SegmentLookupValueId = seg.SegmentLookupValueId,
+                    IsLocked = seg.IsLocked, EffectiveDate = seg.EffectiveDate, EndDate = seg.EndDate
+                }).ToList()
+                : account.SegmentValues.Select(seg => new AccountSegmentValueCreateDto
+                {
+                    SegmentStructureId = seg.SegmentStructureId, SegmentPosition = seg.SegmentPosition,
+                    SegmentValue = seg.SegmentValue, SegmentLookupValueId = seg.SegmentLookupValueId,
+                    IsLocked = seg.IsLocked, EffectiveDate = seg.EffectiveDate, EndDate = seg.EndDate
+                }).ToList();
+            var identityService = _segmentIdentityService ?? throw new InvalidOperationException("The Finance account identity validator is unavailable.");
+            var identity = await identityService.ValidateAndComposeAsync(TenantId, submittedSegments, dto.AccountNumber, account.Id, cancellationToken);
+            EnsureNaturalAccountCode(dto.AccountCode, identity.NaturalAccountCode);
 
             account.UpdatedAt = now;
             account.UpdatedBy = UserName;
@@ -302,8 +442,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 account.AccountSubCategory = dto.AccountSubCategory;
             }
 
-            account.AccountCode = dto.AccountCode ?? account.AccountCode;
-            account.AccountNumber = dto.AccountNumber;
+            account.AccountCode = identity.NaturalAccountCode;
+            account.AccountNumber = identity.AccountNumber;
             account.AccountName = dto.AccountName;
             account.CashFlowClassification = NormalizeCashFlowClassification(dto.CashFlowClassification);
             // account.AccountType = Enum.Parse<AccountType>(dto.AccountType); // Handled above
@@ -311,9 +451,6 @@ namespace ErpSystem.Api.Services.Finance.GL
             // account.AccountSubCategory = dto.AccountSubCategory; // Handled above
             account.CurrencyCode = dto.CurrencyCode;
             account.IsMultiCurrency = dto.IsMultiCurrency;
-            account.IsIFRSClassified = dto.IsIFRSClassified;
-            account.IsBaseClassified = dto.IsBaseFrameworkClassified;
-            account.IsLocalClassified = dto.IsLocalFrameworkClassified;
             account.IsControlAccount = dto.IsControlAccount;
             account.AllowDirectPosting = dto.IsPostingAllowed;
             account.ReferenceNumber = dto.ReferenceNumber ?? account.ReferenceNumber;
@@ -335,9 +472,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 await _unitOfWork.AccountSegmentValues.DeleteRangeAsync(
                     v => v.TenantId == TenantId && v.AccountId == account.Id);
 
-                account.SegmentValues.Clear();
-
-                foreach (var seg in dto.SegmentValues.OrderBy(v => v.SegmentPosition))
+                foreach (var seg in identity.Values.OrderBy(v => v.SegmentPosition))
                 {
                     var segEntity = new AccountSegmentValue
                     {
@@ -354,27 +489,31 @@ namespace ErpSystem.Api.Services.Finance.GL
                         CreatedBy = UserName
                     };
 
-                    account.SegmentValues.Add(segEntity);
+                    await _unitOfWork.Repository<AccountSegmentValue>().AddAsync(segEntity);
+                    // DbSet relationship fix-up normally attaches the new row to the tracked account.
+                    // Keep the response projection deterministic even for repository implementations
+                    // that do not perform fix-up until DetectChanges runs.
+                    if (!account.SegmentValues.Contains(segEntity))
+                        account.SegmentValues.Add(segEntity);
                 }
 
-                var orderedSegmentValues = account.SegmentValues
-                    .OrderBy(v => v.SegmentPosition)
-                    .Select(v => v.SegmentValue);
-
-                // Get separator from settings
-                var settings = await _unitOfWork.Repository<FinanceSettings>()
-                    .GetQueryable(s => s.TenantId == TenantId)
-                    .FirstOrDefaultAsync(cancellationToken);
-                var separator = settings?.AccountSeparator ?? "-";
-
-                account.AccountNumber = string.Join(separator, orderedSegmentValues);
+                account.AccountNumber = identity.AccountNumber;
             }
 
-            await _unitOfWork.Accounts.UpdateAsync(account);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await _accountingBookService.SyncAccountMappingsAsync(account, cancellationToken);
+            // The account and its replacement segment rows are already tracked. Calling Update on the
+            // aggregate here would reclassify newly-added segment rows as Modified after EF generated
+            // their GUIDs, producing updates for rows that do not yet exist.
+            await _accountingBookService.SyncAccountMappingsAsync(account, dto.AccountingBooks, cancellationToken);
 
             return MapToDto(account);
+        }
+
+        private static void EnsureNaturalAccountCode(string? submittedCode, string naturalAccountCode)
+        {
+            if (!string.IsNullOrWhiteSpace(submittedCode)
+                && !string.Equals(submittedCode.Trim(), naturalAccountCode, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"Account code must match the Natural Account segment value '{naturalAccountCode}'.");
         }
 
         public async Task DeleteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -483,6 +622,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 (account.ExpirationDate == null || account.ExpirationDate > DateTime.UtcNow);
 
             dto.SegmentValues = account.SegmentValues
+                .Where(v => !v.IsDeleted)
                 .OrderBy(v => v.SegmentPosition)
                 .Select(v => new AccountSegmentValueDto
                 {
@@ -515,8 +655,22 @@ namespace ErpSystem.Api.Services.Finance.GL
                     AccountingBookId = mapping.AccountingBookId,
                     AccountingBookCode = mapping.AccountingBook.Code,
                     AccountingBookName = mapping.AccountingBook.Name,
+                    AccountingBookIsDefault = mapping.AccountingBook.IsDefault,
                     IsEnabled = mapping.IsEnabled,
-                    FinancialStatementLineItem = mapping.FinancialStatementLineItem
+                    AccountClassificationId = mapping.AccountClassificationId,
+                    AccountClassificationCode = mapping.AccountClassification?.Code,
+                    AccountClassificationName = mapping.AccountClassification?.Name,
+                    AccountClassificationSystemRole = mapping.AccountClassification?.SystemRole?.ToString(),
+                    AccountClassificationStatus = mapping.AccountClassification?.Status.ToString(),
+                    IsMigrationReady = !mapping.IsEnabled || mapping.AccountClassification is
+                    {
+                        Status: AccountClassificationStatus.Active,
+                        IsPostingClassification: true
+                    },
+                    FinancialStatementLineItem = mapping.FinancialStatementLineItem,
+                    RowVersion = mapping.RowVersion.Length == 0
+                        ? string.Empty
+                        : Convert.ToBase64String(mapping.RowVersion)
                 })
                 .ToList();
 
@@ -586,9 +740,8 @@ namespace ErpSystem.Api.Services.Finance.GL
                 BaseCurrencyEquivalent = RoundMoney(dto.OpeningBalanceBaseCurrency ?? 0m),
                 CurrentExchangeRate = CalculateOpeningRate(dto.OpeningBalance, dto.OpeningBalanceBaseCurrency),
                 RateEffectiveDate = dto.OpeningBalanceDate?.Date,
-                RevaluationRequired = dto.RevaluationRequired,
                 RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency),
-                TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily"),
+                TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType),
                 TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide),
                 RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End"),
                 RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide),
@@ -602,7 +755,12 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CreatedDate = now
             };
 
-            account.CurrencyLinks.Add(currencyLink);
+            // The link has an application-assigned Guid. Adding it only through a
+            // tracked account navigation can make EF infer Modified for the detached
+            // dependent, which produces an UPDATE and then a concurrency exception
+            // because the row does not exist yet. Explicitly register the new link as
+            // Added while retaining the stable identity used by Finance evidence.
+            await _unitOfWork.Repository<AccountCurrencyLink>().AddAsync(currencyLink);
             await _unitOfWork.SaveChangesAsync();
             return MapCurrencyLinkToDto(currencyLink, account);
         }
@@ -718,9 +876,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             if (!link.IsActive)
                 throw new InvalidOperationException("Inactive currency-link policies are locked. Reactivate the link before changing its rate policy.");
 
-            link.RevaluationRequired = dto.RevaluationRequired;
             link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
-            link.TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily");
+            link.TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType);
             link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);
             link.RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End");
             link.RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide);
@@ -753,7 +910,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                 var dto = MapCurrencyLinkToDto(link, account);
                 var currencyCode = NormalizeCurrencyCode(link.LinkedCurrencyCode);
                 var transactionCount = await _unitOfWork.Repository<AccountTransaction>()
-                    .GetQueryable(t => t.AccountId == accountId
+                    .GetQueryable(t => t.TenantId == TenantId && t.AccountId == accountId
                         && t.TransactionCurrency == currencyCode
                         && !t.IsDeleted)
                     .CountAsync();
@@ -778,12 +935,15 @@ namespace ErpSystem.Api.Services.Finance.GL
                 CurrencyCode = currencyCode,
                 LinkedCurrencyCode = currencyCode,
                 CurrencyName = currencyCode, // Use code as name for now
-                CurrentBalance = link.ForeignCurrencyBalance,
-                CurrentBalanceBaseCurrency = link.BaseCurrencyEquivalent,
-                ForeignCurrencyBalance = link.ForeignCurrencyBalance,
-                BaseCurrencyBalance = link.BaseCurrencyEquivalent,
+                // Currency links are configuration only. Their legacy mutable balances stopped being
+                // authoritative in C2; callers must select an exact book through the exposure inquiry.
+                CurrentBalance = null,
+                CurrentBalanceBaseCurrency = null,
+                ForeignCurrencyBalance = null,
+                BaseCurrencyBalance = null,
+                HasAuthoritativeCurrentBalance = false,
+                CurrentBalanceAuthority = "ExactBookExposureRequired",
                 CurrentExchangeRate = currentExchangeRate,
-                RevaluationRequired = link.RevaluationRequired,
                 RevaluationFrequency = link.RevaluationFrequency.ToString(),
                 TransactionRateType = link.TransactionRateType,
                 TransactionQuoteSide = link.TransactionQuoteSide.ToString(),
@@ -829,6 +989,22 @@ namespace ErpSystem.Api.Services.Finance.GL
             return normalized;
         }
 
+        private static string NormalizeTransactionRateType(string? value)
+        {
+            var normalized = NormalizeRateType(value, "Daily");
+            if (!Enum.TryParse<ExchangeRateType>(
+                    normalized.Replace("-", string.Empty).Replace(" ", string.Empty),
+                    ignoreCase: true,
+                    out var rateType)
+                || rateType is not (ExchangeRateType.Daily or ExchangeRateType.Fixed))
+            {
+                throw new InvalidOperationException(
+                    "Transaction rate type must be Daily or Fixed. Average is reserved for reporting/valuation, and Spot requires a governed provider workflow.");
+            }
+
+            return rateType.ToString();
+        }
+
         private static RevaluationFrequency ParseRevaluationFrequency(string? value)
         {
             if (string.IsNullOrWhiteSpace(value))
@@ -867,9 +1043,8 @@ namespace ErpSystem.Api.Services.Finance.GL
             DateTime now,
             Guid? currentUserId)
         {
-            link.RevaluationRequired = dto.RevaluationRequired;
             link.RevaluationFrequency = ParseRevaluationFrequency(dto.RevaluationFrequency);
-            link.TransactionRateType = NormalizeRateType(dto.TransactionRateType, "Daily");
+            link.TransactionRateType = NormalizeTransactionRateType(dto.TransactionRateType);
             link.TransactionQuoteSide = ParseQuoteSide(dto.TransactionQuoteSide);
             link.RevaluationRateType = NormalizeRateType(dto.RevaluationRateType, "Month-End");
             link.RevaluationQuoteSide = ParseQuoteSide(dto.RevaluationQuoteSide);
@@ -883,6 +1058,238 @@ namespace ErpSystem.Api.Services.Finance.GL
 
         private Guid? TryGetCurrentUserId()
             => Guid.TryParse(_currentUser.UserId, out var userId) ? userId : null;
+
+        private async Task ValidateInquiryDimensionEvidenceAsync(
+            IReadOnlyCollection<AccountTransaction> rows,
+            Guid tenantId,
+            CancellationToken cancellationToken)
+        {
+            var snapshotItems = rows
+                .Where(row => row.FinanceDimensionSnapshot is not null)
+                .SelectMany(row => row.FinanceDimensionSnapshot!.Items)
+                .ToList();
+            var setItems = rows
+                .Where(row => row.FinanceDimensionSet is not null)
+                .SelectMany(row => row.FinanceDimensionSet!.Items)
+                .ToList();
+
+            foreach (var row in rows)
+            {
+                if (row.TenantId != tenantId
+                    || row.JournalEntry.TenantId != tenantId
+                    || row.JournalEntryId != row.JournalEntry.Id)
+                {
+                    throw new InvalidOperationException("Account transaction tenant or journal evidence is inconsistent.");
+                }
+
+                if (row.FinanceDimensionSetId.HasValue
+                    && (row.FinanceDimensionSet is null
+                        || row.FinanceDimensionSet.Id != row.FinanceDimensionSetId.Value
+                        || row.FinanceDimensionSet.TenantId != tenantId
+                        || row.FinanceDimensionSet.IsDeleted))
+                {
+                    throw new InvalidOperationException("Account transaction dimension-set evidence failed tenant integrity validation.");
+                }
+
+                if (row.FinanceDimensionSnapshotId.HasValue
+                    && (row.FinanceDimensionSnapshot is null
+                        || row.FinanceDimensionSnapshot.Id != row.FinanceDimensionSnapshotId.Value
+                        || row.FinanceDimensionSnapshot.TenantId != tenantId
+                        || row.FinanceDimensionSnapshot.IsDeleted
+                        || !row.FinanceDimensionSetId.HasValue
+                        || row.FinanceDimensionSnapshot.FinanceDimensionSetId != row.FinanceDimensionSetId.Value))
+                {
+                    throw new InvalidOperationException("Account transaction dimension-snapshot evidence failed tenant or set integrity validation.");
+                }
+            }
+
+            if (snapshotItems.Any(item => item.TenantId != tenantId
+                    || item.IsDeleted
+                    || rows.All(row => row.FinanceDimensionSnapshotId != item.FinanceDimensionSnapshotId))
+                || setItems.Any(item => item.TenantId != tenantId
+                    || item.IsDeleted
+                    || rows.All(row => row.FinanceDimensionSetId != item.FinanceDimensionSetId)))
+            {
+                throw new InvalidOperationException("Account transaction dimension item evidence failed tenant or parent integrity validation.");
+            }
+
+            var definitionIds = snapshotItems.Select(item => item.FinanceDimensionDefinitionId)
+                .Concat(setItems.Select(item => item.FinanceDimensionDefinitionId)).Distinct().ToList();
+            var valueIds = snapshotItems.Select(item => item.FinanceDimensionValueId)
+                .Concat(setItems.Select(item => item.FinanceDimensionValueId)).Distinct().ToList();
+            if (definitionIds.Count == 0 && valueIds.Count == 0)
+                return;
+
+            var definitions = await _unitOfWork.Repository<FinanceDimensionDefinition>()
+                .GetQueryable(item => definitionIds.Contains(item.Id))
+                .AsNoTracking()
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
+            var values = await _unitOfWork.Repository<FinanceDimensionValue>()
+                .GetQueryable(item => valueIds.Contains(item.Id))
+                .AsNoTracking()
+                .ToDictionaryAsync(item => item.Id, cancellationToken);
+
+            foreach (var item in snapshotItems.Select(item => (
+                         item.FinanceDimensionDefinitionId, item.FinanceDimensionValueId))
+                     .Concat(setItems.Select(item => (
+                         item.FinanceDimensionDefinitionId, item.FinanceDimensionValueId))))
+            {
+                if (!definitions.TryGetValue(item.FinanceDimensionDefinitionId, out var definition)
+                    || definition.TenantId != tenantId
+                    || definition.IsDeleted
+                    || !values.TryGetValue(item.FinanceDimensionValueId, out var value)
+                    || value.TenantId != tenantId
+                    || value.IsDeleted
+                    || value.FinanceDimensionDefinitionId != definition.Id)
+                {
+                    throw new InvalidOperationException("Account transaction dimension definition/value lineage failed tenant integrity validation.");
+                }
+            }
+        }
+
+        private static FinancePostingEvent SelectAndValidatePostingEvent(
+            IEnumerable<FinancePostingEvent> events,
+            IReadOnlyCollection<AccountTransaction> rows,
+            AccountingBook book,
+            Guid tenantId)
+        {
+            var group = events.ToList();
+            var journalId = group[0].JournalEntryId!.Value;
+            var journalRows = rows.Where(row => row.JournalEntryId == journalId).ToList();
+            if (group.Any(item => item.TenantId != tenantId
+                    || item.JournalEntryId != journalId
+                    || item.AccountingBookId != book.Id
+                    || item.BookClassification != book.Code
+                    || item.PostingStatus != "Posted"
+                    || string.IsNullOrWhiteSpace(item.SourceModule)
+                    || string.IsNullOrWhiteSpace(item.SourceDocumentType)
+                    || item.SourceDocumentId == Guid.Empty)
+                || group.Count != 1)
+            {
+                throw new InvalidOperationException("Posting-event evidence is ambiguous or inconsistent with the requested tenant, journal, book, or posted status.");
+            }
+
+            var postingEvent = group[0];
+            foreach (var row in journalRows)
+            {
+                EnsureMatchingEvidence(row.SourceModule, postingEvent.SourceModule, "source module");
+                EnsureMatchingEvidence(row.SourceDocumentType, postingEvent.SourceDocumentType, "source document type");
+                EnsureMatchingEvidence(row.SourceDocumentId, postingEvent.SourceDocumentId, "source document");
+                EnsureMatchingEvidence(row.JournalEntry.SourceModule, postingEvent.SourceModule, "journal source module");
+                EnsureMatchingEvidence(row.JournalEntry.OriginModuleCode, postingEvent.OriginModuleCode, "origin module");
+                EnsureMatchingEvidence(row.JournalEntry.SourceDocumentType, postingEvent.SourceDocumentType, "journal source document type");
+                EnsureMatchingEvidence(row.JournalEntry.SourceDocumentId, postingEvent.SourceDocumentId, "journal source document");
+            }
+
+            return postingEvent;
+        }
+
+        private static void EnsureMatchingEvidence(string? left, string? right, string evidenceName)
+        {
+            if (!string.IsNullOrWhiteSpace(left)
+                && (string.IsNullOrWhiteSpace(right)
+                    || !string.Equals(left, right, StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException($"Posting-event {evidenceName} evidence is inconsistent.");
+            }
+        }
+
+        private static void EnsureMatchingEvidence(Guid? left, Guid right, string evidenceName)
+        {
+            if (left.HasValue && left.Value != right)
+                throw new InvalidOperationException($"Posting-event {evidenceName} evidence is inconsistent.");
+        }
+
+        private static AccountTransactionInquiryItemDto MapInquiryItem(
+            AccountTransaction transaction,
+            AccountingBook book,
+            FinancePostingEvent? postingEvent)
+        {
+            var snapshot = transaction.FinanceDimensionSnapshot;
+            var dimensions = snapshot is not null
+                ? snapshot.Items
+                    .Where(item => !item.IsDeleted)
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .ThenBy(item => item.Id)
+                    .Select(MapDimensionAssignment)
+                    .ToList()
+                : transaction.FinanceDimensionSet?.Items
+                    .Where(item => !item.IsDeleted)
+                    .OrderBy(item => item.DimensionCodeSnapshot)
+                    .ThenBy(item => item.Id)
+                    .Select(MapDimensionAssignment)
+                    .ToList() ?? [];
+
+            return new AccountTransactionInquiryItemDto
+            {
+                Id = transaction.Id,
+                JournalEntryId = transaction.JournalEntryId,
+                JournalEntryNumber = transaction.JournalEntry.JournalEntryNumber,
+                TransactionDate = transaction.TransactionDate,
+                PostingDate = transaction.PostedDate ?? transaction.JournalEntry.PostingDate,
+                Reference = transaction.SourceReferenceNumber
+                    ?? transaction.JournalEntry.ReferenceNumber
+                    ?? postingEvent?.SourceDocumentReference,
+                JournalDescription = transaction.JournalEntry.Description,
+                LineDescription = transaction.Description,
+                DebitAmount = transaction.DebitAmount,
+                CreditAmount = transaction.CreditAmount,
+                FunctionalCurrencyCode = transaction.FunctionalCurrencyCode,
+                TransactionCurrencyCode = transaction.TransactionCurrency,
+                TransactionDebitAmount = transaction.TransactionDebitAmount,
+                TransactionCreditAmount = transaction.TransactionCreditAmount,
+                ForeignAmount = transaction.ForeignCurrencyAmount,
+                ExchangeRateId = transaction.ExchangeRateId,
+                ExchangeRate = transaction.ExchangeRate,
+                ExchangeRateSource = transaction.ExchangeRateSource,
+                ExchangeRateDate = transaction.ExchangeRateDate,
+                AccountingBookCode = book.Code,
+                AccountingBookName = book.Name,
+                PostingEventId = postingEvent?.Id,
+                SourceModule = transaction.SourceModule
+                    ?? postingEvent?.SourceModule
+                    ?? transaction.JournalEntry.SourceModule,
+                OriginModuleCode = postingEvent?.OriginModuleCode
+                    ?? transaction.JournalEntry.OriginModuleCode,
+                SourceDocumentId = transaction.SourceDocumentId
+                    ?? postingEvent?.SourceDocumentId
+                    ?? transaction.JournalEntry.SourceDocumentId,
+                SourceDocumentType = transaction.SourceDocumentType
+                    ?? postingEvent?.SourceDocumentType
+                    ?? transaction.JournalEntry.SourceDocumentType,
+                SourceReference = transaction.SourceReferenceNumber
+                    ?? postingEvent?.SourceDocumentReference
+                    ?? transaction.JournalEntry.ReferenceNumber,
+                LineNumber = transaction.LineNumber,
+                FinanceDimensionSetId = transaction.FinanceDimensionSetId,
+                FinanceDimensionSnapshotId = transaction.FinanceDimensionSnapshotId,
+                DimensionDisplayValue = snapshot?.DisplayValueSnapshot
+                    ?? transaction.FinanceDimensionSet?.DisplayValue,
+                Dimensions = dimensions
+            };
+        }
+
+        private static FinanceDimensionAssignmentDto MapDimensionAssignment(
+            FinanceDimensionSnapshotItem item) => new()
+        {
+            DefinitionId = item.FinanceDimensionDefinitionId,
+            ValueId = item.FinanceDimensionValueId,
+            DimensionCode = item.DimensionCodeSnapshot,
+            DimensionName = item.DimensionNameSnapshot,
+            ValueCode = item.DimensionValueCodeSnapshot,
+            ValueName = item.DimensionValueNameSnapshot
+        };
+
+        private static FinanceDimensionAssignmentDto MapDimensionAssignment(
+            FinanceDimensionSetItem item) => new()
+        {
+            DefinitionId = item.FinanceDimensionDefinitionId,
+            ValueId = item.FinanceDimensionValueId,
+            DimensionCode = item.DimensionCodeSnapshot,
+            DimensionName = item.DimensionNameSnapshot,
+            ValueCode = item.DimensionValueCodeSnapshot,
+            ValueName = item.DimensionValueNameSnapshot
+        };
 
         #endregion
     }

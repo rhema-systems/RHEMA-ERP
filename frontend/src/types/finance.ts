@@ -54,11 +54,20 @@ export interface ExchangeRate {
     rate: number;
     currentExchangeRate?: number;
     effectiveDate: string;
+    expiryDate?: string;
     rateType: ExchangeRateType;
     quoteSide: ExchangeRateQuoteSide;
     rateSource: string;
+    sourceName?: string;
+    sourceReference?: string;
     comments?: string;
     isActive: boolean;
+    approvalStatus?: 'Pending' | 'Approved' | 'Rejected' | 'AutoApproved';
+    hasBeenUsed?: boolean;
+    usageLocked?: boolean;
+    usageCount?: number;
+    firstUsedDate?: string;
+    lastUsedDate?: string;
     createdAt: string;
     updatedAt: string;
 }
@@ -147,11 +156,144 @@ export interface AccountingBook {
     name: string;
     description?: string;
     purpose: string;
+    bookType?: AccountingBookType;
+    lifecycleStatus?: AccountingBookLifecycleStatus;
+    functionalCurrencyCode?: string | null;
+    effectiveFromUtc?: string | null;
+    effectiveToUtc?: string | null;
+    baseAccountingBookId?: string | null;
+    baseAccountingBookCode?: string | null;
+    initializationStartedAtUtc?: string | null;
     isActive: boolean;
     isDefault: boolean;
     allowsPosting: boolean;
     isSystemDefined: boolean;
     sortOrder: number;
+    pendingLifecycleStatus?: AccountingBookLifecycleStatus | null;
+    pendingTransitionReason?: string | null;
+    transitionRequestedByUserId?: string | null;
+    transitionRequestedAtUtc?: string | null;
+    transitionWorkflowInstanceId?: string | null;
+    hasAccountingUse?: boolean;
+    activationReady?: boolean;
+    readinessMessage?: string | null;
+    rowVersion?: string;
+}
+
+export type AccountingBookType = 'PrimaryFull' | 'ParallelFull' | 'Delta';
+export type AccountingBookLifecycleStatus = 'Draft' | 'Configuring' | 'Initializing' | 'Active' | 'Suspended' | 'Retired';
+
+export interface SaveAccountingBook {
+    code: string;
+    name: string;
+    description?: string;
+    purpose: string;
+    bookType: AccountingBookType;
+    functionalCurrencyCode?: string | null;
+    effectiveFromUtc?: string | null;
+    effectiveToUtc?: string | null;
+    baseAccountingBookId?: string | null;
+    sortOrder: number;
+    rowVersion?: string;
+}
+
+export interface RequestAccountingBookTransition {
+    targetStatus: AccountingBookLifecycleStatus;
+    reason: string;
+    rowVersion: string;
+}
+
+export interface DecideAccountingBookTransition {
+    reason: string;
+    rowVersion: string;
+}
+
+export type AccountingBookPeriodStatus = 'Future' | 'Open' | 'Closed' | 'Locked';
+export interface AccountingBookPeriod {
+    id: string; accountingBookId: string; accountingBookCode: string; fiscalPeriodId: string;
+    fiscalPeriodCode: string; startDate: string; endDate: string; status: AccountingBookPeriodStatus;
+    pendingStatus?: AccountingBookPeriodStatus | null; pendingReason?: string | null;
+    requestedByUserId?: string | null; requestedAtUtc?: string | null; rowVersion: string;
+}
+export type AccountingBookInitializationMode = 'IndependentOpeningBalances' | 'BaseBookCopyAtCutoff' | 'BaseBalancesWithOpeningAdjustments';
+export type AccountingBookInitializationStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected';
+export interface AccountingBookInitializationLine {
+    accountId: string; currencyCode: string; openingDebit: number; openingCredit: number;
+    baseBookSignedBalance: number; openingAdjustment: number;
+}
+export interface AccountingBookInitialization {
+    id: string; accountingBookId: string; version: number; supersedesInitializationId?: string | null;
+    accountingBookCode: string; mode: AccountingBookInitializationMode; status: AccountingBookInitializationStatus;
+    cutoffDate: string; cutoffFiscalPeriodId: string; cutoffFiscalPeriodCode: string;
+    sourceAccountingBookId?: string | null; sourceAccountingBookCode?: string | null;
+    idempotencyKey: string; reason: string; totalDebits: number; totalCredits: number;
+    requiredAccountCount: number; coveredAccountCount: number; isBalanced: boolean; isCoverageComplete: boolean;
+    evidenceFingerprint: string; reconciliationFingerprint: string; preparedByUserId: string; preparedAtUtc: string;
+    approvedByUserId?: string | null; approvedAtUtc?: string | null; rowVersion: string;
+    rejectedByUserId?: string | null; rejectedAtUtc?: string | null;
+    decidedByUserId?: string | null; decidedAtUtc?: string | null; decisionReason?: string | null;
+    lines: AccountingBookInitializationLine[];
+}
+export interface AccountingBookInitializationPreparationLine {
+    accountId: string; accountNumber: string; accountName: string; accountClassificationId: string;
+    accountClassificationCode: string; authoritativeSignedBalance: number;
+}
+export interface AccountingBookInitializationPreparation {
+    accountingBookId: string; accountingBookCode: string; mode: AccountingBookInitializationMode;
+    cutoffDate: string; cutoffFiscalPeriodId: string; cutoffFiscalPeriodCode: string;
+    sourceAccountingBookId?: string | null; sourceAccountingBookCode?: string | null; functionalCurrencyCode: string;
+    accounts: AccountingBookInitializationPreparationLine[];
+}
+export interface AccountingBookActivationReadiness {
+    isReady: boolean; blockers: string[]; initializationFingerprint?: string | null;
+    requiredPeriodCount: number; readyPeriodCount: number;
+}
+
+export type AccountingBookApplicabilityPolicyStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Retired';
+export interface AccountingBookApplicabilityRuleBook { accountingBookId: string; accountingBookCode: string; selectionOrder: number; }
+export interface AccountingBookApplicabilityRule {
+    id: string; ruleCode: string; priority: number; originatingModuleCode: string;
+    sourceDocumentType: string; postingAction: string; sortOrder: number;
+    selectedBooks: AccountingBookApplicabilityRuleBook[];
+}
+export interface AccountingBookApplicabilityPolicy {
+    id: string; policyCode: string; version: number; supersedesPolicyId?: string | null;
+    name: string; description?: string | null; effectiveFrom: string; effectiveTo?: string | null;
+    status: AccountingBookApplicabilityPolicyStatus; reason: string; workflowInstanceId?: string | null;
+    retirementRequestedByUserId?: string | null; retirementRequestedAtUtc?: string | null;
+    retirementReason?: string | null; retirementWorkflowInstanceId?: string | null;
+    retirementDecisionStatus?: 'Pending' | 'Approved' | 'Rejected' | null;
+    retirementDecidedByUserId?: string | null; retirementDecidedAtUtc?: string | null;
+    retirementDecisionReason?: string | null;
+    rowVersion: string; rules: AccountingBookApplicabilityRule[];
+}
+export interface SaveAccountingBookApplicabilityRule {
+    ruleCode: string; priority: number; originatingModuleCode: string;
+    sourceDocumentType: string; postingAction: string; sortOrder: number; accountingBookIds: string[];
+}
+export interface SaveAccountingBookApplicabilityPolicy {
+    policyCode: string; name: string; description?: string | null; effectiveFrom: string;
+    effectiveTo?: string | null; reason: string; rowVersion?: string | null;
+    rules: SaveAccountingBookApplicabilityRule[];
+}
+export interface DecideAccountingBookApplicabilityPolicy { reason: string; rowVersion: string; }
+export interface ResolveAccountingBookApplicability {
+    effectiveDate: string; originatingModuleCode: string; sourceDocumentType: string; postingAction: string;
+    expectedCalculationInputHash?: string | null; expectedSelectionFingerprint?: string | null;
+}
+export interface FreezeAccountingBookSelection extends ResolveAccountingBookApplicability { idempotencyKey: string; }
+export interface AccountingBookSelectionBook { accountingBookId: string; accountingBookCode: string; selectionOrder: number; authorityFingerprint: string; }
+export interface AccountingBookSelectionBlocker { code: string; accountingBookId?: string | null; message: string; }
+export interface AccountingBookSelection {
+    policyId?: string | null; ruleId?: string | null; policyVersion?: number | null; effectiveDate: string;
+    originatingModuleCode: string; sourceDocumentType: string; postingAction: string;
+    usedPrimaryOnlyFallback: boolean; books: AccountingBookSelectionBook[];
+    blockers: AccountingBookSelectionBlocker[]; calculationInputHash: string; selectionFingerprint: string;
+}
+export interface AccountingBookApplicabilityEligibleBook {
+    accountingBookId: string; code: string; name: string; bookType: 'PrimaryFull' | 'ParallelFull';
+    lifecycleStatus: AccountingBookLifecycleStatus; isDefault: boolean; isActive: boolean;
+    allowsPosting: boolean; initializationReconciled: boolean; mappingClassificationReady: boolean;
 }
 
 export interface AccountAccountingBook {
@@ -160,8 +302,96 @@ export interface AccountAccountingBook {
     accountingBookId: string;
     accountingBookCode: string;
     accountingBookName: string;
+    accountingBookIsDefault: boolean;
+    accountClassificationId?: string | null;
+    accountClassificationCode?: string | null;
+    accountClassificationName?: string | null;
+    accountClassificationSystemRole?: string | null;
+    accountClassificationStatus?: 'Draft' | 'Active' | 'Retired' | null;
+    isEnabled: boolean;
+    isMigrationReady: boolean;
+    financialStatementLineItem?: string;
+    rowVersion: string;
+}
+
+export interface AccountBookAssignmentInput {
+    accountingBookId: string;
+    accountClassificationId?: string | null;
     isEnabled: boolean;
     financialStatementLineItem?: string;
+    rowVersion?: string;
+}
+
+export interface AccountClassification {
+    id: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    parentClassificationId?: string | null;
+    parentClassificationCode?: string | null;
+    parentClassificationName?: string | null;
+    code: string;
+    name: string;
+    description?: string;
+    coreAccountType: AccountType;
+    defaultRevaluationTreatment: 'Exclude' | 'Include';
+    systemRole?: string | null;
+    isPostingClassification: boolean;
+    status: 'Draft' | 'Active' | 'Retired';
+    displayOrder: number;
+    childCount: number;
+    nonRetiredChildCount: number;
+    totalAccountCount: number;
+    enabledAccountCount: number;
+    isLeaf: boolean;
+    canRetire: boolean;
+    rowVersion: string;
+}
+
+export interface SaveAccountClassification {
+    accountingBookId: string;
+    parentClassificationId?: string | null;
+    code: string;
+    name: string;
+    description?: string | null;
+    coreAccountType: AccountType;
+    defaultRevaluationTreatment: 'Exclude' | 'Include';
+    systemRole?: string | null;
+    isPostingClassification: boolean;
+    status: 'Draft' | 'Active' | 'Retired';
+    displayOrder: number;
+    rowVersion?: string;
+}
+
+export interface AccountClassificationUsage {
+    accountAccountingBookId: string;
+    accountId: string;
+    accountCode: string;
+    accountName: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    isEnabled: boolean;
+}
+
+export interface AccountClassificationLayoutUsage {
+    layoutId: string;
+    layoutCode: string;
+    layoutName: string;
+    versionId: string;
+    versionNumber: number;
+    versionStatus: string;
+    rowCode: string;
+    isHistoricalSnapshot: boolean;
+}
+
+export interface AccountClassificationWhereUsed {
+    classificationId: string;
+    classificationCode: string;
+    totalMappings: number;
+    enabledMappings: number;
+    mappings: AccountClassificationUsage[];
+    draftLayoutReferences: number;
+    publishedLayoutReferences: number;
+    layoutReferences: AccountClassificationLayoutUsage[];
 }
 
 export interface Account {
@@ -214,7 +444,6 @@ export interface AccountCurrencyLink {
     id: string;
     accountId: string;
     linkedCurrencyCode: string;
-    revaluationRequired: boolean;
     revaluationFrequency: RevaluationFrequency;
     transactionRateType: string;
     transactionQuoteSide: ExchangeRateQuoteSide;
@@ -222,8 +451,12 @@ export interface AccountCurrencyLink {
     revaluationQuoteSide: ExchangeRateQuoteSide;
     effectiveDate?: string;
     effectiveEndDate?: string;
-    foreignCurrencyBalance: number;
-    baseCurrencyBalance: number;
+    /** @deprecated AccountCurrencyLink is configuration; use exact-book balance exposure. */
+    foreignCurrencyBalance: number | null;
+    /** @deprecated AccountCurrencyLink is configuration; use exact-book balance exposure. */
+    baseCurrencyBalance: number | null;
+    hasAuthoritativeCurrentBalance: boolean;
+    currentBalanceAuthority: 'ExactBookExposureRequired';
     currentExchangeRate?: number;
     lastRevaluationDate?: string;
     lastRevaluationAdjustment?: number;
@@ -232,6 +465,49 @@ export interface AccountCurrencyLink {
     notes?: string;
     createdAt: string;
     updatedAt: string;
+}
+
+export interface AccountBookCurrencyPolicy {
+    id?: string;
+    accountId: string;
+    accountAccountingBookId: string;
+    accountCurrencyLinkId: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    currencyCode: string;
+    accountClassificationId: string;
+    accountClassificationCode: string;
+    accountClassificationName: string;
+    coreAccountType: AccountType;
+    classificationDefault: 'Include' | 'Exclude';
+    revaluationOverride: boolean | null;
+    effectiveRevaluationRequired: boolean;
+    effectiveSource: 'Classification' | 'CurrencyOverride';
+    isNonstandardInclusion: boolean;
+    warning?: string;
+    lifecycleStatus: 'Inherited' | 'Active' | 'PendingApproval' | 'Rejected';
+    pendingRevaluationOverride?: boolean | null;
+    pendingReason?: string;
+    workflowInstanceId?: string;
+    requestedByUserId?: string;
+    requestedAtUtc?: string;
+    decidedByUserId?: string;
+    decidedAtUtc?: string;
+    decisionReason?: string;
+    rowVersion?: string;
+}
+
+export interface SaveAccountBookCurrencyPolicyDto {
+    revaluationOverride: boolean | null;
+    reason: string;
+    confirmNonstandardInclusion: boolean;
+    rowVersion?: string;
+}
+
+export interface DecideAccountBookCurrencyPolicyDto {
+    reason: string;
+    rowVersion: string;
 }
 
 export interface SegmentStructure {
@@ -243,10 +519,16 @@ export interface SegmentStructure {
     dataType: string;
     separatorCharacter?: string;
     lookupTableRequired: boolean;
-    isMandatory: boolean;
+    isRequired: true;
     isReportingDimension: boolean;
     isNaturalAccount: boolean;
     isActive: boolean;
+    lifecycleStatus: 'Draft' | 'Active' | 'Frozen' | 'Retired';
+    rowVersion: string;
+    accountUsageCount: number;
+    canActivate: boolean;
+    canFreeze: boolean;
+    isSystemDefined: boolean;
     canBeModified?: boolean;
     description?: string;
     lookupValues?: SegmentLookupValue[];
@@ -376,6 +658,10 @@ export interface AccountTransaction {
     transactionDate: string;
     reference: string;
     balanceAfter: number;
+    currencyCode?: string;
+    foreignAmount?: number;
+    exchangeRateId?: string;
+    exchangeRate?: number;
     // Computed helpers for UI compatibility
     /** debitAmount = amount when transactionType === 'Debit', else 0 */
     debitAmount?: number;
@@ -386,6 +672,51 @@ export interface AccountTransaction {
     financeDimensionDisplayValue?: string;
     dimensions?: FinanceDimensionAssignment[];
     dimensionSnapshot?: FinanceDimensionSnapshot;
+}
+
+export interface AccountTransactionInquiryItem {
+    id: string;
+    journalEntryId: string;
+    journalEntryNumber: string;
+    transactionDate: string;
+    postingDate?: string | null;
+    reference?: string | null;
+    journalDescription?: string | null;
+    lineDescription?: string | null;
+    debitAmount: number;
+    creditAmount: number;
+    functionalCurrencyCode: string;
+    transactionCurrencyCode?: string | null;
+    transactionDebitAmount?: number | null;
+    transactionCreditAmount?: number | null;
+    foreignAmount?: number | null;
+    exchangeRateId?: string | null;
+    exchangeRate?: number | null;
+    exchangeRateSource?: string | null;
+    exchangeRateDate?: string | null;
+    accountingBookCode: string;
+    accountingBookName: string;
+    postingEventId?: string | null;
+    sourceModule?: string | null;
+    originModuleCode?: string | null;
+    sourceDocumentId?: string | null;
+    sourceDocumentType?: string | null;
+    sourceReference?: string | null;
+    lineNumber: number;
+    financeDimensionSetId?: string | null;
+    financeDimensionSnapshotId?: string | null;
+    dimensionDisplayValue?: string | null;
+    dimensions: FinanceDimensionAssignment[];
+}
+
+export interface AccountTransactionInquiryPage {
+    items: AccountTransactionInquiryItem[];
+    totalCount: number;
+    page: number;
+    pageSize: number;
+    totalPages: number;
+    accountingBookCode: string;
+    accountingBookName: string;
 }
 
 export interface FinanceDimensionAssignment {
@@ -494,8 +825,31 @@ export type FinanceDimensionRouteId =
     | 'ManualJournalEntry'
     | 'FinanceApVendorInvoice'
     | 'FinanceApSupplierDebitNote'
+    | 'FinanceApVendorPayment'
     | 'FinanceArCustomerInvoice'
-    | 'SalesCreditNote';
+    | 'FinanceArCustomerPayment'
+    | 'SalesCreditNote'
+    | 'FinanceCashPayment'
+    | 'FinanceCashReceipt'
+    | 'FinanceCashBankTransfer'
+    | 'FinanceBankDeposit'
+    | 'FinanceReturnedCheque'
+    | 'FinanceBankReconciliationAdjustment'
+    | 'FinanceFixedAssetCapitalization'
+    | 'FinanceFixedAssetCapitalizationReversal'
+    | 'FinanceFixedAssetDepreciation'
+    | 'FinanceFixedAssetDepreciationReversal'
+    | 'FinanceFixedAssetRevaluation'
+    | 'FinanceFixedAssetImpairment'
+    | 'FinanceFixedAssetImpairmentReversal'
+    | 'FinanceFixedAssetValuationCorrection'
+    | 'FinanceFixedAssetDisposal'
+    | 'FinanceFixedAssetDisposalSaleInvoice'
+    | 'FinanceFixedAssetDisposalSaleReceipt'
+    | 'FinanceFixedAssetReclassification'
+    | 'FinanceCapitalProjectSettlement'
+    | 'FinanceLeaseRecognition'
+    | 'FinanceLeasePeriodPosting';
 
 export type FinanceDimensionCertificationState = 'LegacyReadOnly' | 'CaptureOptional' | 'Enforced';
 
@@ -571,13 +925,48 @@ export interface FinanceSourceDocumentDimension {
     budgetEvidenceUpdatedAt?: string;
 }
 
+export type FinanceSettlementComponentType =
+    | 'Principal'
+    | 'Discount'
+    | 'WithholdingTax'
+    | 'VatWithholdingTax'
+    | 'Fee'
+    | 'WriteOff'
+    | 'RealizedFx';
+
+export interface FinanceSettlementDimensionComponent {
+    id: string;
+    settlementSourceLineId: string;
+    settlementAllocationId?: string;
+    originatingDocumentId?: string;
+    originatingSourceLineId?: string;
+    componentType: FinanceSettlementComponentType;
+    financeDimensionSetId?: string;
+    financeDimensionSnapshotId?: string;
+    dimensionCombination?: string;
+    dimensionHash?: string;
+    dimensionValues: FinanceSourceDimensionValue[];
+    transactionCurrencyCode: string;
+    transactionAmount: number;
+    functionalAmount: number;
+    exchangeRateId?: string;
+    exchangeRate: number;
+    comparisonExchangeRateId?: string;
+    comparisonExchangeRate?: number;
+    isFinalResidualRecipient: boolean;
+    roundingResidualTransactionAmount: number;
+    roundingResidualFunctionalAmount: number;
+    evidenceHash: string;
+    evidenceFrozenAt?: string;
+}
+
 export interface FinanceDimensionRouteCertification {
     routeId: FinanceDimensionRouteId;
     producerModule: string;
     sourceRoute: string;
     documentType: string;
     contractVersion: string;
-    grain: 'JournalLine' | 'SourceDocumentLine';
+    grain: 'JournalLine' | 'SourceDocumentLine' | 'SettlementAllocationLine';
     supportsDocumentDefaults: boolean;
     owner: string;
     notes: string;
@@ -795,7 +1184,11 @@ export interface FinanceSettings {
     accountSeparator?: string;
     retainedEarningsAccountId?: string;
     unrealizedGainLossAccountId?: string;
+    unrealizedFxGainAccountId?: string;
+    unrealizedFxLossAccountId?: string;
     realizedGainLossAccountId?: string;
+    realizedFxGainAccountId?: string;
+    realizedFxLossAccountId?: string;
     suspenseAccountId?: string;
     controlAccountArId?: string;
     controlAccountApId?: string;
@@ -808,7 +1201,6 @@ export interface FinanceSettings {
     discountAllowedAccountId?: string;
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
-    openingBalanceAutoRoutingEnabled?: boolean;
     bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
     requireBankDepositPrimaryEvidence?: boolean;
     autoPostBankDepositAfterApproval?: boolean;
@@ -842,7 +1234,11 @@ export interface UpdateFinanceSettingsDto {
     accountSeparator?: string;
     retainedEarningsAccountId?: string;
     unrealizedGainLossAccountId?: string;
+    unrealizedFxGainAccountId?: string;
+    unrealizedFxLossAccountId?: string;
     realizedGainLossAccountId?: string;
+    realizedFxGainAccountId?: string;
+    realizedFxLossAccountId?: string;
     suspenseAccountId?: string;
     controlAccountArId?: string;
     controlAccountApId?: string;
@@ -855,7 +1251,6 @@ export interface UpdateFinanceSettingsDto {
     discountAllowedAccountId?: string;
     discountReceivedAccountId?: string;
     migrationClearingAccountId?: string;
-    openingBalanceAutoRoutingEnabled?: boolean;
     bankDepositPolicy?: 'DepositIntact' | 'ControlledNetBanking';
     requireBankDepositPrimaryEvidence?: boolean;
     autoPostBankDepositAfterApproval?: boolean;
@@ -1257,6 +1652,7 @@ export interface CreateAccountDto {
     isControlAccount: boolean;
     budgetTrackingEnabled: boolean;
     status: AccountStatus;
+    accountingBooks: AccountBookAssignmentInput[];
 }
 
 export interface SegmentValueInput {
@@ -1275,7 +1671,6 @@ export interface AddCurrencyLinkDto {
     accountId: string;
     currencyCode?: string;
     linkedCurrencyCode: string;
-    revaluationRequired: boolean;
     revaluationFrequency: string;
     transactionRateType: string;
     transactionQuoteSide?: ExchangeRateQuoteSide;
@@ -1301,14 +1696,13 @@ export interface CreateSegmentDto {
     dataType: string;
     separatorCharacter?: string;
     lookupTableRequired: boolean;
-    isMandatory: boolean;
-    isReportingDimension: boolean;
     isNaturalAccount: boolean;
     description?: string;
 }
 
 export interface UpdateSegmentDto extends CreateSegmentDto {
     id: string;
+    rowVersion: string;
 }
 
 export interface CreateSegmentLookupValueDto {
@@ -1369,6 +1763,7 @@ export interface CreateAccountTransactionDto {
     reference: string;
     currencyCode?: string;
     foreignAmount?: number;
+    exchangeRateId?: string;
     exchangeRate?: number;
     lineNumber?: number;
     dimensions?: FinancePostingDimensionValue[];
@@ -1570,6 +1965,9 @@ export interface FixedAssetOpeningBalanceCandidate {
     netBookValue: number;
     openingPostedToGl: boolean;
     openingJournalEntryId?: string;
+    openingReversalJournalEntryId?: string;
+    openingReversalPostingEventId?: string;
+    openingReversedAt?: string;
 }
 
 export interface SubledgerOpeningBalanceReadiness {
@@ -1601,7 +1999,6 @@ export interface SubledgerOpeningBalanceReadiness {
 }
 
 export interface UpdateCurrencyLinkRatePolicyDto {
-    revaluationRequired: boolean;
     revaluationFrequency: string;
     transactionRateType: string;
     transactionQuoteSide: ExchangeRateQuoteSide;
@@ -1648,6 +2045,45 @@ export interface OpeningBalanceBatch {
     createdAt: string;
     updatedAt?: string;
     lines: OpeningBalanceLine[];
+    reversals?: OpeningBalanceBatchReversal[];
+}
+
+export interface OpeningBalanceBatchReversal {
+    id: string;
+    openingBalanceBatchId: string;
+    originalPostingEventId: string;
+    originalJournalEntryId: string;
+    reversalPostingEventId?: string;
+    reversalJournalEntryId?: string;
+    sourceKind: string;
+    bookClassification: string;
+    originalOpeningDate: string;
+    originalTotalDebit: number;
+    originalTotalCredit: number;
+    status: string;
+    reason: string;
+    impactAssessment: string;
+    requestedReversalDate: string;
+    requestedByUserId: string;
+    requestedByUserName: string;
+    requestedAt: string;
+    reviewedByUserId?: string;
+    reviewedByUserName?: string;
+    reviewedAt?: string;
+    reviewComment?: string;
+    postedAt?: string;
+    failureReason?: string;
+}
+
+export interface RequestOpeningBalanceBatchReversalDto {
+    reversalDate: string;
+    reason: string;
+    impactAssessment: string;
+}
+
+export interface ReviewOpeningBalanceBatchReversalDto {
+    approved: boolean;
+    reviewComment: string;
 }
 
 export interface OpeningBalanceLine {
@@ -1899,7 +2335,7 @@ export interface BalanceSheetCategoryDto {
 export type FinancialStatementType = 'BalanceSheet' | 'IncomeStatement';
 export type FinancialStatementLayoutVersionStatus = 'Draft' | 'Published' | 'Retired';
 export type FinancialStatementRowType = 'Header' | 'Account' | 'Formula' | 'Total' | 'Spacer';
-export type FinancialStatementRowMappingType = 'Account' | 'AccountRange' | 'AccountHierarchy';
+export type FinancialStatementRowMappingType = 'Account' | 'AccountRange' | 'AccountHierarchy' | 'Classification';
 
 export interface FinancialStatementLayoutSummaryDto {
     id: string;
@@ -1915,6 +2351,8 @@ export interface FinancialStatementLayoutSummaryDto {
     revision: number;
     latestVersionNumber: number;
     publishedVersionNumber?: number;
+    isProtectedStandard: boolean;
+    standardSourceLayoutId?: string;
 }
 
 export interface FinancialStatementLayoutDto extends FinancialStatementLayoutSummaryDto {
@@ -1931,6 +2369,13 @@ export interface FinancialStatementLayoutVersionDto {
     publishedAt?: string;
     publishedById?: string;
     publishedByName?: string;
+    publicationSnapshotSchemaVersion?: string;
+    publishedAccountingBookId?: string;
+    publishedAccountingBookCode?: string;
+    publishedAccountingBookName?: string;
+    hierarchyFingerprint?: string;
+    resolutionFingerprint?: string;
+    publicationAccountCount: number;
     notes?: string;
     revision: number;
     rows: FinancialStatementRowDto[];
@@ -1963,6 +2408,10 @@ export interface FinancialStatementRowMappingDto {
     accountName?: string;
     fromAccountNumber?: string;
     toAccountNumber?: string;
+    accountClassificationId?: string;
+    accountClassificationCode?: string;
+    accountClassificationName?: string;
+    includeClassificationDescendants: boolean;
 }
 
 export interface UpdateFinancialStatementLayoutDto {
@@ -1980,6 +2429,12 @@ export interface CreateFinancialStatementLayoutVersionDto {
     notes?: string;
 }
 
+export interface CloneFinancialStatementLayoutDto {
+    code: string;
+    name: string;
+    accountingBookId: string;
+}
+
 export interface PublishFinancialStatementLayoutVersionDto {
     expectedVersionRevision: number;
     effectiveFrom?: string;
@@ -1994,8 +2449,12 @@ export interface FinancialStatementLayoutValidationResultDto {
 export interface FinancialStatementRowMappingInputDto {
     mappingType: FinancialStatementRowMappingType;
     accountId?: string;
+    accountNumber?: string;
     fromAccountNumber?: string;
     toAccountNumber?: string;
+    accountClassificationId?: string;
+    accountClassificationCode?: string;
+    includeClassificationDescendants?: boolean;
 }
 
 export interface FinancialStatementRowInputDto {
@@ -2220,10 +2679,12 @@ export interface MultiCurrencyTransactionDetailDto {
 export interface RevaluationRequestDto {
     revaluationDate: string;
     revaluationType: string;
+    accountingBookCode: string;
     currencyCode?: string;
     unrealizedGainLossAccountId: string;
     previewOnly: boolean;
     notes?: string;
+    expectedPreviewFingerprint?: string;
 }
 
 export interface RevaluationResultDto {
@@ -2232,6 +2693,87 @@ export interface RevaluationResultDto {
     totalAdjustment: number;
     unrealizedGain: number;
     unrealizedLoss: number;
+}
+
+export interface CurrencyRevaluationPreviewDto {
+    batchNumber: string;
+    revaluationDate: string;
+    functionalCurrencyCode: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    accountingBookName: string;
+    totalGainAmount: number;
+    totalLossAmount: number;
+    netGainLossAmount: number;
+    exposureCount: number;
+    previewFingerprint: string;
+    lines: CurrencyRevaluationPreviewLineDto[];
+}
+
+export interface CurrencyRevaluationPostingResultDto {
+    id: string;
+    journalEntryNumber: string;
+    postingStatus: string;
+    totalDebitAmount: number;
+    totalCreditAmount: number;
+    postingDate?: string;
+}
+
+export interface CurrencyRevaluationPreviewLineDto {
+    accountId: string;
+    accountNumber: string;
+    accountName: string;
+    accountAccountingBookId: string;
+    accountBookCurrencyPolicyId?: string;
+    accountClassificationId: string;
+    accountClassificationCode: string;
+    accountClassificationName: string;
+    coreAccountType: AccountType;
+    normalBalanceLabel: 'Debit' | 'Credit';
+    classificationDefault: 'Include' | 'Exclude';
+    revaluationOverride: boolean | null;
+    effectiveRevaluationRequired: boolean;
+    effectivePolicySource: string;
+    hasGovernanceWarning: boolean;
+    governanceWarning?: string;
+    sourceModule: string;
+    transactionCurrency: string;
+    functionalCurrencyCode: string;
+    foreignCurrencyBalance: number;
+    carryingFunctionalAmount: number;
+    priorUnreversedAdjustment: number;
+    previousRate: number;
+    closingExchangeRate: number;
+    revaluedFunctionalAmount: number;
+    gainLossAmount: number;
+    gainLossType: string;
+    revaluationFrequency: string;
+    rateType: string;
+    quoteSide: ExchangeRateQuoteSide;
+    closingExchangeRateId: string;
+    closingRateDate: string;
+}
+
+export interface FxRevaluationBatchSummaryDto {
+    id: string;
+    batchNumber: string;
+    revaluationDate: string;
+    status: string;
+    functionalCurrencyCode: string;
+    accountingBookId: string;
+    accountingBookCode: string;
+    currencies: string[];
+  exposureCount: number;
+  nonstandardPolicyCount: number;
+    totalGainAmount: number;
+    totalLossAmount: number;
+    netGainLossAmount: number;
+    journalEntryId?: string;
+    journalEntryNumber?: string;
+    reversalJournalEntryId?: string;
+    reversalJournalEntryNumber?: string;
+    postedAt?: string;
+    reversedAt?: string;
 }
 
 export interface RevaluationDetailDto {

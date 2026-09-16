@@ -20,6 +20,13 @@ import {
   type RecurrenceFrequency,
 } from '@/services/finance/recurring-journal-data.service';
 import type { Account } from '@/types/finance';
+import { RecurringJournalLineGrid } from '../recurring-journal-line-grid';
+import {
+  newEditableRecurringJournalLine,
+  summarizeRecurringJournalLines,
+  toRecurringJournalLineInputs,
+  type EditableRecurringJournalLine,
+} from '../recurring-journal-lines';
 
 type ScheduleChoice = 'month-end' | 'day-one' | 'semi-monthly';
 
@@ -31,9 +38,9 @@ export default function NewRecurringJournalPage() {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [referencePattern, setReferencePattern] = useState('{TemplateNumber}-{Period}-{Sequence}');
-  const [amount, setAmount] = useState('');
-  const [debitAccountId, setDebitAccountId] = useState('');
-  const [creditAccountId, setCreditAccountId] = useState('');
+  const [lines, setLines] = useState<EditableRecurringJournalLine[]>(() => [
+    newEditableRecurringJournalLine('initial-line-1'), newEditableRecurringJournalLine('initial-line-2'),
+  ]);
   const [effectiveFrom, setEffectiveFrom] = useState(() => new Date().toISOString().slice(0, 10));
   const [schedule, setSchedule] = useState<ScheduleChoice>('month-end');
   const [autoReverse, setAutoReverse] = useState(false);
@@ -67,14 +74,12 @@ export default function NewRecurringJournalPage() {
     };
   }, [schedule]);
 
+  const lineSummary = useMemo(() => summarizeRecurringJournalLines(lines), [lines]);
+  const canSubmit = !!name.trim() && !!effectiveFrom && submissionReason.trim().length >= 10 && lineSummary.isValid;
+
   const submit = async () => {
-    const fixedAmount = Number(amount);
-    if (!name.trim() || !debitAccountId || !creditAccountId || !effectiveFrom || !Number.isFinite(fixedAmount) || fixedAmount <= 0) {
-      toast({ title: 'Complete the required fields', description: 'Name, effective date, debit account, credit account and a positive amount are required.', variant: 'destructive' });
-      return;
-    }
-    if (debitAccountId === creditAccountId) {
-      toast({ title: 'Select different accounts', description: 'A recurring journal cannot debit and credit the same account.', variant: 'destructive' });
+    if (!name.trim() || !effectiveFrom || !lineSummary.isValid) {
+      toast({ title: 'Complete a balanced journal', description: lineSummary.errors[0] ?? 'Name and effective date are required.', variant: 'destructive' });
       return;
     }
     if (submissionReason.trim().length < 10) {
@@ -90,10 +95,9 @@ export default function NewRecurringJournalPage() {
       interval: 1, recurrenceRuleJson: scheduleDefinition.recurrenceRuleJson,
       businessDayConvention: scheduleDefinition.convention,
       autoReverse, reversalRule: autoReverse ? 'FirstDayOfNextFiscalPeriod' : 'None',
-      lines: [
-        { accountId: debitAccountId, isDebit: true, fixedAmount, description: description.trim() || name.trim(), dimensionValuesJson: '{}' },
-        { accountId: creditAccountId, isDebit: false, fixedAmount, description: description.trim() || name.trim(), dimensionValuesJson: '{}' },
-      ],
+      lines: toRecurringJournalLineInputs(lines).map(line => ({
+        ...line, description: (line.description ?? description.trim()) || name.trim(),
+      })),
     };
 
     setSaving(true);
@@ -122,21 +126,16 @@ export default function NewRecurringJournalPage() {
       <div className="md:col-span-2"><Label htmlFor="description">Purpose and accounting background</Label><Textarea id="description" value={description} onChange={event => setDescription(event.target.value)} placeholder="Explain why this entry recurs and what it recognises." /></div>
     </CardContent></Card>
 
-    <Card><CardHeader><CardTitle>Balanced IFRS journal</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-3">
-      <div><Label htmlFor="amount">Fixed amount (GHS)</Label><Input id="amount" type="number" min="0.01" step="0.01" value={amount} onChange={event => setAmount(event.target.value)} /></div>
-      <div><Label>Debit account</Label><Select value={debitAccountId} onValueChange={setDebitAccountId}><SelectTrigger><SelectValue placeholder="Select posting account" /></SelectTrigger><SelectContent>{accounts.map(item => <SelectItem key={item.id} value={item.id}>{item.accountCode} · {item.accountName}</SelectItem>)}</SelectContent></Select></div>
-      <div><Label>Credit account</Label><Select value={creditAccountId} onValueChange={setCreditAccountId}><SelectTrigger><SelectValue placeholder="Select posting account" /></SelectTrigger><SelectContent>{accounts.map(item => <SelectItem key={item.id} value={item.id}>{item.accountCode} · {item.accountName}</SelectItem>)}</SelectContent></Select></div>
-      <div className="rounded-md bg-emerald-50 p-3 text-sm text-emerald-800 md:col-span-3">Debits and credits will use the same fixed amount. The server validates balance and posting-account eligibility again before saving.</div>
-    </CardContent></Card>
+    <Card><CardHeader><CardTitle>Balanced IFRS journal</CardTitle></CardHeader><CardContent><RecurringJournalLineGrid accounts={accounts} currencyCode="GHS" lines={lines} onChange={setLines} /></CardContent></Card>
 
     <Card><CardHeader><CardTitle>Schedule, reversal and submission</CardTitle></CardHeader><CardContent className="grid gap-5 md:grid-cols-2">
       <div><Label>Schedule</Label><Select value={schedule} onValueChange={value => setSchedule(value as ScheduleChoice)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="month-end">Last business day monthly</SelectItem><SelectItem value="day-one">First business day monthly</SelectItem><SelectItem value="semi-monthly">15th and month-end</SelectItem></SelectContent></Select><p className="mt-1 text-xs text-muted-foreground">{scheduleDefinition.label}</p></div>
       <div><Label htmlFor="effective">Effective from</Label><Input id="effective" type="date" value={effectiveFrom} onChange={event => setEffectiveFrom(event.target.value)} /></div>
-      <div className="flex items-center justify-between rounded-lg border p-4 md:col-span-2"><div><p className="font-medium">Prepare reversal on the next fiscal period</p><p className="text-sm text-muted-foreground">The reversal due date is recorded for control; it does not silently post a journal.</p></div><Switch checked={autoReverse} onCheckedChange={setAutoReverse} /></div>
+      <div className="flex items-center justify-between rounded-lg border p-4 md:col-span-2"><div><p className="font-medium">Automatic reversal</p><p className="text-sm text-muted-foreground">When the occurrence is approved, the checker also authorizes its exact reversing journal to post automatically on the first day of the next tenant fiscal period.</p></div><Switch checked={autoReverse} onCheckedChange={setAutoReverse} /></div>
       <div className="md:col-span-2"><Label htmlFor="reason">Submission reason</Label><Textarea id="reason" value={submissionReason} onChange={event => setSubmissionReason(event.target.value)} /></div>
-      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 md:col-span-2"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>Submitting does not activate or post the template. A different user must approve the standing instruction; every generated occurrence then receives a separate approval before posting.</p></div>
+      <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 md:col-span-2"><ShieldCheck className="mt-0.5 h-5 w-5 shrink-0" /><p>Submitting does not activate or post the template. A different user must approve the standing instruction; every generated occurrence receives a separate approval. For automatic reversal, that occurrence approval explicitly authorizes both the original and its immutable scheduled negation.</p></div>
     </CardContent></Card>
 
-    <div className="flex justify-between"><Button variant="outline" asChild><Link href="/finance/recurring-journals">Cancel</Link></Button><Button onClick={submit} disabled={saving}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Create and submit</Button></div>
+    <div className="flex justify-between"><Button variant="outline" asChild><Link href="/finance/recurring-journals">Cancel</Link></Button><Button onClick={submit} disabled={saving || !canSubmit}>{saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}Create and submit</Button></div>
   </div>;
 }

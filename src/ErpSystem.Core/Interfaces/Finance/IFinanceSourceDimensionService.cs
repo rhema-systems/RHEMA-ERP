@@ -43,6 +43,14 @@ public interface IFinanceSourceDimensionService
         Guid sourceDocumentId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolvePostingDimensionsAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        Guid sourceLineId,
+        Guid postingAccountId,
+        DateTime postingDate,
+        CancellationToken cancellationToken = default);
+
     Task MarkBudgetEvidenceCurrentAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,

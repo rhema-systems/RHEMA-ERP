@@ -133,6 +133,28 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public DateTime? CapitalizedAt { get; set; }
 
         /// <summary>
+        /// Canonical Finance-owned proposal reviewed by the maker-checker workflow before a
+        /// direct capitalization is allowed to post. The JSON and hash deliberately remain on
+        /// the asset after posting so the approval can be reconciled to the resulting journal.
+        /// Procurement-owned capitalization uses its dedicated handoff evidence instead.
+        /// </summary>
+        public string? CapitalizationApprovalSnapshotJson { get; set; }
+
+        [MaxLength(64)]
+        public string? CapitalizationApprovalSnapshotHash { get; set; }
+
+        public Guid? CapitalizationApprovalExchangeRateId { get; set; }
+        public Guid? CapitalizationApprovalWorkflowInstanceId { get; set; }
+        public Guid? CapitalizationApprovalSubmittedByUserId { get; set; }
+        public DateTime? CapitalizationApprovalSubmittedAt { get; set; }
+        public Guid? CapitalizationApprovalApprovedByUserId { get; set; }
+        public DateTime? CapitalizationApprovalApprovedAt { get; set; }
+        public DateTime? CapitalizationApprovalInvalidatedAt { get; set; }
+
+        [MaxLength(1000)]
+        public string? CapitalizationApprovalInvalidationReason { get; set; }
+
+        /// <summary>
         /// The latest compensating Finance event, when the current capitalization was reversed.
         /// Original capitalization IDs deliberately remain above so register-to-GL lineage is not
         /// destroyed; a later capitalization replaces the current-cycle fields while historical

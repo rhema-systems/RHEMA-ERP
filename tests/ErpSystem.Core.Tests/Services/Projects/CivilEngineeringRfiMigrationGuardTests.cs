@@ -9,7 +9,7 @@ public sealed class CivilEngineeringRfiMigrationGuardTests
     public void Migration_uses_authoritative_project_rfi_dms_and_append_only_controls()
     {
         var root = FindRepositoryRoot();
-        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260820190000_AddCivilEngineeringRfiRouting.cs"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260820190000_AddCivilEngineeringRfiRouting.cs"));
         source.Should().Contain("ProjectRfis")
             .And.Contain("ProjectCivilRfiRoutings")
             .And.Contain("CentralDocumentVersions")

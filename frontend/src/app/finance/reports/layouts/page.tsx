@@ -8,6 +8,7 @@ import {
     CheckCircle2,
     ChevronRight,
     ClipboardCheck,
+    Copy,
     Download,
     Eye,
     FileJson,
@@ -20,6 +21,7 @@ import {
     ShieldCheck,
     Upload,
     XCircle,
+    Trash2,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import {
@@ -62,8 +64,10 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financialStatementLayoutDataService } from '@/services/finance/financial-statement-layout-data.service';
+import { resolveFinancialStatementLayoutPermissions } from './permissions';
 import type {
     AccountingBook,
+    AccountClassification,
     FinancialStatementLayoutAuditEventDto,
     FinancialStatementLayoutDto,
     FinancialStatementLayoutExecutionDto,
@@ -73,13 +77,12 @@ import type {
     FinancialStatementLayoutValidationIssueDto,
     FinancialStatementLayoutValidationResultDto,
     FinancialStatementLayoutVersionDto,
+    FinancialStatementRowDto,
+    FinancialStatementRowInputDto,
     FinancialStatementType,
     LegacyFinancialStatementLayoutMigrationRequestDto,
 } from '@/types/finance';
 
-const MANAGE_PERMISSION = 'Finance.Reports.Layouts.Manage';
-const PUBLISH_PERMISSION = 'Finance.Reports.Layouts.Publish';
-const VIEW_PERMISSION = 'Finance.Read';
 const today = new Date().toISOString().slice(0, 10);
 const yearStart = `${new Date().getFullYear()}-01-01`;
 
@@ -120,6 +123,43 @@ function statusVariant(status: FinancialStatementLayoutVersionDto['status']) {
     if (status === 'Published') return 'default' as const;
     if (status === 'Draft') return 'secondary' as const;
     return 'outline' as const;
+}
+
+function mappingLabel(mapping: FinancialStatementRowDto['mappings'][number]) {
+    if (mapping.mappingType === 'Classification') {
+        return `${mapping.accountClassificationCode || 'Unknown classification'}${mapping.accountClassificationName ? ` — ${mapping.accountClassificationName}` : ''}${mapping.includeClassificationDescendants ? ' (including descendants)' : ''}`;
+    }
+    if (mapping.accountNumber) return `${mapping.accountNumber}${mapping.accountName ? ` — ${mapping.accountName}` : ''}`;
+    return [mapping.fromAccountNumber, mapping.toAccountNumber].filter(Boolean).join(' → ') || 'Hierarchy node';
+}
+
+function toRowInput(row: FinancialStatementRowDto): FinancialStatementRowInputDto {
+    return {
+        rowCode: row.rowCode,
+        parentRowCode: row.parentRowCode,
+        label: row.label,
+        rowType: row.rowType,
+        displayOrder: row.displayOrder,
+        formula: row.formula,
+        signMultiplier: row.signMultiplier,
+        isVisible: row.isVisible,
+        suppressIfZero: row.suppressIfZero,
+        showAccountDetails: row.showAccountDetails,
+        isBold: row.isBold,
+        isItalic: row.isItalic,
+        isUnderlined: row.isUnderlined,
+        indentLevel: row.indentLevel,
+        mappings: row.mappings.map((mapping) => ({
+            mappingType: mapping.mappingType,
+            accountId: mapping.accountId,
+            accountNumber: mapping.accountNumber,
+            fromAccountNumber: mapping.fromAccountNumber,
+            toAccountNumber: mapping.toAccountNumber,
+            accountClassificationId: mapping.accountClassificationId,
+            accountClassificationCode: mapping.accountClassificationCode,
+            includeClassificationDescendants: mapping.includeClassificationDescendants,
+        })),
+    };
 }
 
 function issueIcon(issue: FinancialStatementLayoutValidationIssueDto) {
@@ -642,6 +682,7 @@ function LayoutDetailDialog({
     onOpenChange,
     canManage,
     canPublish,
+    canRun,
     onChanged,
 }: {
     layoutId: string | null;
@@ -649,11 +690,14 @@ function LayoutDetailDialog({
     onOpenChange: (open: boolean) => void;
     canManage: boolean;
     canPublish: boolean;
+    canRun: boolean;
     onChanged: () => void;
 }) {
     const { toast } = useToast();
     const [layout, setLayout] = useState<FinancialStatementLayoutDto | null>(null);
     const [audit, setAudit] = useState<FinancialStatementLayoutAuditEventDto[]>([]);
+    const [classifications, setClassifications] = useState<AccountClassification[]>([]);
+    const [classificationSelections, setClassificationSelections] = useState<Record<string, string>>({});
     const [selectedVersionId, setSelectedVersionId] = useState('');
     const [validation, setValidation] = useState<FinancialStatementLayoutValidationResultDto | null>(null);
     const [loading, setLoading] = useState(false);
@@ -665,17 +709,21 @@ function LayoutDetailDialog({
         action: () => Promise<void>;
     } | null>(null);
     const [edit, setEdit] = useState({ name: '', description: '', isDefault: false, isActive: true });
+    const [clone, setClone] = useState({ code: '', name: '' });
 
     const load = useCallback(async () => {
         if (!layoutId) return;
         try {
             setLoading(true);
-            const [detail, auditEvents] = await Promise.all([
-                financialStatementLayoutDataService.getLayout(layoutId),
+            const detail = await financialStatementLayoutDataService.getLayout(layoutId);
+            const [auditEvents, availableClassifications] = await Promise.all([
                 financialStatementLayoutDataService.getAuditTrail(layoutId).catch(() => []),
+                financeDataService.getAccountClassifications(detail.accountingBookId),
             ]);
             setLayout(detail);
             setAudit(auditEvents);
+            setClassifications(availableClassifications.filter((item) => item.status === 'Active'));
+            setClone({ code: `${detail.code}_COPY`.slice(0, 50), name: `${detail.name} Copy` });
             setEdit({
                 name: detail.name,
                 description: detail.description || '',
@@ -706,6 +754,7 @@ function LayoutDetailDialog({
         if (!open) {
             setLayout(null);
             setAudit([]);
+            setClassifications([]);
             setValidation(null);
         }
     }, [load, open]);
@@ -810,6 +859,74 @@ function LayoutDetailDialog({
         });
     };
 
+    const exportVersion = async (format: 'json' | 'xlsx') => {
+        if (!layout || !selectedVersion) return;
+        try {
+            setBusy(true);
+            const baseName = `${layout.code}-v${selectedVersion.versionNumber}`;
+            if (format === 'json') await financialStatementLayoutDataService.downloadExportJson(selectedVersion.id, `${baseName}.json`);
+            else await financialStatementLayoutDataService.downloadExportWorkbook(selectedVersion.id, `${baseName}.xlsx`);
+        } catch (error) {
+            toast({ title: 'Export failed', description: errorMessage(error, 'The version could not be exported.'), variant: 'destructive' });
+        } finally {
+            setBusy(false);
+        }
+    };
+
+    const cloneStandard = async () => {
+        if (!layout || !clone.code.trim() || !clone.name.trim()) return;
+        await runAction(async () => {
+            const created = await financialStatementLayoutDataService.cloneLayout(layout.id, {
+                code: clone.code.trim(),
+                name: clone.name.trim(),
+                accountingBookId: layout.accountingBookId,
+            });
+            onOpenChange(false);
+            onChanged();
+            toast({ title: 'Editable draft cloned', description: `${created.code} is ready for controlled editing.` });
+        }, 'Protected standard cloned');
+    };
+
+    const replaceRows = async (rows: FinancialStatementRowInputDto[]) => {
+        if (!selectedVersion || selectedVersion.status !== 'Draft') return;
+        await runAction(
+            () => financialStatementLayoutDataService.replaceDraftRows(selectedVersion.id, selectedVersion.revision, rows).then(() => undefined),
+            'Draft mappings updated',
+        );
+    };
+
+    const addClassificationMapping = async (rowId: string) => {
+        if (!selectedVersion) return;
+        const classificationId = classificationSelections[rowId];
+        const classification = classifications.find((item) => item.id === classificationId);
+        if (!classification) return;
+        const rows = selectedVersion.rows.map(toRowInput);
+        const row = rows.find((item) => selectedVersion.rows.find((source) => source.id === rowId)?.rowCode === item.rowCode);
+        if (!row) return;
+        if (row.mappings.some((mapping) => mapping.mappingType === 'Classification' && mapping.accountClassificationId === classification.id)) {
+            toast({ title: 'Mapping already exists', description: `${classification.code} is already mapped to this row.`, variant: 'destructive' });
+            return;
+        }
+        row.mappings.push({
+            mappingType: 'Classification',
+            accountClassificationId: classification.id,
+            accountClassificationCode: classification.code,
+            includeClassificationDescendants: true,
+        });
+        await replaceRows(rows);
+    };
+
+    const removeMapping = async (rowId: string, mappingId: string) => {
+        if (!selectedVersion) return;
+        const rows = selectedVersion.rows.map((source) => ({
+            ...toRowInput(source),
+            mappings: source.id === rowId
+                ? source.mappings.filter((mapping) => mapping.id !== mappingId).map((mapping) => toRowInput({ ...source, mappings: [mapping] }).mappings[0])
+                : toRowInput(source).mappings,
+        }));
+        await replaceRows(rows);
+    };
+
     return (
         <>
             <Dialog open={open} onOpenChange={onOpenChange}>
@@ -818,6 +935,7 @@ function LayoutDetailDialog({
                         <DialogTitle className="flex flex-wrap items-center gap-2">
                             {layout?.code || 'Financial statement layout'}
                             {layout?.isDefault ? <Badge>Default</Badge> : null}
+                            {layout?.isProtectedStandard ? <Badge variant="secondary">Protected standard · clone only</Badge> : null}
                             {layout && !layout.isActive ? <Badge variant="outline">Inactive</Badge> : null}
                         </DialogTitle>
                         <DialogDescription>
@@ -853,10 +971,12 @@ function LayoutDetailDialog({
                                                 </Select>
                                             </div>
                                             <div className="flex flex-wrap gap-2">
-                                                {canManage ? <Button variant="outline" onClick={createDraft} disabled={busy || !layout.isActive || layout.versions.some((version) => version.status === 'Draft')}><Archive className="mr-2 h-4 w-4" />Create next Draft</Button> : null}
-                                                {canManage ? <Button variant="outline" onClick={validate} disabled={busy || !selectedVersion}><ClipboardCheck className="mr-2 h-4 w-4" />Validate</Button> : null}
-                                                {canManage ? <Button variant="outline" onClick={() => setPreviewOpen(true)} disabled={!selectedVersion}><Eye className="mr-2 h-4 w-4" />Run preview</Button> : null}
-                                                {canPublish && selectedVersion?.status === 'Draft' ? <Button onClick={requestPublish} disabled={busy}><ShieldCheck className="mr-2 h-4 w-4" />Publish version</Button> : null}
+                                                {canManage && !layout.isProtectedStandard ? <Button variant="outline" onClick={createDraft} disabled={busy || !layout.isActive || layout.versions.some((version) => version.status === 'Draft')}><Archive className="mr-2 h-4 w-4" />Create next Draft</Button> : null}
+                                                {canManage && !layout.isProtectedStandard ? <Button variant="outline" onClick={validate} disabled={busy || !selectedVersion}><ClipboardCheck className="mr-2 h-4 w-4" />Validate</Button> : null}
+                                                {canRun && !layout.isProtectedStandard ? <Button variant="outline" onClick={() => setPreviewOpen(true)} disabled={!selectedVersion}><Eye className="mr-2 h-4 w-4" />Run preview</Button> : null}
+                                                {selectedVersion ? <Button variant="outline" onClick={() => void exportVersion('json')} disabled={busy}><FileJson className="mr-2 h-4 w-4" />JSON</Button> : null}
+                                                {selectedVersion ? <Button variant="outline" onClick={() => void exportVersion('xlsx')} disabled={busy}><FileSpreadsheet className="mr-2 h-4 w-4" />Excel</Button> : null}
+                                                {canPublish && !layout.isProtectedStandard && selectedVersion?.status === 'Draft' ? <Button onClick={requestPublish} disabled={busy}><ShieldCheck className="mr-2 h-4 w-4" />Publish version</Button> : null}
                                             </div>
                                         </div>
 
@@ -867,6 +987,27 @@ function LayoutDetailDialog({
                                                 <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Effective to</div><div className="font-medium">{formatDate(selectedVersion.effectiveTo)}</div></div>
                                                 <div className="rounded-md border p-3"><div className="text-xs text-muted-foreground">Rows / mappings</div><div className="font-medium">{selectedVersion.rows.length} / {selectedVersion.rows.reduce((sum, row) => sum + row.mappings.length, 0)}</div></div>
                                             </div>
+                                        ) : null}
+
+                                        {selectedVersion?.status !== 'Draft' && selectedVersion?.resolutionFingerprint ? (
+                                            <Alert>
+                                                <ShieldCheck className="h-4 w-4" />
+                                                <AlertTitle>Immutable publication snapshot</AlertTitle>
+                                                <AlertDescription>
+                                                    {selectedVersion.publicationAccountCount.toLocaleString()} frozen account memberships · book {selectedVersion.publishedAccountingBookCode} · resolution {selectedVersion.resolutionFingerprint.slice(0, 12)}… · hierarchy {selectedVersion.hierarchyFingerprint?.slice(0, 12)}…
+                                                </AlertDescription>
+                                            </Alert>
+                                        ) : null}
+
+                                        {layout.isProtectedStandard && canManage ? (
+                                            <Card>
+                                                <CardHeader><CardTitle className="text-base">Clone into an editable tenant draft</CardTitle><CardDescription>The protected standard remains unchanged.</CardDescription></CardHeader>
+                                                <CardContent className="grid gap-3 md:grid-cols-[1fr_2fr_auto]">
+                                                    <Input aria-label="Clone layout code" value={clone.code} maxLength={50} onChange={(event) => setClone((current) => ({ ...current, code: event.target.value }))} />
+                                                    <Input aria-label="Clone layout name" value={clone.name} maxLength={150} onChange={(event) => setClone((current) => ({ ...current, name: event.target.value }))} />
+                                                    <Button onClick={() => void cloneStandard()} disabled={busy || !clone.code.trim() || !clone.name.trim()}><Copy className="mr-2 h-4 w-4" />Clone</Button>
+                                                </CardContent>
+                                            </Card>
                                         ) : null}
 
                                         <ValidationPanel validation={validation} />
@@ -901,12 +1042,22 @@ function LayoutDetailDialog({
                                                                         <td className="max-w-md p-3">
                                                                             {row.formula ? <code className="rounded bg-muted px-1 py-0.5 text-xs">{row.formula}</code> : null}
                                                                             {row.mappings.map((mapping) => (
-                                                                                <div key={mapping.id} className="text-xs text-muted-foreground">
-                                                                                    {mapping.mappingType}: {mapping.accountNumber
-                                                                                        ? `${mapping.accountNumber}${mapping.accountName ? ` — ${mapping.accountName}` : ''}`
-                                                                                        : [mapping.fromAccountNumber, mapping.toAccountNumber].filter(Boolean).join(' → ') || 'Hierarchy node'}
+                                                                                <div key={mapping.id} className="flex items-center gap-1 text-xs text-muted-foreground">
+                                                                                    <span>{mapping.mappingType}: {mappingLabel(mapping)}</span>
+                                                                                    {canManage && !layout.isProtectedStandard && selectedVersion.status === 'Draft' ? (
+                                                                                        <Button variant="ghost" size="icon" className="h-6 w-6" aria-label={`Remove ${mapping.mappingType} mapping`} onClick={() => void removeMapping(row.id, mapping.id)}><Trash2 className="h-3 w-3" /></Button>
+                                                                                    ) : null}
                                                                                 </div>
                                                                             ))}
+                                                                            {canManage && !layout.isProtectedStandard && selectedVersion.status === 'Draft' && row.rowType === 'Account' ? (
+                                                                                <div className="mt-2 flex gap-1">
+                                                                                    <Select value={classificationSelections[row.id] || ''} onValueChange={(value) => setClassificationSelections((current) => ({ ...current, [row.id]: value }))}>
+                                                                                        <SelectTrigger className="h-8 min-w-56"><SelectValue placeholder="Add classification mapping" /></SelectTrigger>
+                                                                                        <SelectContent>{classifications.map((item) => <SelectItem key={item.id} value={item.id}>{item.code} — {item.name}</SelectItem>)}</SelectContent>
+                                                                                    </Select>
+                                                                                    <Button variant="outline" size="sm" disabled={!classificationSelections[row.id] || busy} onClick={() => void addClassificationMapping(row.id)}>Add</Button>
+                                                                                </div>
+                                                                            ) : null}
                                                                             {!row.formula && row.mappings.length === 0 ? <span className="text-xs text-muted-foreground">—</span> : null}
                                                                         </td>
                                                                         <td className="p-3 text-center text-xs">{row.isVisible ? 'Visible' : 'Hidden'}{row.suppressIfZero ? ' · zero suppressed' : ''}</td>
@@ -931,25 +1082,25 @@ function LayoutDetailDialog({
                                         </Alert>
                                         <div className="space-y-2">
                                             <Label htmlFor="layout-name">Name</Label>
-                                            <Input id="layout-name" value={edit.name} disabled={!canManage} onChange={(event) => setEdit((current) => ({ ...current, name: event.target.value }))} />
+                                            <Input id="layout-name" value={edit.name} disabled={!canManage || layout.isProtectedStandard} onChange={(event) => setEdit((current) => ({ ...current, name: event.target.value }))} />
                                         </div>
                                         <div className="space-y-2">
                                             <Label htmlFor="layout-description">Description</Label>
-                                            <Textarea id="layout-description" value={edit.description} disabled={!canManage} onChange={(event) => setEdit((current) => ({ ...current, description: event.target.value }))} />
+                                            <Textarea id="layout-description" value={edit.description} disabled={!canManage || layout.isProtectedStandard} onChange={(event) => setEdit((current) => ({ ...current, description: event.target.value }))} />
                                         </div>
                                         <div className="flex items-center justify-between rounded-md border p-4">
                                             <div><div className="font-medium">Default report layout</div><div className="text-sm text-muted-foreground">Used when a report requests the default published layout.</div></div>
                                             <Switch
                                                 checked={edit.isDefault}
-                                                disabled={!canManage || !layout.versions.some((version) => version.status === 'Published')}
+                                                disabled={!canManage || layout.isProtectedStandard || !layout.versions.some((version) => version.status === 'Published')}
                                                 onCheckedChange={(checked) => setEdit((current) => ({ ...current, isDefault: checked }))}
                                             />
                                         </div>
                                         <div className="flex items-center justify-between rounded-md border p-4">
                                             <div><div className="font-medium">Active</div><div className="text-sm text-muted-foreground">Inactive layouts remain available in the audit history only.</div></div>
-                                            <Switch checked={edit.isActive} disabled={!canManage} onCheckedChange={(checked) => setEdit((current) => ({ ...current, isActive: checked, isDefault: checked ? current.isDefault : false }))} />
+                                            <Switch checked={edit.isActive} disabled={!canManage || layout.isProtectedStandard} onCheckedChange={(checked) => setEdit((current) => ({ ...current, isActive: checked, isDefault: checked ? current.isDefault : false }))} />
                                         </div>
-                                        {canManage ? <Button onClick={requestMetadataSave} disabled={busy || !edit.name.trim()}><Save className="mr-2 h-4 w-4" />Save settings</Button> : null}
+                                        {canManage && !layout.isProtectedStandard ? <Button onClick={requestMetadataSave} disabled={busy || !edit.name.trim()}><Save className="mr-2 h-4 w-4" />Save settings</Button> : null}
                                     </div>
                                 </ScrollArea>
                             </TabsContent>
@@ -1011,26 +1162,27 @@ function LayoutDetailDialog({
 export default function FinancialStatementLayoutsPage() {
     const { toast } = useToast();
     const { hasPermission, isLoading: authLoading } = useAuth();
-    const canManage = hasPermission(MANAGE_PERMISSION);
-    const canPublish = hasPermission(PUBLISH_PERMISSION);
-    const canView = hasPermission(VIEW_PERMISSION) || canManage || canPublish;
+    const { canRead, canManage, canPublish, canRun } =
+        resolveFinancialStatementLayoutPermissions(hasPermission);
     const [layouts, setLayouts] = useState<FinancialStatementLayoutSummaryDto[]>([]);
     const [books, setBooks] = useState<AccountingBook[]>([]);
     const [statementType, setStatementType] = useState<'all' | FinancialStatementType>('all');
     const [bookId, setBookId] = useState('all');
     const [includeInactive, setIncludeInactive] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
     const [importOpen, setImportOpen] = useState(false);
     const [migrationOpen, setMigrationOpen] = useState(false);
     const [selectedLayoutId, setSelectedLayoutId] = useState<string | null>(null);
 
     const load = useCallback(async () => {
-        if (!canView) {
+        if (!canRead) {
             setLoading(false);
             return;
         }
         try {
             setLoading(true);
+            setLoadError(null);
             const [layoutRows, accountingBooks] = await Promise.all([
                 financialStatementLayoutDataService.getLayouts({
                     statementType: statementType === 'all' ? undefined : statementType,
@@ -1042,15 +1194,17 @@ export default function FinancialStatementLayoutsPage() {
             setLayouts(layoutRows);
             setBooks(accountingBooks);
         } catch (error) {
+            const message = errorMessage(error, 'Check your finance permissions and try again.');
+            setLoadError(message);
             toast({
                 title: 'Layouts could not be loaded',
-                description: errorMessage(error, 'Check your finance permissions and try again.'),
+                description: message,
                 variant: 'destructive',
             });
         } finally {
             setLoading(false);
         }
-    }, [bookId, canView, includeInactive, statementType, toast]);
+    }, [bookId, canRead, includeInactive, statementType, toast]);
 
     useEffect(() => {
         if (!authLoading) void load();
@@ -1076,12 +1230,12 @@ export default function FinancialStatementLayoutsPage() {
         return <div className="flex min-h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin" /></div>;
     }
 
-    if (!canView) {
+    if (!canRead) {
         return (
             <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Access restricted</AlertTitle>
-                <AlertDescription>You need Finance.Read or a financial-statement layout permission to open this workspace.</AlertDescription>
+                <AlertDescription>You need Finance.Read to browse financial-statement layouts. Action permissions do not grant read access.</AlertDescription>
             </Alert>
         );
     }
@@ -1151,7 +1305,16 @@ export default function FinancialStatementLayoutsPage() {
                         </div>
                     </div>
 
-                    {loading ? (
+                    {loadError ? (
+                        <Alert variant="destructive">
+                            <AlertCircle className="h-4 w-4" />
+                            <AlertTitle>Layout register unavailable</AlertTitle>
+                            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                                <span>{loadError}</span>
+                                <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
+                            </AlertDescription>
+                        </Alert>
+                    ) : loading ? (
                         <div className="flex justify-center py-14"><Loader2 className="h-7 w-7 animate-spin" /></div>
                     ) : layouts.length === 0 ? (
                         <div className="rounded-md border border-dashed py-14 text-center">
@@ -1184,6 +1347,7 @@ export default function FinancialStatementLayoutsPage() {
                                             <td className="p-3">
                                                 <div className="flex flex-wrap gap-1">
                                                     {layout.isDefault ? <Badge>Default</Badge> : null}
+                                                    {layout.isProtectedStandard ? <Badge variant="secondary">Protected standard</Badge> : null}
                                                     {!layout.isActive ? <Badge variant="outline">Inactive</Badge> : null}
                                                     {layout.latestVersionNumber !== layout.publishedVersionNumber ? <Badge variant="secondary">Draft</Badge> : null}
                                                 </div>
@@ -1210,6 +1374,7 @@ export default function FinancialStatementLayoutsPage() {
                 onOpenChange={(value) => { if (!value) setSelectedLayoutId(null); }}
                 canManage={canManage}
                 canPublish={canPublish}
+                canRun={canRun}
                 onChanged={() => void load()}
             />
         </div>

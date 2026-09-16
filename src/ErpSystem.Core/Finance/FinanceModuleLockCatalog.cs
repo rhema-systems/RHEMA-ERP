@@ -12,6 +12,10 @@ public static class FinanceModuleLockCatalog
     public const string Procurement = "PROC";
     public const string Sales = "SALES";
     public const string HumanResources = "HR";
+    public const string QuantitySurvey = "QS";
+    public const string Estate = "ESTATE";
+    public const string Legal = "LEGAL";
+    public const string Maintenance = "MAINT";
 
     public sealed record Definition(
         string Code,
@@ -37,7 +41,19 @@ public static class FinanceModuleLockCatalog
             "fa-chart-line", 4),
         new(HumanResources, "Human Resources", "HR",
             "Accounting postings originating from Human Resources, including payroll.",
-            "fa-users", 5)
+            "fa-users", 5),
+        new(QuantitySurvey, "Quantity Survey", "Quantity Survey",
+            "Accounting documents originating from approved Quantity Survey certificates.",
+            "fa-ruler-combined", 6),
+        new(Estate, "Estate", "Estate",
+            "Accounting documents originating from Estate billing and acquisitions.",
+            "fa-building", 7),
+        new(Legal, "Legal", "Legal",
+            "Accounting documents originating from approved Legal procedure cases.",
+            "fa-scale-balanced", 8),
+        new(Maintenance, "Maintenance", "Maintenance",
+            "Accounting documents originating from billable maintenance work orders.",
+            "fa-screwdriver-wrench", 9)
     ];
 
     private static readonly IReadOnlyDictionary<string, Definition> ByCode = Definitions

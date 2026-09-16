@@ -45,6 +45,7 @@ import {
   CalendarDays,
   Globe2,
   ListTree,
+  ListFilter,
   Mail,
   Building,
   BarChart3,
@@ -538,17 +539,12 @@ export const navigationItems: NavItem[] = [
           },
           {
             title: 'Suppliers',
-            href: '/procurement/business-partners?partnerType=Supplier',
+            href: '/finance/ap/suppliers',
             icon: Users,
-            permissions: [
-              'Finance.Read',
-              'Finance.Admin',
-              'procurement.records.read',
-              'procurement.supplier.manage',
-              'procurement.supplier.review',
-            ],
-            accessMode: 'any',
+            permissions: ['Finance.Read'],
           },
+          /* Procurement and Inventory own supplier masters, purchase orders, approvals,
+           * and physical receipt workflows. Finance consumes their accounting evidence.
           {
             title: 'Purchase Orders',
             href: '/finance/ap/purchase-orders',
@@ -573,12 +569,15 @@ export const navigationItems: NavItem[] = [
             href: '/finance/ap/receipts',
             icon: Package,
           },
+          */
           { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
+          /* Procurement and Inventory own the supplier-return workflow.
           {
             title: 'Supplier Returns',
             href: '/finance/ap/returns',
             icon: RotateCcw,
           },
+          */
           {
             title: 'Supplier Debit Notes',
             href: '/finance/ap/supplier-debit-notes',
@@ -587,12 +586,12 @@ export const navigationItems: NavItem[] = [
           },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
           {
-            title: 'Adjustment Journal',
+            title: 'New AP Adjustment',
             href: '/finance/subledger-adjustments/new?module=AP',
             icon: FileText,
           },
           {
-            title: 'Journals',
+            title: 'AP Journal Entries',
             href: '/finance/journal-entries?sourceModule=AP',
             icon: FileText,
           },
@@ -645,6 +644,7 @@ export const navigationItems: NavItem[] = [
             href: '/finance/ar/dashboard',
             icon: LayoutDashboard,
           },
+          /* Sales and the shared business-partner master own these customer workflows.
           {
             title: 'Customer Partners',
             href: '/procurement/business-partners?partnerType=Customer',
@@ -659,6 +659,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
           { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
           { title: 'Deliveries', href: '/sales/deliveries', icon: Truck },
+          */
           {
             title: 'Customers',
             href: '/finance/ar/customers',
@@ -671,6 +672,7 @@ export const navigationItems: NavItem[] = [
             accessMode: 'any',
           },
           { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
+          /* Sales owns customer-return and sales-credit-note source workflows.
           {
             title: 'Customer Returns',
             href: '/sales/return-orders',
@@ -681,6 +683,7 @@ export const navigationItems: NavItem[] = [
             href: '/sales/credit-notes',
             icon: CreditCard,
           },
+          */
           { title: 'Receipts', href: '/finance/ar/receipts', icon: CreditCard },
           {
             title: 'Collection Follow-up',
@@ -693,14 +696,16 @@ export const navigationItems: NavItem[] = [
             ],
             accessMode: 'any',
           },
+          /* Sales owns the customer-refund source workflow.
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
+          */
           {
-            title: 'Adjustment Journal',
+            title: 'New AR Adjustment',
             href: '/finance/subledger-adjustments/new?module=AR',
             icon: FileText,
           },
           {
-            title: 'Journals',
+            title: 'AR Journal Entries',
             href: '/finance/journal-entries?sourceModule=AR',
             icon: FileText,
           },
@@ -756,6 +761,11 @@ export const navigationItems: NavItem[] = [
             title: 'Cash Transactions',
             href: '/finance/cash/transactions',
             icon: Activity,
+          },
+          {
+            title: 'Bank Deposits',
+            href: '/finance/cash/deposits',
+            icon: Landmark,
           },
           {
             title: 'Bank Reconciliation',
@@ -922,6 +932,23 @@ export const navigationItems: NavItem[] = [
             title: 'Reports Overview',
             href: '/finance/reports',
             icon: LayoutDashboard,
+          },
+          {
+            title: 'Statement Layouts',
+            href: '/finance/reports/layouts',
+            icon: BookTemplate,
+            permissions: [
+              'Finance.Read',
+              'Finance.Reports.Layouts.Manage',
+              'Finance.Reports.Layouts.Publish',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Ad Hoc Report Builder',
+            href: '/reports/financial/ad-hoc',
+            icon: ListFilter,
+            permissions: ['Finance.Reports.AdHoc.Build'],
           },
           {
             title: 'Trial Balance',
@@ -3569,8 +3596,8 @@ export const navigationItems: NavItem[] = [
                 permissions: ['Finance.AccessScopes.Manage'],
               },
               {
-                title: 'Chart of Accounts Setup',
-                href: '/administration/finance/accounts',
+                title: 'Chart of Accounts',
+                href: '/finance/accounts',
                 icon: CreditCard,
               },
               {

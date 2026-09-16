@@ -25,6 +25,8 @@ import type { Customer } from '@/types/ar';
 import { PaymentMethodType, type BankAccount, type LiquidityAccount, type PaymentMethod } from '@/types/cash-management';
 import type { TaxGroup } from '@/types/tax';
 import { useToast } from "@/components/ui/use-toast";
+import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 const directBankSettlementTypes = new Set<PaymentMethodType>([
     PaymentMethodType.BankTransfer,
@@ -57,6 +59,7 @@ export default function AssetDisposalsPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assetComboOpen, setAssetComboOpen] = useState(false);
     const { toast } = useToast();
+    const [dimensionDefaults, setDimensionDefaults] = useState<Record<string, string>>({});
 
     // Form state
     const [formData, setFormData] = useState<Partial<RequestAssetDisposalDto>>({
@@ -196,12 +199,20 @@ export default function AssetDisposalsPage() {
 
         try {
             setIsSubmitting(true);
-            await fixedAssetsDataService.requestDisposal(formData as RequestAssetDisposalDto);
+            await fixedAssetsDataService.requestDisposal({
+                ...formData,
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(dimensionDefaults),
+                    lines: [],
+                    applyDefaultToEligibleLines: true,
+                },
+            } as RequestAssetDisposalDto);
             toast({
                 title: "Success",
                 description: "Asset disposal request submitted successfully.",
             });
             setIsDialogOpen(false);
+            setDimensionDefaults({});
             setFormData({
                 disposalType: 'Sale',
                 disposalScope: 'WholeAsset',
@@ -576,9 +587,9 @@ export default function AssetDisposalsPage() {
                                         </div>
                                         <div className="space-y-2">
                                             <Label htmlFor="saleTaxTreatment">Statutory Tax Treatment <span className="text-red-500">*</span></Label>
-                                            <Select value={formData.saleTaxTreatment || 'Standard'} onValueChange={(value: RequestAssetDisposalDto['saleTaxTreatment']) => setFormData({
+                                            <Select value={formData.saleTaxTreatment || 'Standard'} onValueChange={(value) => setFormData({
                                                 ...formData,
-                                                saleTaxTreatment: value,
+                                                saleTaxTreatment: value as RequestAssetDisposalDto['saleTaxTreatment'],
                                                 saleTaxGroupId: value === 'Standard'
                                                     ? (formData.saleTaxGroupId || saleTaxGroups.find(group => group.isDefault)?.id || saleTaxGroups[0]?.id)
                                                     : undefined,
@@ -772,6 +783,12 @@ export default function AssetDisposalsPage() {
                                 />
                             </div>
 
+                            <SourceDocumentDimensionDefaultsPanel
+                                effectiveDate={formData.disposalDate || new Date().toISOString().slice(0, 10)}
+                                values={dimensionDefaults}
+                                onChange={setDimensionDefaults}
+                                disabled={isSubmitting}
+                            />
                             <DialogFooter>
                                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                                 <Button type="submit" className="bg-red-600 hover:bg-red-700" disabled={isSubmitting}>

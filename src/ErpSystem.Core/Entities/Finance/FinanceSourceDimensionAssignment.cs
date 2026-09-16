@@ -28,6 +28,25 @@ public sealed class FinanceSourceDimensionAssignment : TenantEntity
 
     public Guid SourceDocumentId { get; set; }
     public Guid? SourceLineId { get; set; }
+
+    /// <summary>
+    /// Trusted economic account resolved by the producer service. Populated only for line rows;
+    /// clients cannot select or overwrite it through a dimension payload.
+    /// </summary>
+    public Guid? ResolvedAccountId { get; set; }
+
+    /// <summary>
+    /// Effective accounting date captured on the header row for rule-drift/readiness evaluation.
+    /// </summary>
+    public DateTime? SourceDocumentDate { get; set; }
+
+    /// <summary>
+    /// Header-only evidence of the complete trusted economic-line context at the last draft save.
+    /// </summary>
+    public int? ExpectedSourceLineCount { get; set; }
+
+    [MaxLength(64)]
+    public string? SourceLineManifestHash { get; set; }
     /// <summary>
     /// Canonical assignment. It remains nullable for a clearable header default and for an
     /// explicitly captured CaptureOptional line with no supplied values. The assignment row,
