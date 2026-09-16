@@ -99,7 +99,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
 
         var permissionSql = ArchivedMigrationSource.SqlContaining(
             "20260830193635_AddFinanceDimensionSourceInfrastructure.cs",
-            "Finance.Dimensions.Certification.Manage");
+            "INSERT INTO [Permissions]");
 
         await context.Database.ExecuteSqlRawAsync(permissionSql);
         await context.Database.ExecuteSqlRawAsync(permissionSql);
@@ -138,14 +138,14 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 ON column_definition.object_id = index_column.object_id
                 AND column_definition.column_id = index_column.column_id
             WHERE table_definition.name = N'AccountTransactions'
-                AND index_definition.name = N'IX_AccountTransactions_TenantId_BookClassification_TransactionDate_AccountId'
+                AND index_definition.name = N'IX_AccountTransactions_TenantId_AccountingBookId_TransactionDate_AccountId'
                 AND index_column.key_ordinal > 0;
             """;
 
         // Key order matters: changing it can leave the index present while making the tenant/book
         // prefix unusable for the trial-balance and journal-inquiry query shapes it was designed for.
         Convert.ToString(await command.ExecuteScalarAsync())
-            .Should().Be("TenantId,BookClassification,TransactionDate,AccountId");
+            .Should().Be("TenantId,AccountingBookId,TransactionDate,AccountId");
     }
 
     [SqlServerFact]
@@ -749,7 +749,9 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             context.AccountingBooks.Add(new AccountingBook
             {
                 Id = bookId, TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
-                IsDefault = true, IsActive = true, AllowsPosting = true
+                IsDefault = true, IsActive = true, AllowsPosting = true,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS"
             });
             var journal = new JournalEntry
             {
@@ -859,14 +861,19 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             context.AccountingBooks.Add(new AccountingBook
             {
                 Id = bookId, TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
-                IsDefault = true, IsActive = true, AllowsPosting = true
+                IsDefault = true, IsActive = true, AllowsPosting = true,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS"
             });
             if (includeParallelBook)
             {
                 context.AccountingBooks.Add(new AccountingBook
                 {
                     Id = parallelBookId, TenantId = tenantId, Code = "LOCAL_STATUTORY", Name = "Local Statutory",
-                    IsDefault = false, IsActive = true, AllowsPosting = true
+                    BookType = AccountingBookType.ParallelFull,
+                    IsDefault = false, IsActive = true, AllowsPosting = true,
+                    LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                    FunctionalCurrencyCode = "GHS"
                 });
             }
             context.Accounts.AddRange(
