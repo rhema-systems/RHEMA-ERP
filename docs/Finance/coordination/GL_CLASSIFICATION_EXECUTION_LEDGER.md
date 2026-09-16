@@ -3163,3 +3163,25 @@ evidence directory, or backup was accessed, and no operational retry is authoriz
   absent. No `RhemaERP` mutation or C6/C7/C8 activation occurred. This is a fresh-empty-catalog baseline proof,
   not a proof of the existing development catalog's reset, reseed, application smoke paths, or frontend release
   build. Those gates remain separate.
+
+### Guarded development reset and local API smoke (2026-09-16)
+
+- `origin/master` remained `9361cd8e9af617cf7f80df8923290671d31f7775`. The reviewed clean HEAD was
+  `6d999e10f37412570431ffe1803ee3095d330efe` (tree
+  `58fb124d8a660af5255a4d0bed20c390260be7db`). Independent read-only review confirmed the live local
+  `RhemaERP` catalog was an empty stub left by the September 14 failed reset: only the empty EF migrations-history
+  table and its key; source fingerprint `0|EMPTY|0|0|0`. Historical backup files were retained.
+- The first guarded invocation refused before SQL contact because an ignored generated Syncfusion `pdfium.js` file
+  existed in the integration worktree. No file was hidden or deleted. A fresh, detached worktree at the identical
+  reviewed commit/tree passed the repository gate and ran the unchanged reset harness exactly once. Its external
+  evidence is `GL-Disposable-Reset-Evidence-20260916-14`; terminal status is `PASS` / `COMPLETE`.
+- The harness made a unique COPY_ONLY/CHECKSUM backup, verified it with RESTORE VERIFYONLY, and preserved its
+  SHA-256 `6AAAC79D6D44559358800B54A8BA3916982299889C96FFDB4A61FBA04513D812`. Its guarded reset applied
+  only `20260916132000_DisposableDevelopmentCurrentModelBaseline`; two seed passes produced the same invariant
+  SHA-256 `61C65A169AD90E3F05F11F2A8A44D9F8513DC60550993796EAF0FF1BE8D75CEB`; DBCC passed. Independent
+  SQL read-back found 1,630 application tables, 835 checks, 493 enabled triggers, and six programmable objects.
+- A temporary local API launch with C6/C7/C8 false and startup initialization skipped passed `/health/live` (200)
+  and the SQL readiness check. Overall `/health/ready` returned 503 solely because the ClamAV file-virus-scanner
+  check was unhealthy; the full `/health` also reported memory degraded. The temporary API was stopped. Docker's
+  Linux engine was unavailable on this host, so the compose-managed ClamAV service was not started. No Finance
+  activation flags were enabled; broad frontend type-check and full application/browser testing remain open.
