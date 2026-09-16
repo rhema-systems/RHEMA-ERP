@@ -118,6 +118,7 @@ export default function SalaryReviewProposalPage() {
    * outcome onto the record, so we refetch and let it decide.
    */
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'SalaryReviewProposal',
     entityId: id,
     entityLabel: 'Salary Review Proposal',

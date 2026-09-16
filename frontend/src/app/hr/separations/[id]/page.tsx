@@ -203,6 +203,7 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
    * paid.
    */
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'EmployeeSeparation',
     entityId: id,
     entityLabel: 'Separation',

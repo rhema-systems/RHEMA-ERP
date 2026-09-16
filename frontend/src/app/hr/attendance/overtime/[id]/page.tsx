@@ -68,6 +68,7 @@ export default function OvertimeRequestDetailPage() {
   };
 
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'StaffOvertimeRequest',
     entityId: id,
     entityLabel: 'Overtime Request',

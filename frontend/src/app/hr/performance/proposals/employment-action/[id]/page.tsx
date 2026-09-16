@@ -81,6 +81,7 @@ export default function EmploymentActionProposalPage() {
   });
 
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'EmploymentActionProposal',
     entityId: id,
     entityLabel: 'Employment Action Proposal',

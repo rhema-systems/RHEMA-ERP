@@ -109,6 +109,7 @@ export default function ConsultantTimesheetDetailPage() {
   };
 
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'ConsultantTimesheet',
     entityId: id,
     entityLabel: 'Consultant Timesheet',

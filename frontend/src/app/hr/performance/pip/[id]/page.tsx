@@ -128,6 +128,7 @@ export default function PipDetailPage() {
    * the outcome onto the record, so we refetch and let it decide.
    */
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'PerformanceImprovementPlan',
     entityId: id,
     entityLabel: 'Improvement Plan',

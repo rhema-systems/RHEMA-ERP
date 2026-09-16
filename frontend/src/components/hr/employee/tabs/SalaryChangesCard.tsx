@@ -98,6 +98,7 @@ export function SalaryChangesCard({
 
   // The engine's actions for the ONE live request; the hook is keyed on that request's id.
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'HrEmployeeSalaryChangeRequest',
     entityId: live?.id ?? '',
     entityLabel: 'Salary change request',

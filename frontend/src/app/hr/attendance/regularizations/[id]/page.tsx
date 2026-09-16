@@ -64,6 +64,7 @@ export default function RegularizationDetailPage() {
   };
 
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'StaffAttendanceRegularization',
     entityId: id,
     entityLabel: 'Attendance Regularization',

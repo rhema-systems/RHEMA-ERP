@@ -72,6 +72,7 @@ export default function LeaveRequestDetailPage() {
    * it just refetches.
    */
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'LeaveRequest',
     entityId: id,
     entityLabel: 'Leave Request',
