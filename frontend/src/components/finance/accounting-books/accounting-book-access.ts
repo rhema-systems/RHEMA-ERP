@@ -7,6 +7,12 @@ export const APPROVE_BOOK_PERIODS_PERMISSION = 'Finance.AccountingBooks.Periods.
 export const MANAGE_BOOK_INITIALIZATION_PERMISSION = 'Finance.AccountingBooks.Initialization.Manage';
 export const APPROVE_BOOK_INITIALIZATION_PERMISSION = 'Finance.AccountingBooks.Initialization.Approve';
 
+// A visible permission is not maker-checker authority. Withhold decision controls
+// until both actor and maker identities are known and differ; the API checks again.
+export function isIndependentChecker(actorId?: string | null, makerId?: string | null) {
+    return Boolean(actorId && makerId && actorId.toLowerCase() !== makerId.toLowerCase());
+}
+
 export function getAccountingBookAccess(hasPermission: (permission: string) => boolean) {
     const canRead = hasPermission(FINANCE_READ_PERMISSION);
     return {

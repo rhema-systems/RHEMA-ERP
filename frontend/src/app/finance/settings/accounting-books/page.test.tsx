@@ -8,9 +8,11 @@ import type { AccountingBook } from '@/types/finance';
 let permissions = new Set<string>();
 let authLoading = false;
 let authError: Error | null = null;
+let authUserId = 'checker-id';
 
 vi.mock('@/hooks/use-auth', () => ({
     useAuth: () => ({
+        user: { id: authUserId },
         isLoading: authLoading,
         error: authError,
         hasPermission: (permission: string) => permissions.has(permission),
@@ -54,6 +56,7 @@ describe('accounting book settings', () => {
         permissions = new Set(['Finance.Read']);
         authLoading = false;
         authError = null;
+        authUserId = 'checker-id';
         vi.clearAllMocks();
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([primaryBook]);
         vi.mocked(financeDataService.getCurrencies).mockResolvedValue([{ currencyCode: 'GHS', currencyName: 'Ghanaian Cedi', isActive: true }, { currencyCode: 'USD', currencyName: 'US Dollar', isActive: true }] as never);
@@ -213,6 +216,7 @@ describe('accounting book settings', () => {
             ...initializingBook,
             pendingLifecycleStatus: 'Suspended' as const,
             pendingTransitionReason: 'Pause configuration for review',
+            transitionRequestedByUserId: 'maker-id',
         };
         permissions.add('Finance.AccountingBooks.Manage');
         permissions.add('Finance.AccountingBooks.Transitions.Approve');
@@ -235,6 +239,22 @@ describe('accounting book settings', () => {
         }));
     });
 
+    it('hides approval actions from the requester even when that user has approval permission', async () => {
+        authUserId = 'MAKER-ID';
+        permissions.add('Finance.AccountingBooks.Transitions.Approve');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            pendingLifecycleStatus: 'Suspended',
+            transitionRequestedByUserId: 'maker-id',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        expect(await screen.findByText('Awaiting a different authorized checker.')).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+        expect(financeDataService.approveAccountingBookTransition).not.toHaveBeenCalled();
+    });
+
     it('does not let a checker approve Active before C4 readiness', async () => {
         permissions.add('Finance.AccountingBooks.Transitions.Approve');
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
@@ -242,6 +262,7 @@ describe('accounting book settings', () => {
             pendingLifecycleStatus: 'Active',
             pendingTransitionReason: 'Attempt activation',
             activationReady: false,
+            transitionRequestedByUserId: 'maker-id',
         }]);
 
         render(<AccountingBooksSettingsPage />);

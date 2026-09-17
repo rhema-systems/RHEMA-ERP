@@ -17,7 +17,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { AccountingBook, AccountingBookLifecycleStatus, AccountingBookType, SaveAccountingBook } from '@/types/finance';
-import { getAccountingBookAccess } from '@/components/finance/accounting-books/accounting-book-access';
+import { getAccountingBookAccess, isIndependentChecker } from '@/components/finance/accounting-books/accounting-book-access';
 import { SearchableOptionPicker } from '@/components/finance/accounting-books/searchable-option-picker';
 import type { Currency } from '@/types/finance';
 
@@ -55,7 +55,7 @@ const dateValue = (value?: string | null) => value ? value.slice(0, 10) : '';
 const utcDate = (value: string) => value ? `${value}T00:00:00.000Z` : null;
 
 export default function AccountingBooksSettingsPage() {
-    const { hasPermission, isLoading: authLoading, error: authError } = useAuth();
+    const { user, hasPermission, isLoading: authLoading, error: authError } = useAuth();
     const access = getAccountingBookAccess(hasPermission);
     const { toast } = useToast();
     const [books, setBooks] = useState<AccountingBook[]>([]);
@@ -244,6 +244,10 @@ export default function AccountingBooksSettingsPage() {
             : books.length === 0 ? <Card><CardContent className="py-12 text-center"><p className="text-muted-foreground">No accounting books are configured.</p>{access.canManage && <Button className="mt-4" onClick={() => openEditor()}><Plus className="mr-2 h-4 w-4" />Create the first book</Button>}</CardContent></Card>
                 : <div className="grid gap-4 lg:grid-cols-2">{books.map(book => {
                     const status = statusOf(book);
+                    const isRequester = Boolean(user?.id && book.transitionRequestedByUserId
+                        && user.id.toLowerCase() === book.transitionRequestedByUserId.toLowerCase());
+                    const canDecide = Boolean(access.canApproveTransition && book.pendingLifecycleStatus
+                        && isIndependentChecker(user?.id, book.transitionRequestedByUserId));
                     return <Card key={book.id}>
                         <CardHeader>
                             <div className="flex flex-wrap items-start justify-between gap-3"><div><CardTitle className="text-lg">{book.code} — {book.name}</CardTitle><CardDescription>{book.purpose}</CardDescription></div><div className="flex gap-2"><Badge variant={status === 'Active' ? 'default' : 'secondary'}>{status}</Badge>{book.isDefault && <Badge variant="outline">Primary/default</Badge>}</div></div>
@@ -251,7 +255,7 @@ export default function AccountingBooksSettingsPage() {
                         <CardContent className="space-y-3 text-sm">
                             <div className="grid grid-cols-2 gap-2"><span><span className="text-muted-foreground">Type:</span> {typeOf(book)}</span><span><span className="text-muted-foreground">Currency:</span> {book.functionalCurrencyCode || 'Inherited from base'}</span><span><span className="text-muted-foreground">Effective:</span> {dateValue(book.effectiveFromUtc) || 'Not set'}</span><span><span className="text-muted-foreground">Base:</span> {book.baseAccountingBookCode || 'None'}</span></div>
                             {book.pendingLifecycleStatus && <Alert className={book.pendingLifecycleStatus === 'Active' && !book.activationReady ? 'border-amber-300 bg-amber-50' : undefined}><AlertTitle>Pending {book.pendingLifecycleStatus}</AlertTitle><AlertDescription>{book.pendingTransitionReason || 'Awaiting independent review.'}{book.pendingLifecycleStatus === 'Active' && !book.activationReady ? ` ${book.readinessMessage || 'Approved initialization and an open first exact-book period are required.'}` : ''}</AlertDescription></Alert>}
-                            <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void openDetail(book)}>View details</Button><Button asChild variant="outline" size="sm"><Link href={`/finance/settings/accounting-books/${book.id}/readiness`}>Periods &amp; initialization</Link></Button>{access.canManage && status !== 'Retired' && <Button variant="outline" size="sm" disabled={Boolean(book.pendingLifecycleStatus)} onClick={() => openEditor(book)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</Button>}{access.canRequestTransition && !book.pendingLifecycleStatus && lifecycleTargets[status].length > 0 && <Button size="sm" onClick={() => openTransition(book)}>Request transition</Button>}{access.canApproveTransition && book.pendingLifecycleStatus && <><Button size="sm" disabled={book.pendingLifecycleStatus === 'Active' && !book.activationReady} onClick={() => { setDecision({ book, action: 'approve' }); setDecisionReason(''); }}>Approve</Button><Button size="sm" variant="destructive" onClick={() => { setDecision({ book, action: 'reject' }); setDecisionReason(''); }}>Reject</Button></>}</div>
+                            <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void openDetail(book)}>View details</Button><Button asChild variant="outline" size="sm"><Link href={`/finance/settings/accounting-books/${book.id}/readiness`}>Periods &amp; initialization</Link></Button>{access.canManage && status !== 'Retired' && <Button variant="outline" size="sm" disabled={Boolean(book.pendingLifecycleStatus)} onClick={() => openEditor(book)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</Button>}{access.canRequestTransition && !book.pendingLifecycleStatus && lifecycleTargets[status].length > 0 && <Button size="sm" onClick={() => openTransition(book)}>Request transition</Button>}{canDecide && <><Button size="sm" disabled={book.pendingLifecycleStatus === 'Active' && !book.activationReady} onClick={() => { setDecision({ book, action: 'approve' }); setDecisionReason(''); }}>Approve</Button><Button size="sm" variant="destructive" onClick={() => { setDecision({ book, action: 'reject' }); setDecisionReason(''); }}>Reject</Button></>}{isRequester && <span className="self-center text-xs text-muted-foreground">Awaiting a different authorized checker.</span>}</div>
                         </CardContent>
                     </Card>;
                 })}</div>}

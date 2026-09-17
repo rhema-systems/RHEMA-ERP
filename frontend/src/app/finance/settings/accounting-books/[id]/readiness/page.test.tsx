@@ -6,8 +6,9 @@ import { financeDataService } from '@/services/finance/finance-data.service';
 
 let permissions = new Set<string>();
 let authLoading = false;
+let authUserId = 'checker';
 vi.mock('next/navigation', () => ({ useParams: () => ({ id: 'book-1' }) }));
-vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ isLoading: authLoading, error: null, hasPermission: (value: string) => permissions.has(value) }) }));
+vi.mock('@/hooks/use-auth', () => ({ useAuth: () => ({ user: { id: authUserId }, isLoading: authLoading, error: null, hasPermission: (value: string) => permissions.has(value) }) }));
 vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock('@/services/finance/finance-data.service', () => ({ financeDataService: {
     getAccountingBook: vi.fn(), getAccountingBooks: vi.fn(), getAccountingBookPeriods: vi.fn(), getFiscalPeriods: vi.fn(),
@@ -23,7 +24,7 @@ describe('accounting book C4 readiness', () => {
     beforeEach(() => {
         vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
         Element.prototype.scrollIntoView = vi.fn();
-        permissions = new Set(['Finance.Read']); authLoading = false; vi.clearAllMocks();
+        permissions = new Set(['Finance.Read']); authLoading = false; authUserId = 'checker'; vi.clearAllMocks();
         vi.mocked(financeDataService.getAccountingBook).mockResolvedValue(book as never);
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([book] as never);
         vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([]);
@@ -102,6 +103,31 @@ describe('accounting book C4 readiness', () => {
         fireEvent.change(screen.getByLabelText('Independent checker reason'), { target: { value: 'Evidence independently reconciled' } });
         fireEvent.click(screen.getByRole('button', { name: 'Confirm approve' }));
         await waitFor(() => expect(financeDataService.decideAccountingBookInitialization).toHaveBeenCalledWith('book-1', 'approve', 'Evidence independently reconciled', 'AQ=='));
+    });
+
+    it('hides period and initialization decisions from their maker despite approval grants', async () => {
+        authUserId = 'MAKER';
+        permissions.add('Finance.AccountingBooks.Periods.Approve');
+        permissions.add('Finance.AccountingBooks.Initialization.Approve');
+        vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([{
+            ...period, pendingStatus: 'Open', requestedByUserId: 'maker',
+        }] as never);
+        vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue({
+            id: 'init', accountingBookId: 'book-1', version: 1, accountingBookCode: 'LOCAL',
+            mode: 'IndependentOpeningBalances', status: 'PendingApproval', cutoffDate: '2025-12-31',
+            cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2025-12', idempotencyKey: 'key',
+            reason: 'reason', totalDebits: 0, totalCredits: 0, requiredAccountCount: 1,
+            coveredAccountCount: 1, isBalanced: true, isCoverageComplete: true,
+            evidenceFingerprint: 'A'.repeat(64), reconciliationFingerprint: 'B'.repeat(64),
+            preparedByUserId: 'maker', preparedAtUtc: '2026-01-01', rowVersion: 'AQ==', lines: [],
+        } as never);
+
+        render(<AccountingBookReadinessPage />);
+        expect(await screen.findByText('Pending Open')).toBeInTheDocument();
+        expect(screen.getAllByText('Awaiting a different authorized checker.')).toHaveLength(2);
+        expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+        expect(financeDataService.decideAccountingBookInitialization).not.toHaveBeenCalled();
     });
 
     it('shows rejection as decision evidence without presenting it as approval', async () => {
