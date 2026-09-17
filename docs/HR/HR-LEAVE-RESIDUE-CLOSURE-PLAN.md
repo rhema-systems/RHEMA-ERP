@@ -1,6 +1,6 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1 and G2 BUILT and verified. G3–G7 planned, not built.**
+**Status:** 2026-09-17 — **G1, G2 and G3 BUILT and verified. G4–G7 planned, not built.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -92,7 +92,52 @@ example** naming the spread.
 is what stops these eight becoming another 14 dead fields. Leave and encashment are complete in it;
 the rest of HR is listed as unsurveyed.
 
-### G3–G7 — not started
+### G3 — excuse duty and the medical board (leave side): BUILT 2026-09-17
+
+Migration `20260917213834_AddLeaveMedicalEvidence` (three columns on `LeaveTypes`, one on
+`LeaveRequestAttachments`, guarded SQL, registered).
+
+**Verified by `dev-harness/hr-leave` slice 7 — 34 assertions, green twice. Suite total 311 across
+seven slices, green twice.**
+
+**Attachments are typed now**, and that is what makes the rules possible at all. `LeaveEvidenceKind`
+is `Other` / `ExcuseDuty` / `MedicalBoardRecommendation`; a rule saying *"a certificate must be
+attached"* cannot be checked against file names, because `scan.pdf` is a medical certificate or a
+holiday photograph with equal probability. `Other = 0`, so every attachment that predates the column
+keeps meaning what it meant.
+
+**Two rules, both on the leave type, both inert until switched on:**
+
+| Rule | Refuses at submit when |
+|---|---|
+| Excuse duty | the absence is longer than `SelfCertificationDays` and no `ExcuseDuty` document is attached |
+| Medical board | cumulative days of this type **in the year** pass `MedicalBoardThresholdDays` and no board recommendation is attached |
+
+⚠ **The board rule counts the year, not the request**, and slice 7 proves it with two six-day
+absences against a ten-day threshold: each passes alone, together they refuse, and the message states
+**12**. A per-request threshold is defeated by splitting one absence in two, which is exactly what
+somebody avoiding a board would do. Same reasoning that made the sub-type cap annual (decision D-2).
+
+⚠ **The gate runs BEFORE the auto-approval branch.** A leave type with `RequiresApproval = false`
+would otherwise approve sick leave with no certificate and nobody ever asked. Slice 7 asserts the
+request is still `Draft` afterwards, not merely that the call failed.
+
+**⚠ What slice 7 found, which reading the code did not**
+
+`LeaveRequestAttachmentDto.EvidenceKind` was never populated — the column, the entity property, the
+enum, the DTO field and the upload parameter were each correct, and the **mapper** was missed. So
+every attachment read back as `Other` however it was uploaded: the gate refusing on the truth while
+the screen showed something else, which is worse than a blank field because the record then appears
+to say no evidence was produced.
+
+**Defaults:** off / 3 days / 90 days, all documented in the entity and on screen as starting values
+rather than anyone's rule. **L-D10 remains TDC's to answer, but nothing waits on it.**
+
+⚠ **Nothing is seeded on**, so the demo will not show this until a leave type is configured for it.
+Unlike in-service encashment there is no already-demonstrated screen to protect, so the safe default
+was taken rather than forcing it.
+
+### G4–G7 — not started
 
 Unchanged from § 4 below. **G6 is partly done** — the register exists and covers leave; what remains
 is the survey of the other modules.

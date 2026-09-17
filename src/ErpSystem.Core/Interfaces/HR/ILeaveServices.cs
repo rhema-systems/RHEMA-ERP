@@ -154,7 +154,11 @@ public interface ILeaveService
     /// <c>IHrControlledDocumentService</c>; <paramref name="filePath"/> stays empty for new
     /// rows and is only populated on pre-migration data.
     /// </summary>
-    Task<LeaveRequestAttachmentDto> UploadAttachmentAsync(Guid leaveRequestId, Guid uploadedBy, string fileName, string filePath, string? contentType, long? fileSizeBytes, Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null);
+    /// <remarks>
+    /// <paramref name="evidenceKind"/> is what makes the R-15a gate possible: it can ask whether a
+    /// document of the right KIND is present, which no list of file names could answer.
+    /// </remarks>
+    Task<LeaveRequestAttachmentDto> UploadAttachmentAsync(Guid leaveRequestId, Guid uploadedBy, string fileName, string filePath, string? contentType, long? fileSizeBytes, Guid? fileUploadRecordId = null, Guid? documentRecordId = null, Guid? documentVersionId = null, LeaveEvidenceKind evidenceKind = LeaveEvidenceKind.Other);
     Task<IEnumerable<LeaveRequestAttachmentDto>> GetAttachmentsAsync(Guid leaveRequestId);
     Task<LeaveRequestAttachmentDto?> GetAttachmentByIdAsync(Guid attachmentId);
     Task<bool> DeleteAttachmentAsync(Guid attachmentId);

@@ -36,6 +36,9 @@ namespace ErpSystem.Application.Extensions
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
             EncashmentWorkingDaysPerMonth = entity.EncashmentWorkingDaysPerMonth,
+            RequiresMedicalCertificate = entity.RequiresMedicalCertificate,
+            SelfCertificationDays = entity.SelfCertificationDays,
+            MedicalBoardThresholdDays = entity.MedicalBoardThresholdDays,
             IsActive = entity.IsActive
         };
 
@@ -63,7 +66,10 @@ namespace ErpSystem.Application.Extensions
             MandatoryAnnualLeave = dto.MandatoryAnnualLeave,
             EncashmentRateBasis = dto.EncashmentRateBasis,
             EncashmentRatePerDay = dto.EncashmentRatePerDay,
-            EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth
+            EncashmentWorkingDaysPerMonth = dto.EncashmentWorkingDaysPerMonth,
+            RequiresMedicalCertificate = dto.RequiresMedicalCertificate,
+            SelfCertificationDays = dto.SelfCertificationDays,
+            MedicalBoardThresholdDays = dto.MedicalBoardThresholdDays
         };
 
         public static List<LeaveTypeDto> ToDtoList(this IEnumerable<LeaveType> entities)
@@ -380,7 +386,12 @@ namespace ErpSystem.Application.Extensions
             FileSizeBytes = entity.FileSizeBytes,
             UploadedDate = entity.UploadedDate,
             UploadedBy = entity.UploadedBy,
-            UploadedByName = entity.UploadedByEmployee?.FullName ?? string.Empty
+            UploadedByName = entity.UploadedByEmployee?.FullName ?? string.Empty,
+            // ⚠ Without this the DTO carried the field and nothing filled it, so every attachment
+            // read back as "Other" however it was uploaded — the gate refusing on the truth while
+            // the screen showed something else. Caught by slice 7, not by reading the code: the
+            // column, the entity, the DTO and the enum were all correct in isolation.
+            EvidenceKind = entity.EvidenceKind
         };
 
         public static List<LeaveRequestAttachmentDto> ToDtoList(this IEnumerable<LeaveRequestAttachment> entities)

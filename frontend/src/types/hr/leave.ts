@@ -65,6 +65,17 @@ export interface LeaveType {
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;
+
+  /**
+   * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
+   * tenant, because they are rules about a KIND of leave — sick leave needs a certificate,
+   * annual leave does not, and every client has both.
+   */
+  requiresMedicalCertificate: boolean;
+  /** Days takeable on the employee's own word. ⚠ 3 is a starting value, not anyone's rule. */
+  selfCertificationDays: number;
+  /** Cumulative days in a year past which a board must sit. Null = never. ⚠ Counted per YEAR. */
+  medicalBoardThresholdDays?: number | null;
   isActive: boolean;
 }
 
@@ -100,6 +111,17 @@ export interface CreateLeaveTypeRequest {
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
   encashmentWorkingDaysPerMonth: number;
+
+  /**
+   * Excuse duty and the medical board (R-15a). ⚠ All three live on the LEAVE TYPE, not the
+   * tenant, because they are rules about a KIND of leave — sick leave needs a certificate,
+   * annual leave does not, and every client has both.
+   */
+  requiresMedicalCertificate: boolean;
+  /** Days takeable on the employee's own word. ⚠ 3 is a starting value, not anyone's rule. */
+  selfCertificationDays: number;
+  /** Cumulative days in a year past which a board must sit. Null = never. ⚠ Counted per YEAR. */
+  medicalBoardThresholdDays?: number | null;
   /** Pay components an encashment pays through — owned by the Emoluments area. */
   allowanceComponentIds: string[];
 }

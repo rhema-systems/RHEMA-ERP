@@ -31,6 +31,13 @@ public class LeaveTypeDto
     public EncashmentRateBasis EncashmentRateBasis { get; set; }
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; }
+
+    /// <summary>Whether this leave type requires excuse duty (a medical certificate).</summary>
+    public bool RequiresMedicalCertificate { get; set; }
+    /// <summary>Days takeable on the employee's own word before a certificate is required.</summary>
+    public int SelfCertificationDays { get; set; }
+    /// <summary>Cumulative days in a year past which a medical board must sit. Null = never.</summary>
+    public int? MedicalBoardThresholdDays { get; set; }
     public bool IsActive { get; set; }
 }
 
@@ -64,6 +71,22 @@ public class CreateLeaveTypeDto
     public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
     public decimal? EncashmentRatePerDay { get; set; }
     public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+
+    /// <summary>
+    /// Whether this leave type requires excuse duty — a medical certificate — once the
+    /// self-certification period is passed. Defaults off, so no existing type starts refusing.
+    /// </summary>
+    public bool RequiresMedicalCertificate { get; set; } = false;
+
+    /// <summary>Days takeable on the employee's own word. ⚠ 3 is a starting value, not a rule.</summary>
+    [Range(0, 365)] public int SelfCertificationDays { get; set; } = 3;
+
+    /// <summary>
+    /// Cumulative days of this type in a year past which a medical board must sit. Null = never.
+    /// ⚠ Counted across the YEAR: a per-request threshold is defeated by splitting an absence.
+    /// </summary>
+    [Range(1, 365)] public int? MedicalBoardThresholdDays { get; set; } = 90;
+
     /// <summary>Allowance pay-component IDs whose value feeds this leave type's derived encashment rate.</summary>
     public List<Guid> AllowanceComponentIds { get; set; } = new();
 }
@@ -652,6 +675,12 @@ public class LeaveRequestAttachmentDto
     public DateTime UploadedDate { get; set; }
     public Guid UploadedBy { get; set; }
     public string UploadedByName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// What the document is. ⚠ The evidence gate reads this, not the file name — `scan.pdf` is a
+    /// medical certificate or a holiday photograph with equal probability.
+    /// </summary>
+    public LeaveEvidenceKind EvidenceKind { get; set; }
 }
 
 // ─── Leave Encashment ─────────────────────────────────────────────────────────

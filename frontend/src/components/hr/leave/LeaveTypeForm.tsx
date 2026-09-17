@@ -49,6 +49,9 @@ export const leaveTypeSchema = z
     allowCashConversion: z.boolean(),
     requiresReliever: z.boolean(),
     mandatoryAnnualLeave: z.boolean(),
+    requiresMedicalCertificate: z.boolean(),
+    selfCertificationDays: z.string().optional().or(z.literal('')),
+    medicalBoardThresholdDays: z.string().optional().or(z.literal('')),
     minServiceMonthsToAccess: z.string().optional().or(z.literal('')),
     encashmentRateBasis: z.enum(['DerivedFromEmoluments', 'Manual']),
     encashmentRatePerDay: z.string().optional().or(z.literal('')),
@@ -87,6 +90,9 @@ export const emptyLeaveType: LeaveTypeFormValues = {
   allowCashConversion: false,
   requiresReliever: false,
   mandatoryAnnualLeave: false,
+  requiresMedicalCertificate: false,
+  selfCertificationDays: '3',
+  medicalBoardThresholdDays: '90',
   minServiceMonthsToAccess: '',
   encashmentRateBasis: 'DerivedFromEmoluments',
   encashmentRatePerDay: '',
@@ -118,6 +124,9 @@ export function LeaveTypeForm({
 
   const allowCarryOver = form.watch('allowCarryOver');
   const allowCashConversion = form.watch('allowCashConversion');
+  const requiresCertificate = form.watch('requiresMedicalCertificate');
+  const selfCertDays = form.watch('selfCertificationDays');
+  const boardDays = form.watch('medicalBoardThresholdDays');
 
   return (
     <Card className="max-w-3xl">
@@ -190,6 +199,49 @@ export function LeaveTypeForm({
               <SwitchField form={form} name="requiresApproval" label="Requires approval" />
               <SwitchField form={form} name="requiresReliever" label="Requires a reliever" />
             </FieldRow>
+          </section>
+
+          <section className="space-y-4">
+            <h3 className="text-sm font-medium text-muted-foreground">Medical evidence</h3>
+            <SwitchField
+              form={form}
+              name="requiresMedicalCertificate"
+              label="Requires excuse duty (a medical certificate)"
+              description="Off for most leave. On for sick leave and its relatives: an absence longer than the self-certification period cannot be submitted until a certificate is attached."
+            />
+            {requiresCertificate && (
+              <>
+                <FieldRow>
+                  <NumberField
+                    form={form}
+                    name="selfCertificationDays"
+                    label="Self-certification days"
+                  />
+                  <NumberField
+                    form={form}
+                    name="medicalBoardThresholdDays"
+                    label="Medical board threshold (days per year)"
+                  />
+                </FieldRow>
+                <p className="text-sm text-muted-foreground">
+                  An absence of <strong>{selfCertDays || 0}</strong> day(s) or fewer needs nothing
+                  but the employee&apos;s own word.{' '}
+                  {boardDays ? (
+                    <>
+                      Once this leave type reaches <strong>{boardDays}</strong> day(s) in one year
+                      &mdash; counted across every request, not per request &mdash; a medical
+                      board&apos;s recommendation must be attached as well.
+                    </>
+                  ) : (
+                    <>Leave the board threshold blank and no board is ever required.</>
+                  )}
+                </p>
+                <p className="text-sm text-muted-foreground">
+                  These are starting values, not rules from any authority. Set what this
+                  organisation&apos;s policy says.
+                </p>
+              </>
+            )}
           </section>
 
           <section className="space-y-4">
@@ -298,6 +350,12 @@ export function leaveTypeFormToRequest(
     carryOverExpiryMonths: num(v.carryOverExpiryMonths),
     forfeitUnusedAfterMonths: num(v.forfeitUnusedAfterMonths),
     mandatoryAnnualLeave: v.mandatoryAnnualLeave,
+    requiresMedicalCertificate: v.requiresMedicalCertificate,
+    selfCertificationDays: Number(v.selfCertificationDays || 0),
+    // Blank means no board is ever required, which is not the same as a threshold of zero.
+    medicalBoardThresholdDays: v.medicalBoardThresholdDays
+      ? Number(v.medicalBoardThresholdDays)
+      : null,
     encashmentRateBasis: v.encashmentRateBasis,
     encashmentRatePerDay: num(v.encashmentRatePerDay),
     encashmentWorkingDaysPerMonth: v.encashmentWorkingDaysPerMonth,

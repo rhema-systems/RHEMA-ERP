@@ -140,6 +140,9 @@ public class LeaveTypeService : ILeaveTypeService
             CountWeekendsAsLeave = entity.CountWeekendsAsLeave,
             CountHolidaysAsLeave = entity.CountHolidaysAsLeave,
             AllowCashConversion = entity.AllowCashConversion,
+            RequiresMedicalCertificate = entity.RequiresMedicalCertificate,
+            SelfCertificationDays = entity.SelfCertificationDays,
+            MedicalBoardThresholdDays = entity.MedicalBoardThresholdDays,
             RequiresReliever = entity.RequiresReliever,
             MinServiceMonthsToAccess = entity.MinServiceMonthsToAccess,
             CarryOverExpiryMonths = entity.CarryOverExpiryMonths,
@@ -213,6 +216,9 @@ public class LeaveTypeService : ILeaveTypeService
         entity.CountWeekendsAsLeave = dto.CountWeekendsAsLeave;
         entity.CountHolidaysAsLeave = dto.CountHolidaysAsLeave;
         entity.AllowCashConversion = dto.AllowCashConversion;
+        entity.RequiresMedicalCertificate = dto.RequiresMedicalCertificate;
+        entity.SelfCertificationDays = dto.SelfCertificationDays;
+        entity.MedicalBoardThresholdDays = dto.MedicalBoardThresholdDays;
         entity.RequiresReliever = dto.RequiresReliever;
         entity.MinServiceMonthsToAccess = dto.MinServiceMonthsToAccess;
         entity.CarryOverExpiryMonths = dto.CarryOverExpiryMonths;

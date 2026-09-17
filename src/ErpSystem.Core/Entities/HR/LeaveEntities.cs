@@ -95,6 +95,59 @@ public class LeaveType : TenantEntity
     /// <summary>Working-days-per-month divisor used to turn a monthly emolument into a daily rate.</summary>
     public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
 
+    // ── Medical evidence (residue plan R-15a) ────────────────────────────────────────────────
+    //
+    // Excuse duty, and the medical board. Raised by stakeholders; nothing existed before this —
+    // sick leave was an ordinary leave type with optional untyped attachments, so no rule could be
+    // written about what had to be produced or when.
+    //
+    // ⚠ All three live on the LEAVE TYPE, not on the tenant, because they are rules about A KIND OF
+    // LEAVE. Sick leave needs a certificate; annual leave does not. A tenant-wide setting could not
+    // express that, and every client has both kinds.
+    //
+    // ⚠ The numbers below are DEFAULTS, not rules from any authority. They are inert until
+    // RequiresMedicalCertificate is switched on, and each client sets what its own policy says. The
+    // same reasoning as CompanyHrPolicySettings.GrievanceRungChaseDays: a working assumption that
+    // costs a settings edit to change rather than a release.
+
+    /// <summary>
+    /// Whether this leave type requires a medical certificate — <b>excuse duty</b> — once the
+    /// self-certification period is passed.
+    /// </summary>
+    /// <remarks>
+    /// Defaults <b>false</b>, so no existing leave type starts refusing requests that were fine
+    /// yesterday. Turn it on for sick leave and its relatives; leave it off for everything else.
+    /// </remarks>
+    public bool RequiresMedicalCertificate { get; set; } = false;
+
+    /// <summary>
+    /// Days an employee may take on their own word before <see cref="RequiresMedicalCertificate"/>
+    /// bites. A request of this length or shorter needs no certificate.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>3 is a starting value, not a rule.</b> Two to three days is common Ghanaian practice and
+    /// it is what the residue plan inferred; TDC has not confirmed it and neither has anyone else.
+    /// Set 0 to require a certificate for even a single day.
+    /// </remarks>
+    [Range(0, 365)]
+    public int SelfCertificationDays { get; set; } = 3;
+
+    /// <summary>
+    /// Cumulative days of this leave type, in one leave year, beyond which a <b>medical board</b>
+    /// recommendation must be attached. Null means no board is ever required.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Cumulative across the year, not per request</b>, and that is the whole point — a
+    /// per-request threshold is defeated by splitting one long absence into several short ones. The
+    /// same reasoning that made the sub-type cap annual in the closure build (decision D-2).</para>
+    ///
+    /// <para>⚠ 90 days is a starting value inferred from general practice, not a figure any
+    /// authority has given us. It is logged for TDC as <b>L-D10</b>. Null it out if a client has no
+    /// board at all.</para>
+    /// </remarks>
+    [Range(1, 365)]
+    public int? MedicalBoardThresholdDays { get; set; } = 90;
+
     public bool IsActive { get; set; } = true;
 
     // Navigation properties
@@ -583,6 +636,19 @@ public class LeaveRequestAttachment : TenantEntity
     public string? ContentType { get; set; }
 
     public long? FileSizeBytes { get; set; }
+
+    /// <summary>
+    /// What this document is — a supporting file, excuse duty, or a medical board recommendation
+    /// (residue plan R-15a).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Without this, the evidence gate could not exist. A rule saying "a certificate must be
+    /// attached" needs to distinguish a certificate from any other file, and a filename cannot do
+    /// it: <c>scan.pdf</c> is a medical certificate or a holiday photograph with equal probability.
+    /// <para>Defaults to <see cref="LeaveEvidenceKind.Other"/>, which is what every attachment
+    /// uploaded before this column existed genuinely was.</para>
+    /// </remarks>
+    public LeaveEvidenceKind EvidenceKind { get; set; } = LeaveEvidenceKind.Other;
 
     public DateTime UploadedDate { get; set; }
 

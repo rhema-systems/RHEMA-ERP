@@ -1227,7 +1227,10 @@ namespace ErpSystem.Api.Controllers.HR
         [HttpPost("{id:guid}/attachments")]
         [ProducesResponseType(typeof(LeaveRequestAttachmentDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
-        public async Task<IActionResult> UploadAttachment(Guid id, IFormFile file, CancellationToken ct = default)
+        public async Task<IActionResult> UploadAttachment(
+            Guid id, IFormFile file,
+            [FromQuery] LeaveEvidenceKind evidenceKind = LeaveEvidenceKind.Other,
+            CancellationToken ct = default)
         {
             // W3: evidence goes onto your own request; the HR desk attaches for anyone.
             if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
@@ -1286,7 +1289,11 @@ namespace ErpSystem.Api.Controllers.HR
                 var dto = await _leaveService.UploadAttachmentAsync(
                     id, uploadedById, document.OriginalFileName, string.Empty,
                     document.ContentType, document.FileSize,
-                    document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
+                    document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                    // ⚠ What the document IS, which is what the R-15a evidence gate reads. Defaults to
+                    // Other, so an existing caller that does not send it uploads a plain supporting
+                    // document rather than silently satisfying a medical-certificate requirement.
+                    evidenceKind);
 
                 return Ok(dto);
             }

@@ -503,11 +503,17 @@ public class LeaveService : ILeaveService
             throw new InvalidOperationException("Only Pending or Draft leave requests can be submitted for approval.");
 
         var userId = GetCurrentUserId();
+        var leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+
+        // ⚠ BEFORE the auto-approval branch below, deliberately. A leave type that skips the
+        // workflow would otherwise approve sick leave with no certificate attached and nobody ever
+        // asked — which is the single worst outcome this gate exists to prevent, and exactly the
+        // case a reader would assume was covered.
+        await EnsureMedicalEvidenceAsync(request, leaveType);
 
         // Auto-approval: leave types configured with RequiresApproval = false skip the workflow
         // entirely and are approved on submission (balance deducted via the recalc, same as a
         // normal approval). Used for low-risk types (e.g. short casual leave).
-        var leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
         if (!leaveType.RequiresApproval)
         {
             request.Status = LeaveStatus.Approved;
@@ -569,6 +575,83 @@ public class LeaveService : ILeaveService
     ///
     /// It sits before the authority call so it holds on the fallback path too, not just the engine.
     /// </remarks>
+    /// <summary>
+    /// Refuses a submission that is missing the medical evidence its leave type requires
+    /// (residue plan R-15a — excuse duty and the medical board).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Two rules, both configured on the leave type, both inert until
+    /// <c>RequiresMedicalCertificate</c> is switched on.</b></para>
+    ///
+    /// <list type="number">
+    ///   <item><b>Excuse duty.</b> An absence longer than the self-certification period needs a
+    ///   medical certificate. At or under it the employee's own word is enough.</item>
+    ///   <item><b>The medical board.</b> Once cumulative days of this leave type in the year pass
+    ///   the board threshold, a board's recommendation must be attached as well.</item>
+    /// </list>
+    ///
+    /// <para>⚠ <b>The board rule counts the YEAR, not the request.</b> A per-request threshold is
+    /// defeated by splitting one long absence into several short ones, which is precisely what
+    /// somebody avoiding a board would do. Same reasoning that made the sub-type cap annual in the
+    /// closure build (decision D-2).</para>
+    ///
+    /// <para>⚠ <b>The refusal names what is missing and what would satisfy it.</b> Eight create
+    /// checks in this service already work that way. "Submission failed" sends somebody to HR; "this
+    /// needs excuse duty because it is longer than 3 days" sends them to their doctor.</para>
+    /// </remarks>
+    private async Task EnsureMedicalEvidenceAsync(LeaveRequest request, LeaveType leaveType)
+    {
+        if (!leaveType.RequiresMedicalCertificate) return;
+
+        var tenantId = GetTenantId();
+
+        var attached = await _attachmentRepository
+            .GetQueryable()
+            .Where(a => a.TenantId == tenantId && a.LeaveRequestId == request.Id)
+            .Select(a => a.EvidenceKind)
+            .ToListAsync();
+
+        // ── 1. Excuse duty ──────────────────────────────────────────────────────────────────
+        if (request.TotalDays > leaveType.SelfCertificationDays
+            && !attached.Contains(LeaveEvidenceKind.ExcuseDuty))
+        {
+            throw new InvalidOperationException(
+                $"This is {request.TotalDays:0.##} day(s) of {leaveType.Name}, and anything longer than "
+                + $"{leaveType.SelfCertificationDays} day(s) needs excuse duty — a medical certificate — "
+                + "attached before it can be submitted.");
+        }
+
+        // ── 2. The medical board ────────────────────────────────────────────────────────────
+        if (leaveType.MedicalBoardThresholdDays is not int boardThreshold) return;
+
+        // Everything already taken on this leave type this year, plus what is being asked for now.
+        // ⚠ The request itself is excluded from the query and added separately: it may already be
+        // Pending (submit is reachable from Pending as well as Draft), and counting it twice would
+        // send somebody to a board at half the real threshold.
+        var takenThisYear = await _leaveRepository
+            .GetQueryable()
+            .Where(r => r.TenantId == tenantId
+                     && r.EmployeeId == request.EmployeeId
+                     && r.LeaveTypeId == request.LeaveTypeId
+                     && r.Id != request.Id
+                     && r.StartDate.Year == request.StartDate.Year
+                     && (r.Status == LeaveStatus.Approved
+                      || r.Status == LeaveStatus.InProgress
+                      || r.Status == LeaveStatus.Completed))
+            .SumAsync(r => (decimal?)r.TotalDays) ?? 0m;
+
+        var cumulative = takenThisYear + request.TotalDays;
+
+        if (cumulative > boardThreshold
+            && !attached.Contains(LeaveEvidenceKind.MedicalBoardRecommendation))
+        {
+            throw new InvalidOperationException(
+                $"This would take {leaveType.Name} to {cumulative:0.##} day(s) in {request.StartDate.Year}, "
+                + $"past the {boardThreshold}-day point at which a medical board must sit. Attach the board's "
+                + "recommendation before submitting.");
+        }
+    }
+
     private void RefuseSelfApproval(Guid subjectEmployeeId, string what)
     {
         if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == subjectEmployeeId)
@@ -2689,7 +2772,8 @@ public class LeaveService : ILeaveService
         string? contentType, long? fileSizeBytes,
         Guid? fileUploadRecordId = null,
         Guid? documentRecordId = null,
-        Guid? documentVersionId = null)
+        Guid? documentVersionId = null,
+        LeaveEvidenceKind evidenceKind = LeaveEvidenceKind.Other)
     {
         var request = await GetOwnedLeaveRequestAsync(leaveRequestId);
 
@@ -2705,7 +2789,8 @@ public class LeaveService : ILeaveService
             TenantId       = request.TenantId,
             FileUploadRecordId = fileUploadRecordId,
             DocumentRecordId   = documentRecordId,
-            DocumentVersionId  = documentVersionId
+            DocumentVersionId  = documentVersionId,
+            EvidenceKind       = evidenceKind
         };
 
         await _attachmentRepository.AddAsync(attachment);

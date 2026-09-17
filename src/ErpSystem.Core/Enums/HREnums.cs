@@ -9882,6 +9882,47 @@ public enum EncashmentRateBasis
     Manual = 1
 }
 
+/// <summary>
+/// What a document attached to a leave request actually IS (residue plan R-15a).
+/// </summary>
+/// <remarks>
+/// <para><b>Why typing them matters.</b> Leave attachments were untyped — a file name and a path —
+/// so nothing could ask *"is the required evidence present?"*. A gate can check that a document of
+/// the right kind is attached; it cannot check that against a list of filenames, because
+/// <c>scan.pdf</c> is indistinguishable from a holiday photograph.</para>
+///
+/// <para>⚠ <b><see cref="ExcuseDuty"/> and "medical certificate" are the same document.</b> Excuse
+/// duty is the term TDC's stakeholders used and the one Ghanaian practice uses; medical certificate
+/// is the generic name, and it is what <c>LeaveType.RequiresMedicalCertificate</c> calls it. Both
+/// names appear deliberately: the setting reads as a policy, the attachment reads as the thing an
+/// employee is holding.</para>
+///
+/// <para>⚠ Values are persisted. <see cref="Other"/> is 0 so every attachment that existed before
+/// this enum keeps meaning exactly what it meant — an untyped supporting document — rather than
+/// silently becoming a medical certificate nobody uploaded.</para>
+/// </remarks>
+public enum LeaveEvidenceKind
+{
+    /// <summary>A supporting document of no particular kind. The default, and what every pre-existing row is.</summary>
+    [Description("Supporting document")]
+    Other = 0,
+
+    /// <summary>
+    /// A medical certificate excusing the employee from duty — "excuse duty". What a leave type
+    /// with <c>RequiresMedicalCertificate</c> demands once the self-certification period is passed.
+    /// </summary>
+    [Description("Excuse duty (medical certificate)")]
+    ExcuseDuty = 1,
+
+    /// <summary>
+    /// A medical board's recommendation, required once cumulative sick leave passes the leave
+    /// type's board threshold. ⚠ The board itself is a Medical-module record; this is the document
+    /// the leave request carries to show one has sat.
+    /// </summary>
+    [Description("Medical board recommendation")]
+    MedicalBoardRecommendation = 2
+}
+
 #endregion
 
 #region Employee Profile Change Requests (area 25 slice 12 — decision D6)

@@ -289,7 +289,26 @@ export interface MandatoryLeaveCompliance {
   status: string;
 }
 
-// ── Attachments (through the controlled upload gate) ────────────────────────────
+// ── Attachments (through the controlled upload gate) ──────────────────────────
+
+/**
+ * What a document attached to a leave request actually is (R-15a).
+ *
+ * ⚠ `ExcuseDuty` and "medical certificate" are the same document under two names — the local
+ * term and the generic one. The leave type's setting says `requiresMedicalCertificate`; the
+ * thing an employee is holding is excuse duty.
+ *
+ * ⚠ Typing them is what makes the evidence gate possible at all. A rule saying "a certificate
+ * must be attached" cannot be checked against file names: `scan.pdf` is a medical certificate
+ * or a holiday photograph with equal probability.
+ */
+export type LeaveEvidenceKind = 'Other' | 'ExcuseDuty' | 'MedicalBoardRecommendation';
+
+export const LEAVE_EVIDENCE_KIND_LABEL: Record<LeaveEvidenceKind, string> = {
+  Other: 'Supporting document',
+  ExcuseDuty: 'Excuse duty (medical certificate)',
+  MedicalBoardRecommendation: 'Medical board recommendation',
+};
 
 export interface LeaveRequestAttachment {
   id: string;
@@ -302,6 +321,9 @@ export interface LeaveRequestAttachment {
   uploadedDate: string;
   uploadedBy: string;
   uploadedByName: string;
+
+  /** What the document is — read by the evidence gate, not inferred from the file name. */
+  evidenceKind: LeaveEvidenceKind;
 }
 
 // ── Leave plans ─────────────────────────────────────────────────────────────────

@@ -89,6 +89,13 @@ export default function EditLeaveTypePage() {
             allowCashConversion: leaveType.allowCashConversion,
             requiresReliever: leaveType.requiresReliever,
             mandatoryAnnualLeave: leaveType.mandatoryAnnualLeave,
+            requiresMedicalCertificate: leaveType.requiresMedicalCertificate,
+            selfCertificationDays: String(leaveType.selfCertificationDays ?? 3),
+            // Blank, not '0' — no board at all is a different statement from a zero threshold.
+            medicalBoardThresholdDays:
+              leaveType.medicalBoardThresholdDays == null
+                ? ''
+                : String(leaveType.medicalBoardThresholdDays),
             minServiceMonthsToAccess: str(leaveType.minServiceMonthsToAccess),
             encashmentRateBasis: leaveType.encashmentRateBasis,
             encashmentRatePerDay: str(leaveType.encashmentRatePerDay),

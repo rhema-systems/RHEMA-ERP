@@ -1,7 +1,8 @@
 # HR — Configuration Register
 
-**Started 2026-09-17** (leave residue plan, slice G2). **Partial: leave and encashment only.**
-Everything else in HR is still to be surveyed — see § 4.
+**Started 2026-09-17** (leave residue plan, slices G2 and G3). **Partial: leave only** — encashment,
+the reminder cadence, and the medical-evidence rules. Everything else in HR is still to be surveyed
+— see § 4.
 
 ---
 
@@ -134,9 +135,33 @@ them history). It protects the system from itself; it is not a policy anybody sh
 
 ## 3. Leave — per leave type
 
-Settings on `LeaveType` are not surveyed here yet. ⚠ The leave guide's § 4.4 traced **11 ghosts**
-among them; that list has not been re-checked since the closure build, so its status is **unknown**,
-not clean.
+### Medical evidence (R-15a) — surveyed
+
+These three are on the **leave type**, not the tenant, because they are rules about a KIND of leave:
+sick leave needs a certificate, annual leave does not, and every client has both.
+
+| Setting | Default | Status | Proof — slice 7, both positions |
+|---|---|---|---|
+| `RequiresMedicalCertificate` | `false` | **Enforced** | [1] a 21-day absence submits freely with the flag off; [2] a 7-day one is refused with it on |
+| `SelfCertificationDays` | `3` | **Enforced** | [2] 3 days submits, 7 days refuses, and the message names both figures |
+| `MedicalBoardThresholdDays` | `90` (null on pre-existing rows) | **Enforced** | [3] two 6-day absences against a 10-day threshold: each passes alone, together they refuse stating 12 |
+
+⚠ **The board threshold is counted across the YEAR.** Asserted with two absences that each pass the
+per-request test — a per-request rule would let both through, which is what splitting an absence
+looks like.
+
+⚠ **Typing the evidence is what makes these enforceable**, and slice 7 asserts the negative case: an
+`Other` attachment does **not** satisfy an excuse-duty requirement, and excuse duty does **not**
+substitute for a board recommendation. Without those two, the gate would be satisfied by any file
+and the rules would be decorative.
+
+⚠ **The gate is asserted on the auto-approving path too** (`RequiresApproval = false`), which is the
+branch where a miss approves sick leave with nobody asked.
+
+### The rest of `LeaveType` — not surveyed
+
+⚠ The leave guide's § 4.4 traced **11 ghosts** among them; that list has not been re-checked since
+the closure build, so its status is **unknown**, not clean.
 
 ---
 
