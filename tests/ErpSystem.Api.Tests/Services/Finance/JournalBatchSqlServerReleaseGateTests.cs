@@ -182,7 +182,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
     [SqlServerFact]
     [Trait("Batch", "FinancePostingEngine")]
     [Trait("Category", "SqlServerIntegration")]
-    public async Task PostingWithAlreadyTrackedAccounts_ShouldSynchronizeBalancesWithoutMutatingTrackerEnumeration()
+    public async Task PostingWithAlreadyTrackedAccounts_ShouldPersistBookBalancesWithoutTrackerMutation()
     {
         await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
         var seeded = await database.SeedPostingAccountsAsync();
@@ -244,18 +244,16 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         var result = await engine.PostAsync(request);
 
         result.PostingStatus.Should().Be("Posted");
-        trackedAccounts.Single(account => account.Id == seeded.DebitAccountId).Balance.Should().Be(-100m);
-        trackedAccounts.Single(account => account.Id == seeded.CreditAccountId).Balance.Should().Be(-100m);
+        trackedAccounts.Should().OnlyContain(account => context.Entry(account).State == EntityState.Unchanged);
 
-        // Verify the durable SQL values as well as the in-memory snapshot. This guards against fixing
-        // the enumerator by detaching entities while accidentally losing or double-applying balances.
+        // The tracked account entities remain stable while the book-scoped projections are durable.
         await using var verification = database.CreateContext();
-        (await verification.Accounts.AsNoTracking()
-                .SingleAsync(account => account.Id == seeded.DebitAccountId))
-            .Balance.Should().Be(-100m);
-        (await verification.Accounts.AsNoTracking()
-                .SingleAsync(account => account.Id == seeded.CreditAccountId))
-            .Balance.Should().Be(-100m);
+        (await verification.AccountBalances.AsNoTracking()
+                .SingleAsync(balance => balance.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.AsNoTracking()
+                .SingleAsync(balance => balance.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
         (await verification.FinancePostingEvents.AsNoTracking()
                 .CountAsync(postingEvent => postingEvent.SourceDocumentId == request.SourceDocumentId))
             .Should().Be(1);
@@ -307,7 +305,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
     [SqlServerFact]
     [Trait("Batch", "FinancePostingEngine")]
     [Trait("Category", "MultiBookIdentityC1")]
-    public async Task ConcurrentCaseVariantDifferentBookSubmissions_ShouldMoveGenericBalancesExactlyOnce()
+    public async Task ConcurrentCaseVariantDifferentBookSubmissions_ShouldMoveExactBookBalancesOnce()
     {
         await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
         var seeded = await database.SeedPostingAccountsAsync(includeParallelBook: true);
@@ -352,18 +350,15 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         await using var verification = database.CreateContext();
         (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
         (await verification.JournalEntries.CountAsync()).Should().Be(1);
-        // Either book can win the race. Only the primary book updates the legacy compatibility view.
+        // Either book can win the race; only that exact book receives a projection.
         var primaryBookWon = outcomes[0].Result is not null;
-        var expectedCompatibilityBalance = primaryBookWon ? -100m : 0m;
-        (await verification.Accounts.SingleAsync(item => item.Id == seeded.DebitAccountId)).Balance
-            .Should().Be(expectedCompatibilityBalance);
-        (await verification.Accounts.SingleAsync(item => item.Id == seeded.CreditAccountId)).Balance
-            .Should().Be(expectedCompatibilityBalance);
         (await verification.AccountBalances.CountAsync()).Should().Be(2);
         (await verification.AccountBalances.Select(item => item.BookClassification).Distinct().ToListAsync())
             .Should().ContainSingle().Which.Should().Be(primaryBookWon ? "IFRS" : "LOCAL_STATUTORY");
         (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
             .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
     }
 
     [SqlServerFact]

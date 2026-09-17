@@ -317,7 +317,6 @@ namespace ErpSystem.Api.Services.Finance.Segments
                         IsControlAccount = false,
                         BudgetTrackingEnabled = false,
                         Status = AccountStatus.Active,
-                        Balance = 0,
                         DebitBalance = 0,
                         CreditBalance = 0,
                         OpeningBalance = 0,

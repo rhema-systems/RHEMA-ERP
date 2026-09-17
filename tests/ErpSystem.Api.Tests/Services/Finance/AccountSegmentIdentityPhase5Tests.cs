@@ -174,7 +174,7 @@ public sealed class AccountSegmentIdentityPhase5Tests
         using var context = new ApplicationDbContext(options);
 
         context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         ArchivedMigrationSource.Read("20260904003118_AddGovernedAccountSegmentIdentity.cs")
             .Should().Contain("AddGovernedAccountSegmentIdentity");
     }

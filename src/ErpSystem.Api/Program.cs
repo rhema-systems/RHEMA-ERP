@@ -1369,7 +1369,7 @@ BEGIN
                 ([Id], [AccountCode], [AccountNumber], [AccountName], [AccountType], [AccountCategory], [AccountSubCategory], [Description],
                  [ParentAccountId], [IsSegmented], [CurrencyCode], [IsMultiCurrency], [IsIFRSClassified], [IsBaseClassified], [IsLocalClassified],
                  [IFRSLineItem], [BaseLineItem], [LocalLineItem], [AllowDirectPosting], [IsControlAccount], [RequireDepartmentCode], [RequireProjectCode],
-                 [BudgetTrackingEnabled], [Status], [Balance], [DebitBalance], [CreditBalance], [OpeningBalance], [LastTransactionDate],
+                 [BudgetTrackingEnabled], [Status], [DebitBalance], [CreditBalance], [OpeningBalance], [LastTransactionDate],
                  [EstateModuleLinkId], [PayrollModuleLinkId], [ProcurementModuleLinkId], [TaxReportingCategory], [CashFlowClassification], [IsSystemAccount],
                  [InactivatedDate], [InactivationReason], [CreatedAt], [UpdatedAt], [CreatedBy], [UpdatedBy], [CreatedById], [LastModifiedById],
                  [IsDeleted], [DeletedAt], [DeletedBy], [TenantId], [ReferenceNumber], [EffectiveDate], [ExpirationDate], [Metadata], [Tags], [Priority])
@@ -1398,7 +1398,6 @@ BEGIN
                 0,
                 seed.[BudgetTrackingEnabled],
                 1,
-                0,
                 0,
                 0,
                 0,

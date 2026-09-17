@@ -300,7 +300,6 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
             (await failed.FinancePostingEvents.CountAsync()).Should().Be(0);
             (await failed.AccountBalances.CountAsync()).Should().Be(0);
             (await failed.AccountingBookSelectionEvidence.CountAsync()).Should().Be(0);
-            (await failed.Accounts.Where(x => x.Id == seeded.DebitId || x.Id == seeded.CreditId).SumAsync(x => x.Balance)).Should().Be(0m);
         }
         await using (var wrongFailedActor = database.Context())
         {
@@ -355,8 +354,6 @@ public sealed class AccountingEventC6ConcurrencySqlServerTests
         reversalLeaves.Should().OnlyContain(x => x.FinancePostingEvent != null && x.FinancePostingEvent.SourceModule == "GL"
             && x.FinancePostingEvent.OriginModuleCode == "FIN" && x.FinancePostingEvent.SourceDocumentType == "FinancePostingEventReversal"
             && x.FinancePostingEvent.PostingAction == "Reverse" && x.FinancePostingEvent.SourceDocumentId == originalLeaves[x.AccountingBookId]);
-        (await final.Accounts.Where(x => x.Id == seeded.DebitId || x.Id == seeded.CreditId)
-            .Select(x => x.Balance).ToListAsync()).Should().HaveCount(2).And.OnlyContain(value => value == 0m);
         var balances = await final.AccountBalances.Where(x => x.AccountId == seeded.DebitId || x.AccountId == seeded.CreditId).ToListAsync();
         balances.Select(x => (x.AccountId, x.AccountingBookId)).Should().BeEquivalentTo(new[]
         {

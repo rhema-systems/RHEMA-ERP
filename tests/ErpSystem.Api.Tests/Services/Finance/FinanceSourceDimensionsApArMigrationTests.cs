@@ -33,6 +33,6 @@ public sealed class FinanceSourceDimensionsApArMigrationTests
         ArchivedMigrationSource.Read("20260830232009_AddFinanceSourceDimensionsToApAr.cs")
             .Should().Contain("Migration(\"20260830232009_AddFinanceSourceDimensionsToApAr\")");
         typeof(DisposableDevelopmentCurrentModelBaseline).GetCustomAttribute<MigrationAttribute>()
-            ?.Id.Should().Be("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+            ?.Id.Should().Be("20260916132000_DisposableDevelopmentCurrentModelBaseline");
     }
 }

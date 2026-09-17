@@ -44,8 +44,8 @@ internal static class FinanceProducerCompatibilityAuthority
         if (!string.Equals(accountingEvent.Status, "Posted", StringComparison.Ordinal))
             throw new InvalidOperationException("PRODUCER_COMPATIBILITY_EVENT_NOT_POSTED: compatibility evidence requires a posted AccountingEvent.");
 
-        // This is the same Finance-owned authority used by the posting engine when it decides which
-        // exact-book representation updates legacy Account.Balance. IsDefault is restricted to the
+        // This is the same Finance-owned authority used by the posting engine when it selects the
+        // exact default-book representation. IsDefault is restricted to the
         // tenant's PrimaryFull book and becomes immutable after accounting use. Do not re-filter
         // lifecycle flags here: exact retries and reversals may validly return historical frozen evidence.
         var compatibilityBookIds = await db.AccountingBooks.AsNoTracking()

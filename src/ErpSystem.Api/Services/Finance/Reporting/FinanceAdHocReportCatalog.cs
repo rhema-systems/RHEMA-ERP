@@ -92,7 +92,7 @@ public static class FinanceAdHocReportCatalog
                 Text("serialNumber", "Serial number", "[f].[SerialNumber]"))),
 
         new("chart-of-accounts", "Chart of accounts",
-            "Account classifications, balances, posting controls, currency and reporting mappings.",
+            "Account classifications, posting controls, currency and reporting mappings. Use book-balances for balances.",
             "[Accounts] [a] OUTER APPLY (SELECT [ac].[Code], [ac].[Name], [parent].[Name] AS [ParentName] " +
             "FROM [AccountAccountingBooks] [aab] INNER JOIN [AccountingBooks] [ab] ON [ab].[Id] = [aab].[AccountingBookId] " +
             "AND [ab].[TenantId] = [a].[TenantId] AND [ab].[IsDeleted] = 0 AND [ab].[IsActive] = 1 AND [ab].[AllowsPosting] = 1 AND [ab].[IsDefault] = 1 " +
@@ -114,13 +114,30 @@ public static class FinanceAdHocReportCatalog
                 Text("subCategory", "Classification", "[classification].[Name]"),
                 Text("classificationCode", "Classification code", "[classification].[Code]"),
                 Text("currency", "Currency", "[a].[CurrencyCode]"),
-                Money("balance", "Current balance", "[a].[Balance]"),
-                Money("debitBalance", "Cumulative debit", "[a].[DebitBalance]"),
-                Money("creditBalance", "Cumulative credit", "[a].[CreditBalance]"),
                 Bool("allowPosting", "Allows direct posting", "[a].[AllowDirectPosting]"),
                 Bool("controlAccount", "Control account", "[a].[IsControlAccount]"),
                 Text("status", "Account status", "CASE [a].[Status] WHEN 1 THEN 'Active' WHEN 2 THEN 'Inactive' WHEN 3 THEN 'Closed' WHEN 4 THEN 'Pending approval' ELSE 'Unknown' END"),
-                Date("lastTransactionDate", "Last transaction date", "[a].[LastTransactionDate]")))
+                Date("lastTransactionDate", "Last transaction date", "[a].[LastTransactionDate]"))),
+
+        new("book-balances", "Accounting book balances",
+            "Period balances and movements for an exact accounting book, account and functional currency.",
+            "[AccountBalances] [b] INNER JOIN [Accounts] [a] ON [a].[Id] = [b].[AccountId] " +
+            "AND [a].[TenantId] = [b].[TenantId] AND [a].[IsDeleted] = 0 " +
+            "INNER JOIN [AccountingBooks] [book] ON [book].[Id] = [b].[AccountingBookId] " +
+            "AND [book].[TenantId] = [b].[TenantId] AND [book].[IsDeleted] = 0 " +
+            "INNER JOIN [FiscalPeriods] [period] ON [period].[Id] = [b].[FiscalPeriodId] " +
+            "AND [period].[TenantId] = [b].[TenantId] AND [period].[IsDeleted] = 0",
+            "[b].[TenantId]", "[b].[IsDeleted] = 0",
+            Fields(
+                Text("accountNumber", "Account number", "[a].[AccountNumber]"),
+                Text("accountName", "Account name", "[a].[AccountName]"),
+                Text("book", "Accounting book", "[book].[Code]"),
+                Text("period", "Fiscal period", "[period].[PeriodCode]"),
+                Text("currency", "Functional currency", "[b].[Currency]"),
+                Money("openingBalance", "Opening signed balance", "[b].[OpeningBalance]"),
+                Money("periodDebits", "Period debits", "[b].[PeriodDebits]"),
+                Money("periodCredits", "Period credits", "[b].[PeriodCredits]"),
+                Money("closingBalance", "Closing signed balance", "[b].[ClosingBalance]")))
     ];
 
     public static FinanceAdHocDataset Required(string code) => All.FirstOrDefault(item =>

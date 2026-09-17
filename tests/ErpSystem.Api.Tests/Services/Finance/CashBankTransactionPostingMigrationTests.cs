@@ -54,9 +54,8 @@ public sealed class CashBankTransactionPostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.OffsetAccount.Id).CreditAmount.Should().Be(100m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.CashBankTransactionPostedAfterApproval && a.TenantId == tenantId)).Should().Be(1);
-        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
-        fixture.BankGlAccount.Balance.Should().Be(100m);
-        fixture.OffsetAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.BankGlAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.OffsetAccount.Id)).ClosingBalance.Should().Be(-100m);
     }
 
     [Fact]

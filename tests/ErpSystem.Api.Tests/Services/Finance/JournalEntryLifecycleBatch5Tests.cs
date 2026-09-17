@@ -162,11 +162,8 @@ public sealed partial class JournalEntryLifecycleBatch5Tests
             e.SourceDocumentId == journal.Id &&
             e.PostingAction == "Post")).Should().Be(1);
 
-        var storedDebitAccount = await db.Accounts.SingleAsync(a => a.Id == debitAccount.Id);
-        var storedCreditAccount = await db.Accounts.SingleAsync(a => a.Id == creditAccount.Id);
-        // Manual journals use the same posting-engine balance snapshot maintenance as subledger posts.
-        storedDebitAccount.Balance.Should().Be(100m);
-        storedCreditAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == debitAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == creditAccount.Id)).ClosingBalance.Should().Be(-100m);
     }
 
     [Fact]

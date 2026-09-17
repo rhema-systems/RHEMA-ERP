@@ -14,7 +14,7 @@ public sealed class TenderPaymentVerificationPermissionMigrationTests
     private const string MigrationId =
         "20260831194500_GrantTenderPaymentVerificationPermission";
     private const string CurrentBaselineId =
-        "20260913162402_DisposableDevelopmentCurrentModelBaseline";
+        "20260916132000_DisposableDevelopmentCurrentModelBaseline";
 
     [Fact]
     public void ArchivedPermissionRepairIsRetainedWhileOnlyCurrentBaselineIsDiscoverable()

@@ -136,7 +136,7 @@ public sealed class LegacyPostingPathLockdownTests
 
         foreach (var migrationSource in new[]
         {
-            "20260913162402_DisposableDevelopmentCurrentModelBaseline.cs",
+            "20260916132000_DisposableDevelopmentCurrentModelBaseline.cs",
             "ArchivedGovernanceBaselineSql.cs",
             "FinanceC1C8BaselineAuthoritySql.cs"
         })

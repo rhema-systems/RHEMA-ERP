@@ -32,8 +32,8 @@ public sealed class CoreFinancialReportingFoundationTests
         await using var db = CreateContext();
         SeedTenant(db, tenantId);
         var period = SeedPeriod(db, tenantId);
-        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Cash", balance: 999m);
-        var equity = SeedAccount(db, tenantId, AccountType.Equity, "3000", "Equity", balance: 999m);
+        var cash = SeedAccount(db, tenantId, AccountType.Asset, "1000", "Cash");
+        var equity = SeedAccount(db, tenantId, AccountType.Equity, "3000", "Equity");
         SeedJournal(db, tenantId, period.Id, "JE-POSTED", "Posted", (cash.Id, 100m, 0m), (equity.Id, 0m, 100m));
         SeedJournal(db, tenantId, period.Id, "JE-DRAFT", "Draft", (cash.Id, 50m, 0m), (equity.Id, 0m, 50m));
         await db.SaveChangesAsync();
@@ -996,8 +996,7 @@ public sealed class CoreFinancialReportingFoundationTests
         AccountType type,
         string number,
         string name,
-        string? category = null,
-        decimal balance = 0m)
+        string? category = null)
     {
         var account = new Account
         {
@@ -1012,8 +1011,7 @@ public sealed class CoreFinancialReportingFoundationTests
             BaseLineItem = category ?? name,
             LocalLineItem = category ?? name,
             Status = AccountStatus.Active,
-            AllowDirectPosting = true,
-            Balance = balance
+            AllowDirectPosting = true
         };
         db.Accounts.Add(account);
         return account;

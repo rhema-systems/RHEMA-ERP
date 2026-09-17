@@ -110,7 +110,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 var account = await _glService.CreateSegmentedAccountAsync(accountDto);
 
                 return CreatedAtAction(
-                    nameof(GetAccountBalance),
+                    nameof(GetAccountById),
                     new { id = account.Id },
                     new
                     {
@@ -325,42 +325,6 @@ namespace ErpSystem.Api.Controllers.Finance
                 Console.WriteLine($"ERROR in DeleteAccount: {ex.Message}");
                 return StatusCode(500, new { error = "An error occurred while deleting the account", details = ex.Message });
             }
-        }
-
-        /// <summary>
-        /// Retrieves the current balance of a GL account in the specified currency.
-        /// </summary>
-        /// <remarks>
-        /// **Common Use Cases:**
-        /// - Displaying real-time account balances on the Chart of Accounts inquiry screen
-        /// - Checking an account balance before posting a journal entry to validate sufficient funds or limits
-        /// - Viewing account balances in foreign currencies for multi-currency reporting
-        ///
-        /// **Integration Pattern:**
-        /// - Delegates to the General Ledger service which computes the balance from posted journal entry lines
-        /// - Balance is calculated as the net of all debits and credits, respecting the account's normal balance direction
-        /// - When a non-base currency is specified, the balance reflects translated amounts using the currency revaluation rates
-        ///
-        /// **Business Rules:**
-        /// - The currency code defaults to the base currency configured in Finance multi-currency setup if not specified
-        /// - Balance includes only posted (not draft or pending) journal entry lines
-        /// - The balance reflects all periods up to and including the current open period
-        /// - Requesting a balance in a currency not linked to the account may return zero or trigger a translation
-        ///
-        /// **Authorization:** Requires authenticated user with Finance module read access
-        /// </remarks>
-        /// <param name="id">The unique identifier (GUID) of the GL account.</param>
-        /// <param name="currencyCode">The ISO 4217 currency code for the balance inquiry. Defaults to the configured finance base currency when omitted.</param>
-        /// <returns>The account balance details including debit total, credit total, and net balance in the requested currency.</returns>
-        /// <response code="200">Balance retrieved successfully.</response>
-        /// <response code="401">Not authenticated.</response>
-        /// <response code="404">No account exists with the specified ID.</response>
-        /// <response code="500">Internal server error.</response>
-        [HttpGet("{id}/balance")]
-        public async Task<IActionResult> GetAccountBalance(Guid id, [FromQuery] string? currencyCode = null)
-        {
-            var balance = await _glService.GetAccountBalanceAsync(id, currencyCode);
-            return Ok(balance);
         }
 
         /// <summary>

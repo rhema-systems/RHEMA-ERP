@@ -1051,7 +1051,7 @@ public class FinanceDataSeeder
     private List<Account> GetStandardChartOfAccounts(Guid tenantId, DateTime baseDate)
     {
         // Reference-data seeding must never invent a ledger balance. Earlier development fixtures
-        // placed presentation values directly on Account.Balance without journals, which made the
+        // placed presentation values on accounts without journals, which made the
         // trial balance, detailed ledger and account card disagree on a fresh database. All GL
         // accounts now start at zero; opening positions must enter through the controlled opening-
         // balance workspace so debit/credit evidence and subledger reconciliation are retained.
@@ -1077,7 +1077,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1100,7 +1099,6 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1125,7 +1123,6 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1148,7 +1145,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1171,7 +1167,6 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1195,7 +1190,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1219,7 +1213,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1243,7 +1236,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1267,7 +1259,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1291,7 +1282,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1399,7 +1389,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1424,7 +1413,6 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1447,7 +1435,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1472,7 +1459,6 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1497,7 +1483,6 @@ public class FinanceDataSeeder
                 IsControlAccount = true,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1520,7 +1505,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1544,7 +1528,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1566,7 +1549,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1590,7 +1572,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1612,7 +1593,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1637,7 +1617,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1662,7 +1641,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1684,7 +1662,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1709,7 +1686,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1733,7 +1709,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1757,7 +1732,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1781,7 +1755,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1805,7 +1778,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1829,7 +1801,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1851,7 +1822,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1873,7 +1843,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1895,7 +1864,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1917,7 +1885,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = false,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1939,7 +1906,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },
@@ -1961,7 +1927,6 @@ public class FinanceDataSeeder
                 IsControlAccount = false,
                 BudgetTrackingEnabled = true,
                 Status = AccountStatus.Active,
-                Balance = 0m,
                 CreatedAt = baseDate,
                 CreatedBy = "System"
             },

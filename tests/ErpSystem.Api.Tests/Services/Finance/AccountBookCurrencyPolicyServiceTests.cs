@@ -327,7 +327,7 @@ public sealed class AccountBookCurrencyPolicyServiceTests
             .Options);
 
         db.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         ArchivedMigrationSource.Read("20260903190453_AddBookScopedFxRevaluationPolicy.cs")
             .Should().Contain("class AddBookScopedFxRevaluationPolicy");
     }

@@ -14,7 +14,7 @@ public sealed class PurchaseRequisitionLinePlanItemLineageMigrationTests
     private const string MigrationId =
         "20260829170000_AddPurchaseRequisitionLinePlanItemLineage";
     private const string CurrentBaselineId =
-        "20260913162402_DisposableDevelopmentCurrentModelBaseline";
+        "20260916132000_DisposableDevelopmentCurrentModelBaseline";
 
     [Fact]
     public void ArchivedMigrationBackfillIsRetainedWhileOnlyCurrentBaselineIsDiscoverable()

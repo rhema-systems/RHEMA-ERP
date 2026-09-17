@@ -1530,11 +1530,8 @@ public sealed class ControlledOpeningBalancePostingTests
         (await db.FinancePostingEvents.CountAsync(e => e.TenantId == tenantId && e.SourceDocumentType == "OpeningBalanceBatch")).Should().Be(1);
         (await db.AccountTransactions.CountAsync(t => t.TenantId == tenantId && t.SourceDocumentType == "OpeningBalanceBatch")).Should().Be(2);
 
-        var cash = await db.Accounts.SingleAsync(a => a.Id == fixture.Cash.Id);
-        var equity = await db.Accounts.SingleAsync(a => a.Id == fixture.Equity.Id);
-        // Opening balances also maintain Account.Balance as a read-side snapshot through the posting engine.
-        cash.Balance.Should().Be(100m);
-        equity.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == fixture.Cash.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == fixture.Equity.Id)).ClosingBalance.Should().Be(-100m);
         (await db.AuditLogs.CountAsync(a => a.TenantId == tenantId && a.Action == FinanceAuditEvents.OpeningBalancePosted)).Should().Be(1);
     }
 
@@ -1581,8 +1578,8 @@ public sealed class ControlledOpeningBalancePostingTests
         reversed.ReversalJournalEntryId.Should().NotBeNull();
         reversed.ReversalPostingEventId.Should().NotBeNull();
         (await db.OpeningBalanceBatches.SingleAsync(item => item.Id == batch.Id)).Status.Should().Be("Reversed");
-        (await db.Accounts.SingleAsync(item => item.Id == fixture.Cash.Id)).Balance.Should().Be(0m);
-        (await db.Accounts.SingleAsync(item => item.Id == fixture.Equity.Id)).Balance.Should().Be(0m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == fixture.Cash.Id)).ClosingBalance.Should().Be(0m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == fixture.Equity.Id)).ClosingBalance.Should().Be(0m);
     }
 
     [Fact]

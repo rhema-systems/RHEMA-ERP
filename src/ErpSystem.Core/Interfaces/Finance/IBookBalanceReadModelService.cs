@@ -7,7 +7,7 @@ public interface IBookBalanceReadModelService
 {
     Task ApplyPostingAsync(Guid tenantId, Guid accountingBookId, string accountingBookCode,
         Guid fiscalPeriodId, string functionalCurrencyCode, IReadOnlyCollection<AccountTransaction> lines,
-        bool updatePrimaryCompatibilityBalance, DateTime postedAt, Guid? actorId,
+        DateTime postedAt, Guid? actorId,
         CancellationToken cancellationToken = default);
 
     Task<BookBalanceInquiryDto> GetAsync(Guid tenantId, Guid accountId, string accountingBookCode,

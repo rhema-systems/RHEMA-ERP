@@ -108,9 +108,8 @@ public sealed class ArReceiptPostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.ArAccount.Id).CreditAmount.Should().Be(100m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArReceiptPosted && a.TenantId == tenantId)).Should().Be(1);
-        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
-        fixture.ArAccount.Balance.Should().Be(-100m);
-        fixture.BankGlAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.ArAccount.Id)).ClosingBalance.Should().Be(-100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.BankGlAccount.Id)).ClosingBalance.Should().Be(100m);
     }
 
     [Fact]

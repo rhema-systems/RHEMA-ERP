@@ -27,7 +27,7 @@ public sealed class BookBalanceReadModelC2Tests
 
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
             fixture.Period.Id, "GHS", fixture.Lines(debit, credit, "USD", debit, credit),
-            true, DateTime.UtcNow, Guid.NewGuid());
+            DateTime.UtcNow, Guid.NewGuid());
         await fixture.Db.SaveChangesAsync();
 
         (await fixture.Db.AccountBalances.SingleAsync()).ClosingBalance.Should().Be(expected);
@@ -41,7 +41,7 @@ public sealed class BookBalanceReadModelC2Tests
         var lines = fixture.Lines(100m, 0m, "USD", 8m, 0m);
 
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
-            fixture.Period.Id, "GHS", lines, true, DateTime.UtcNow, Guid.NewGuid());
+            fixture.Period.Id, "GHS", lines, DateTime.UtcNow, Guid.NewGuid());
         await fixture.Db.SaveChangesAsync();
 
         var balance = await fixture.Db.AccountBalances.SingleAsync();
@@ -50,39 +50,36 @@ public sealed class BookBalanceReadModelC2Tests
         balance.ClosingBalance.Should().Be(100m);
         (await fixture.Db.AccountCurrencyExposures.SingleAsync()).Should().Match<AccountCurrencyExposure>(x =>
             x.SignedForeignBalance == 8m && x.SignedFunctionalBalance == 100m && x.AccountingBookId == fixture.Primary.Id);
-        (await fixture.Db.Accounts.SingleAsync(x => x.Id == fixture.Debit.Id)).Balance.Should().Be(100m);
         (await fixture.Db.AccountCurrencyLinks.SingleAsync()).ForeignCurrencyBalance.Should().Be(0m);
     }
 
     [Fact]
-    public async Task NonDefaultBook_UpdatesOnlyBookProjection_NotLegacyAccountBalance()
+    public async Task NonDefaultBook_UpdatesOnlyItsBookProjection()
     {
         await using var fixture = await Fixture.CreateAsync();
         var lines = fixture.Lines(0m, 75m);
         foreach (var line in lines) { line.AccountingBookId = fixture.Parallel.Id; line.BookClassification = fixture.Parallel.Code; }
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Parallel.Id, fixture.Parallel.Code,
-            fixture.Period.Id, "GHS", lines, false, DateTime.UtcNow, null);
+            fixture.Period.Id, "GHS", lines, DateTime.UtcNow, null);
         await fixture.Db.SaveChangesAsync();
 
         (await fixture.Db.AccountBalances.SingleAsync()).ClosingBalance.Should().Be(-75m);
-        (await fixture.Db.Accounts.SingleAsync(x => x.Id == fixture.Debit.Id)).Balance.Should().Be(0m);
     }
 
     [Fact]
-    public async Task AlternativeBooks_RemainIsolated_AndPrimaryCompatibilityNeverSumsThem()
+    public async Task AlternativeBooks_RemainIsolated()
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
-            fixture.Period.Id, "GHS", fixture.Lines(1000m, 0m), true, DateTime.UtcNow, null);
+            fixture.Period.Id, "GHS", fixture.Lines(1000m, 0m), DateTime.UtcNow, null);
         var local = fixture.Lines(1000m, 0m);
         foreach (var line in local) { line.AccountingBookId = fixture.Parallel.Id; line.BookClassification = fixture.Parallel.Code; }
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Parallel.Id, fixture.Parallel.Code,
-            fixture.Period.Id, "GHS", local, false, DateTime.UtcNow, null);
+            fixture.Period.Id, "GHS", local, DateTime.UtcNow, null);
         await fixture.Db.SaveChangesAsync();
 
         var rows = await fixture.Db.AccountBalances.OrderBy(item => item.BookClassification).ToListAsync();
         rows.Should().HaveCount(2).And.OnlyContain(item => item.ClosingBalance == 1000m);
-        fixture.Debit.Balance.Should().Be(1000m);
     }
 
     [Fact]
@@ -90,7 +87,7 @@ public sealed class BookBalanceReadModelC2Tests
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
-            fixture.Period.Id, "GHS", fixture.Lines(25m, 0m), true, DateTime.UtcNow, null);
+            fixture.Period.Id, "GHS", fixture.Lines(25m, 0m), DateTime.UtcNow, null);
         await fixture.Db.SaveChangesAsync();
 
         var result = await fixture.Service.GetAsync(fixture.TenantId, fixture.Debit.Id, "IFRS");
@@ -106,7 +103,6 @@ public sealed class BookBalanceReadModelC2Tests
     {
         await using var fixture = await Fixture.CreateAsync();
         fixture.AddPostedEvidence(fixture.Lines(40m, 0m), fixture.Primary);
-        fixture.Debit.Balance = 999m;
         fixture.Db.AccountBalances.Add(new AccountBalance { TenantId = fixture.TenantId, AccountId = fixture.Debit.Id,
             AccountingBookId = fixture.Primary.Id, BookClassification = "IFRS", FiscalPeriodId = fixture.Period.Id,
             Currency = "GHS", ClosingBalance = 999m });
@@ -115,70 +111,33 @@ public sealed class BookBalanceReadModelC2Tests
         var dry = await fixture.Service.ReconcileAsync(fixture.TenantId,
             new("IFRS", false, null, null, null), Guid.NewGuid());
         dry.BalanceDriftCount.Should().BeGreaterThan(0);
-        dry.PrimaryCompatibilityDriftCount.Should().Be(1);
         (await fixture.Db.AccountBalances.SingleAsync()).ClosingBalance.Should().Be(999m);
 
         var maker = Guid.NewGuid(); var checker = Guid.NewGuid();
         var request = new BookBalanceReconciliationRequestDto("IFRS", true, "Reviewed C2 drift", "rebuild-1", checker);
         var applied = await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
         (await fixture.Db.AccountBalances.SingleAsync()).ClosingBalance.Should().Be(40m);
-        fixture.Debit.Balance.Should().Be(40m);
         var repeated = await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
         repeated.RebuildRunId.Should().Be(applied.RebuildRunId);
         (await fixture.Db.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(1);
     }
 
-    [Fact]
-    public async Task Reconciliation_IncludesMappedZeroTransactionAccountInPreviewFingerprintAndApplySet()
-    {
-        await using var fixture = await Fixture.CreateAsync();
-        var (account, _) = fixture.AddZeroTransactionAccount("mapped", 25m);
-        await fixture.Db.SaveChangesAsync();
-
-        var preview = await fixture.Service.ReconcileAsync(fixture.TenantId,
-            new("IFRS", false, null, null, null), Guid.NewGuid());
-        preview.PrimaryCompatibilityDriftCount.Should().Be(1);
-
-        await fixture.Service.ReconcileAsync(fixture.TenantId,
-            new("IFRS", true, "Repair mapped zero-activity account", "mapped-zero", Guid.NewGuid()), Guid.NewGuid());
-
-        account.Balance.Should().Be(0m);
-    }
-
     [Theory]
     [InlineData("unmapped")]
     [InlineData("disabled")]
     [InlineData("invalid-classification")]
-    public async Task Reconciliation_LeavesZeroBalanceIneligibleAccountsUntouched(string eligibility)
+    public async Task Reconciliation_LeavesIneligibleAccountsOutsideBookProjection(string eligibility)
     {
         await using var fixture = await Fixture.CreateAsync();
-        var (account, _) = fixture.AddZeroTransactionAccount(eligibility, 0m);
+        var (account, _) = fixture.AddZeroTransactionAccount(eligibility);
         await fixture.Db.SaveChangesAsync();
 
-        var preview = await fixture.Service.ReconcileAsync(fixture.TenantId,
+        await fixture.Service.ReconcileAsync(fixture.TenantId,
             new("IFRS", false, null, null, null), Guid.NewGuid());
-        preview.PrimaryCompatibilityDriftCount.Should().Be(0);
         await fixture.Service.ReconcileAsync(fixture.TenantId,
             new("IFRS", true, "Verify ineligible account policy", $"ineligible-{eligibility}", Guid.NewGuid()), Guid.NewGuid());
 
-        account.Balance.Should().Be(0m);
-    }
-
-    [Theory]
-    [InlineData("unmapped")]
-    [InlineData("disabled")]
-    [InlineData("invalid-classification")]
-    public async Task Reconciliation_BlocksHistoricalNonzeroBalanceOutsideEligibleAccountSet(string eligibility)
-    {
-        await using var fixture = await Fixture.CreateAsync();
-        var (account, _) = fixture.AddZeroTransactionAccount(eligibility, 17m);
-        await fixture.Db.SaveChangesAsync();
-
-        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId,
-                new("IFRS", false, null, null, null), Guid.NewGuid()))
-            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*non-zero account evidence*");
-        account.Balance.Should().Be(17m);
-        (await fixture.Db.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(0);
+        (await fixture.Db.AccountBalances.CountAsync(item => item.AccountId == account.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -189,7 +148,7 @@ public sealed class BookBalanceReadModelC2Tests
         var request = new BookBalanceReconciliationRequestDto(
             "IFRS", true, "Governed zero-activity rebuild", "eligible-account-added", Guid.NewGuid());
         await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
-        fixture.AddZeroTransactionAccount("mapped", 0m);
+        fixture.AddZeroTransactionAccount("mapped");
         await fixture.Db.SaveChangesAsync();
 
         await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId, request, maker))
@@ -200,7 +159,7 @@ public sealed class BookBalanceReadModelC2Tests
     public async Task RebuildIdempotency_ConflictsWhenZeroTransactionAccountEligibilityChanges()
     {
         await using var fixture = await Fixture.CreateAsync();
-        var (_, mapping) = fixture.AddZeroTransactionAccount("mapped", 0m);
+        var (_, mapping) = fixture.AddZeroTransactionAccount("mapped");
         await fixture.Db.SaveChangesAsync();
         var maker = Guid.NewGuid();
         var request = new BookBalanceReconciliationRequestDto(
@@ -211,24 +170,6 @@ public sealed class BookBalanceReadModelC2Tests
 
         await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId, request, maker))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("*different source or governance evidence*");
-    }
-
-    [Fact]
-    public async Task RebuildIdempotency_ConflictsWhenMappedZeroTransactionCompatibilityDrifts()
-    {
-        await using var fixture = await Fixture.CreateAsync();
-        var (account, _) = fixture.AddZeroTransactionAccount("mapped", 0m);
-        await fixture.Db.SaveChangesAsync();
-        var maker = Guid.NewGuid();
-        var request = new BookBalanceReconciliationRequestDto(
-            "IFRS", true, "Governed compatibility rebuild", "eligible-account-drift", Guid.NewGuid());
-        await fixture.Service.ReconcileAsync(fixture.TenantId, request, maker);
-        account.Balance = 31m;
-        await fixture.Db.SaveChangesAsync();
-
-        await fixture.Service.Invoking(service => service.ReconcileAsync(fixture.TenantId, request, maker))
-            .Should().ThrowAsync<InvalidOperationException>().WithMessage("*projection drift*");
-        account.Balance.Should().Be(31m);
     }
 
     [Theory]
@@ -252,7 +193,7 @@ public sealed class BookBalanceReadModelC2Tests
         var line = delta >= 0 ? fixture.Lines(delta, 0m) : fixture.Lines(0m, -delta);
 
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
-            fixture.Period.Id, "GHS", line, true, DateTime.UtcNow, null);
+            fixture.Period.Id, "GHS", line, DateTime.UtcNow, null);
         await fixture.Db.SaveChangesAsync();
 
         var refreshed = await fixture.Db.AccountBalances.SingleAsync(item => item.FiscalPeriodId == later.Id);
@@ -263,10 +204,9 @@ public sealed class BookBalanceReadModelC2Tests
     }
 
     [Fact]
-    public async Task Rebuild_PrimaryCompatibilityExcludesAlternativeBookEvidence()
+    public async Task Rebuild_ExcludesAlternativeBookEvidence()
     {
         await using var fixture = await Fixture.CreateAsync();
-        fixture.Debit.Balance = 2000m;
         fixture.AddPostedEvidence(fixture.Lines(1000m, 0m), fixture.Primary);
         var local = fixture.Lines(1000m, 0m);
         foreach (var line in local)
@@ -278,9 +218,9 @@ public sealed class BookBalanceReadModelC2Tests
         await fixture.Db.SaveChangesAsync();
 
         await fixture.Service.ReconcileAsync(fixture.TenantId,
-            new("IFRS", true, "Repair primary compatibility", "repair-primary", Guid.NewGuid()), Guid.NewGuid());
+            new("IFRS", true, "Repair primary book", "repair-primary", Guid.NewGuid()), Guid.NewGuid());
 
-        fixture.Debit.Balance.Should().Be(1000m);
+        (await fixture.Db.AccountBalances.SingleAsync()).ClosingBalance.Should().Be(1000m);
         (await fixture.Db.AccountTransactions.CountAsync()).Should().Be(2);
     }
 
@@ -314,12 +254,12 @@ public sealed class BookBalanceReadModelC2Tests
         var recent = fixture.Lines(10m, 0m);
         recent[0].TransactionDate = new DateTime(2026, 9, 25);
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
-            fixture.Period.Id, "GHS", recent, true, DateTime.UtcNow, null);
+            fixture.Period.Id, "GHS", recent, DateTime.UtcNow, null);
         await fixture.Db.SaveChangesAsync();
         var older = fixture.Lines(5m, 0m);
         older[0].TransactionDate = new DateTime(2026, 9, 5);
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, fixture.Primary.Code,
-            fixture.Period.Id, "GHS", older, true, DateTime.UtcNow, null);
+            fixture.Period.Id, "GHS", older, DateTime.UtcNow, null);
         await fixture.Db.SaveChangesAsync();
 
         (await fixture.Db.AccountBalances.SingleAsync()).LastTransactionDate
@@ -384,7 +324,6 @@ public sealed class BookBalanceReadModelC2Tests
     public async Task Reconciliation_RejectsActivePostedLineWithDeletedHeaderBeforePreviewOrApply(bool apply)
     {
         await using var fixture = await Fixture.CreateAsync();
-        fixture.Debit.Balance = 77m;
         fixture.AddPostedEvidence(fixture.Lines(10m, 0m), fixture.Primary);
         await fixture.Db.SaveChangesAsync();
         var header = await fixture.Db.JournalEntries.IgnoreQueryFilters().SingleAsync();
@@ -397,7 +336,6 @@ public sealed class BookBalanceReadModelC2Tests
 
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*journal/header book evidence*");
-        fixture.Debit.Balance.Should().Be(77m);
         (await fixture.Db.AccountBalances.CountAsync()).Should().Be(0);
         (await fixture.Db.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(0);
     }
@@ -436,7 +374,7 @@ public sealed class BookBalanceReadModelC2Tests
     {
         await using var fixture = await Fixture.CreateAsync();
         await fixture.Service.ApplyPostingAsync(fixture.TenantId, fixture.Primary.Id, "IFRS", fixture.Period.Id,
-            "GHS", fixture.Lines(10m, 0m, "GHS", 10m, 0m), true, DateTime.UtcNow, null);
+            "GHS", fixture.Lines(10m, 0m, "GHS", 10m, 0m), DateTime.UtcNow, null);
         await fixture.Db.SaveChangesAsync();
         (await fixture.Db.AccountCurrencyExposures.CountAsync()).Should().Be(0);
     }
@@ -538,7 +476,7 @@ public sealed class BookBalanceReadModelC2Tests
             await Db.SaveChangesAsync();
         }
         public (Account Account, AccountAccountingBook? Mapping) AddZeroTransactionAccount(
-            string eligibility, decimal balance)
+            string eligibility)
         {
             var suffix = Guid.NewGuid().ToString("N")[..8];
             var account = new Account
@@ -546,7 +484,7 @@ public sealed class BookBalanceReadModelC2Tests
                 Id = Guid.NewGuid(), TenantId = TenantId, AccountCode = $"Z{suffix}",
                 AccountNumber = $"Z{suffix}", AccountName = "Zero activity",
                 AccountType = AccountType.Asset, CurrencyCode = "GHS",
-                Status = AccountStatus.Active, Balance = balance
+                Status = AccountStatus.Active
             };
             Db.Accounts.Add(account);
             if (eligibility == "unmapped") return (account, null);

@@ -105,8 +105,8 @@ public sealed class FinancePostingEngineTests
         await action.Should().ThrowAsync<FinanceBudgetCommitmentConflictException>();
         (await db.JournalEntries.CountAsync()).Should().Be(0);
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
-        debitAccount.Balance.Should().Be(0m);
-        creditAccount.Balance.Should().Be(0m);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == debitAccount.Id)).Should().Be(0);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == creditAccount.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -151,8 +151,8 @@ public sealed class FinancePostingEngineTests
         postingEvent.OriginModuleCode.Should().Be("FIN");
         journal.OriginModuleCode.Should().Be("FIN");
 
-        cashAccount.Balance.Should().Be(100m);
-        revenueAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == cashAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == revenueAccount.Id)).ClosingBalance.Should().Be(-100m);
     }
 
     [Fact]
@@ -248,7 +248,7 @@ public sealed class FinancePostingEngineTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-4")]
     [Trait("Category", "PostingEngine")]
-    public async Task PostAsync_ShouldApplyAccountBalanceMovementUsingNormalBalanceDirection()
+    public async Task PostAsync_ShouldApplyBookBalanceMovementUsingSignedDebitMinusCredit()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -287,11 +287,11 @@ public sealed class FinancePostingEngineTests
             }
         });
 
-        assetAccount.Balance.Should().Be(70m);
-        expenseAccount.Balance.Should().Be(40m);
-        liabilityAccount.Balance.Should().Be(100m);
-        equityAccount.Balance.Should().Be(25m);
-        revenueAccount.Balance.Should().Be(-15m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == assetAccount.Id)).ClosingBalance.Should().Be(70m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == expenseAccount.Id)).ClosingBalance.Should().Be(40m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == liabilityAccount.Id)).ClosingBalance.Should().Be(-100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == equityAccount.Id)).ClosingBalance.Should().Be(-25m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == revenueAccount.Id)).ClosingBalance.Should().Be(15m);
     }
 
     [Fact]
@@ -350,8 +350,8 @@ public sealed class FinancePostingEngineTests
         second.JournalEntryId.Should().Be(first.JournalEntryId);
         (await db.JournalEntries.CountAsync()).Should().Be(1);
         (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
-        debitAccount.Balance.Should().Be(100m);
-        creditAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == debitAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == creditAccount.Id)).ClosingBalance.Should().Be(-100m);
         (await db.AccountBalances.CountAsync()).Should().Be(2);
         (await db.AccountBalances.SingleAsync(item => item.AccountId == debitAccount.Id)).PeriodDebits.Should().Be(100m);
         (await db.AccountBalances.SingleAsync(item => item.AccountId == creditAccount.Id)).PeriodCredits.Should().Be(100m);
@@ -419,8 +419,8 @@ public sealed class FinancePostingEngineTests
         await FluentActions.Awaiting(() => CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id)))
             .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_PERIOD_REQUIRED:*");
         db.JournalEntries.Should().BeEmpty();
-        debit.Balance.Should().Be(0m);
-        credit.Balance.Should().Be(0m);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == debit.Id)).Should().Be(0);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == credit.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -654,8 +654,8 @@ public sealed class FinancePostingEngineTests
         exposure.LastTransactionDate.Should().Be(new DateTime(2026, 7, 4));
         exchangeRate.HasBeenUsedInTransactions.Should().BeTrue();
         exchangeRate.TransactionCount.Should().Be(1);
-        cashAccount.Balance.Should().Be(1500m);
-        revenueAccount.Balance.Should().Be(1500m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == cashAccount.Id)).ClosingBalance.Should().Be(1500m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == revenueAccount.Id)).ClosingBalance.Should().Be(-1500m);
     }
 
     [Fact]

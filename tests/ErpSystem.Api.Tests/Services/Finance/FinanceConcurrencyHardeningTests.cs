@@ -97,7 +97,7 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
-    public void FinancePostingEngine_ShouldRespectAmbientTransactionsAndUseAtomicBalanceDeltas()
+    public void FinancePostingEngine_ShouldRespectAmbientTransactionsAndUseBookScopedProjection()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "GL", "FinancePostingEngine.cs"));
@@ -105,11 +105,8 @@ public sealed class FinanceConcurrencyHardeningTests
         source.Should().Contain("CurrentTransaction", "posting must join an existing DbContext transaction when callers already opened one");
         source.Should().Contain("ExecutePostingAsync", "owned and ambient transaction paths should share one posting implementation");
         source.Should().Contain("IsSqlServer()", "SQL Server lock hints must not run against other relational providers used in dev/test");
-        source.Should().Contain("ExecuteSqlInterpolatedAsync", "account balance snapshots should be incremented atomically in the database");
-        source.Should().Contain("UPDLOCK", "same-account concurrent postings must serialize balance snapshot updates");
-        source.Should().Contain("ApplyTrackedAccountBalanceDeltasAsync", "non-SQL Server providers need a provider-neutral balance update path");
-        source.Should().NotContain("account.Balance += transaction", "balance snapshot updates must not use read-modify-write per transaction line");
-        source.Should().NotContain("account.Balance -= transaction", "balance snapshot updates must not use read-modify-write per transaction line");
+        source.Should().Contain("_bookBalances.ApplyPostingAsync", "posted lines must update exact-book projections");
+        source.Should().NotContain("ApplyTrackedAccountBalanceDeltasAsync", "the unscoped account snapshot must remain retired");
     }
 
     [Fact]
@@ -472,7 +469,7 @@ public sealed class FinanceConcurrencyHardeningTests
         var migrations = context.GetService<IMigrationsAssembly>().Migrations;
 
         migrations.Should().ContainSingle()
-            .Which.Key.Should().Be("20260913162402_DisposableDevelopmentCurrentModelBaseline",
+            .Which.Key.Should().Be("20260916132000_DisposableDevelopmentCurrentModelBaseline",
                 "legacy migration sources are retained byte-for-byte while only the true current-model baseline is compiled");
     }
 
@@ -588,7 +585,7 @@ public sealed class FinanceConcurrencyHardeningTests
             .Options;
         using var context = new ApplicationDbContext(options);
         context.GetService<IMigrationsAssembly>().Migrations.Should().ContainSingle()
-            .Which.Key.Should().Be("20260913162402_DisposableDevelopmentCurrentModelBaseline",
+            .Which.Key.Should().Be("20260916132000_DisposableDevelopmentCurrentModelBaseline",
                 "the archived compatibility source remains auditable while the merged current-model baseline is the sole compiled migration");
     }
 

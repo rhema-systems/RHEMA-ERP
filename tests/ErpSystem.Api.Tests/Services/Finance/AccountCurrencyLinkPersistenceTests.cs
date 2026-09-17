@@ -66,7 +66,7 @@ public class AccountCurrencyLinkPersistenceTests
         };
         var balances = new BookBalanceReadModelService(db);
         await balances.ApplyPostingAsync(tenantId, book.Id, book.Code, period.Id, "GHS",
-            new[] { line }, true, DateTime.UtcNow, null);
+            new[] { line }, DateTime.UtcNow, null);
         await db.SaveChangesAsync();
 
         using var unit = new UnitOfWork(db);

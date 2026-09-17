@@ -185,10 +185,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         }
 
         // Journal lines are authoritative. Both exact-book projections are updated inside this same
-        // posting transaction; Account.Balance remains a temporary default-book-only compatibility view.
+        // posting transaction; no unscoped account balance snapshot is maintained.
         await _bookBalances.ApplyPostingAsync(tenantId, validation.AccountingBookId,
             validation.AccountingBookCode, validation.FiscalPeriod.Id, validation.FunctionalCurrencyCode,
-            journalEntry.Transactions.ToArray(), validation.UpdatesPrimaryCompatibilityBalance,
+            journalEntry.Transactions.ToArray(),
             now, postedByUserId, cancellationToken);
 
         _context.FinancePostingEvents.Add(postingEvent);
@@ -880,133 +880,6 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         };
     }
 
-    private async Task ApplyAccountBalanceMovementsAsync(
-        Guid tenantId,
-        IEnumerable<AccountTransaction> transactions,
-        CancellationToken cancellationToken)
-    {
-        var transactionList = transactions
-            .Where(t => !t.IsDeleted)
-            .OrderBy(t => t.LineNumber)
-            .ToList();
-
-        if (transactionList.Count == 0)
-        {
-            throw new InvalidOperationException("Posting must contain journal transaction lines.");
-        }
-
-        var accountIds = transactionList
-            .Select(t => t.AccountId)
-            .Distinct()
-            .ToList();
-
-        var accountTypes = await _context.Accounts
-            .Where(a => a.TenantId == tenantId && accountIds.Contains(a.Id) && !a.IsDeleted)
-            .Select(a => new { a.Id, a.AccountType })
-            .ToDictionaryAsync(a => a.Id, a => a.AccountType, cancellationToken);
-
-        if (accountTypes.Count != accountIds.Count)
-        {
-            throw new InvalidOperationException("One or more posting accounts were not found for this tenant.");
-        }
-
-        var balanceDeltas = transactionList
-            .GroupBy(transaction => transaction.AccountId)
-            .Select(group => new AccountBalanceDelta(
-                group.Key,
-                group.Sum(transaction => GetAccountBalanceDelta(accountTypes[transaction.AccountId], transaction))))
-            .Where(delta => delta.Amount != 0m)
-            .ToArray();
-
-        if (balanceDeltas.Length == 0)
-        {
-            return;
-        }
-
-        if (_context.Database.IsSqlServer())
-        {
-            await ApplySqlServerAccountBalanceDeltasAsync(tenantId, balanceDeltas, cancellationToken);
-            return;
-        }
-
-        await ApplyTrackedAccountBalanceDeltasAsync(tenantId, balanceDeltas, cancellationToken);
-    }
-
-    private async Task ApplySqlServerAccountBalanceDeltasAsync(
-        Guid tenantId,
-        IReadOnlyCollection<AccountBalanceDelta> balanceDeltas,
-        CancellationToken cancellationToken)
-    {
-        foreach (var delta in balanceDeltas)
-        {
-            // SQL Server lock hints serialize concurrent snapshot increments while the posting transaction is active.
-            var rows = await _context.Database.ExecuteSqlInterpolatedAsync($@"
-UPDATE [Accounts] WITH (UPDLOCK, ROWLOCK)
-SET [Balance] = [Balance] + {delta.Amount}
-WHERE [Id] = {delta.AccountId}
-  AND [TenantId] = {tenantId}
-  AND [IsDeleted] = CAST(0 AS bit);", cancellationToken);
-
-            if (rows != 1)
-            {
-                throw new InvalidOperationException("One or more posting accounts were not found for this tenant.");
-            }
-
-            SyncTrackedAccountBalanceSnapshot(tenantId, delta);
-        }
-    }
-
-    private async Task ApplyTrackedAccountBalanceDeltasAsync(
-        Guid tenantId,
-        IReadOnlyCollection<AccountBalanceDelta> balanceDeltas,
-        CancellationToken cancellationToken)
-    {
-        var accountIds = balanceDeltas.Select(delta => delta.AccountId).ToArray();
-        await _context.Accounts
-            .Where(account => account.TenantId == tenantId && accountIds.Contains(account.Id) && !account.IsDeleted)
-            .LoadAsync(cancellationToken);
-
-        var deltasByAccountId = balanceDeltas.ToDictionary(delta => delta.AccountId, delta => delta.Amount);
-        foreach (var entry in _context.ChangeTracker.Entries<Account>())
-        {
-            if (entry.Entity.TenantId == tenantId &&
-                !entry.Entity.IsDeleted &&
-                deltasByAccountId.TryGetValue(entry.Entity.Id, out var delta))
-            {
-                entry.Entity.Balance += delta;
-            }
-        }
-    }
-
-    private void SyncTrackedAccountBalanceSnapshot(Guid tenantId, AccountBalanceDelta delta)
-    {
-        // Materialize the tracker query before changing property state below. EF Core's
-        // Entries<T>() iterator may run DetectChanges while it is being enumerated, and assigning
-        // OriginalValue/IsModified can in turn mutate tracker state. Procurement and other module
-        // integrations commonly enter Finance with the posting accounts already tracked, so walking
-        // the live iterator here caused "Collection was modified" after SQL Server had applied the
-        // atomic balance update. A stable snapshot keeps the raw-SQL balance and the tracked read-side
-        // entity synchronized without invalidating EF's enumerator.
-        var trackedAccounts = _context.ChangeTracker
-            .Entries<Account>()
-            .ToArray();
-
-        foreach (var entry in trackedAccounts)
-        {
-            if (entry.Entity.TenantId != tenantId ||
-                entry.Entity.Id != delta.AccountId ||
-                entry.Entity.IsDeleted)
-            {
-                continue;
-            }
-
-            var balanceProperty = entry.Property(account => account.Balance);
-            balanceProperty.CurrentValue += delta.Amount;
-            balanceProperty.OriginalValue = balanceProperty.CurrentValue;
-            balanceProperty.IsModified = false;
-        }
-    }
-
     private static decimal GetAccountBalanceDelta(AccountType accountType, AccountTransaction transaction)
     {
         if (transaction.DebitAmount > 0)
@@ -1052,7 +925,6 @@ WHERE [Id] = {delta.AccountId}
         return -creditAmount;
     }
 
-    private sealed record AccountBalanceDelta(Guid AccountId, decimal Amount);
 
     private async Task ApplyAccountCurrencyLinkMovementsAsync(
         Guid tenantId,
@@ -1218,14 +1090,13 @@ WHERE [Id] = {delta.AccountId}
                 tenantId, request, normalizedAccountingBookCode, "BOOK_NOT_POSTABLE", cancellationToken);
             throw new InvalidOperationException("Accounting book is unavailable for posting.");
         }
-        var primaryCompatibilityBooks = await _context.AccountingBooks.AsNoTracking()
+        var defaultPostingBooks = await _context.AccountingBooks.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IsDefault && !item.IsDeleted
                 && (allowHistoricalMappingException || (item.IsActive && item.AllowsPosting)))
             .Take(2).ToListAsync(cancellationToken);
-        if (primaryCompatibilityBooks.Count != 1)
+        if (defaultPostingBooks.Count != 1)
             throw new InvalidOperationException(
                 "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default posting book is required before posting.");
-        var updatesPrimaryCompatibilityBalance = primaryCompatibilityBooks[0].Id == accountingBook.Id;
         var requestedFunctionalCurrency = NormalizeCurrency(request.FunctionalCurrencyCode, "Functional currency");
         var functionalCurrencyConfig = await ResolveTenantFunctionalCurrencyAsync(tenantId, cancellationToken);
         var functionalCurrency = functionalCurrencyConfig.CurrencyCode;
@@ -1683,7 +1554,6 @@ WHERE [Id] = {delta.AccountId}
             budgetReservationSourceDocumentType,
             RequestFingerprintVersion,
             requestFingerprint,
-            updatesPrimaryCompatibilityBalance,
             allowHistoricalMappingException);
     }
 
@@ -3502,7 +3372,6 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         string? BudgetReservationSourceDocumentType,
         string RequestFingerprintVersion,
         string RequestFingerprint,
-        bool UpdatesPrimaryCompatibilityBalance,
         bool AllowsHistoricalMappingException);
 
     private sealed record ValidatedPostingLine(

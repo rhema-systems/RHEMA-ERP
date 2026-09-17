@@ -24,20 +24,11 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
 
     public async Task ApplyPostingAsync(Guid tenantId, Guid accountingBookId, string accountingBookCode,
         Guid fiscalPeriodId, string functionalCurrencyCode, IReadOnlyCollection<AccountTransaction> lines,
-        bool updatePrimaryCompatibilityBalance, DateTime postedAt, Guid? actorId,
+        DateTime postedAt, Guid? actorId,
         CancellationToken cancellationToken = default)
     {
         var active = lines.Where(line => !line.IsDeleted).ToArray();
         if (active.Length == 0) throw new InvalidOperationException("Posting contains no balance lines.");
-        // Exact reversal may lawfully target the now-inactive historical default book. In that one
-        // case the caller's already-validated primary flag preserves the original compatibility
-        // coordinate; ordinary and non-primary posting still require today's active authority.
-        var primaryBook = updatePrimaryCompatibilityBalance
-            ? await ResolveUniqueDefaultBookAsync(tenantId, requireActivePosting: false, cancellationToken)
-            : await ResolvePrimaryCompatibilityBookAsync(tenantId, cancellationToken);
-        if (updatePrimaryCompatibilityBalance != (primaryBook.Id == accountingBookId))
-            throw new InvalidOperationException(
-                "Primary compatibility selection does not match the authoritative active default posting book.");
         var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
         if (!string.Equals(functionalCurrencyCode, functionalAuthority, StringComparison.Ordinal))
             throw new InvalidOperationException("Posting functional currency does not exactly match tenant authority.");
@@ -131,8 +122,6 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         await ApplyExposureDeltasAsync(tenantId, accountingBookId, accountingBookCode,
             functionalCurrencyCode, period, active, postedAt, cancellationToken);
 
-        if (updatePrimaryCompatibilityBalance)
-            await ApplyPrimaryCompatibilityAsync(tenantId, active, cancellationToken);
     }
 
     public async Task<BookBalanceInquiryDto> GetAsync(Guid tenantId, Guid accountId, string accountingBookCode,
@@ -178,7 +167,7 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         CancellationToken cancellationToken = default)
     {
         var book = await ResolveBookAsync(tenantId, RequireCode(request.AccountingBookCode), cancellationToken);
-        var primaryBook = await ResolvePrimaryCompatibilityBookAsync(tenantId, cancellationToken);
+        var primaryBook = await ResolveDefaultPostingBookAsync(tenantId, cancellationToken);
         var functionalAuthority = await ResolveFunctionalCurrencyAsync(tenantId, cancellationToken);
         if (request.Apply && (string.IsNullOrWhiteSpace(request.Reason) || string.IsNullOrWhiteSpace(request.IdempotencyKey)
             || !request.ApprovedByUserId.HasValue || request.ApprovedByUserId == Guid.Empty
@@ -226,30 +215,24 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         var balanceDrift = CountBalanceDrift(expectedBalances, existingBalances);
         var exposureDrift = CountExposureDrift(expectedExposures, existingExposures);
         var absoluteDrift = AbsoluteBalanceDrift(expectedBalances, existingBalances);
-        var compatibilityDrift = 0;
-        Dictionary<Guid, decimal>? primaryCompatibility = null;
         if (book.Id == primaryBook.Id)
         {
-            var authority = await LoadPrimaryCompatibilityAuthorityAsync(
+            var authority = await LoadDefaultBookMappingAuthorityAsync(
                 tenantId, book, transactions, cancellationToken);
-            var accounts = authority.Accounts;
             fingerprint = ReconciliationFingerprint(transactionFingerprint, authority.Fingerprint);
-            primaryCompatibility = BuildPrimaryCompatibility(transactions, accounts);
-            compatibilityDrift = accounts.Values.Count(account =>
-                account.Balance != primaryCompatibility.GetValueOrDefault(account.Id));
         }
 
         if (!request.Apply)
         {
             if (rebuildTransaction != null)
                 await rebuildTransaction.CommitAsync(cancellationToken);
-            return new(book.Id, book.Code, false, balanceDrift, exposureDrift, compatibilityDrift,
+            return new(book.Id, book.Code, false, balanceDrift, exposureDrift,
                 absoluteDrift, fingerprint, null);
         }
 
         var result = await ExecuteRebuildAsync(tenantId, book, request, requestedByUserId, expectedBalances,
-            expectedExposures, primaryCompatibility, fingerprint, balanceDrift, exposureDrift,
-            compatibilityDrift, absoluteDrift, cancellationToken);
+            expectedExposures, fingerprint, balanceDrift, exposureDrift,
+            absoluteDrift, cancellationToken);
         if (rebuildTransaction != null)
             await rebuildTransaction.CommitAsync(cancellationToken);
         return result;
@@ -257,8 +240,8 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
 
     private async Task<BookBalanceReconciliationDto> ExecuteRebuildAsync(Guid tenantId, AccountingBook book,
         BookBalanceReconciliationRequestDto request, Guid requestedByUserId, List<AccountBalance> balances,
-        List<AccountCurrencyExposure> exposures, Dictionary<Guid, decimal>? primaryCompatibility,
-        string fingerprint, int balanceDrift, int exposureDrift, int compatibilityDrift,
+        List<AccountCurrencyExposure> exposures,
+        string fingerprint, int balanceDrift, int exposureDrift,
         decimal absoluteDrift, CancellationToken cancellationToken)
     {
         // No executable API is exposed in C2. Any future command surface must enforce tenant/user
@@ -271,10 +254,10 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         {
             if (!string.Equals(existingRun.SourceFingerprint, fingerprint, StringComparison.Ordinal)
                 || !string.Equals(existingRun.CommandFingerprint, commandFingerprint, StringComparison.Ordinal)
-                || balanceDrift != 0 || exposureDrift != 0 || compatibilityDrift != 0 || absoluteDrift != 0m)
+                || balanceDrift != 0 || exposureDrift != 0 || absoluteDrift != 0m)
                 throw new InvalidOperationException(
                     "The rebuild idempotency key was already used for different source or governance evidence, or current projection drift.");
-            return new(book.Id, book.Code, true, 0, 0, 0, 0m, fingerprint, existingRun.Id);
+            return new(book.Id, book.Code, true, 0, 0, 0m, fingerprint, existingRun.Id);
         }
 
         var ownsTransaction = _context.Database.CurrentTransaction == null;
@@ -287,18 +270,6 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
                 item.TenantId == tenantId && item.AccountingBookId == book.Id).ToListAsync(cancellationToken));
             _context.AccountBalances.AddRange(balances);
             _context.AccountCurrencyExposures.AddRange(exposures);
-            if (primaryCompatibility != null)
-            {
-                var eligibleAccountIds = primaryCompatibility.Keys.ToArray();
-                var accounts = await _context.Accounts.Where(item => item.TenantId == tenantId
-                        && eligibleAccountIds.Contains(item.Id) && !item.IsDeleted)
-                    .ToListAsync(cancellationToken);
-                if (accounts.Count != eligibleAccountIds.Length)
-                    throw new InvalidOperationException(
-                        "Primary compatibility account authority changed before the governed rebuild could be applied.");
-                foreach (var account in accounts)
-                    account.Balance = primaryCompatibility[account.Id];
-            }
             var run = new FinanceBalanceRebuildRun
             {
                 Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
@@ -312,7 +283,7 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
             _context.FinanceBalanceRebuildRuns.Add(run);
             await _context.SaveChangesAsync(cancellationToken);
             if (transaction != null) await transaction.CommitAsync(cancellationToken);
-            return new(book.Id, book.Code, true, balanceDrift, exposureDrift, compatibilityDrift,
+            return new(book.Id, book.Code, true, balanceDrift, exposureDrift,
                 absoluteDrift, fingerprint, run.Id);
         }
         catch
@@ -365,20 +336,6 @@ public sealed class BookBalanceReadModelService : IBookBalanceReadModelService
         }
     }
 
-    private async Task ApplyPrimaryCompatibilityAsync(Guid tenantId, IEnumerable<AccountTransaction> lines,
-        CancellationToken cancellationToken)
-    {
-        foreach (var group in lines.GroupBy(line => line.AccountId))
-        {
-            var account = await _context.Accounts.SingleAsync(item => item.TenantId == tenantId
-                && item.Id == group.Key && !item.IsDeleted, cancellationToken);
-            var signed = Round(group.Sum(line => line.DebitAmount - line.CreditAmount));
-            var legacyNormalBalance = account.AccountType is AccountType.Liability or AccountType.Equity or AccountType.Revenue
-                ? -signed : signed;
-            account.Balance = Round(account.Balance + legacyNormalBalance);
-        }
-    }
-
     private async Task AcquireTenantProjectionLockAsync(Guid tenantId, CancellationToken cancellationToken)
     {
         if (!_context.Database.IsSqlServer()) return;
@@ -402,7 +359,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
         return matches[0];
     }
 
-    private async Task<AccountingBook> ResolvePrimaryCompatibilityBookAsync(Guid tenantId, CancellationToken token)
+    private async Task<AccountingBook> ResolveDefaultPostingBookAsync(Guid tenantId, CancellationToken token)
         => await ResolveUniqueDefaultBookAsync(tenantId, requireActivePosting: true, token);
 
     private async Task<AccountingBook> ResolveUniqueDefaultBookAsync(
@@ -570,7 +527,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
     }
 
     private async Task<(Dictionary<Guid, Account> Accounts, string Fingerprint)>
-        LoadPrimaryCompatibilityAuthorityAsync(Guid tenantId, AccountingBook book,
+        LoadDefaultBookMappingAuthorityAsync(Guid tenantId, AccountingBook book,
             IReadOnlyCollection<AccountTransaction> transactions, CancellationToken cancellationToken)
     {
         var accounts = await _context.Accounts.AsNoTracking()
@@ -579,7 +536,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
         var accountIds = accounts.Select(item => item.Id).ToArray();
         var transactionAccountIds = transactions.Select(item => item.AccountId).ToHashSet();
         if (transactionAccountIds.Except(accountIds).Any())
-            throw new InvalidOperationException("Primary compatibility evidence references an unavailable account.");
+            throw new InvalidOperationException("Default-book evidence references an unavailable account.");
 
         var mappings = await _context.AccountAccountingBooks.AsNoTracking()
             .Include(item => item.AccountClassification)
@@ -604,12 +561,10 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
                 continue;
             }
 
-            // C2 cannot truthfully derive legacy Account.Balance for an account outside the exact
-            // primary-book authority. Zero/inactive compatibility state is left untouched; posted
-            // evidence or a historical non-zero balance blocks the run rather than being guessed away.
-            if (transactionAccountIds.Contains(account.Id) || account.Balance != 0m)
+            // Posted evidence outside the governed primary-book mapping is not safe to rebuild.
+            if (transactionAccountIds.Contains(account.Id))
                 throw new InvalidOperationException(
-                    "Primary compatibility rebuild found posted or non-zero account evidence without one enabled compatible account/book classification mapping.");
+                    "Primary-book rebuild found posted account evidence without one enabled compatible account/book classification mapping.");
         }
 
         return (eligibleAccounts, CompatibilityAuthorityFingerprint(eligibleAccounts.Values, eligibleMappings));
@@ -626,7 +581,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
         foreach (var mapping in mappings.OrderBy(item => item.AccountId).ThenBy(item => item.Id))
         {
             var classification = mapping.AccountClassification
-                ?? throw new InvalidOperationException("Primary compatibility classification evidence is unavailable.");
+                ?? throw new InvalidOperationException("Default-book classification evidence is unavailable.");
             text.Append("MAPPING|").Append(mapping.Id.ToString("N")).Append('|')
                 .Append(mapping.TenantId.ToString("N")).Append('|').Append(mapping.AccountId.ToString("N")).Append('|')
                 .Append(mapping.AccountingBookId.ToString("N")).Append('|')
@@ -652,18 +607,4 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance balance projection lock.'
     private static DateTime Min(DateTime? current, DateTime candidate) => current.HasValue && current.Value < candidate ? current.Value : candidate;
     private static DateTime Max(DateTime? current, DateTime candidate) => current.HasValue && current.Value > candidate ? current.Value : candidate;
 
-    private static Dictionary<Guid, decimal> BuildPrimaryCompatibility(
-        IEnumerable<AccountTransaction> transactions, IReadOnlyDictionary<Guid, Account> accounts)
-    {
-        var result = accounts.Keys.ToDictionary(id => id, _ => 0m);
-        foreach (var group in transactions.GroupBy(item => item.AccountId))
-        {
-            if (!accounts.TryGetValue(group.Key, out var account))
-                throw new InvalidOperationException("Primary-book transaction references an unavailable account.");
-            var signed = Round(group.Sum(item => item.DebitAmount - item.CreditAmount));
-            result[group.Key] = account.AccountType is AccountType.Liability or AccountType.Equity or AccountType.Revenue
-                ? -signed : signed;
-        }
-        return result;
-    }
 }

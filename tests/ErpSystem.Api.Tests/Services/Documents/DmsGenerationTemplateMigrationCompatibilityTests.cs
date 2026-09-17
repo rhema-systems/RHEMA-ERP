@@ -38,7 +38,7 @@ public sealed class DmsGenerationTemplateMigrationCompatibilityTests
         using var context = new ApplicationDbContext(options);
         var migrations = context.GetService<IMigrationsAssembly>().Migrations;
 
-        migrations.Keys.Should().Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        migrations.Keys.Should().Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         ArchivedMigrationSource.Read("20260820120000_AddDmsGenerationTemplateWordSource.cs")
             .Should().Contain("class AddDmsGenerationTemplateWordSource");
         ArchivedMigrationSource.Read("20260822130000_AddUploadedDocumentTemplateColumns.cs")

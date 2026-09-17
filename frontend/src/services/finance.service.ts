@@ -727,14 +727,6 @@ class FinanceService {
   }
 
   /**
-   * Get account balance
-   */
-  async getAccountBalance(id: string, currencyCode?: string): Promise<{ balance: number; currencyCode: string }> {
-    const query = currencyCode ? `?currencyCode=${currencyCode}` : '';
-    return apiService.get(`${this.baseUrl}/accounts/${id}/balance${query}`);
-  }
-
-  /**
    * Create account
    */
   async createAccount(data: CreateAccountDto): Promise<Account> {

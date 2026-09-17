@@ -61,7 +61,6 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<IEnumerable<AccountTransaction>> GetByJournalEntryAsync(Guid journalEntryId);
         Task<IEnumerable<AccountTransaction>> GetByAccountAndDateRangeAsync(Guid accountId, DateTime startDate, DateTime endDate);
         Task<IEnumerable<AccountTransaction>> GetByTransactionTypeAsync(TransactionType transactionType);
-        Task<decimal> GetAccountBalanceAsync(Guid accountId, DateTime? asOfDate = null);
     }
 
     // ============================================================================
@@ -77,7 +76,6 @@ namespace ErpSystem.Core.Interfaces.Finance
         Task<IEnumerable<AccountTransactionDto>> GetByAccountAsync(Guid accountId);
         Task<IEnumerable<AccountTransactionDto>> GetByJournalEntryAsync(Guid journalEntryId);
         Task<IEnumerable<AccountTransactionDto>> GetByAccountAndDateRangeAsync(Guid accountId, DateTime startDate, DateTime endDate);
-        Task<decimal> GetAccountBalanceAsync(Guid accountId, DateTime? asOfDate = null);
     }
 
     public interface IFinancialReportService

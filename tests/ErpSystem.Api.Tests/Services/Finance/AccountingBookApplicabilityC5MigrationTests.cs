@@ -83,7 +83,7 @@ public sealed class AccountingBookApplicabilityC5MigrationTests
         using var context = new ApplicationDbContext(options);
 
         context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         ArchivedMigrationSource.Read("20260906190846_AddAccountingBookApplicabilityFoundation.cs")
             .Should().Contain($"Migration(\"{MigrationId}\")");
     }

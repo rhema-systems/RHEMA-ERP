@@ -46,7 +46,7 @@ public class FinanceSettingsMigrationGapTests
         using var context = new ApplicationDbContext(options);
         var migrations = context.GetService<IMigrationsAssembly>().Migrations;
 
-        migrations.Keys.Should().Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        migrations.Keys.Should().Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         ArchivedMigrationSource.Read("20260731140309_RepairMissingFinanceSettingsColumns.cs")
             .Should().Contain(MigrationId);
         // This regression protects the dependency between these two historical repair migrations.

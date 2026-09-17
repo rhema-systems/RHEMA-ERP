@@ -56,10 +56,9 @@ public sealed class FiscalYearCloseTests
             .SingleAsync(e => e.SourceDocumentType == "YearEndClose" && e.SourceDocumentId == fixture.FiscalYear.Id);
         postingEvent.JournalEntryId.Should().Be(closingEntry.Id);
 
-        // Engine balance snapshots: income statement accounts zeroed, net income in equity.
-        fixture.Revenue.Balance.Should().Be(0m);
-        fixture.Expense.Balance.Should().Be(0m);
-        fixture.RetainedEarnings.Balance.Should().Be(600m);
+        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Revenue.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(0m);
+        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Expense.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(0m);
+        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.RetainedEarnings.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(-600m);
     }
 
     [Fact]
@@ -217,9 +216,9 @@ public sealed class FiscalYearCloseTests
             .SingleAsync(e => e.SourceDocumentType == "YearEndCloseReversal" && e.SourceDocumentId == fixture.FiscalYear.Id);
         reversalEvent.JournalEntryId.Should().NotBeNull();
 
-        fixture.Revenue.Balance.Should().Be(1000m);
-        fixture.Expense.Balance.Should().Be(400m);
-        fixture.RetainedEarnings.Balance.Should().Be(0m);
+        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Revenue.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(-1000m);
+        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.Expense.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(400m);
+        (await fixture.Db.AccountBalances.Where(x => x.AccountId == fixture.RetainedEarnings.Id).SumAsync(x => x.PeriodDebits - x.PeriodCredits)).Should().Be(0m);
     }
 
     private sealed record Fixture(

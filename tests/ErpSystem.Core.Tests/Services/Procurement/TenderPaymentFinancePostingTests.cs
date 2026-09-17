@@ -285,7 +285,7 @@ public sealed class TenderPaymentFinancePostingTests
 
         var discovered = context.GetService<IMigrationsAssembly>().Migrations;
         discovered.Should().ContainSingle();
-        discovered.Should().ContainKey("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+        discovered.Should().ContainKey("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         discovered.Should().NotContainKey("20260831203000_AddTenderFeeFinancePostingLineage");
 
         var migration = new AddTenderFeeFinancePostingLineage();

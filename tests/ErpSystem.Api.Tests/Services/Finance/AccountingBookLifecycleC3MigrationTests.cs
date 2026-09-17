@@ -81,7 +81,7 @@ public sealed class AccountingBookLifecycleC3MigrationTests
         using var context = new ApplicationDbContext(options);
 
         context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         ArchivedMigrationSource.Read("20260905213000_AddGovernedAccountingBookLifecycle.cs")
             .Should().Contain($"[Migration(\"{MigrationId}\")]");
     }

@@ -14,7 +14,7 @@ public sealed class SupplierOnboardingCategoryAlignmentMigrationTests
     private const string MigrationId =
         "20260827090000_AlignSupplierOnboardingPartnerCategories";
     private const string CurrentBaselineId =
-        "20260913162402_DisposableDevelopmentCurrentModelBaseline";
+        "20260916132000_DisposableDevelopmentCurrentModelBaseline";
 
     [Fact]
     public void ArchivedRepairIsRetainedWhileOnlyCurrentBaselineIsDiscoverable()

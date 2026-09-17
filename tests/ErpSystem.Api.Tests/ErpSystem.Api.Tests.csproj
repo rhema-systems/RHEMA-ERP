@@ -301,7 +301,6 @@
          book selection to owner producers; this project disables implicit compile items. -->
     <Compile Include="Services\Finance\FinanceProducerCompatibilityC10Tests.cs" />
     <Compile Include="Services\Finance\BookBalanceConsumerAuthorityC2Tests.cs" />
-    <Compile Include="Services\Finance\GeneralLedgerPrimaryBalanceCompatibilityC2Tests.cs" />
     <Compile Include="Services\Finance\FixedAssetCapitalizationFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationFoundationTests.cs" />
     <Compile Include="Services\Finance\FixedAssetDepreciationConventionCalculatorTests.cs" />

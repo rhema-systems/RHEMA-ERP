@@ -131,7 +131,7 @@ public sealed class SupplierDebitNoteFoundationTests
     {
         using var context = CreateContext();
         context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
-            .Equal("20260913162402_DisposableDevelopmentCurrentModelBaseline");
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
         var sql = ArchivedMigrationSource.Read("20260818103000_AddSupplierDebitNoteLifecycleAndApplications.cs");
 
         sql.Should().Contain("OBJECT_ID(N'[dbo].[SupplierDebitNotes]', N'U') IS NULL");

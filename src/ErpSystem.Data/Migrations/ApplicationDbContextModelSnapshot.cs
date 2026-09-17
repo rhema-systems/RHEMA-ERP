@@ -7896,9 +7896,6 @@ namespace ErpSystem.Data.Migrations
                     b.Property<bool>("AllowDirectPosting")
                         .HasColumnType("bit");
 
-                    b.Property<decimal>("Balance")
-                        .HasColumnType("decimal(18,4)");
-
                     b.Property<string>("BaseLineItem")
                         .HasMaxLength(100)
                         .HasColumnType("nvarchar(100)");

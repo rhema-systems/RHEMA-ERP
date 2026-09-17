@@ -21,7 +21,7 @@ public sealed class FinanceAdHocReportBuilderTests
     public void Catalogue_ExposesCuratedFinanceDatasetsWithoutBrowserSuppliedSql()
     {
         FinanceAdHocReportCatalog.All.Select(item => item.Code).Should().BeEquivalentTo(
-            "gl-lines", "ap-invoices", "ar-invoices", "fixed-assets", "chart-of-accounts");
+            "gl-lines", "ap-invoices", "ar-invoices", "fixed-assets", "chart-of-accounts", "book-balances");
         FinanceAdHocReportCatalog.All.Should().OnlyContain(dataset =>
             dataset.Fields.Count > 0 && dataset.Fields.Values.All(field =>
                 !string.IsNullOrWhiteSpace(field.SqlExpression)));
@@ -42,6 +42,18 @@ public sealed class FinanceAdHocReportBuilderTests
             .And.Contain("[ac].[Status] = 2")
             .And.Contain("[parent].[TenantId] = [a].[TenantId]")
             .And.Contain("[parent].[AccountingBookId] = [ab].[Id]");
+    }
+
+    [Fact]
+    public void BookBalancesCatalogue_ExposesOnlyBookScopedBalances()
+    {
+        var dataset = FinanceAdHocReportCatalog.Required("book-balances");
+
+        dataset.FromSql.Should().Contain("[b].[AccountingBookId]")
+            .And.Contain("[b].[FiscalPeriodId]")
+            .And.Contain("[a].[TenantId] = [b].[TenantId]");
+        dataset.Fields.Should().ContainKey("closingBalance");
+        FinanceAdHocReportCatalog.Required("chart-of-accounts").Fields.Should().NotContainKey("balance");
     }
 
     [Fact]

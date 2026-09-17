@@ -702,7 +702,6 @@ namespace ErpSystem.Data.Migrations
                     RequireProjectCode = table.Column<bool>(type: "bit", nullable: false),
                     BudgetTrackingEnabled = table.Column<bool>(type: "bit", nullable: false),
                     Status = table.Column<int>(type: "int", nullable: false),
-                    Balance = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
                     DebitBalance = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
                     CreditBalance = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
                     OpeningBalance = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
