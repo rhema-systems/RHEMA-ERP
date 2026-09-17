@@ -21,6 +21,8 @@ const period = { id: 'bp-1', accountingBookId: 'book-1', accountingBookCode: 'LO
 
 describe('accounting book C4 readiness', () => {
     beforeEach(() => {
+        vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+        Element.prototype.scrollIntoView = vi.fn();
         permissions = new Set(['Finance.Read']); authLoading = false; vi.clearAllMocks();
         vi.mocked(financeDataService.getAccountingBook).mockResolvedValue(book as never);
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([book] as never);
@@ -62,6 +64,7 @@ describe('accounting book C4 readiness', () => {
         vi.mocked(financeDataService.createAccountingBookPeriod).mockResolvedValue(period as never);
         render(<AccountingBookReadinessPage />);
         fireEvent.click(await screen.findByLabelText('Fiscal period'));
+        fireEvent.change(screen.getByPlaceholderText('Search period code or name…'), { target: { value: 'February' } });
         fireEvent.click(screen.getByText('2026-02 — February'));
         fireEvent.click(screen.getByRole('button', { name: 'Add Future period' }));
         await waitFor(() => expect(financeDataService.createAccountingBookPeriod).toHaveBeenCalledWith('book-1', 'fp-2'));

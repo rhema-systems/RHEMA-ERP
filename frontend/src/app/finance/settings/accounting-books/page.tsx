@@ -18,6 +18,8 @@ import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { AccountingBook, AccountingBookLifecycleStatus, AccountingBookType, SaveAccountingBook } from '@/types/finance';
 import { getAccountingBookAccess } from '@/components/finance/accounting-books/accounting-book-access';
+import { SearchableOptionPicker } from '@/components/finance/accounting-books/searchable-option-picker';
+import type { Currency } from '@/types/finance';
 
 const bookTypes: AccountingBookType[] = ['PrimaryFull', 'ParallelFull', 'Delta'];
 const lifecycleStates: AccountingBookLifecycleStatus[] = ['Draft', 'Configuring', 'Initializing', 'Active', 'Suspended', 'Retired'];
@@ -57,6 +59,9 @@ export default function AccountingBooksSettingsPage() {
     const access = getAccountingBookAccess(hasPermission);
     const { toast } = useToast();
     const [books, setBooks] = useState<AccountingBook[]>([]);
+    const [currencies, setCurrencies] = useState<Currency[]>([]);
+    const [currencyLoading, setCurrencyLoading] = useState(true);
+    const [currencyError, setCurrencyError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [editing, setEditing] = useState<AccountingBook | null | undefined>(undefined);
@@ -90,8 +95,27 @@ export default function AccountingBooksSettingsPage() {
         if (!authLoading && !access.canRead) setLoading(false);
     }, [access.canRead, authLoading, load]);
 
+    const loadCurrencies = useCallback(async () => {
+        setCurrencyLoading(true);
+        setCurrencyError(null);
+        try { setCurrencies(await financeDataService.getCurrencies()); }
+        catch (reason) { setCurrencyError(reason instanceof Error ? reason.message : 'Currencies could not be loaded.'); }
+        finally { setCurrencyLoading(false); }
+    }, []);
+
+    useEffect(() => { if (!authLoading && access.canManage) void loadCurrencies(); }, [access.canManage, authLoading, loadCurrencies]);
+
     const baseBookOptions = useMemo(() => books.filter(book =>
         book.id !== editing?.id && statusOf(book) !== 'Retired'), [books, editing?.id]);
+    const currencyOptions = useMemo(() => {
+        const active = currencies.filter(currency => currency.isActive)
+            .map(currency => ({ value: currency.currencyCode, label: `${currency.currencyCode} — ${currency.currencyName}` }));
+        const existingCode = editing?.functionalCurrencyCode;
+        if (existingCode && !active.some(option => option.value === existingCode)) {
+            active.push({ value: existingCode, label: `${existingCode} — current assignment (inactive)` });
+        }
+        return active.sort((left, right) => left.value.localeCompare(right.value));
+    }, [currencies, editing?.functionalCurrencyCode]);
 
     const openEditor = (book?: AccountingBook) => {
         setEditing(book ?? null);
@@ -240,12 +264,12 @@ export default function AccountingBooksSettingsPage() {
                 <div><Label>Book type</Label><Select value={form.bookType} disabled={structuralLocked} onValueChange={value => setForm({ ...form, bookType: value as AccountingBookType, baseAccountingBookId: null })}><SelectTrigger aria-label="Book type"><SelectValue /></SelectTrigger><SelectContent>{bookTypes.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent></Select></div>
                 <div><Label htmlFor="book-purpose">Accounting purpose / principle</Label><Input id="book-purpose" value={form.purpose} disabled={structuralLocked} onChange={event => setForm({ ...form, purpose: event.target.value })} placeholder="e.g. IFRS reporting" /></div>
                 {form.bookType === 'Delta' ? <div className="sm:col-span-2"><Label>Base accounting book</Label><Select value={form.baseAccountingBookId ?? ''} disabled={structuralLocked} onValueChange={value => setForm({ ...form, baseAccountingBookId: value })}><SelectTrigger aria-label="Base accounting book"><SelectValue placeholder="Select governed base book" /></SelectTrigger><SelectContent>{baseBookOptions.map(book => <SelectItem key={book.id} value={book.id}>{book.code} — {book.name}</SelectItem>)}</SelectContent></Select></div>
-                    : <div><Label htmlFor="book-currency">Functional currency</Label><Input id="book-currency" maxLength={3} value={form.functionalCurrencyCode ?? ''} disabled={structuralLocked} onChange={event => setForm({ ...form, functionalCurrencyCode: event.target.value.toUpperCase() })} /></div>}
+                    : <div><Label>Functional currency</Label><SearchableOptionPicker label="Functional currency" value={form.functionalCurrencyCode ?? ''} options={currencyOptions} onChange={value => setForm({ ...form, functionalCurrencyCode: value })} placeholder={currencyLoading ? 'Loading currencies…' : 'Select currency'} searchPlaceholder="Search code or name…" emptyMessage="No active currency found." disabled={structuralLocked || currencyLoading || Boolean(currencyError)} />{currencyError && <p className="mt-1 text-sm text-destructive">{currencyError} <Button type="button" variant="link" className="h-auto p-0" onClick={() => void loadCurrencies()}>Retry currencies</Button></p>}</div>}
                 <div><Label htmlFor="book-order">Display order</Label><Input id="book-order" type="number" value={form.sortOrder} disabled={updateBlocked} onChange={event => setForm({ ...form, sortOrder: Number(event.target.value) })} /></div>
                 <div><Label htmlFor="book-from">Effective from</Label><Input id="book-from" type="date" value={dateValue(form.effectiveFromUtc)} disabled={structuralLocked} onChange={event => setForm({ ...form, effectiveFromUtc: event.target.value })} /></div>
                 <div><Label htmlFor="book-to">Effective to</Label><Input id="book-to" type="date" value={dateValue(form.effectiveToUtc)} disabled={structuralLocked} onChange={event => setForm({ ...form, effectiveToUtc: event.target.value })} /></div>
                 <div className="sm:col-span-2"><Label htmlFor="book-description">Description</Label><Textarea id="book-description" value={form.description ?? ''} disabled={updateBlocked} onChange={event => setForm({ ...form, description: event.target.value })} /></div>
-            </div><DialogFooter><Button variant="outline" onClick={() => setEditing(undefined)}>Cancel</Button><Button disabled={saving || updateBlocked || !form.code.trim() || !form.name.trim() || !form.purpose.trim() || (form.bookType === 'Delta' ? !form.baseAccountingBookId : form.functionalCurrencyCode?.trim().length !== 3)} onClick={() => void save()}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save book</Button></DialogFooter>
+            </div><DialogFooter><Button variant="outline" onClick={() => setEditing(undefined)}>Cancel</Button><Button disabled={saving || updateBlocked || !form.code.trim() || !form.name.trim() || !form.purpose.trim() || (form.bookType === 'Delta' ? !form.baseAccountingBookId : currencyLoading || Boolean(currencyError) || !currencyOptions.some(option => option.value === form.functionalCurrencyCode))} onClick={() => void save()}>{saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Save book</Button></DialogFooter>
         </DialogContent></Dialog>
 
         <Dialog open={detail !== null} onOpenChange={open => { if (!open) setDetail(null); }}><DialogContent><DialogHeader><DialogTitle>{detail?.code} accounting-book details</DialogTitle><DialogDescription>Governed structure and lifecycle evidence for this tenant-owned book.</DialogDescription></DialogHeader>{detailLoading ? <Loader2 className="mx-auto my-8 h-6 w-6 animate-spin" aria-label="Loading book detail" /> : detailError ? <Alert variant="destructive"><AlertTitle>Could not load book detail</AlertTitle><AlertDescription>{detailError} <Button variant="link" className="h-auto p-0" onClick={() => detail && void openDetail(detail)}>Retry</Button></AlertDescription></Alert> : detail && <div className="grid gap-3 text-sm sm:grid-cols-2"><div><span className="text-muted-foreground">Lifecycle</span><p>{statusOf(detail)}</p></div><div><span className="text-muted-foreground">Type</span><p>{typeOf(detail)}</p></div><div><span className="text-muted-foreground">Purpose</span><p>{detail.purpose}</p></div><div><span className="text-muted-foreground">Functional currency</span><p>{detail.functionalCurrencyCode || 'Inherited from base'}</p></div><div><span className="text-muted-foreground">Accounting use</span><p>{detail.hasAccountingUse ? 'Yes — structure locked' : 'No'}</p></div><div><span className="text-muted-foreground">Activation readiness</span><p>{detail.activationReady ? 'Ready' : 'Not ready'}</p></div><div className="sm:col-span-2"><span className="text-muted-foreground">Readiness evidence</span><p>{detail.readinessMessage || 'Approved initialization and an open first exact-book period are required.'}</p></div></div>}</DialogContent></Dialog>

@@ -22,6 +22,7 @@ vi.mock('@/hooks/use-toast', () => ({ useToast: () => ({ toast: vi.fn() }) }));
 vi.mock('@/services/finance/finance-data.service', () => ({
     financeDataService: {
         getAccountingBooks: vi.fn(),
+        getCurrencies: vi.fn(),
         getAccountingBook: vi.fn(),
         createAccountingBook: vi.fn(),
         updateAccountingBook: vi.fn(),
@@ -48,11 +49,14 @@ const initializingBook: AccountingBook = {
 
 describe('accounting book settings', () => {
     beforeEach(() => {
+        vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
+        Element.prototype.scrollIntoView = vi.fn();
         permissions = new Set(['Finance.Read']);
         authLoading = false;
         authError = null;
         vi.clearAllMocks();
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([primaryBook]);
+        vi.mocked(financeDataService.getCurrencies).mockResolvedValue([{ currencyCode: 'GHS', currencyName: 'Ghanaian Cedi', isActive: true }, { currencyCode: 'USD', currencyName: 'US Dollar', isActive: true }] as never);
         vi.mocked(financeDataService.getAccountingBook).mockResolvedValue(primaryBook);
     });
 
@@ -118,7 +122,9 @@ describe('accounting book settings', () => {
         fireEvent.change(screen.getByLabelText('Stable code'), { target: { value: 'tax_book' } });
         fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'Tax Book' } });
         fireEvent.change(screen.getByLabelText('Accounting purpose / principle'), { target: { value: 'Tax basis' } });
-        fireEvent.change(screen.getByLabelText('Functional currency'), { target: { value: 'ghs' } });
+        fireEvent.click(screen.getByRole('combobox', { name: 'Functional currency' }));
+        fireEvent.change(screen.getByPlaceholderText('Search code or name…'), { target: { value: 'Ghanaian' } });
+        fireEvent.click(screen.getByText('GHS — Ghanaian Cedi'));
         fireEvent.click(screen.getByRole('button', { name: 'Save book' }));
 
         await waitFor(() => expect(financeDataService.createAccountingBook).toHaveBeenCalledWith(expect.objectContaining({
