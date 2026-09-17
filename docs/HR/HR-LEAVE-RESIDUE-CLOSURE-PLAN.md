@@ -1,7 +1,7 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1–G4 BUILT. G5a BUILT. G5b four of five done (L-12, L-15, L-19, L-20).
-L-22 and G6's wider survey outstanding.**
+**Status:** 2026-09-17 — **G1–G5 BUILT and verified. G6's survey of HR beyond leave is all that
+remains; G7 was done incrementally.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -270,10 +270,28 @@ It also gives G1's `UsedDays` correction a route to reach everybody, which it di
 
 **Verified by slice 9, now 30 assertions. Suite total 404 across nine slices, green twice.**
 
-### Still open in G5b
+#### L-22 — the compliance register, done 2026-09-17
 
-**L-22** — compliance is read-only apart from the export: no department filter, and no link from a
-row to the employee or to raising leave on their behalf.
+It answered *"who is outstanding"* and nothing else. `MandatoryLeaveComplianceDto` now carries the
+employee's **staff number** and **organisation unit**, and the CSV carries both too — an export that
+disagrees with the screen is its own small bug, and nobody reconciles the two until a figure is
+disputed.
+
+The screen gained a **unit filter** and a **status filter** (client-side: the whole register is
+already loaded for the export, so a round trip per change would be slower and no more correct), the
+employee name **links to their profile**, and any row with days outstanding offers **Book leave**,
+prefilled with the employee and leave type.
+
+Why a unit filter specifically: **outstanding mandatory leave is acted on by a department.** It is
+the head who has to release people, not HR one name at a time.
+
+### G5 complete
+
+**Verified by slice 9, now 37 assertions. Suite total 411 across nine slices, green twice.**
+
+⚠ **The L-22 assertions first SKIPPED**, because the demo tenant has no mandatory leave type with a
+balance — so the two checks that matter never ran while the suite reported them as present. The slice
+now plants its own fixture. **Two assertions that never execute are worse than none.**
 
 ### G6–G7 — outstanding
 

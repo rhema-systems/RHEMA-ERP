@@ -665,6 +665,17 @@ public class MandatoryLeaveComplianceDto
 {
     public Guid EmployeeId { get; set; }
     public string EmployeeName { get; set; } = string.Empty;
+
+    /// <summary>So a row can be found, and taken to the person it is about.</summary>
+    public string EmployeeNumber { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The employee's organisation unit. ⚠ Added for finding L-22: the register listed
+    /// everybody with no way to narrow it, and outstanding mandatory leave is something a
+    /// DEPARTMENT acts on — it is the head who has to release people, not HR one name at a time.
+    /// </summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public Guid LeaveTypeId { get; set; }
     public string LeaveTypeName { get; set; } = string.Empty;
     public int Year { get; set; }

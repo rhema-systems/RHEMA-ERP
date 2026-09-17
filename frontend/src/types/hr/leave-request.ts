@@ -287,6 +287,15 @@ export interface UpdateLeaveAdjustmentRequest {
 export interface MandatoryLeaveCompliance {
   employeeId: string;
   employeeName: string;
+  employeeNumber: string;
+
+  /**
+   * ⚠ Added for L-22. Outstanding mandatory leave is something a DEPARTMENT acts on — it is
+   * the head who has to release people, not HR one name at a time — and the register had no way
+   * to narrow to one.
+   */
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
   leaveTypeId: string;
   leaveTypeName: string;
   year: number;

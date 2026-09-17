@@ -1745,7 +1745,8 @@ public class LeaveService : ILeaveService
         var csv = new StringBuilder();
         csv.AppendLine(string.Join(",", new[]
         {
-            "Employee", "Leave type", "Year", "Entitled", "Taken", "Scheduled", "Outstanding", "Status",
+            "Employee", "Staff number", "Organisation unit",
+            "Leave type", "Year", "Entitled", "Taken", "Scheduled", "Outstanding", "Status",
         }.Select(CsvCell)));
 
         foreach (var r in rows)
@@ -1753,6 +1754,8 @@ public class LeaveService : ILeaveService
             csv.AppendLine(string.Join(",", new[]
             {
                 r.EmployeeName,
+                r.EmployeeNumber,
+                r.OrganizationUnitName ?? string.Empty,
                 r.LeaveTypeName,
                 r.Year.ToString(),
                 r.EntitledDays.ToString("0.##"),
@@ -1911,7 +1914,7 @@ public class LeaveService : ILeaveService
         var balances = await _leaveBalanceRepository
             .GetQueryable()
             .Include(lb => lb.LeaveType)
-            .Include(lb => lb.Employee)
+            .Include(lb => lb.Employee).ThenInclude(e => e.OrganizationUnit)
             .Where(lb => lb.TenantId == tenantId
                       && lb.Year == year
                       && lb.LeaveType.MandatoryAnnualLeave
@@ -1937,6 +1940,9 @@ public class LeaveService : ILeaveService
             {
                 EmployeeId = lb.EmployeeId,
                 EmployeeName = lb.Employee?.FullName ?? string.Empty,
+                EmployeeNumber = lb.Employee?.EmployeeNumber ?? string.Empty,
+                OrganizationUnitId = lb.Employee?.OrganizationUnitId,
+                OrganizationUnitName = lb.Employee?.OrganizationUnit?.Name,
                 LeaveTypeId = lb.LeaveTypeId,
                 LeaveTypeName = lb.LeaveType?.Name ?? string.Empty,
                 Year = year,
