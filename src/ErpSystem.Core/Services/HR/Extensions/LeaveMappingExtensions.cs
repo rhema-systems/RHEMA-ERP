@@ -233,7 +233,8 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverId = dto.SecondRelieverId,
             Notes = dto.Notes,
             // PlannedBy is stamped by the service from the token (finish-plan lane 4).
-            Year = dto.Year
+            // Year follows the dates, never the caller (L-17).
+            Year = dto.StartDate.Year
         };
 
         public static List<LeavePlanDto> ToDtoList(this IEnumerable<LeavePlan> entities)
@@ -281,6 +282,22 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverEmployeeName = entity.SecondRelieverEmployee?.FullName,
             RelieverNotes = entity.RelieverNotes,
             LeavePlanId = entity.LeavePlanId,
+            ApprovedById = entity.ApprovedById,
+            ApprovedDate = entity.ApprovedDate,
+            RejectionReason = entity.RejectionReason,
+            SuggestedStartDate = entity.SuggestedStartDate,
+            SuggestedEndDate = entity.SuggestedEndDate,
+            ManagerSuggestionNotes = entity.ManagerSuggestionNotes,
+            OriginalStartDate = entity.OriginalStartDate,
+            OriginalEndDate = entity.OriginalEndDate,
+            RescheduledDate = entity.RescheduledDate,
+            RescheduledById = entity.RescheduledById,
+            RescheduleReason = entity.RescheduleReason,
+            RescheduleCount = entity.RescheduleCount,
+            ObservanceConfirmedDate = entity.ObservanceConfirmedDate,
+            ObservanceConfirmedById = entity.ObservanceConfirmedById,
+            // RescheduledByName / ObservanceConfirmedByName are filled by the reads that need them:
+            // the actor columns are bare Guids (no navigation — see the entity's note on shadow FKs).
             ClosureDate = entity.ClosureDate,
             ClosureNotes = entity.ClosureNotes,
             CancellationDate = entity.CancellationDate,

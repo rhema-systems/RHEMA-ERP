@@ -135,7 +135,7 @@ the sweep is a re-survey after all.
 
 | area | likely money events | status |
 |---|---|---|
-| 2 — Leave | leave encashment on separation (FR-HR-152 caps it) | 🔲 to record |
+| 2 — Leave | leave encashment — in service and on separation | ✅ **recorded 2026-09-17**, see below |
 | 4 — Compensation | pay components, allowances, the payroll boundary | 🔲 to record |
 | 7 — Training | training budget, costs, vendor payments, `costPerCompletion` | 🔲 to record |
 | 11 — Medical | claim create → approve → **pay**; insurance utilisation; NHIS | 🔲 to record |
@@ -143,6 +143,38 @@ the sweep is a re-survey after all.
 
 ⚠ **Area 11 is the priority back-fill** — it has a live, working claim→approve→**pay** path, so it
 is the closest analogue to travel 12.1 and the two must post the same way.
+
+### Area 2 — Leave ✅ *(recorded 2026-09-17, closure plan wave D slice D3)*
+
+Leave has **one** money event, and unlike travel it is already arithmetically complete: the payout
+is derived server-side from the employee's emoluments and the leave type's rate policy, the
+lifecycle is create → approve → **processed**, and `Processed` is the only status that moves a
+balance. **What is missing is the accounting, not the arithmetic.**
+
+| # | money event | entity | what is missing |
+|---|---|---|---|
+| 2.1 | Leave encashment paid | `LeaveEncashment` | No GL posting and no AP document. `PaymentReference` is free text and `ProcessedDate` an HR timestamp; `ProcessedByEmployeeId` is an **`Employee`** FK, so who authorised the payment is an HR fact invisible to Finance. The payout (`AmountPaid`) is a real cash movement that appears in no trial balance. |
+| 2.2 | Leave liability carried | `LeaveBalance` | Untaken leave is an **accrued liability** — days owed that the company will either pay out or absorb. Six balance components are derived and correct, and none of them reaches a balance sheet. Nothing in HR values them, because the day-rate question below is unanswered. |
+
+**⚠ Two things the sweep must NOT assume.**
+
+1. **There are two daily-rate formulas live in the product.** Leave encashment uses
+   `(basic + linked allowances) ÷ 22`; the separation settlement uses `monthly × 12 ÷ 365`. On
+   GHS 6,000/month those differ by about **38%**. This is logged for TDC as **L-D7** in
+   `HR-OPEN-QUESTIONS-FOR-TDC.md` and is deliberately **not** reconciled in code — picking one
+   without an answer would just make it a third. The sweep inherits the question, not a decision.
+
+2. **Whether in-service encashment should exist at all is an open requirements conflict.**
+   FR-HR-046 says leave is encashed *"only on exit, no other route"*, and the module ships an
+   in-service path with annual leave flagged `AllowCashConversion` in the seed. Logged as **L-D8**.
+   If TDC upholds FR-HR-046, event 2.1 collapses into the separation settlement (row 9b) and stops
+   being a leave-module posting at all. **Do not build 2.1 before L-D8 is answered.**
+
+**What the sweep inherits that is already right:** four create checks on an encashment, a
+server-derived payout the caller cannot override, one-encashment-per-request, create-and-submit in
+one transaction, and a balance that only moves on `Processed`. As of 2026-09-17 the processor is
+also stamped from the caller's own employee id rather than taken from the request body, so the
+"who authorised this" field is at least truthful — it just is not a Finance identity.
 
 ### Area 13 — Succession & Talent (recorded 2026-08-18, slice 5)
 

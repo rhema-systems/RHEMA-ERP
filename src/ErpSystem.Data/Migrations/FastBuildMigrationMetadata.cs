@@ -326,3 +326,5 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260913224857_AddDisabilityTypes")] partial class AddDisabilityTypes { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260913234443_DropContractLeaveColumns")] partial class DropContractLeaveColumns { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260914063456_AddTalentSegmentOwnership")] partial class AddTalentSegmentOwnership { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260917155507_AddLeaveRequestSuggestionAndReschedule")] partial class AddLeaveRequestSuggestionAndReschedule { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260917163710_AddLeaveReminderEngine")] partial class AddLeaveReminderEngine { }

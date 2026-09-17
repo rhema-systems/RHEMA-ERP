@@ -1,11 +1,238 @@
 # HR Leave Management — Closure Plan
 
-**Status:** PLANNED 2026-09-17. Nothing in this document has been built. It is the complete
-definition of what remains before the leave module can be called done, written from a
+**Status:** ✅ **COMPLETE 2026-09-17.** All six waves built and verified — 192 harness assertions,
+green twice (see § 0). It is
+the complete definition of what remains before the leave module can be called done, written from a
 screen-by-screen source walk (`HR-LEAVE-SYSTEM-GUIDE.md`) plus a field-level trace of every
 configurable setting and a requirements pass against what TDC has asked for.
 
-**Owner:** whoever picks up leave next. **Read this before writing any code.**
+**Owner:** whoever picks up leave next. **Read this before writing any code**, and read § 0 first —
+it is the only part of this document that describes the code as it stands today.
+
+---
+
+## 0. Progress — what is built, and what that changed
+
+| Wave | Slices | State |
+|---|---|---|
+| **A — stop the bleeding** | A1, A2, A3 | ✅ **DONE 2026-09-17** |
+| **B — make the screens honest** | B1, B2, B3 | ✅ **DONE 2026-09-17** |
+| **C — the flow TDC described** | C1–C4 | ✅ **DONE 2026-09-17** |
+| **D — the joins** | D1–D3 | ✅ **DONE 2026-09-17** |
+| **E — the features that finish it** | E1–E4 | ✅ **DONE 2026-09-17** |
+| **F — prove it** | F1 | ✅ **DONE 2026-09-17 — 192 assertions, green twice** |
+
+**Two migrations were added:** `20260917155507_AddLeaveRequestSuggestionAndReschedule` (eleven
+columns on `LeaveRequests`) and `20260917163710_AddLeaveReminderEngine` (two tables). Both rewritten
+as guarded SQL and registered in `FastBuildMigrationMetadata`.
+
+### What waves A and B closed
+
+**A1 · L-1** — the desk's *Submit request* now calls `POST /Leaves/{id}/submit` after a non-draft
+create, with the portal's honest "Saved, but not submitted" fallback when only the workflow hand-off
+fails. Before this the request landed at `Pending` with no workflow instance: unsubmittable,
+unapprovable, days already deducted, Cancel the only exit.
+
+**A2 · L-2** — *Mark as paid* worked at all. ⚠ **Fixed deeper than the plan said.** The plan called
+for a one-word screen change (`user?.id` → `user?.employeeId`); instead `ProcessedByEmployeeId` is
+now stamped **server-side** from the token and **removed from `ProcessLeaveEncashmentDto`**, because
+this is the same defect finish-plan lane 4 fixed for adjustments and plans, and the ledger's own
+lesson there was that a screen-only fix leaves the hole open to every other caller. An unlinked
+account is refused with a message rather than a constraint failure.
+**Callers must drop `processedByEmployeeId` from the body** — `hr-demo-smoke/021` already has.
+
+**A3 · L-3, L-14** — accrual is computed on the org-wide balances read, so the **Accrued** column
+stops repeating Entitled. Beyond the plan: `AccruedAvailableDays` is now on the balance DTO — the
+figure the create check *actually enforces* — and the create check, both request forms and the
+balances screen all read **one** definition of it (`LeaveService.EnforcedAvailableDays`). The forms
+lead with "can be taken now" and explain the difference when the two figures disagree. This is the
+answer to § 2.2's first trap: the two numbers can no longer drift, because there is only one.
+
+**B1 · L-11, L-34, L-35** — the five tab deletes and the register's retire button are gated on
+`HR.Leave.Admin` (`useLeavePermissions`), which the HR role does not hold; `ResourceCollectionTab`
+grew an `allowRemove` prop for it. Retired sub-types leave the pickers (`GET …/sub-types?activeOnly=true`;
+the rulebook tab still shows them). **`LeaveType.IsActive` and `LeaveSubType.IsActive` are now
+enforced in the service**, on create and on moving a draft onto a retired type — not just by the
+picker.
+
+**B2 · L-31, L-32** — leave no longer runs its own holiday query. `IHrWorkingDayCalculator` gained
+`GetHolidayDatesAsync`, and leave counts chargeable days against it, so leave and HR's statutory
+clocks share one answer to "is this a holiday". Leave therefore now honours the **default calendar**,
+**`PublicHoliday.IsActive`** (which the calculator itself was also missing) and **`SubstitutionDate`**.
+Leave keeps its own per-type `CountWeekendsAsLeave` / `CountHolidaysAsLeave` switches — the shared
+calculator is Monday-to-Friday by design and those switches are leave's, not its.
+
+**B3 · L-29, L-33, L-17, L-16, L-7, L-8** —
+· **Pro-rate on exit** is wired: a leaver stops accruing on their last day, mirroring
+`ProRateOnJoin`. ⚠ It applies to **incremental accrual only**, exactly as its twin does; a
+`FullGrantOnEligibility` policy is unaffected, because a full grant that is reduced is not a full
+grant. If TDC wants a leaver's full grant scaled, that is a different setting.
+· **`ObservanceType` is wired**: an **Optional** holiday is a working day, so taking it is leave like
+any other. Mandatory and Substitute Day close the office. ⚠ This narrows an assumption other modules
+may hold — flagged to payroll.
+· **`AttractsHolidayPay` / `HolidayPayMultiplier`** stay recorded and are now *labelled* on the
+holiday form as payroll's to apply, and raised in `docs/HANDOFF-PAYROLL-LEAVE.md`. They are not
+ghosts any more; they are somebody else's inputs.
+· A plan's **`Year` is derived from its start date** server-side and removed from the create DTO, so
+a January plan raised from the December list no longer vanishes from both.
+· The plan dialog has a **sub-type field** (hidden when the type has none).
+· The requests list filters **status server-side**, so the count and the paging agree with it.
+· `/hr/leave/requests?employeeId=` is honoured, and the picker names whoever it is pointed at.
+
+### What waves C, D and E closed
+
+**C1 · R-4, L-5** — the three leave entity types now seed a **two-stage** ladder (line manager →
+HR confirmation) via `EnsureLeaveWorkflowsSeededAsync`. ⚠ **`PreventInitiatorApproval` is
+deliberately FALSE**, against this plan's own D-3. That flag guards the *initiator*; a leave
+record's conflicted party is its *subject*, and HR raises leave for other people from the desk — on
+a one-HR-user tenant (the demo tenant is exactly that) the flag strands every desk-raised request at
+stage 2 with nobody able to clear it. Instead all three leave services refuse an approval by the
+employee the record is about. **Consequence: one approve call no longer finishes a request.**
+
+**C2 · R-3, D-1** — `suggest-changes` and `respond-suggestion` on a REQUEST, mirroring the plan's,
+with `LeaveStatus.ChangesSuggested`. Sending back cancels the live approval and re-derives the
+balance (the days stop being reserved); answering re-submits through the front door.
+
+**C3 · L-9, R-1** — `LeaveRequest.LeavePlanId` is finally written. "Raise the leave request" on an
+approved plan, on both desk and portal, pre-filling dates and relievers; the server checks the plan
+is the right employee's, approved and not already spent; both plan lists show the request raised.
+
+**C4 · R-8, R-7** — `reschedule` keeps the number and the history and **re-opens the approval**
+(D-5: an approval is an approval OF DATES). A reason is mandatory. `confirm-observance` records
+"still going ahead". The date checks that re-run on a move are a deliberate subset — past, order,
+overlap and balance, but NOT eligibility, service access or minimum notice; see the helper's remarks.
+
+**D1 · L-27, the largest structural gap** — `LeaveAttendancePostingService` writes `OnLeave` days
+carrying `LeaveRequestId` on approval and removes them on cancel or reschedule, so `DaysOnLeave` on
+the monthly summary — which the payroll export reads — stops being zero. Three things it does that
+matter: it posts **only** when the engine actually finished (a two-stage first approval leaves the
+request Pending); it **never overwrites an observation** (a punched or annotated day is skipped and
+counted); and reversal is a **HARD delete**, because the unique index on
+`(TenantId, EmployeeId, AttendanceDate)` is not filtered on `IsDeleted` while `GetQueryable()` hides
+soft-deleted rows — a soft delete would leave an invisible row holding that employee's slot.
+
+**D2 · L-28, L-37** — the sub-type cap is enforced as an **ANNUAL** cap, not the per-request one
+this plan proposed: a single-request check is defeated by splitting one request into two. Still one
+balance pot per leave type, as D-2 decided. The medical claim dialog gained a "Related sick leave"
+picker, so `MedicalExpenseClaim.LeaveRequestId` finally has a writer.
+
+**D3 · L-21, X-1** — leave's two money events registered in
+`HR-FINANCE-INTEGRATION-BACKLOG.md` §Area 2, with both open questions attached and an explicit
+*"do not build 2.1 before L-D8 is answered"*. No GL posting, per the rule.
+
+**E1 · R-5, L-36** — the calendar: one component, three entry points (`/me/leave/calendar`,
+`/hr/leave/calendar` with a scope selector covering team and organisation). `Mine` and `Team`
+resolve from the token, never from a query parameter. Holidays drawn underneath as a background, so
+the reason a five-day leave charges four is visible. `CalendarColor` is real at last.
+
+**E2 · R-6, R-10, L-23** — `LeaveReminderService`, the twelfth HR engine, following the house
+pattern exactly. Five sweeps: leave starting soon and unconfirmed, leave that ended and was never
+closed, a request nobody has decided, mandatory leave outstanding from month 9, carry-over about to
+lapse. ⚠ **It warns and moves no balances** — `LeaveYearEndService` stays unhosted for the reason
+V-4 records, and that is why this engine CAN be scheduled when the year-end cannot.
+
+**E3 · L-6, L-18, R-11** — `/hr/leave/register`, org-wide with real filters, plus CSV from the
+register, balances and compliance. The register query is shared by the paged read and the CSV so
+they cannot disagree. ⚠ CSV cells starting `=`, `+`, `-` or `@` get a leading apostrophe — without
+it a name beginning with one executes as a formula in Excel.
+
+**E4 · R-12** — bulk approve/reject on the queue, capped at 50, looping the **real** per-request
+service call. Cross-module defect #15 is exactly what a cleverer bulk path would reproduce. Uses the
+bulk catalogue's §4.2 result shape, and the screen names the items that refused.
+
+### What this did NOT change
+
+**There is still no `dev-harness/hr-leave` suite (V-1)**, so everything above was verified by
+reading, by type-checking and by two clean builds — **not by running**. Wave F1 remains the single
+biggest risk in this plan, and "fixed" still means "looks fixed" until it runs.
+
+### F1 — the harness, and what it found (2026-09-17)
+
+**`dev-harness/hr-leave`: 192 assertions across four slices, green twice against the rebuilt API.**
+V-1 is closed. The suite's own README carries the running recipe, the fixture conventions and the
+eight traps it hit.
+
+| Slice | Assertions | Covers |
+|---|---|---|
+| 1 · lifecycle | 75 | the two-stage ladder (C1), submit (A1), send back and answer (C2), reschedule and confirm (C4) |
+| 2 · attendance | 31 | the leave → attendance join and its reversal (D1/L-27), the reconciler |
+| 3 · guards | 33 | self-approval, retired types and sub-types, the annual sub-type cap, the engine assertion pair, permission tiers |
+| 4 · reads | 53 | the two balance figures, calendar, register, three CSV exports, the queue, the reminder engine |
+
+**It found five defects. ⚠ THREE WERE INTRODUCED BY THIS CLOSURE BUILD** — which is the class of
+defect a code review does not catch, and the entire argument for having built the suite.
+
+| # | What | Fixed by |
+|---|---|---|
+| **1** | ⚠ **A refused suggestion destroyed the approval workflow.** The gap-2 date validation ran AFTER the block that cancels the live instance, so an approver proposing invalid dates left the request at `Pending` with no instance — unapprovable, unsubmittable. **Exactly the L-1 shape wave A existed to fix, reintroduced by the fix for a different gap** | validation moved before the workflow branch |
+| **2** | **`LeaveRequestDto` carried no `ApprovedById` / `ApprovedDate` / `RejectionReason`** — on the entity, on no DTO, so nothing could show who approved leave or when | added to the DTO and the mapper |
+| **3** | ⚠ **The line manager could not READ the request they were assigned to approve.** Self-or-`HR.Leave.Read`, and `Manager` holds no HR permission — so the queue listed a row that 403'd on click. The gate's comment said *"deliberately NOT self-or-manager"*, which was coherent while the Manager stage was optional and stopped being so when C1 made it mandatory | `CanReadRequestAsync` gained a third arm: the current workflow assignee. Narrower than a role grant — one request, one person, only while it sits at their step |
+| **4** | **The attendance reconciler was reachable from nothing but the 24-hour timer** — untriggerable, unprovable, and useless for repairing drift today | `POST api/hr/leave/reminders/reconcile-attendance` |
+| **5** | *(pre-existing)* the employee-numbering change had silently broken the shared fixture helper, which minted its actor by supplying a staff number the system now issues itself | the helper identifies its actor by surname |
+
+**What green does not prove**, recorded so nobody reads more into it than is there: no screen has
+been rendered — there is no browser automation, and frontend verification remains `tsc` on a scoped
+tsconfig; the reminder engine's 24-hour schedule and distributed lock are untested (only its
+run-now endpoints are); and **L-D7 and L-D8 are deliberately unasserted**, because encoding a guess
+about the daily-rate basis or about whether in-service encashment is permitted would turn an open
+question into a fixed requirement.
+
+---
+
+### Closed after wave E, before the harness (2026-09-17)
+
+**Both open gaps are now shut, and one more that wave C created.**
+
+**The attendance invariant is convergent, not hook-driven.** `OnLeave` days exist for a request iff
+its status is Approved/InProgress/Completed. Leave's four transitions call
+`ReconcileAttendanceAsync`; the nightly sweep calls `ReconcileRecentAttendanceAsync` over requests
+changed in the last 14 days. That closes the recall hole *without* enumerating doors — which matters
+because the generic workflow recall calls the status adapter directly and never touches
+`LeaveService`, and any list of hooks is a list somebody stops extending. **Drift the sweep repairs
+is logged as a WARNING**, because it means a real bug upstream. ⚠ The posting service no longer
+reads an ambient tenant: it takes one, so it behaves identically in a request and on a timer.
+
+**An approver's suggested dates are validated when proposed.** `SuggestChangesAsync` now runs the
+same date checks the employee faces. The accept path still re-checks — time passes, and another
+request can eat the balance meanwhile.
+
+**⚠ L-10 was upgraded and fixed, because C1 made it load-bearing.** The approvals queue was
+"direct reports' Pending requests". Under the two-stage ladder the request stays `Pending` between
+stages, so that query showed a manager what they had already approved and **never showed HR the
+confirmation step at all** — HR is nobody's `ManagerId`, so the step C1 introduced had no inbox.
+`GET api/Leaves/my-approvals` now asks the engine which requests the caller may actually decide;
+the screen's manager picker is gone with it (it was also a way to read somebody else's queue). The
+old endpoint survives for existing callers, marked superseded. ⚠ The queue asks the engine per
+candidate, so it scans a capped 300 Pending requests.
+
+**Still open and deliberately deferred until after F1:** L-12, L-13, L-15, L-19, L-20, L-22, L-24,
+L-26 — all convenience gaps from the system guide, none of them correctness. **L-13 (the leave-type
+PUT is a replace-set that silently unlinks every allowance) is the one worth doing first** of those.
+
+**Superseded — these two were the open gaps, now closed above:**
+
+1. **A request recalled through the generic workflow surface would strand its attendance days.**
+   Recall goes through `WorkflowController` and calls the adapter directly, bypassing `LeaveService`.
+   Not reachable today — recall applies to in-flight requests, which have no attendance days — but
+   the hole is real. The fix is either a reconciliation pass or routing recall through the module
+   service, and both are bigger than wave D.
+2. **`RespondToSuggestionAsync` re-runs the balance check even when the employee simply accepts the
+   approver's own suggested dates.** So an approver can propose a window the employee's balance will
+   not carry, and the *employee* gets the refusal. Safe, but unkind; catching it at suggest-time
+   needs the approver's dialog to read the employee's balance.
+
+**Five reminder windows are assumptions, not TDC's numbers:** 7 days before a start, 2 days'
+closure grace, 5 days undecided, month 9 for mandatory leave, 30 days for carry-over. Each is
+documented at its constant.
+
+### Decisions taken to get here
+
+All eleven of § 4 are now recorded in `docs/HR-OPEN-QUESTIONS-FOR-TDC.md` as **L-D1 … L-D8** (the
+three marked *recommend* were taken as recommended and need no TDC answer). Six are **built to the
+recommendation** so the module is not left half-finished waiting; TDC can still overturn them.
+**L-D7 (the daily-rate basis) and L-D8 (whether in-service encashment is permitted at all) are
+deliberately NOT built** — both readings are live in the product at once, and guessing would ship a
+third.
 
 ---
 
@@ -148,6 +375,56 @@ first if you are checking the module against the requirement rather than against
 | **R-11** | **Leave register + balance export.** No org-wide request list (L-6), no CSV from anywhere (L-18). The reports catalogue lists these as the most-wanted missing HR reports | every leave conversation ends in "can I have that as a spreadsheet" |
 | **R-12** | **Bulk approval.** The UAT plan already records "bulk/multi-select actions on approval queues (Leave, Travel, Medical claims) — not built" | a December approval queue is 200 rows |
 | **R-13** | **Compassionate leave offset against annual leave** — recorded in the finish plan §2e as needing a design call; there is no offset or advance concept anywhere in the module | already an open `DECIDE` row |
+
+### 3.3b Raised after the closure build (2026-09-17, by the module owner)
+
+Two real requirements that waves A–E did not cover, recorded here so they are not lost. **Both are
+features, not fixes**, and both were deferred until after F1.
+
+| ID | What | Why it is not covered by anything built |
+|---|---|---|
+| **R-14** | **Recall from leave — an employee called back before their end date.** | There is **no correct action** for this today. *Cancel* releases every day including the ones already taken; *Close* refuses before the end date; *Reschedule* records that the leave moved, which is a different fact. The only route is cancel-and-re-key a shorter request, losing the number and the approval. ⚠ **And nothing writes `LeaveStatus.InProgress`** — every reference in the solution reads or filters on it and no code path sets it, so the system has no notion of leave that is currently happening, which is the precondition for recalling somebody from it |
+| **R-15** | **Excuse duty, and a medical board recommendation for extended sick leave.** | Raised by stakeholders. **Nothing exists** — no certification rule, no typed evidence, no board. Sick leave is an ordinary leave type with optional untyped attachments |
+
+#### R-14 — what curtailment has to be, and the defect it exposes
+
+The enterprise shape is **curtailment**, and it is deliberately not an amendment:
+
+- it **truncates** rather than cancels — days up to the recall date stand as taken, days after are
+  restored to the balance;
+- it is the **employer's** act, recorded as its own event (who, when, why, effective when), because
+  the consequences differ from an employee changing their mind: restored days are often protected
+  from the normal carry-over expiry, and recall costs may be reimbursable;
+- the record **keeps its number and its approval** — the leave was validly approved and then
+  interrupted, not wrongly granted.
+
+Sketch: `RecalledOn` / `RecalledById` / `RecallReason` / `DaysRestored` on `LeaveRequest`, a
+`PUT /{id}/recall` taking an effective date, `EndDate` truncated and `TotalDays` recomputed — the
+balance then re-derives itself, because `UsedDays` comes from approved requests. Plus a small job
+that sets `InProgress` when leave starts, so the action is offered only where it means something.
+
+> ⚠ **A defect in what wave D already built, which only curtailment exposes.**
+> `ReconcileAttendanceAsync` posts when a request counts as taken and reverses when it does not —
+> but `PostAsync` only **adds**. Shortening `EndDate` while the status stays `Approved` would leave
+> the now-out-of-range attendance days behind. Reschedule is safe because it drops to `Pending`
+> first, so the reverse runs. **`ReverseAsync` needs to remove days outside the request's current
+> range**, and that fix belongs in the same slice.
+
+#### R-15 — where excuse duty and the medical board would live
+
+⚠ **The thresholds below are inferred from general Ghanaian practice, not from TDC.** Logged for
+them as **L-D10**; do not build to these numbers without an answer.
+
+| Piece | Where it belongs |
+|---|---|
+| `RequiresMedicalCertificate` + the self-certification threshold *(commonly 2–3 days)* | **leave type** — it is a rule about a kind of leave |
+| `MedicalBoardThresholdDays` — cumulative sick days in a year beyond which a board must sit | **leave type** |
+| The certificate itself | **leave attachment, but typed** — `ExcuseDuty` vs `MedicalBoardRecommendation` — so the gate can check the right one is present, which an untyped file cannot |
+| The board, its sitting, its members, its recommendation | **the medical module**, referenced from leave — the bridge-by-reference pattern SHE↔Medical already uses |
+| A "retire on medical grounds" outcome | **separation**, which already has retirement |
+
+Enforcement point is **submit**: a sick-leave request over the threshold without the required
+evidence is refused, naming what is missing — the same shape as the eight existing create checks.
 
 ### 3.4 Integration gaps — the joins that exist and are never written
 
@@ -293,7 +570,7 @@ So nobody widens this later without saying so:
 
 | Document | For |
 |---|---|
-| `docs/HR/HR-LEAVE-SYSTEM-GUIDE.md` | the screen-by-screen source walk this plan is built on. **§4.4 is the ghost-setting trace; §1.4 is the accrual arithmetic** |
+| `docs/HR/HR-LEAVE-SYSTEM-GUIDE.md` | **Rewritten 2026-09-17 after this build**, so it now describes the module as it stands rather than as the evidence this plan was drawn from. §4.4 is the setting trace (nine of the eleven ghosts are wired); §1.4 is the accrual arithmetic; **§23 is the original 37 findings with their current state** |
 | `docs/HR/HR-WORKFLOW-ENGINE-INTEGRATION.md` | the recipe and traps for C1–C4 |
 | `docs/HR/HR-REPORTS-CATALOGUE.md` §3.3 | the four leave reports, for E3 |
 | `docs/HR/HR-BULK-OPERATIONS-CATALOGUE.md` §4.1 | how to build E4 safely |

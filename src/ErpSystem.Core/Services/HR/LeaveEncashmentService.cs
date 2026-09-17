@@ -169,6 +169,27 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         return (await GetWithIncludes(entity.Id))!.ToDto();
     }
 
+        /// <summary>
+    /// Refuses an approval by the very employee the record is about.
+    /// </summary>
+    /// <remarks>
+    /// This is the segregation the two-stage leave definition relies on, and it is done HERE rather
+    /// than with the engine's <c>PreventInitiatorApproval</c> on purpose. That flag guards the
+    /// INITIATOR; a leave record's conflicted party is its SUBJECT, and HR raises leave on other
+    /// people's behalf from the desk. On a tenant with one HR user the flag would strand every
+    /// desk-raised record at the HR stage with nobody able to clear it — trap 7 of
+    /// <c>HR-WORKFLOW-ENGINE-INTEGRATION.md</c>, and the area-9b mistake. Checking the subject
+    /// blocks the real conflict and cannot strand somebody else's record.
+    ///
+    /// It sits before the authority call so it holds on the fallback path too, not just the engine.
+    /// </remarks>
+    private void RefuseSelfApproval(Guid subjectEmployeeId, string what)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == subjectEmployeeId)
+            throw new InvalidOperationException(
+                $"You cannot approve your own {what}. It has to be approved by someone else.");
+    }
+
     public async Task<LeaveEncashmentDto> ApproveEncashmentAsync(Guid id)
     {
         var entity = await GetOwnedEncashmentAsync(id);
@@ -176,6 +197,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
+
+        RefuseSelfApproval(entity.EmployeeId, "leave encashment");
 
         var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
             _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
@@ -215,6 +238,19 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         return (await GetWithIncludes(id))!.ToDto();
     }
 
+    /// <summary>
+    /// The acting employee for an actor column that is an <c>Employees</c> foreign key. A login id
+    /// is not an employee id; an unlinked account cannot be the actor and is refused with a message
+    /// rather than a constraint failure. Mirrors <c>LeaveService.RequireActingEmployeeId</c>.
+    /// </summary>
+    private Guid RequireActingEmployeeId(string purpose)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty)
+            return me;
+        throw new InvalidOperationException(
+            $"{purpose} requires your user account to be linked to an employee record. Please contact your administrator.");
+    }
+
     public async Task<LeaveEncashmentDto> MarkAsProcessedAsync(Guid id, ProcessLeaveEncashmentDto dto)
     {
         var entity = await GetOwnedEncashmentAsync(id);
@@ -222,9 +258,14 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (entity.Status != LeaveEncashmentStatus.Approved)
             throw new InvalidOperationException("Only approved encashments can be marked as processed.");
 
+        // ProcessedByEmployeeId is an Employees foreign key. The screen used to send the login's
+        // user id, which no employee has, so the action failed on the constraint every time — the
+        // same defect lane 4 fixed for adjustments and plans. The actor comes from the token.
+        var processedBy = RequireActingEmployeeId("Marking a leave encashment as paid");
+
         entity.Status = LeaveEncashmentStatus.Processed;
         entity.ProcessedDate = _clock.UtcNow;
-        entity.ProcessedByEmployeeId = dto.ProcessedByEmployeeId;
+        entity.ProcessedByEmployeeId = processedBy;
         entity.PaymentReference = dto.PaymentReference;
 
         // Mark processed and recalculate the balance in one transaction. The balance's

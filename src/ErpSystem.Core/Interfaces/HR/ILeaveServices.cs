@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Enums;
 
 /// <summary>
 /// Service interface for leave request management
@@ -11,16 +12,115 @@ public interface ILeaveService
     Task<bool> SubmitForApprovalAsync(Guid id);
     Task<LeaveRequestDto> ApproveLeaveAsync(Guid id, ApproveLeaveDto dto);
     Task<LeaveRequestDto> RejectLeaveAsync(Guid id, RejectLeaveDto dto);
+
+    /// <summary>Send a submitted request back with dates of the approver's own (ChangesSuggested).</summary>
+    Task<LeaveRequestDto> SuggestChangesAsync(Guid id, SuggestLeaveRequestChangesDto dto);
+
+    /// <summary>The employee accepts the suggested dates, or counters with their own; either way it re-submits.</summary>
+    Task<LeaveRequestDto> RespondToSuggestionAsync(Guid id, RespondToLeaveSuggestionDto dto);
+
+    /// <summary>Move an APPROVED request to different dates, keeping its number and history. Re-opens the approval.</summary>
+    Task<LeaveRequestDto> RescheduleAsync(Guid id, RescheduleLeaveRequestDto dto);
+
+    /// <summary>Record that approved leave is still going ahead. Moves no days, changes no status.</summary>
+    Task<LeaveRequestDto> ConfirmObservanceAsync(Guid id);
     Task<LeaveRequestDto> GetLeaveRequestByIdAsync(Guid id);
     Task<LeaveRequestDto?> GetLeaveRequestByNumberAsync(string applicationNumber);
-    Task<PagedResult<LeaveRequestDto>> GetEmployeeLeaveHistoryAsync(Guid employeeId, int year, int pageNumber, int pageSize);
+    Task<PagedResult<LeaveRequestDto>> GetEmployeeLeaveHistoryAsync(Guid employeeId, int year, int pageNumber, int pageSize, LeaveStatus? status = null);
+    /// <summary>
+    /// ⚠ SUPERSEDED by <see cref="GetMyPendingApprovalsAsync"/>. Kept because existing callers and
+    /// harnesses use it.
+    /// </summary>
+    /// <remarks>
+    /// This answers "requests raised by this manager's direct reports that are still Pending",
+    /// which is NOT the same question as "requests awaiting this manager's decision" — the gap the
+    /// closure plan records as L-10. Under the two-stage ladder the difference became load-bearing:
+    /// after the line manager approves, the request stays <c>Pending</c> while the engine sits at
+    /// the HR step, so this query keeps showing it to the manager who already decided and never
+    /// shows it to HR, who is nobody's <c>ManagerId</c>.
+    /// </remarks>
     Task<PagedResult<LeaveRequestDto>> GetPendingApprovalsAsync(Guid managerId, int pageNumber, int pageSize);
+
+    /// <summary>
+    /// Requests actually awaiting the CALLER's decision, as the workflow engine sees it.
+    /// </summary>
+    /// <remarks>
+    /// The queue asks the engine per candidate rather than inferring from the reporting line, so a
+    /// two-stage definition puts each request in front of whoever owns the step it is ON. It also
+    /// stops the screen being a way to read somebody else's queue: there is no approver parameter,
+    /// because the answer is only ever about the caller.
+    /// </remarks>
+    Task<PagedResult<LeaveRequestDto>> GetMyPendingApprovalsAsync(
+        int pageNumber, int pageSize, CancellationToken ct = default);
     Task<IEnumerable<LeaveBalanceDto>> GetEmployeeLeaveBalancesAsync(Guid employeeId, int year);
     Task<IEnumerable<LeaveBalanceDto>> GetAllLeaveBalancesAsync(int year, Guid? employeeId, Guid? leaveTypeId);
     Task<LeaveBalanceDetailDto?> GetLeaveBalanceDetailAsync(Guid balanceId);
     Task<IEnumerable<MandatoryLeaveComplianceDto>> GetMandatoryLeaveComplianceAsync(int year);
     Task<bool> CancelLeaveRequestAsync(Guid id, string cancellationReason);
     Task<LeaveRequestDto> CloseLeaveRequestAsync(Guid id, CloseLeaveDto dto);
+
+    /// <summary>
+    /// Leave drawn as time rather than rows, for a date range and an audience.
+    /// </summary>
+    /// <remarks>
+    /// The caller has already been authorized for <paramref name="scope"/> — the controller decides
+    /// that, because "my team" needs the caller's own employee id and "the organisation" needs the
+    /// leave read tier. This resolves the rows.
+    /// </remarks>
+    /// <summary>
+    /// Makes the attendance register match a request's current status, whatever changed it.
+    /// </summary>
+    /// <remarks>
+    /// The invariant: <c>OnLeave</c> attendance days exist for a request if and only if its status
+    /// is Approved, InProgress or Completed. Leave's own transitions call this, and so does the
+    /// nightly sweep — because a status can also be changed through doors leave does not own (the
+    /// generic workflow recall calls the status adapter directly, bypassing this service entirely),
+    /// and a hook per door is a list somebody eventually forgets to add to.
+    /// </remarks>
+    Task ReconcileAttendanceAsync(Guid leaveRequestId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reconciles every request whose status changed recently. Returns how many were put right.
+    /// </summary>
+    /// <remarks>
+    /// A non-zero result is a BUG SIGNAL, not routine housekeeping — it means something moved a
+    /// request without going through this service. It is logged as a warning for that reason.
+    /// </remarks>
+    Task<int> ReconcileRecentAttendanceAsync(
+        Guid tenantId, int lookbackDays = 14, CancellationToken ct = default);
+
+    /// <summary>
+    /// Approve or reject several requests, one real service call each.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ It loops <c>ApproveLeaveAsync</c> / <c>RejectLeaveAsync</c> rather than doing anything
+    /// clever. Cross-module defect #15: the platform's generic approval surfaces drive the workflow
+    /// engine WITHOUT invoking the module's status adapter, so a record approved that way completes
+    /// its workflow and stays Submitted for ever. A bulk path that reached for the engine directly
+    /// would reproduce that at scale — and it would also check authorization once for the batch
+    /// instead of once per item, which is an access-control hole (bulk catalogue §4.1).
+    /// </remarks>
+    Task<HrBulkActionResultDto> BulkDecideAsync(
+        BulkLeaveDecisionDto dto, bool approve, CancellationToken ct = default);
+
+    /// <summary>
+    /// The organisation-wide leave register: every request matching the filter, paged.
+    /// </summary>
+    Task<PagedResult<LeaveRequestDto>> GetRegisterAsync(
+        LeaveRegisterFilterDto filter, int pageNumber, int pageSize, CancellationToken ct = default);
+
+    /// <summary>The same register as a CSV, unpaged. Capped so one click cannot pull a million rows.</summary>
+    Task<byte[]> ExportRegisterCsvAsync(LeaveRegisterFilterDto filter, CancellationToken ct = default);
+
+    /// <summary>The balances screen as a CSV, with the same filters it offers.</summary>
+    Task<byte[]> ExportBalancesCsvAsync(int year, Guid? employeeId, Guid? leaveTypeId, CancellationToken ct = default);
+
+    /// <summary>The mandatory-leave compliance register as a CSV.</summary>
+    Task<byte[]> ExportComplianceCsvAsync(int year, CancellationToken ct = default);
+
+    Task<LeaveCalendarDto> GetCalendarAsync(
+        DateOnly from, DateOnly to, LeaveCalendarScope scope, Guid? employeeId,
+        Guid? leaveTypeId, Guid? organizationUnitId, CancellationToken ct = default);
 
     // ─── Leave Adjustments ───────────────────────────────────────────────────
     Task<LeaveAdjustmentDto> AddAdjustmentAsync(CreateLeaveAdjustmentDto dto);
@@ -58,7 +158,7 @@ public interface ILeaveTypeService
     Task DeactivateLeaveTypeAsync(Guid id);
 
     // Sub types
-    Task<IEnumerable<LeaveSubTypeDto>> GetSubTypesAsync(Guid leaveTypeId);
+    Task<IEnumerable<LeaveSubTypeDto>> GetSubTypesAsync(Guid leaveTypeId, bool activeOnly = false);
     Task<LeaveSubTypeDto> CreateSubTypeAsync(CreateLeaveSubTypeDto dto);
     Task<LeaveSubTypeDto> UpdateSubTypeAsync(Guid id, CreateLeaveSubTypeDto dto);
     Task DeleteSubTypeAsync(Guid id);

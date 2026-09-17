@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pencil, Ban, CheckCheck } from 'lucide-react';
+import { Loader2, Pencil, Ban, CheckCheck, CalendarClock, CornerUpLeft, CircleCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -20,6 +20,13 @@ import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
 import { useAuth } from '@/hooks/use-auth';
 import { leaveService } from '@/services/hr/leave.service';
 import { LeaveAttachmentsPanel } from '@/components/hr/leave/LeaveAttachmentsPanel';
+import {
+  SuggestDatesDialog,
+  RespondToSuggestionDialog,
+  RescheduleDialog,
+  SuggestedDatesPanel,
+  RescheduleTrailPanel,
+} from '@/components/hr/leave/LeaveDateChangeDialogs';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -50,6 +57,7 @@ export default function LeaveRequestDetailPage() {
   const { user } = useAuth();
 
   const [action, setAction] = useState<null | 'cancel' | 'close'>(null);
+  const [dateDialog, setDateDialog] = useState<null | 'suggest' | 'respond' | 'reschedule'>(null);
   const [busy, setBusy] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [closureNotes, setClosureNotes] = useState('');
@@ -94,6 +102,53 @@ export default function LeaveRequestDetailPage() {
     },
     onOpenWorkflows: () => router.push('/administration/workflow'),
   });
+
+  /**
+   * The three date-change acts. Each one returns the updated request, so the only thing left to do
+   * is refetch — including the workflow panel, because sending back CANCELS the live approval and
+   * both answering and rescheduling START A NEW ONE. A stale panel would show an approval that is
+   * no longer the one in force.
+   */
+  const runDateChange = async (what: 'suggest' | 'respond' | 'reschedule', run: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await run();
+      await refresh();
+      await workflow.refresh();
+      toast({
+        title:
+          what === 'suggest'
+            ? 'Sent back'
+            : what === 'respond'
+              ? 'Answered'
+              : 'Moved',
+        description:
+          what === 'suggest'
+            ? 'The employee has been asked to accept or counter the dates.'
+            : what === 'respond'
+              ? 'The request is back with the approver on the settled dates.'
+              : 'The dates have moved and the request is back in approval.',
+      });
+      setDateDialog(null);
+    } catch (e: any) {
+      toast({ title: 'Error', description: e?.message || 'Action failed.', variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const confirmObservance = async () => {
+    setBusy(true);
+    try {
+      await leaveService.confirmObservance(id);
+      await refresh();
+      toast({ title: 'Confirmed', description: 'Recorded that this leave is still going ahead.' });
+    } catch (e: any) {
+      toast({ title: 'Error', description: e?.message || 'Action failed.', variant: 'destructive' });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const runAction = async () => {
     if (!action) return false;
@@ -140,8 +195,17 @@ export default function LeaveRequestDetailPage() {
   }
 
   const isDraft = r.status === 'Draft';
-  const canCancel = ['Draft', 'Pending', 'Approved'].includes(r.status);
+  const canCancel = ['Draft', 'Pending', 'Approved', 'ChangesSuggested'].includes(r.status);
   const canClose = r.status === 'InProgress' || r.status === 'Approved';
+
+  // The third decision verb, offered wherever approve and reject are. The service refuses anyone
+  // the engine has not assigned, and anyone approving their own leave.
+  const canSuggest = r.status === 'Pending';
+  // The employee's answer. HR can drive it from here too — the endpoint is self-or-leave-write.
+  const canRespond = r.status === 'ChangesSuggested';
+  // Moving approved dates, and saying it is still going ahead. Neither applies once it is closed.
+  const canReschedule = r.status === 'Approved' && !r.closureDate;
+  const canConfirm = canReschedule && !r.observanceConfirmedDate;
 
   return (
     <div className="space-y-6 p-6">
@@ -163,6 +227,27 @@ export default function LeaveRequestDetailPage() {
 
             {/* Submit / approve / reject / recall all come from the workflow engine. */}
             <WorkflowApprovalActions {...workflow.actionProps} />
+
+            {canSuggest && (
+              <Button variant="outline" onClick={() => setDateDialog('suggest')}>
+                <CornerUpLeft className="mr-2 h-4 w-4" /> Send back with dates
+              </Button>
+            )}
+            {canRespond && (
+              <Button onClick={() => setDateDialog('respond')}>
+                <CornerUpLeft className="mr-2 h-4 w-4" /> Answer the suggestion
+              </Button>
+            )}
+            {canReschedule && (
+              <Button variant="outline" onClick={() => setDateDialog('reschedule')}>
+                <CalendarClock className="mr-2 h-4 w-4" /> Move dates
+              </Button>
+            )}
+            {canConfirm && (
+              <Button variant="outline" disabled={busy} onClick={confirmObservance}>
+                <CircleCheck className="mr-2 h-4 w-4" /> Still going ahead
+              </Button>
+            )}
 
             {canClose && (
               <Button variant="outline" onClick={() => setAction('close')}>
@@ -186,6 +271,9 @@ export default function LeaveRequestDetailPage() {
         </TabsList>
 
         <TabsContent value="overview" className="space-y-4 pt-4">
+          <SuggestedDatesPanel request={r} />
+          <RescheduleTrailPanel request={r} />
+
           <InfoCard title="Leave">
             <InfoRow label="Leave type" value={r.leaveTypeName} />
             <InfoRow label="Sub-type" value={r.leaveSubTypeName} />
@@ -194,7 +282,30 @@ export default function LeaveRequestDetailPage() {
             <InfoRow label="End date" value={r.endDate?.slice(0, 10)} />
             <InfoRow label="Total days" value={r.totalDays} />
             <InfoRow label="Requested on" value={r.requestDate?.slice(0, 10)} />
-            <InfoRow label="From a plan" value={r.leavePlanId ? 'Yes' : 'No'} />
+            <InfoRow label="From a plan" value={r.leavePlanReference ?? (r.leavePlanId ? 'Yes' : 'No')} />
+            {/*
+              The attendance join. It should match Total days once approved; fewer means some of
+              those days already had attendance recorded and leave did not overwrite them — and
+              those days do not reach the payroll export as leave (closure plan L-27).
+            */}
+            <InfoRow
+              label="Attendance days marked"
+              value={
+                r.status === 'Approved' || r.status === 'InProgress' || r.status === 'Completed'
+                  ? `${r.attendanceDaysRecorded ?? 0} of ${r.totalDays}`
+                  : undefined
+              }
+            />
+            <InfoRow
+              label="Still going ahead"
+              value={
+                r.observanceConfirmedDate
+                  ? `Confirmed ${r.observanceConfirmedDate.slice(0, 10)}`
+                  : r.status === 'Approved'
+                    ? 'Not yet confirmed'
+                    : undefined
+              }
+            />
           </InfoCard>
 
           <InfoCard title="Employee & cover">
@@ -250,6 +361,40 @@ export default function LeaveRequestDetailPage() {
           }}
         />
       </Tabs>
+
+      <SuggestDatesDialog
+        request={r}
+        open={dateDialog === 'suggest'}
+        onOpenChange={(open) => setDateDialog(open ? 'suggest' : null)}
+        busy={busy}
+        onConfirm={(values) =>
+          runDateChange('suggest', () =>
+            leaveService.suggestChanges(id, {
+              suggestedStartDate: values.suggestedStartDate,
+              suggestedEndDate: values.suggestedEndDate,
+              notes: values.notes || null,
+            }),
+          )
+        }
+      />
+
+      <RespondToSuggestionDialog
+        request={r}
+        open={dateDialog === 'respond'}
+        onOpenChange={(open) => setDateDialog(open ? 'respond' : null)}
+        busy={busy}
+        onConfirm={(values) =>
+          runDateChange('respond', () => leaveService.respondToSuggestion(id, values))
+        }
+      />
+
+      <RescheduleDialog
+        request={r}
+        open={dateDialog === 'reschedule'}
+        onOpenChange={(open) => setDateDialog(open ? 'reschedule' : null)}
+        busy={busy}
+        onConfirm={(values) => runDateChange('reschedule', () => leaveService.reschedule(id, values))}
+      />
 
       <ConfirmationDialog
         open={action !== null}

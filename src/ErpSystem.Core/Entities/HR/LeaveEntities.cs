@@ -436,6 +436,46 @@ public class LeaveRequest : TenantEntity
 
     public LeaveStatus Status { get; set; } = LeaveStatus.Pending;
 
+    // ── Send back with different dates (status ChangesSuggested) ─────────────────────────────
+    // The mirror of LeavePlan's three fields. A leave PLAN could always be sent back with the
+    // manager's own dates; a leave REQUEST — the record that actually books the days — could only
+    // be approved or rejected outright, so TDC's "sending back for correction with suggested dates"
+    // had nowhere to happen (closure plan R-3 / decision D-1).
+    public DateOnly? SuggestedStartDate { get; set; }
+    public DateOnly? SuggestedEndDate { get; set; }
+
+    [MaxLength(1000)]
+    public string? ManagerSuggestionNotes { get; set; }
+
+    // ── Rescheduling an already-approved request ─────────────────────────────────────────────
+    // TDC asked for "possible shifting of the leave to a different day even after the planning is
+    // done". The only route used to be cancel-and-re-key, which loses the number, the approval and
+    // the history (closure plan R-8 / decision D-5). These record the move rather than hide it;
+    // moving the dates re-opens the approval, so the record never claims an approval of dates
+    // nobody approved.
+    //
+    // ⚠ No navigation properties on the two actor columns, deliberately. They match ApprovedById
+    // above, which is also a bare Guid: an unpaired navigation to Employee mints a shadow
+    // `EmployeeId1` column on the other side. Names are resolved in the read that needs them.
+    public DateOnly? OriginalStartDate { get; set; }
+    public DateOnly? OriginalEndDate { get; set; }
+    public DateTime? RescheduledDate { get; set; }
+    public Guid? RescheduledById { get; set; }
+
+    [MaxLength(500)]
+    public string? RescheduleReason { get; set; }
+
+    /// <summary>How many times the approved dates have been moved. Zero for a request never moved.</summary>
+    public int RescheduleCount { get; set; }
+
+    // ── "Is this still going ahead?" ─────────────────────────────────────────────────────────
+    // An approved request used to go quiet between approval and its start date: nobody was asked
+    // whether the person was still going, and nothing recorded the answer (closure plan R-7 /
+    // decision D-4). The reminder that asks is the leave reminder service; this is where the answer
+    // lands. Deferring is not a separate state — it is a reschedule, above.
+    public DateTime? ObservanceConfirmedDate { get; set; }
+    public Guid? ObservanceConfirmedById { get; set; }
+
     // Workflow integration
     public Guid? WorkflowInstanceId { get; set; }
     public Guid? ApprovedById { get; set; }
@@ -596,4 +636,89 @@ public class EmployeeReliever : TenantEntity
 
     [ForeignKey(nameof(RelieverEmployeeId))]
     public virtual Employee RelieverEmployee { get; set; } = null!;
+}
+
+// ─── Leave reminder engine (closure plan wave E, slice E2) ───────────────────
+
+/// <summary>
+/// One execution of the leave reminder sweep.
+/// </summary>
+/// <remarks>
+/// HR has eleven of these engines — assets, certifications, discipline, ID expiry, probation,
+/// separation, SHE, movements, travel, teams, attendance — and leave, the module with more dates
+/// that matter than any of them, had none. Nothing was raised when leave was about to start, when
+/// approved leave was never closed, when mandatory leave went untaken, or when carry-over was about
+/// to expire (closure plan R-6 / R-10 / L-23).
+/// </remarks>
+public class LeaveReminderRun : TenantEntity
+{
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+
+    /// <summary>"Scheduled" (background service) or "Manual" (run-now endpoint).</summary>
+    [MaxLength(20)]
+    public string Trigger { get; set; } = "Scheduled";
+
+    public Guid? TriggeredByUserId { get; set; }
+
+    public int RemindersQueued { get; set; }
+
+    public virtual ICollection<LeaveReminderDispatchLog> DispatchLogs { get; set; }
+        = new List<LeaveReminderDispatchLog>();
+}
+
+/// <summary>
+/// One reminder actually dispatched by a leave sweep.
+/// </summary>
+/// <remarks>
+/// <para>The unique <c>(TenantId, DedupeKey)</c> index is the send-once guarantee: a key encodes
+/// the record, the reminder kind, the date it is about and the escalation tier reached, so each
+/// rung fires exactly once — and moving a date produces fresh keys, which re-arms the ladder. That
+/// is deliberate: leave that has been rescheduled genuinely is a new thing to chase.</para>
+///
+/// <para>⚠ Nothing here carries a reason for leave, a diagnosis, or a balance. A reminder travels
+/// further than the record it is about — into notification lists and email — and "Ama's leave
+/// starts on Monday" is actionable without saying why she is going. Sick leave makes this a
+/// medical-confidentiality matter, not just a style preference: the same reasoning governs the
+/// travel engine's note about passport numbers.</para>
+/// </remarks>
+public class LeaveReminderDispatchLog : TenantEntity
+{
+    public Guid RunId { get; set; }
+
+    [ForeignKey(nameof(RunId))]
+    public virtual LeaveReminderRun Run { get; set; } = null!;
+
+    /// <summary>
+    /// Machine kind: "LeaveStartingSoon", "LeaveNotClosed", "MandatoryLeaveOutstanding",
+    /// "CarryOverExpiring", "RequestAwaitingDecision".
+    /// </summary>
+    [MaxLength(60)]
+    public string Kind { get; set; } = string.Empty;
+
+    /// <summary>Human label for the swept item, e.g. "Leave request", "Carry-over".</summary>
+    [MaxLength(100)]
+    public string ItemType { get; set; } = string.Empty;
+
+    /// <summary>Id of the swept record. No FK — the target table varies by kind.</summary>
+    public Guid EntityId { get; set; }
+
+    /// <summary>The employee the reminder is about, so a feed can be scoped to a person.</summary>
+    public Guid? EmployeeId { get; set; }
+
+    /// <summary>What the notification shows: a request number and a leave type, and nothing more.</summary>
+    [MaxLength(250)]
+    public string Reference { get; set; } = string.Empty;
+
+    public DateTime? DueDate { get; set; }
+
+    /// <summary>Days remaining at dispatch time; negative when overdue.</summary>
+    public int DaysRemaining { get; set; }
+
+    /// <summary>0 for a due-soon rung; 1, 2 or 3 for an overdue escalation tier.</summary>
+    public int EscalationTier { get; set; }
+
+    [Required]
+    [MaxLength(300)]
+    public string DedupeKey { get; set; } = string.Empty;
 }

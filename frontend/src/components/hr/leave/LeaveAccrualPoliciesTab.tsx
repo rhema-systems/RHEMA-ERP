@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { Badge } from '@/components/ui/badge';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import {
   ACCRUAL_FREQUENCY_OPTIONS,
@@ -51,6 +52,8 @@ const label = (opts: { value: string; label: string }[], v: string) =>
 
 /** How entitlement builds up over time for this leave type. */
 export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }) {
+  const { canAdminister } = useLeavePermissions();
+
   return (
     <ResourceCollectionTab<LeaveAccrualPolicy, FormValues>
       parentId={leaveTypeId}
@@ -66,6 +69,7 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
       update={(id, policyId, v) =>
         leaveTypeService.updateAccrualPolicy(policyId, toPayload(id, v))
       }
+      allowRemove={canAdminister}
       remove={(_id, policyId) => leaveTypeService.removeAccrualPolicy(policyId)}
       columns={[
         { header: 'Frequency', cell: (p) => label(ACCRUAL_FREQUENCY_OPTIONS, p.frequency) },

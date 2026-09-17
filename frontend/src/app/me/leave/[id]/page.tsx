@@ -34,6 +34,9 @@ import {
   FileText,
   Loader2,
   Paperclip,
+  CalendarClock,
+  CircleCheck,
+  CornerUpLeft,
   Pencil,
   Send,
   Trash2,
@@ -42,6 +45,12 @@ import {
 import { useAuth } from '@/hooks/use-auth';
 import { leaveService } from '@/services/hr/leave.service';
 import { LEAVE_STATUS_BADGE } from '@/components/me/leave/leave-status';
+import {
+  RespondToSuggestionDialog,
+  RescheduleDialog,
+  SuggestedDatesPanel,
+  RescheduleTrailPanel,
+} from '@/components/hr/leave/LeaveDateChangeDialogs';
 
 const fmtDate = (d: string) =>
   new Date(d).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
@@ -78,6 +87,7 @@ export default function MyLeaveRequestDetailPage({
   const { user } = useAuth();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [cancelOpen, setCancelOpen] = useState(false);
+  const [dateDialog, setDateDialog] = useState<null | 'respond' | 'reschedule'>(null);
   const [cancelReason, setCancelReason] = useState('');
 
   const { data: request, isLoading } = useQuery({
@@ -126,6 +136,69 @@ export default function MyLeaveRequestDetailPage({
       }),
   });
 
+  /**
+   * Answering the approver's suggested dates, and moving an approved request.
+   *
+   * ⚠ Both re-enter approval — answering re-submits on the settled dates, and a move re-opens the
+   * approval because an approval is an approval OF DATES (decision D-5). Neither is a quiet edit,
+   * and the dialogs say so before you confirm.
+   */
+  const respondMutation = useMutation({
+    mutationFn: (values: {
+      accept: boolean;
+      startDate: string | null;
+      endDate: string | null;
+      notes: string | null;
+    }) => leaveService.respondToSuggestion(id, values),
+    onSuccess: async () => {
+      setDateDialog(null);
+      toast({
+        title: 'Answered',
+        description: 'Your request is back with your approver on the settled dates.',
+      });
+      await refresh();
+    },
+    onError: (e: any) =>
+      toast({
+        title: 'Could not answer',
+        description: e?.message || 'The suggested dates could not be answered.',
+        variant: 'destructive',
+      }),
+  });
+
+  const rescheduleMutation = useMutation({
+    mutationFn: (values: { startDate: string; endDate: string; reason: string }) =>
+      leaveService.reschedule(id, values),
+    onSuccess: async () => {
+      setDateDialog(null);
+      toast({
+        title: 'Moved',
+        description: 'Your leave has moved and is back with your approver.',
+      });
+      await refresh();
+    },
+    onError: (e: any) =>
+      toast({
+        title: 'Could not move it',
+        description: e?.message || 'The leave could not be moved.',
+        variant: 'destructive',
+      }),
+  });
+
+  const confirmMutation = useMutation({
+    mutationFn: () => leaveService.confirmObservance(id),
+    onSuccess: async () => {
+      toast({ title: 'Thanks', description: 'We have recorded that you are still going.' });
+      await refresh();
+    },
+    onError: (e: any) =>
+      toast({
+        title: 'Could not confirm',
+        description: e?.message || 'The confirmation did not save.',
+        variant: 'destructive',
+      }),
+  });
+
   const uploadMutation = useMutation({
     mutationFn: (file: File) => leaveService.uploadAttachment(id, file),
     onSuccess: async () => {
@@ -168,8 +241,14 @@ export default function MyLeaveRequestDetailPage({
   const canEdit = isMine && request.status === 'Draft';
   const canSubmit = isMine && (request.status === 'Draft' || request.status === 'Pending');
   const canCancel =
-    isMine && ['Draft', 'Pending', 'Approved'].includes(request.status);
+    isMine && ['Draft', 'Pending', 'Approved', 'ChangesSuggested'].includes(request.status);
   const canAttach = isMine && !['Cancelled', 'Completed'].includes(request.status);
+
+  // Your approver sent it back with dates of their own; accept them or counter (closure plan R-3).
+  const canRespond = isMine && request.status === 'ChangesSuggested';
+  // Move approved leave without cancelling and re-keying it (R-8), and say it is still going (R-7).
+  const canReschedule = isMine && request.status === 'Approved' && !request.closureDate;
+  const canConfirm = canReschedule && !request.observanceConfirmedDate;
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -211,12 +290,39 @@ export default function MyLeaveRequestDetailPage({
             Submit for approval
           </Button>
         )}
+        {canRespond && (
+          <Button onClick={() => setDateDialog('respond')}>
+            <CornerUpLeft className="mr-2 h-4 w-4" /> Answer the suggested dates
+          </Button>
+        )}
+        {canReschedule && (
+          <Button variant="outline" onClick={() => setDateDialog('reschedule')}>
+            <CalendarClock className="mr-2 h-4 w-4" /> Move these dates
+          </Button>
+        )}
+        {canConfirm && (
+          <Button
+            variant="outline"
+            disabled={confirmMutation.isPending}
+            onClick={() => confirmMutation.mutate()}
+          >
+            {confirmMutation.isPending ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <CircleCheck className="mr-2 h-4 w-4" />
+            )}
+            Yes, still going
+          </Button>
+        )}
         {canCancel && (
           <Button variant="outline" onClick={() => setCancelOpen(true)}>
             <Ban className="mr-2 h-4 w-4" /> Cancel request
           </Button>
         )}
       </div>
+
+      <SuggestedDatesPanel request={request} />
+      <RescheduleTrailPanel request={request} />
 
       <Card>
         <CardHeader>
@@ -233,6 +339,16 @@ export default function MyLeaveRequestDetailPage({
           <Row label="Second reliever" value={request.secondRelieverEmployeeName} />
           <Row label="Reliever notes" value={request.relieverNotes} />
           <Row label="Handover notes" value={request.handoverNotes} />
+          {request.status === 'Approved' && (
+            <Row
+              label="Still going ahead"
+              value={
+                request.observanceConfirmedDate
+                  ? `Confirmed ${fmtDate(request.observanceConfirmedDate)}`
+                  : 'Not yet confirmed'
+              }
+            />
+          )}
           {request.status === 'Cancelled' && (
             <>
               <Row
@@ -357,6 +473,22 @@ export default function MyLeaveRequestDetailPage({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <RespondToSuggestionDialog
+        request={request}
+        open={dateDialog === 'respond'}
+        onOpenChange={(open) => setDateDialog(open ? 'respond' : null)}
+        busy={respondMutation.isPending}
+        onConfirm={(values) => respondMutation.mutate(values)}
+      />
+
+      <RescheduleDialog
+        request={request}
+        open={dateDialog === 'reschedule'}
+        onOpenChange={(open) => setDateDialog(open ? 'reschedule' : null)}
+        busy={rescheduleMutation.isPending}
+        onConfirm={(values) => rescheduleMutation.mutate(values)}
+      />
+
     </div>
   );
 }

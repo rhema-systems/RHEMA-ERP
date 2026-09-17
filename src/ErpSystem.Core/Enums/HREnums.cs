@@ -953,7 +953,16 @@ public enum LeaveStatus
 
     InProgress = 5,
 
-    Completed = 6
+    Completed = 6,
+
+    /// <summary>
+    /// The approver reviewed the request and proposed different dates; it is back with the employee,
+    /// who accepts them or counters with their own. The mirror of
+    /// <see cref="LeavePlanStatus.ChangesSuggested"/>, which leave PLANS have had since the port —
+    /// requests did not, so TDC's *"sending back for correction with suggested dates"* had nowhere
+    /// to happen on the record that actually books the days (closure plan R-3 / decision D-1).
+    /// </summary>
+    ChangesSuggested = 7
 }
 
 public enum LeaveEligibilityType

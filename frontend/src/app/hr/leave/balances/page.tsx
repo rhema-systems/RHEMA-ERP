@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Scale, RefreshCw, Loader2 } from 'lucide-react';
+import { Download, Loader2, RefreshCw, Scale } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -28,6 +28,18 @@ import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 
+/** Saves a blob the browser already has, rather than navigating to a URL that carries no token. */
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 const ALL = '__all__';
 const currentYear = new Date().getFullYear();
 const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
@@ -39,6 +51,29 @@ export default function LeaveBalancesPage() {
   const [leaveTypeId, setLeaveTypeId] = useState<string>(ALL);
   const [year, setYear] = useState<string>(String(currentYear));
   const [recalculating, setRecalculating] = useState(false);
+  const [exporting, setExporting] = useState(false);
+
+  // The CSV comes from the SAME server read the table uses, so it carries the live accrued and
+  // "can take now" figures rather than a second derivation that would quietly disagree (L-18).
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const blob = await leaveService.exportBalances(
+        Number(year),
+        employeeId ?? undefined,
+        leaveTypeId === ALL ? undefined : leaveTypeId,
+      );
+      saveBlob(blob, `leave-balances-${year}.csv`);
+    } catch (e: any) {
+      toast({
+        title: 'Export failed',
+        description: e?.message || 'The balances could not be exported.',
+        variant: 'destructive',
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const { data: leaveTypes } = useQuery({
     queryKey: ['hr', 'leave-types', 'active'],
@@ -92,6 +127,15 @@ export default function LeaveBalancesPage() {
         title="Leave Balances"
         description="Entitlement, accrual, usage and what remains."
         actions={
+          <>
+          <Button variant="outline" onClick={exportCsv} disabled={exporting}>
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Export CSV
+          </Button>
           <Button variant="outline" onClick={recalculate} disabled={recalculating}>
             {recalculating ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -100,6 +144,7 @@ export default function LeaveBalancesPage() {
             )}
             Recalculate
           </Button>
+          </>
         }
       />
 
@@ -167,13 +212,14 @@ export default function LeaveBalancesPage() {
                   <TableHead className="text-right">Pending</TableHead>
                   <TableHead className="text-right">Encashed</TableHead>
                   <TableHead className="text-right">Available</TableHead>
+                  <TableHead className="text-right">Can take now</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
-                      {[...Array(10)].map((__, j) => (
+                      {[...Array(11)].map((__, j) => (
                         <TableCell key={j}>
                           <Skeleton className="h-4 w-[60px]" />
                         </TableCell>
@@ -182,7 +228,7 @@ export default function LeaveBalancesPage() {
                   ))
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={10}>
+                    <TableCell colSpan={11}>
                       <EmptyState
                         icon={Scale}
                         title="No balances"
@@ -212,7 +258,15 @@ export default function LeaveBalancesPage() {
                       <TableCell className="text-right">{b.usedDays}</TableCell>
                       <TableCell className="text-right">{b.pendingDays}</TableCell>
                       <TableCell className="text-right">{b.encashedDays}</TableCell>
-                      <TableCell className="text-right font-medium">{b.availableDays}</TableCell>
+                      <TableCell className="text-right">{b.availableDays}</TableCell>
+                      {/*
+                        The figure the create check enforces. On an accruing type it is below
+                        Available until the year is fully accrued — that difference is the single
+                        most common reason a request is refused (closure plan L-3 / L-14).
+                      */}
+                      <TableCell className="text-right font-medium">
+                        {b.accruedAvailableDays}
+                      </TableCell>
                     </TableRow>
                   ))
                 )}

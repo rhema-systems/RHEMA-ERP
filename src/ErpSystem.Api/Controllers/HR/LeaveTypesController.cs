@@ -116,8 +116,9 @@ public class LeaveTypesController : ControllerBase
 
     [HttpGet("{leaveTypeId:guid}/sub-types")]
     [ProducesResponseType(typeof(IEnumerable<LeaveSubTypeDto>), StatusCodes.Status200OK)]
-    public async Task<ActionResult<IEnumerable<LeaveSubTypeDto>>> GetSubTypes(Guid leaveTypeId)
-        => Ok(await _service.GetSubTypesAsync(leaveTypeId));
+    public async Task<ActionResult<IEnumerable<LeaveSubTypeDto>>> GetSubTypes(
+        Guid leaveTypeId, [FromQuery] bool activeOnly = false)
+        => Ok(await _service.GetSubTypesAsync(leaveTypeId, activeOnly));
 
     [HttpPost("sub-types")]
     [Authorize(Policy = HrPermissions.LeaveWritePolicy)]

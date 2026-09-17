@@ -416,6 +416,10 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ILeaveEncashmentService, LeaveEncashmentService>();
         services.AddScoped<ILeaveBalanceRecalculationService, LeaveBalanceRecalculationService>();
         services.AddScoped<ILeaveEntitlementService, LeaveEntitlementService>();
+        // Approved leave reaches the attendance register through this. Before it, StaffDailyAttendance
+        // .LeaveRequestId and StaffAttendanceStatus.OnLeave were both written by nothing, so the
+        // payroll export read zero days on leave for everybody (closure plan L-27).
+        services.AddScoped<ILeaveAttendancePostingService, LeaveAttendancePostingService>();
         services.AddScoped<IReasonCodeService, ReasonCodeService>();
         // Round-2 lane D1 (Q-4): the seeded contract-kind vocabulary, which had no service at all.
         services.AddScoped<IEmployeeContractTypeService, EmployeeContractTypeService>();
@@ -719,6 +723,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ISeparationReminderService, SeparationReminderService>();
         services.AddScoped<IProbationReminderService, ProbationReminderService>();
         services.AddScoped<IStaffTravelReminderService, StaffTravelReminderService>();
+        // The twelfth HR reminder engine, and the last to be built — for the module with more dates
+        // that matter than any of the others (closure plan R-6 / R-10 / L-23).
+        services.AddScoped<ILeaveReminderService, LeaveReminderService>();
         // Asset reminder engine (area 16 slice 9, AST-1): maintenance due, overdue, and
         // never scheduled. Slice 11 adds insurance expiry and overdue returns to this one
         // rather than starting a seventh.

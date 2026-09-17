@@ -20,6 +20,13 @@ import type {
   CreateLeavePlanRequest,
   SuggestLeavePlanChangesRequest,
   RespondToLeaveSuggestionRequest,
+  SuggestLeaveRequestChanges,
+  RescheduleLeaveRequest,
+  LeaveCalendarScope,
+  LeaveCalendarData,
+  LeaveRegisterFilter,
+  BulkLeaveDecision,
+  HrBulkActionResult,
   LeaveEncashment,
   CreateLeaveEncashmentRequest,
   ProcessLeaveEncashmentRequest,
@@ -47,15 +54,21 @@ class LeaveService {
     return apiService.get<LeaveRequest>(`${this.baseUrl}/by-number/${requestNumber}`);
   }
 
+  /**
+   * One employee's requests for a year. `status` is filtered server-side so the paging and the
+   * count agree with it — filtering the fetched page in the browser under-reported silently
+   * (closure plan L-7).
+   */
   getEmployeeHistory(
     employeeId: string,
     year = 0,
     pageNumber = 1,
     pageSize = 20,
+    status?: string,
   ): Promise<PagedResult<LeaveRequest>> {
     return apiService.get<PagedResult<LeaveRequest>>(
       `${this.baseUrl}/employee/${employeeId}/history`,
-      { year, pageNumber, pageSize },
+      { year, pageNumber, pageSize, ...(status ? { status } : {}) },
     );
   }
 
@@ -83,6 +96,109 @@ class LeaveService {
   /** Starts the approval workflow. */
   submit(id: string): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/${id}/submit`);
+  }
+
+  /**
+   * Send a submitted request back to the employee with dates of your own — the third decision verb
+   * beside approve and reject. Leave plans have always had it; requests did not (closure plan R-3).
+   */
+  suggestChanges(id: string, data: SuggestLeaveRequestChanges): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/suggest-changes`, data);
+  }
+
+  /** The employee accepts the suggested dates, or counters with their own. Either way it re-submits. */
+  respondToSuggestion(id: string, data: RespondToLeaveSuggestionRequest): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/respond-suggestion`, data);
+  }
+
+  /**
+   * Move an APPROVED request to different dates, keeping its number and history.
+   * ⚠ This re-opens the approval — an approval is an approval of dates (decision D-5).
+   */
+  reschedule(id: string, data: RescheduleLeaveRequest): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/reschedule`, data);
+  }
+
+  /**
+   * Requests awaiting YOUR decision, as the workflow engine sees it.
+   *
+   * ⚠ Not the same as the old `getPendingApprovals(managerId)`, which asked "this manager's direct
+   * reports' pending requests". Under the two-stage ladder that answered the wrong question in both
+   * directions — it kept showing a manager what they had already approved, and never showed HR the
+   * confirmation step at all (closure plan L-10).
+   */
+  getMyApprovals(pageNumber = 1, pageSize = 20): Promise<PagedResult<LeaveRequest>> {
+    return apiService.get<PagedResult<LeaveRequest>>(`${this.baseUrl}/my-approvals`, {
+      pageNumber,
+      pageSize,
+    });
+  }
+
+  /**
+   * The organisation-wide register. Until this existed the only listing was one employee at a
+   * time, so "who is off in December" could not be asked at all (closure plan L-6).
+   */
+  getRegister(
+    filter: LeaveRegisterFilter,
+    pageNumber = 1,
+    pageSize = 25,
+  ): Promise<PagedResult<LeaveRequest>> {
+    return apiService.get<PagedResult<LeaveRequest>>(`${this.baseUrl}/register`, {
+      ...filter,
+      pageNumber,
+      pageSize,
+    });
+  }
+
+  /** The register as a CSV, with the same filters. */
+  exportRegister(filter: LeaveRegisterFilter): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/register/export`, { ...filter });
+  }
+
+  exportBalances(year: number, employeeId?: string, leaveTypeId?: string): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/balances/export`, {
+      year,
+      employeeId,
+      leaveTypeId,
+    });
+  }
+
+  exportCompliance(year: number): Promise<Blob> {
+    return apiService.downloadBlob(`${this.baseUrl}/compliance/export`, { year });
+  }
+
+  /**
+   * Decide several requests at once.
+   *
+   * ⚠ The server loops the real per-request service call, so each item is authorized on its own and
+   * a refusal on one does not abandon the rest — read `results` for the ones that did not go
+   * through, rather than assuming success from a 200.
+   */
+  bulkApprove(data: BulkLeaveDecision): Promise<HrBulkActionResult> {
+    return apiService.post<HrBulkActionResult>(`${this.baseUrl}/bulk-approve`, data);
+  }
+
+  bulkReject(data: BulkLeaveDecision): Promise<HrBulkActionResult> {
+    return apiService.post<HrBulkActionResult>(`${this.baseUrl}/bulk-reject`, data);
+  }
+
+  /**
+   * Leave drawn as time. The scope decides who is visible AND how the caller is authorized:
+   * `Mine` and `Team` resolve from the token, `Organisation` needs the leave read tier.
+   */
+  getCalendar(params: {
+    from: string;
+    to: string;
+    scope: LeaveCalendarScope;
+    leaveTypeId?: string;
+    organizationUnitId?: string;
+  }): Promise<LeaveCalendarData> {
+    return apiService.get<LeaveCalendarData>(`${this.baseUrl}/calendar`, params);
+  }
+
+  /** Record that approved leave is still going ahead. Moves no days, changes no status. */
+  confirmObservance(id: string): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/confirm-observance`, {});
   }
 
   approve(id: string, data: ApproveLeaveRequest): Promise<LeaveRequest> {

@@ -99,8 +99,28 @@ workflow **entity-type catalogue** is still seeded only by `POST /api/Workflow/e
 manager approves" is "anyone in the Manager role approves" until cross-module #3 (conditional
 routing never routes) is fixed — the per-record checks in each service do the narrowing today.
 
-▶ **Next unblocked work: lane 8a's back-fill** (Leave, Compensation, Training, Medical, SHE into
-the Finance register — Medical first, it has a live pay path). **One decision is owed: D-13.**
+✅ **LEAVE IS CLOSED OUT — 2026-09-17.** All six waves of
+[`HR/HR-LEAVE-CLOSURE-PLAN.md`](HR/HR-LEAVE-CLOSURE-PLAN.md) are built and **verified:
+`dev-harness/hr-leave`, 192 assertions across four slices, green twice** (lifecycle 75 ·
+attendance 31 · guards 33 · reads 53). Two migrations
+(`AddLeaveRequestSuggestionAndReschedule`, `AddLeaveReminderEngine`). The Finance back-fill row
+below is now recorded for leave — see `HR-FINANCE-INTEGRATION-BACKLOG.md` § Area 2, where **event
+2.1 is explicitly blocked on L-D8** rather than merely unbuilt.
+
+⚠ **The harness found five defects and THREE were introduced by that same closure build** — a
+refused date suggestion destroyed the approval workflow; the request DTO exposed no approval stamp;
+and the line manager could not read the request they were assigned to approve. All fixed and
+re-verified. The lesson is in `HR/HR-LEAVE-CLOSURE-PLAN.md` § 0 and in the suite's README: a
+module verified by reading and by clean builds is not a verified module.
+
+▶ **Next unblocked work: lane 8a's back-fill** (Compensation, Training, Medical, SHE into
+the Finance register — Medical first, it has a live pay path; **Leave is done**).
+**One decision is owed: D-13.**
+
+▶ **Leave's own follow-ons, recorded but not started:** **R-14** recall from leave (an employee
+called back before their end date — there is no correct action today) and **R-15** excuse duty plus
+a medical board recommendation. Both in the closure plan § 3.3b; R-15's rules are TDC's, logged as
+**L-D10**.
 
 ⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
 `GET /api/JobAnalysis/descriptions/{id}/details` returned 500 for every one of the tenant's 46 job

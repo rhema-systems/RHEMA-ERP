@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
@@ -55,6 +56,8 @@ const describe = (e: LeaveTypeEligibility) =>
  * endpoint for them, so the collection is rendered without an edit affordance.
  */
 export function LeaveEligibilityTab({ leaveTypeId }: { leaveTypeId: string }) {
+  const { canAdminister } = useLeavePermissions();
+
   const { data: levels } = useQuery({
     queryKey: ['hr', 'organization-levels', 'all'],
     queryFn: () => organizationLevelService.getAll(),
@@ -91,6 +94,7 @@ export function LeaveEligibilityTab({ leaveTypeId }: { leaveTypeId: string }) {
       // so `update` is never reached.
       allowUpdate={false}
       update={async () => undefined}
+      allowRemove={canAdminister}
       remove={(_id, ruleId) => leaveTypeService.removeEligibilityRule(ruleId)}
       columns={[
         {

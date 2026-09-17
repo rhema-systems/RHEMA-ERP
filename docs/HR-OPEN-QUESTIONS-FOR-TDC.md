@@ -490,3 +490,140 @@ from there, or start at a deliberate round number so that system-issued numbers 
 from historical ones?
 
 ---
+
+## The leave module's eight open decisions *(raised 2026-09-17)*
+
+These arise from closing out leave management. The full reasoning behind each is in
+`docs/HR/HR-LEAVE-CLOSURE-PLAN.md` § 4; this is the list TDC has to answer.
+
+**Six of them are already built to a recommendation**, because leaving the module half-finished
+while waiting is worse than building the defensible reading and changing it if TDC disagrees. Each
+row says what is running today. **Two — L-D7 and L-D8 — are not built and should not be until TDC
+answers, because both readings are live in the product at once.**
+
+### L-D1 · Should a leave REQUEST support send-back-with-suggested-dates?
+
+TDC described *"sending back for correction with suggested dates"*. That conversation exists today
+on a leave **plan** (the annual intention) but not on a **request** (the actual application):
+`LeaveRequest` has no suggested-dates fields and no `respond-suggestion` endpoint.
+
+**Built to:** yes, on the request, mirroring the plan exactly. The plan is annual and optional; the
+request is where real dates are argued about. If TDC only ever meant the plan, the request-side
+fields become unused rather than wrong.
+
+### L-D2 · Should a leave balance be held per sub-type?
+
+Today all Sick sub-types share one pot, because `LeaveBalance` is keyed on (employee, leave type,
+year) with no sub-type. The sub-type's `MaxDaysAllowed` cap therefore never reaches a balance.
+
+**Built to:** one pot per leave type, with the sub-type cap enforced **per request** instead.
+Per-sub-type balances would multiply every row on the Balances screen and every year-end run, for an
+outcome the per-request cap already delivers. **This is a policy call and TDC may prefer the other.**
+
+### L-D3 · Is HR a second approval step after the supervisor?
+
+TDC described *"supervisor reviewing for approval … hr getting the final leave dates"*. The seeded
+workflow is **one** step where Manager **or** HR may approve, and one approval is enough. So
+"supervisor approves, then HR confirms" is not what is configured.
+
+**Built to:** a two-stage definition — stage 1 line manager, stage 2 HR, with initiator-approval
+prevented. This is configuration rather than code and is easy to reverse.
+
+### L-D4 · What does "confirming the upcoming leave will be observed" mean?
+
+An approved request goes quiet between approval and its start date. Nobody is asked whether the
+person is still going, and nothing records the answer.
+
+**Built to:** both a reminder N days out **and** an explicit confirm/defer action on the request, so
+the answer is recorded rather than assumed. If TDC only wants the reminder, the action is harmless.
+
+### L-D5 · Who may shift an approved leave date, and does it need re-approval?
+
+TDC asked for *"possible shifting of the leave to a different day even after the planning is done"*.
+Today the only route is cancel-and-re-key, which loses the number, the approval and the history.
+
+**Built to:** HR may amend; the employee may request an amendment; **any change to the dates
+re-opens the approval.** Anything else would let an approval mean something it did not.
+
+### L-D6 · What should an unpaid leave type actually do? *(needs the payroll owner, not TDC)*
+
+`LeaveType.IsPaid` is display-only: unpaid leave produces no deduction anywhere. HR records the
+leave and the days; what that is worth is payroll's. Raised separately in
+`docs/HANDOFF-PAYROLL-LEAVE.md`. **Not built, and should not be built inside HR.**
+
+### L-D7 · ⚠ One daily-rate basis, or two? *(NOT built — needs an answer)*
+
+Two formulas are live in one product. **Leave encashment** uses `(basic + linked allowances) ÷ 22`;
+the **separation settlement** uses `monthly × 12 ÷ 365`. On GHS 6,000/month those differ by about
+**38%**. This is the same question already raised above under *"How is a daily rate worked out for
+exit pay?"* — it is repeated here because leave is the second module now depending on the answer.
+
+Whichever basis TDC names, both should use it.
+
+### L-D8 · ⚠ Is in-service leave encashment permitted at all? *(NOT built — a requirements conflict)*
+
+**FR-HR-046 says leave is encashed *"only on exit, no other route"*.** The leave module nevertheless
+ships an in-service encashment path, with annual leave flagged `AllowCashConversion` in the seed —
+so the product currently implements both readings at once.
+
+- **If FR-HR-046 stands:** `AllowCashConversion` should be **off on every seeded leave type** and the
+  employee-facing encashment screen gated behind separation.
+- **If in-service encashment is intended:** FR-HR-046's wording needs amending.
+
+**Either is a small change. Shipping both is not an option, and this must be resolved before
+sign-off.**
+
+### L-D9 · The five leave reminder windows are our numbers, not TDC's
+
+The leave reminder engine (built 2026-09-17) sweeps nightly and chases five things. Each threshold
+is a working assumption, running in code today, and each is a one-line change:
+
+| What it chases | Window we chose | Why that number |
+|---|---|---|
+| Approved leave about to start, with nobody confirming it is still going | **7 days** | long enough to brief a reliever; short enough that the reminder is about *this* leave |
+| Leave that ended and was never closed | **2 days'** grace | a day either side of a weekend should not raise a chase |
+| A request nobody has decided | **5 days** from the request date | chased on the REQUEST date, not the start date, so a request filed months ahead and ignored is still caught |
+| Mandatory leave still outstanding | from **month 9** | lands with a quarter of the year left to actually take it |
+| Carry-over about to lapse | **30 days** | one pay cycle's notice |
+
+There is also a **90-day backlog floor**: the first sweep on an established database ignores
+anything older, so go-live does not queue years of history. (Area 9's first live run queued 275
+reminders, 242 of which were history.)
+
+**None of these is load-bearing** — nothing breaks if TDC prefers different numbers, and nothing
+needs re-testing beyond the harness. They are listed so they are confirmed rather than discovered.
+
+### L-D10 · Excuse duty and the medical board — the rules, before anything is built
+
+Stakeholders raised **excuse duty** and a **medical board recommendation** as requirements for sick
+leave. **Nothing of the kind exists in the system today** — sick leave is an ordinary leave type
+with optional, untyped attachments and no certification rule at all.
+
+Before it can be built, TDC has to answer four things. The parenthesised values are common
+Ghanaian practice and are **our guesses, not a proposal**:
+
+1. **How many days may an employee self-certify** before a certificate is required? *(commonly
+   2–3)*
+2. **What counts as valid excuse duty** — any registered facility, or a named panel of providers?
+   Does the certificate have to name a diagnosis, or only a period? *(The second is usually
+   preferable: HR needs to know she is excused and for how long, not what is wrong with her.)*
+3. **At what cumulative sick leave does a Medical Board become required**, and is that counted per
+   year or per episode? Is the Board a standing committee, an ad-hoc panel, or an external referral?
+4. **What outcomes may the Board recommend**, and what does each one do to the employment record?
+   The usual set is *fit to resume · fit with restrictions · extend sick leave · retire on medical
+   grounds* — and the last of those is a **separation**, which makes this a cross-module rule rather
+   than a leave setting.
+
+**Why this needs answering rather than assuming.** A certification threshold set too low buries HR
+in paperwork for one-day absences; set too high it stops being a control. And a medical board is a
+statutory process in parts of Ghanaian employment — if TDC is bound by a specific instrument, the
+thresholds are not ours to choose at all.
+
+⚠ **One design point worth confirming with the answer.** Our recommendation is that the evidence is
+a **typed** attachment (*excuse duty* / *board recommendation*) rather than a general file, so the
+system can refuse a submission that is missing the *right* document rather than merely missing *a*
+document. That is the difference between a control and a filing cabinet.
+
+Recorded in `docs/HR/HR-LEAVE-CLOSURE-PLAN.md` § 3.3b as **R-15**.
+
+---

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { ShieldCheck } from 'lucide-react';
+import { Download, Loader2, ShieldCheck } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -20,10 +20,24 @@ import {
   TableRow,
 } from '@/components/ui/table';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
+import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { leaveService } from '@/services/hr/leave.service';
+
+/** Saves a blob the browser already has, rather than navigating to a URL that carries no token. */
+function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
 
 const currentYear = new Date().getFullYear();
 const years = [currentYear, currentYear - 1, currentYear - 2];
@@ -34,6 +48,26 @@ const years = [currentYear, currentYear - 1, currentYear - 2];
  */
 export default function LeaveCompliancePage() {
   const [year, setYear] = useState(String(currentYear));
+  const [exporting, setExporting] = useState(false);
+  const { toast } = useToast();
+
+  // The compliance register is the one leave screen that is purely a list of people who owe
+  // something, and it had no way out of the browser at all (L-22 / R-11).
+  const exportCsv = async () => {
+    setExporting(true);
+    try {
+      const blob = await leaveService.exportCompliance(Number(year));
+      saveBlob(blob, `leave-compliance-${year}.csv`);
+    } catch (e: any) {
+      toast({
+        title: 'Export failed',
+        description: e?.message || 'The register could not be exported.',
+        variant: 'destructive',
+      });
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const { data, isLoading } = useQuery({
     queryKey: ['hr', 'leave-compliance', year],
@@ -47,6 +81,16 @@ export default function LeaveCompliancePage() {
       <PageHeader
         title="Mandatory Leave Compliance"
         description="Employees who have not yet taken their required leave."
+        actions={
+          <Button variant="outline" onClick={exportCsv} disabled={exporting}>
+            {exporting ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Download className="mr-2 h-4 w-4" />
+            )}
+            Export CSV
+          </Button>
+        }
       />
 
       <Card>

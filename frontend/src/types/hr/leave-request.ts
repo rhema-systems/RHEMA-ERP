@@ -20,7 +20,9 @@ export type LeaveStatus =
   | 'Rejected'
   | 'Cancelled'
   | 'InProgress'
-  | 'Completed';
+  | 'Completed'
+  /** The approver sent it back with dates of their own; it is with the employee to answer. */
+  | 'ChangesSuggested';
 
 export type LeavePlanStatus =
   | 'Draft'
@@ -47,6 +49,7 @@ export const LEAVE_STATUS_OPTIONS: { value: LeaveStatus; label: string }[] = [
   { value: 'Cancelled', label: 'Cancelled' },
   { value: 'InProgress', label: 'In progress' },
   { value: 'Completed', label: 'Completed' },
+  { value: 'ChangesSuggested', label: 'Changes suggested' },
 ];
 
 // ── Leave requests ──────────────────────────────────────────────────────────────
@@ -77,11 +80,57 @@ export interface LeaveRequest {
   secondRelieverEmployeeName?: string | null;
   relieverNotes?: string | null;
   leavePlanId?: string | null;
+  /** The plan this came from, named rather than shown as a Guid. Single-request read only. */
+  leavePlanReference?: string | null;
+
+  /**
+   * Attendance days recorded as OnLeave against this request. Single-request read only. It should
+   * equal `totalDays` once approved; fewer means some days already had attendance recorded and were
+   * left alone, and those will not reach the payroll export as leave (closure plan L-27).
+   */
+  attendanceDaysRecorded?: number;
+
+  /** Dates the approver sent back instead. Set while the status is ChangesSuggested. */
+  suggestedStartDate?: string | null;
+  suggestedEndDate?: string | null;
+  managerSuggestionNotes?: string | null;
+
+  /** Set once an approved request has been moved: what it used to say, who moved it, and why. */
+  originalStartDate?: string | null;
+  originalEndDate?: string | null;
+  rescheduledDate?: string | null;
+  rescheduledById?: string | null;
+  rescheduledByName?: string | null;
+  rescheduleReason?: string | null;
+  rescheduleCount: number;
+
+  /** Set when somebody answered "yes, this is still going ahead". */
+  observanceConfirmedDate?: string | null;
+  observanceConfirmedById?: string | null;
+  observanceConfirmedByName?: string | null;
+
   closureDate?: string | null;
   closureNotes?: string | null;
   cancellationDate?: string | null;
   cancellationReason?: string | null;
   createdAt: string;
+}
+
+/** An approver sending a request back with dates of their own. */
+export interface SuggestLeaveRequestChanges {
+  suggestedStartDate: string;
+  suggestedEndDate: string;
+  notes?: string | null;
+}
+
+/**
+ * Moving an approved request. A reason is required: the point of this path over cancel-and-re-key
+ * is that the record says why it moved.
+ */
+export interface RescheduleLeaveRequest {
+  startDate: string;
+  endDate: string;
+  reason: string;
 }
 
 export interface CreateLeaveRequest {
@@ -135,7 +184,10 @@ export interface LeaveBalance {
   carriedOverDays: number;
   adjustmentDays: number;
   encashedDays: number;
+  /** Policy figure: entitled + carried + adjustments − used − pending − encashed. */
   availableDays: number;
+  /** What the server's create check actually enforces — accrued replaces entitled for accruing types. */
+  accruedAvailableDays: number;
 }
 
 export interface LeaveBalanceDetail extends LeaveBalance {
@@ -259,6 +311,12 @@ export interface LeavePlan {
   approvedDate?: string | null;
   rejectionReason?: string | null;
   /**
+   * The live leave request already raised from this plan, if any. A cancelled or rejected request
+   * does not count — the plan becomes raiseable again. (Closure plan L-9.)
+   */
+  raisedLeaveRequestId?: string | null;
+  raisedLeaveRequestNumber?: string | null;
+  /**
    * Why the named reliever(s) may not be free over the plan's dates — their own plans, their own
    * live leave requests, or another plan in the window that already names them. Empty when clear.
    * Advisory: the plan can still be saved and approved. (Finish-plan lane 4.)
@@ -292,7 +350,10 @@ export interface CreateLeavePlanRequest {
   notes?: string | null;
   // plannedBy is stamped server-side from the token (finish-plan lane 4); it is an Employee
   // foreign key and both screens used to send the login's user id.
-  year: number;
+  //
+  // `year` is likewise NOT sent: the server derives it from startDate. The desk screen used to send
+  // the list filter's year, so a January plan raised from the December list was filed under the
+  // wrong one and shown by neither (closure plan L-17).
 }
 
 export interface SuggestLeavePlanChangesRequest {
@@ -342,8 +403,8 @@ export interface CreateLeaveEncashmentRequest {
   notes?: string | null;
 }
 
+/** The processor is stamped server-side from the caller's employee id, never sent. */
 export interface ProcessLeaveEncashmentRequest {
-  processedByEmployeeId: string;
   paymentReference: string;
 }
 
@@ -355,4 +416,72 @@ export interface LeaveYearEndResult {
   totalDaysCarriedOver: number;
   totalDaysForfeited: number;
   notes: string[];
+}
+
+// ── Leave calendar (closure plan wave E, slice E1) ──────────────────────────────
+
+export type LeaveCalendarScope = 'Mine' | 'Team' | 'Organisation';
+
+/**
+ * One person's leave, as a band on a calendar.
+ *
+ * ⚠ It carries no reason and no balance — a calendar is read by colleagues, and "Ama is on annual
+ * leave" is what a calendar is for.
+ */
+export interface LeaveCalendarEntry {
+  id: string;
+  requestNumber: string;
+  employeeId: string;
+  employeeName: string;
+  organizationUnitName?: string | null;
+  leaveTypeId: string;
+  leaveTypeName: string;
+  /** The leave type's own colour; null when the tenant never set one. */
+  calendarColor?: string | null;
+  /** DateOnly */
+  startDate: string;
+  endDate: string;
+  totalDays: number;
+  status: LeaveStatus;
+  /** Approved (or beyond). A pending band is drawn as an outline. */
+  isConfirmed: boolean;
+}
+
+export interface LeaveCalendarHoliday {
+  date: string;
+  name: string;
+}
+
+export interface LeaveCalendarData {
+  from: string;
+  to: string;
+  scope: LeaveCalendarScope;
+  entries: LeaveCalendarEntry[];
+  holidays: LeaveCalendarHoliday[];
+}
+
+// ── Leave register and bulk decisions (closure plan wave E, slices E3/E4) ───────
+
+export interface LeaveRegisterFilter {
+  from?: string;
+  to?: string;
+  status?: LeaveStatus;
+  leaveTypeId?: string;
+  employeeId?: string;
+  organizationUnitId?: string;
+  search?: string;
+}
+
+export interface BulkLeaveDecision {
+  leaveRequestIds: string[];
+  comments?: string | null;
+  /** Required when rejecting. */
+  rejectionReason?: string | null;
+}
+
+/** The house bulk-result shape: a per-item reason, so the few that failed say why. */
+export interface HrBulkActionResult {
+  requestedCount: number;
+  succeededCount: number;
+  results: { id: string; success: boolean; reason?: string | null }[];
 }

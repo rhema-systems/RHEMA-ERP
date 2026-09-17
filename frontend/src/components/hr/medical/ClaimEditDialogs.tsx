@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,6 +24,7 @@ import {
 } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
 import { medicalClaimService } from '@/services/hr/medical-claims.service';
+import { leaveService } from '@/services/hr/leave.service';
 import {
   MEDICAL_EXPENSE_TYPE_OPTIONS,
   MEDICAL_ITEM_TYPE_OPTIONS,
@@ -41,13 +42,24 @@ import type {
  * ⚠ **`PUT` is not a patch.** Every field on `UpdateMedicalExpenseClaimDto` is written, so a
  * payload that omits one blanks it. Both dialogs therefore seed from the full record and send
  * everything back — including the fields they do not show, such as `preAuthorizationId`,
- * `referralId`, `leaveRequestId` and `insurancePolicyId`, which are set by other surfaces and
- * would otherwise be silently dropped by an edit made here.
+ * `referralId` and `insurancePolicyId`, which are set by other surfaces and would otherwise be
+ * silently dropped by an edit made here.
+ *
+ * `leaveRequestId` used to be one of those carried-but-unsettable fields, and no surface anywhere
+ * set it — so a claim was never tied to the sick leave it arose from (closure plan L-37). The
+ * "Related sick leave" picker below is that surface.
  *
  * `admissionStart` / `admissionEnd` are two of the fields the closure ledger's section E lists as
  * settable by the API and reachable from no form; the hospitalisation toggle below is where they
  * finally become editable.
  */
+
+/**
+ * The "not related to leave" choice. A Radix Select item cannot carry an empty string as its value
+ * (an empty value is how it represents "nothing selected"), so the absence of a link needs its own
+ * sentinel, mapped back to null on save.
+ */
+const NO_LEAVE = '__none__';
 
 const toDateInput = (v?: string | null) => {
   if (!v) return '';
@@ -82,6 +94,26 @@ export function ClaimEditActions({
   const str = (k: string) => String(form[k] ?? '');
   const orNull = (k: string) => (str(k).trim() === '' ? null : str(k));
 
+  /**
+   * The employee's approved leave for the year the treatment happened, so a claim can name the sick
+   * leave it arose from. `MedicalExpenseClaim.LeaveRequestId` has carried the comment "Leave
+   * Integration" since the port and nothing ever wrote it (closure plan L-37).
+   *
+   * Approved only, and only while the dialog is open. An employee reading their own claim cannot
+   * see this list — the leave history endpoint answers self-or-HR.Leave.Read, so a claims clerk
+   * without leave access simply gets no options rather than an error.
+   */
+  const claimYear = Number((claim.serviceDate ?? claim.claimDate ?? '').slice(0, 4)) || 0;
+  const { data: leaveOptions } = useQuery({
+    queryKey: ['hr', 'leave-requests', 'history', claim.employeeId, claimYear, 'Approved'],
+    queryFn: () =>
+      leaveService
+        .getEmployeeHistory(claim.employeeId, claimYear, 1, 50, 'Approved')
+        .then((r) => r.items)
+        .catch(() => []),
+    enabled: editing && !!claim.employeeId,
+  });
+
   useEffect(() => {
     if (!editing) return;
     setForm({
@@ -99,6 +131,7 @@ export function ClaimEditActions({
       totalAmount: String(claim.totalAmount ?? ''),
       amountRequested: String(claim.amountRequested ?? ''),
       additionalNotes: claim.additionalNotes ?? '',
+      leaveRequestId: claim.leaveRequestId ?? '',
     });
   }, [editing, claim]);
 
@@ -133,7 +166,7 @@ export function ClaimEditActions({
         totalAmount: Number(str('totalAmount') || 0),
         amountRequested: Number(str('amountRequested') || 0),
         insurancePolicyId: claim.insurancePolicyId ?? null,
-        leaveRequestId: claim.leaveRequestId ?? null,
+        leaveRequestId: orNull('leaveRequestId'),
         additionalNotes: orNull('additionalNotes'),
       }),
     onSuccess: () => {
@@ -210,6 +243,34 @@ export function ClaimEditActions({
                 </SelectContent>
               </Select>
             </div>
+
+            {/*
+              The medical → leave join. Only offered when the employee has approved leave in the
+              treatment year; a claim that did not arise from leave simply leaves it unset.
+            */}
+            {!!leaveOptions?.length && (
+              <div className="space-y-2">
+                <Label>Related sick leave</Label>
+                <Select
+                  value={str('leaveRequestId') || NO_LEAVE}
+                  onValueChange={(v) => set('leaveRequestId', v === NO_LEAVE ? '' : v)}
+                >
+                  <SelectTrigger><SelectValue placeholder="Not related to leave" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_LEAVE}>Not related to leave</SelectItem>
+                    {leaveOptions.map((lr) => (
+                      <SelectItem key={lr.id} value={lr.id}>
+                        {lr.requestNumber} · {lr.leaveTypeName} · {lr.startDate?.slice(0, 10)} to{' '}
+                        {lr.endDate?.slice(0, 10)}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  Ties this claim to the leave it arose from. Approved leave in {claimYear} only.
+                </p>
+              </div>
+            )}
 
             <div className="space-y-2">
               <Label>Description</Label>

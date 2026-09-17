@@ -192,10 +192,11 @@ Covered comprehensively by the 23 Oracle reports (§2.1) plus `RunSummary`/`Jour
 
 | Report | Purpose | Status | Sensitivity |
 |---|---|---|---|
-| **Leave Register** | Leave taken/approved/pending by employee/type/period — `LeavesController` has only per-employee history and `pending-approvals/{managerId}`; no all-requests list | 🔲 | 🟡 |
-| **Leave Balance Report** | Entitlement/carried-over/used/available days by employee, org unit — `GET api/leaves/balances`, `employee/{id}/balances`, screen `hr/leave/balances`; no export (corrected 2026-09-02) | 🟡 | 🟡 |
-| **Leave Encashment Register** | `LeaveEncashment` payouts — ties to the Finance sweep's leave-encashment posting gap (row 23) | 🔲 | 🔴 |
-| **Leave Liability Report** | Aggregate `LeaveBalance.EncashedDays`/unused-day value — the balance-sheet-adjacent figure the Finance sweep flagged as unmodelled (row 24) | 🔲 | 🔴 |
+| **Leave Register** | Leave taken/approved/pending by employee/type/period — **built 2026-09-17**: `GET api/Leaves/register` (date window, status, type, employee, org unit, free text; paged) + screen `hr/leave/register` + `register/export` CSV | ✅ | 🟡 |
+| **Leave Balance Report** | Entitlement/accrued/carried-over/used/available by employee and org unit — `GET api/leaves/balances`, screen `hr/leave/balances`. **Export added 2026-09-17** (`balances/export`). Now carries BOTH availability figures: the policy one and the "can take now" one the create check enforces | ✅ | 🟡 |
+| **Mandatory Leave Compliance** | Who still owes statutory leave this year — screen `hr/leave/compliance`; **export added 2026-09-17** (`compliance/export`). Listed here because it was the one leave register with no way out of the browser at all | ✅ | 🟡 |
+| **Leave Encashment Register** | `LeaveEncashment` payouts — ties to the Finance sweep's leave-encashment posting gap (backlog §Area 2, event 2.1) | 🔲 | 🔴 |
+| **Leave Liability Report** | Aggregate unused-day value — the balance-sheet figure the Finance sweep flagged as unmodelled (§Area 2, event 2.2). ⚠ **Blocked, not merely unbuilt:** valuing it needs the daily-rate basis, and two are live in the product (open question **L-D7**) | 🔲 | 🔴 |
 
 ### 3.4 Attendance & time
 

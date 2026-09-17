@@ -111,6 +111,7 @@ public class LeavePlanService : ILeavePlanService
             .ToListAsync();
         var dtos = items.ToDtoList();
         await EnrichRelieverClashesAsync(dtos);
+        await EnrichRaisedRequestsAsync(dtos);
         return dtos;
     }
 
@@ -130,6 +131,7 @@ public class LeavePlanService : ILeavePlanService
             .ToListAsync();
         var dtos = items.ToDtoList();
         await EnrichRelieverClashesAsync(dtos);
+        await EnrichRaisedRequestsAsync(dtos);
         return dtos;
     }
 
@@ -140,6 +142,7 @@ public class LeavePlanService : ILeavePlanService
             throw new ArgumentException($"Leave plan '{id}' not found.");
         var dto = entity.ToDto();
         await EnrichRelieverClashesAsync(new List<LeavePlanDto> { dto });
+        await EnrichRaisedRequestsAsync(new List<LeavePlanDto> { dto });
         return dto;
     }
 
@@ -186,7 +189,8 @@ public class LeavePlanService : ILeavePlanService
         entity.SecondRelieverId = dto.SecondRelieverId;
         entity.Notes = dto.Notes;
         // PlannedBy is who raised the plan; an edit does not re-author it.
-        entity.Year = dto.Year;
+        // Year follows the dates — moving a plan into January moves its year with it (L-17).
+        entity.Year = dto.StartDate.Year;
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -217,6 +221,27 @@ public class LeavePlanService : ILeavePlanService
         return (await GetWithIncludes(id))!.ToDto();
     }
 
+        /// <summary>
+    /// Refuses an approval by the very employee the record is about.
+    /// </summary>
+    /// <remarks>
+    /// This is the segregation the two-stage leave definition relies on, and it is done HERE rather
+    /// than with the engine's <c>PreventInitiatorApproval</c> on purpose. That flag guards the
+    /// INITIATOR; a leave record's conflicted party is its SUBJECT, and HR raises leave on other
+    /// people's behalf from the desk. On a tenant with one HR user the flag would strand every
+    /// desk-raised record at the HR stage with nobody able to clear it — trap 7 of
+    /// <c>HR-WORKFLOW-ENGINE-INTEGRATION.md</c>, and the area-9b mistake. Checking the subject
+    /// blocks the real conflict and cannot strand somebody else's record.
+    ///
+    /// It sits before the authority call so it holds on the fallback path too, not just the engine.
+    /// </remarks>
+    private void RefuseSelfApproval(Guid subjectEmployeeId, string what)
+    {
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == subjectEmployeeId)
+            throw new InvalidOperationException(
+                $"You cannot approve your own {what}. It has to be approved by someone else.");
+    }
+
     public async Task<LeavePlanDto> ApproveLeavePlanAsync(Guid id)
     {
         var entity = await GetOwnedLeavePlanAsync(id);
@@ -224,6 +249,8 @@ public class LeavePlanService : ILeavePlanService
         var userId = GetCurrentUserId();
         if (userId == Guid.Empty)
             throw new UnauthorizedAccessException("User not authenticated.");
+
+        RefuseSelfApproval(entity.EmployeeId, "leave plan");
 
         var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
             _workflowIntegrationService, _currentUserService.Roles, EntityType, id, userId,
@@ -419,6 +446,43 @@ public class LeavePlanService : ILeavePlanService
     /// Fills <see cref="LeavePlanDto.RelieverClashes"/> for every plan in the list with one query per
     /// source over the whole window, rather than three per row.
     /// </summary>
+    /// <summary>
+    /// Fills <c>RaisedLeaveRequestId</c>/<c>Number</c> — the request, if any, already raised from
+    /// each plan. One query for the whole page, the same shape as its reliever-clash sibling.
+    /// </summary>
+    /// <remarks>
+    /// Cancelled and rejected requests are excluded on purpose: a plan whose request was cancelled
+    /// has not been used up, and the employee should be able to raise another from it.
+    /// </remarks>
+    private async Task EnrichRaisedRequestsAsync(List<LeavePlanDto> plans)
+    {
+        if (plans.Count == 0) return;
+
+        var tenantId = GetTenantId();
+        var planIds = plans.Select(p => p.Id).ToList();
+
+        var raised = await _leaveRequestRepository
+            .GetQueryable()
+            .Where(r => r.TenantId == tenantId
+                     && r.LeavePlanId != null
+                     && planIds.Contains(r.LeavePlanId!.Value)
+                     && r.Status != LeaveStatus.Cancelled
+                     && r.Status != LeaveStatus.Rejected)
+            .Select(r => new { PlanId = r.LeavePlanId!.Value, r.Id, r.RequestNumber })
+            .ToListAsync();
+
+        var byPlan = raised
+            .GroupBy(r => r.PlanId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        foreach (var plan in plans)
+        {
+            if (!byPlan.TryGetValue(plan.Id, out var request)) continue;
+            plan.RaisedLeaveRequestId = request.Id;
+            plan.RaisedLeaveRequestNumber = request.RequestNumber;
+        }
+    }
+
     private async Task EnrichRelieverClashesAsync(List<LeavePlanDto> plans)
     {
         var withReliever = plans.Where(p => p.RelieverId.HasValue || p.SecondRelieverId.HasValue).ToList();

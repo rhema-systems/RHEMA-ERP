@@ -82,6 +82,12 @@ export interface ResourceCollectionTabProps<TItem, TForm extends FieldValues> {
    * from the owning module and a create would be refused with 409.
    */
   allowCreate?: boolean;
+  /**
+   * Set false when the caller may read and edit but not remove — typically because the delete
+   * endpoint sits on a higher permission tier than the rest of the collection. Hiding it is the
+   * point: a button that always answers 403 is worse than no button.
+   */
+  allowRemove?: boolean;
 
   columns: CollectionColumn<TItem>[];
   actions?: CollectionAction<TItem>[];
@@ -161,6 +167,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   update,
   remove,
   readOnly = false,
+  allowRemove = true,
   allowUpdate = true,
   allowCreate = true,
   columns,
@@ -300,7 +307,7 @@ export function ResourceCollectionTab<TItem, TForm extends FieldValues>({
   const rows = data ?? [];
   const canAdd = !readOnly && allowCreate;
   const canEdit = !readOnly && allowUpdate;
-  const canRemove = !readOnly && !!remove;
+  const canRemove = !readOnly && allowRemove && !!remove;
   const hasRowMenu = canEdit || canRemove || actions.length > 0;
 
   return (

@@ -35,7 +35,6 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
-import { useAuth } from '@/hooks/use-auth';
 import { leaveEncashmentService } from '@/services/hr/leave.service';
 import type { LeaveEncashment } from '@/types/hr/leave-request';
 
@@ -57,7 +56,6 @@ type Pending =
 export default function LeaveEncashmentsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const { user } = useAuth();
   const [year, setYear] = useState(String(currentYear));
   const [status, setStatus] = useState(ALL);
   const [pending, setPending] = useState<Pending | null>(null);
@@ -80,7 +78,6 @@ export default function LeaveEncashmentsPage() {
       }
       if (!paymentReference.trim()) throw new Error('A payment reference is required.');
       return leaveEncashmentService.markAsProcessed(p.row.id, {
-        processedByEmployeeId: (user?.id as string) ?? '',
         paymentReference: paymentReference.trim(),
       });
     },

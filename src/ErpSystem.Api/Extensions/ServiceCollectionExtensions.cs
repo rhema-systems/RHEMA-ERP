@@ -2477,6 +2477,17 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             // Sweep logic is scoped (IStaffTravelReminderService) so run-now shares it.
             services.AddHostedService<ErpSystem.Api.Services.HR.StaffTravelReminderBackgroundService>();
 
+            // Leave reminder engine (closure plan wave E, slice E2): daily sweep — approved leave
+            // about to start with nobody confirming it is still going, leave that ended and was
+            // never closed, a request nobody has decided, mandatory leave still outstanding late in
+            // the year, and carry-over about to lapse. Sweep logic is scoped (ILeaveReminderService)
+            // so run-now shares it.
+            //
+            // ⚠ This engine WARNS ONLY. LeaveYearEndService, which actually moves carry-over and
+            // forfeiture, stays deliberately unhosted — those two acts change people's entitlements
+            // and automating them is TDC's policy call, not a defect to fix.
+            services.AddHostedService<ErpSystem.Api.Services.HR.LeaveReminderBackgroundService>();
+
             // Separation reminder engine (FR-HR-111): daily sweep — a retirement
             // or a contract expiry approaching with no exit raised, a clearance with mandatory lines
             // unanswered, a settlement sitting with Internal Audit, and a settlement approved and

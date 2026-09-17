@@ -129,7 +129,11 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             return annual;
 
         var employee = await _employeeRepository.GetByIdAsync(employeeId);
-        var dateEmployed = employee?.TenantId == tenantId ? employee.DateEmployed : null;
+        var isOwn = employee?.TenantId == tenantId;
+        var dateEmployed = isOwn ? employee!.DateEmployed : null;
+        var dateLeft = isOwn && employee!.TerminationDate is DateTime left
+            ? DateOnly.FromDateTime(left)
+            : (DateOnly?)null;
 
         var yearStart = new DateOnly(year, 1, 1);
         var yearEnd = new DateOnly(year, 12, 31);
@@ -137,7 +141,21 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         // Clamp the as-of date into the target year for within-year accrual.
         var effectiveAsOf = asOf ?? _clock.TodayUtc;
         if (effectiveAsOf > yearEnd) effectiveAsOf = yearEnd;
-        if (effectiveAsOf < yearStart) return 0m; // year hasn't started yet
+
+        // Pro-rate on exit: a leaver stops accruing on their last day, so the clock stops there
+        // rather than running to today or to year end. This is the mirror of ProRateOnJoin, which
+        // moves the START of the accrual window to the hire date — the two switches are a pair, and
+        // until now only one of them was read by anything (closure plan L-29).
+        //
+        // ⚠ It applies to incremental accrual only, exactly as ProRateOnJoin does. A policy set to
+        // FullGrantOnEligibility grants the whole year the moment eligibility is reached, and a
+        // "full grant" that is then reduced is no longer a full grant — so the two settings do not
+        // combine. If TDC wants a leaver's full grant scaled down, that is a different setting and
+        // it needs saying (decision D-6's neighbour; recorded in the closure ledger).
+        if (policy.ProRateOnExit && dateLeft is DateOnly exit && exit < effectiveAsOf)
+            effectiveAsOf = exit;
+
+        if (effectiveAsOf < yearStart) return 0m; // year hasn't started yet, or they left before it
 
         // Accrual eligibility date = hire date + the policy's minimum-service months.
         var eligibilityDate = dateEmployed?.AddMonths(policy.MinServiceMonths ?? 0) ?? yearStart;

@@ -11,7 +11,7 @@
  */
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { useQueryClient } from '@tanstack/react-query';
 import { useToast } from '@/components/ui/use-toast';
@@ -28,6 +28,7 @@ import { leaveService } from '@/services/hr/leave.service';
 
 export default function NewMyLeaveRequestPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
@@ -73,6 +74,20 @@ export default function NewMyLeaveRequestPage() {
     }
   };
 
+  // Raised from an approved plan: the planner links here with the agreed dates and people, and
+  // `planId` is what joins the two records (closure plan L-9 / R-1). Everything stays editable.
+  const p = (key: string) => searchParams?.get(key) ?? '';
+  const fromPlan: MyLeaveRequestFormValues = {
+    ...emptyMyLeaveRequest,
+    leaveTypeId: p('leaveTypeId'),
+    leaveSubTypeId: p('leaveSubTypeId'),
+    startDate: p('startDate'),
+    endDate: p('endDate'),
+    relieverEmployeeId: p('relieverId'),
+    secondRelieverEmployeeId: p('secondRelieverId'),
+    leavePlanId: p('planId'),
+  };
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
@@ -85,7 +100,7 @@ export default function NewMyLeaveRequestPage() {
       </div>
       <MyLeaveRequestForm
         employeeId={employeeId}
-        defaultValues={emptyMyLeaveRequest}
+        defaultValues={p('planId') ? fromPlan : emptyMyLeaveRequest}
         onSubmit={handleSubmit}
         submitting={submitting}
         onCancel={() => router.push('/me/leave')}

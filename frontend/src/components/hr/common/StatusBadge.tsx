@@ -17,6 +17,9 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   terminated: 'destructive',
   onhold: 'destructive',
   draft: 'outline',
+  // A record sent back with the approver's own dates — neither approved nor refused, and waiting on
+  // the person who raised it. Secondary, like every other "somebody owes an answer" state.
+  changessuggested: 'secondary',
 
   // Attendance & Time. "Absent" and "Late" are the exceptions worth spotting in a list,
   // so they carry the destructive/secondary weight rather than reading as neutral.

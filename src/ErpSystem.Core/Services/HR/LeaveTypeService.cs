@@ -265,16 +265,25 @@ public class LeaveTypeService : ILeaveTypeService
 
     // ─── Sub Types ───────────────────────────────────────────────────────────
 
-    public async Task<IEnumerable<LeaveSubTypeDto>> GetSubTypesAsync(Guid leaveTypeId)
+    /// <summary>
+    /// Sub-types of a leave type. <paramref name="activeOnly"/> defaults to false so the rulebook
+    /// tab keeps showing retired rows (they are what the Status column is for); the request forms
+    /// pass true, because <c>LeaveSubType.IsActive</c> was honoured by nothing and a retired
+    /// sub-type stayed pickable for ever (closure plan L-34).
+    /// </summary>
+    public async Task<IEnumerable<LeaveSubTypeDto>> GetSubTypesAsync(Guid leaveTypeId, bool activeOnly = false)
     {
         await GetOwnedLeaveTypeAsync(leaveTypeId);
         var tenantId = GetTenantId();
-        var items = await _leaveSubTypeRepository
+        var query = _leaveSubTypeRepository
             .GetQueryable()
             .Include(st => st.LeaveType)
-            .Where(st => st.TenantId == tenantId && st.LeaveTypeId == leaveTypeId)
-            .OrderBy(st => st.SubTypeName)
-            .ToListAsync();
+            .Where(st => st.TenantId == tenantId && st.LeaveTypeId == leaveTypeId);
+
+        if (activeOnly)
+            query = query.Where(st => st.IsActive);
+
+        var items = await query.OrderBy(st => st.SubTypeName).ToListAsync();
         return items.ToDtoList();
     }
 

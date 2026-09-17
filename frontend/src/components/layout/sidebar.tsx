@@ -1148,6 +1148,12 @@ export const navigationItems: NavItem[] = [
             icon: CalendarDays,
             children: [
               { title: 'Requests', href: '/hr/leave/requests', icon: CalendarDays },
+              // No permission gate: the calendar's scope selector defaults to Everyone, which the
+              // server refuses without HR.Leave.Read — but "my team" and "mine" are open to all
+              // staff, so hiding the leaf would hide those too.
+              { title: 'Calendar', href: '/hr/leave/calendar', icon: CalendarDays },
+              // Org-wide, so it carries the read permission the per-employee Requests screen does not.
+              { title: 'Register', href: '/hr/leave/register', icon: ClipboardList, permissions: ['HR.Leave.Read'] },
               { title: 'Approvals', href: '/hr/leave/approvals', icon: CheckSquare },
               { title: 'Plans', href: '/hr/leave/plans', icon: CalendarClock, permissions: ['HR.Leave.Read'] },
               { title: 'Balances', href: '/hr/leave/balances', icon: Database, permissions: ['HR.Leave.Read'] },

@@ -3,6 +3,7 @@
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import { staffLevelService } from '@/services/hr/staff-level.service';
 import type { LeaveCategoryAllocation } from '@/types/hr/leave';
@@ -42,14 +43,16 @@ const toPayload = (leaveTypeId: string, v: FormValues) => ({
 
 /** How many days each staff level gets, optionally per sub-type and time-bounded. */
 export function LeaveAllocationsTab({ leaveTypeId }: { leaveTypeId: string }) {
+  const { canAdminister } = useLeavePermissions();
+
   const { data: staffLevels } = useQuery({
     queryKey: ['hr', 'staff-levels', 'active'],
     queryFn: () => staffLevelService.getActive(),
   });
 
   const { data: subTypes } = useQuery({
-    queryKey: ['hr', 'leave-types', leaveTypeId, 'sub-types'],
-    queryFn: () => leaveTypeService.getSubTypes(leaveTypeId),
+    queryKey: ['hr', 'leave-types', leaveTypeId, 'sub-types', 'active'],
+    queryFn: () => leaveTypeService.getSubTypes(leaveTypeId, true),
     enabled: !!leaveTypeId,
   });
 
@@ -68,6 +71,7 @@ export function LeaveAllocationsTab({ leaveTypeId }: { leaveTypeId: string }) {
       update={(id, allocationId, v) =>
         leaveTypeService.updateAllocation(allocationId, toPayload(id, v))
       }
+      allowRemove={canAdminister}
       remove={(_id, allocationId) => leaveTypeService.removeAllocation(allocationId)}
       columns={[
         { header: 'Staff level', cell: (a) => a.staffLevelName || '—' },
