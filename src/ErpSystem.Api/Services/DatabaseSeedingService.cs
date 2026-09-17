@@ -90,6 +90,15 @@ namespace ErpSystem.Web.Services
                     "Independent final payment authorization before posting, clearing, or settlement finalization.")
             };
 
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> AccountingBookApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Financial Controller Review",
+                    new[] { "Financial Controller" },
+                    "Independent approval of accounting-book opening, period, or lifecycle evidence.")
+            };
+
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
 
         private sealed record FinanceWorkflowSeedSpec(
@@ -1235,9 +1244,11 @@ namespace ErpSystem.Web.Services
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
                         var approvalStages = spec.EntityCode is
-                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
-                            ? FinancePaymentApprovalStages
-                            : FinanceApprovalStages;
+                            "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
+                            ? AccountingBookApprovalStages
+                            : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
+                                ? FinancePaymentApprovalStages
+                                : FinanceApprovalStages;
 
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
@@ -1620,6 +1631,12 @@ namespace ErpSystem.Web.Services
                     "Sequential finance journal approval: Accounts Officer review -> Finance Manager approval -> Financial Controller final approval."),
                 new("JournalBatch", "Journal Batch", typeof(JournalBatch).FullName, "Journal Batch Approval",
                     "Batch-level journal approval with per-entry decisions, control totals, partial posting, and batch reversal controls."),
+                new("AccountingBookInitialization", "Accounting Book Initialization", typeof(AccountingBookInitialization).FullName,
+                    "Accounting Book Initialization Approval", "Independent approval of balanced, complete opening evidence before book activation."),
+                new("AccountingBookPeriodLifecycle", "Accounting Book Period Lifecycle", typeof(AccountingBookPeriod).FullName,
+                    "Accounting Book Period Lifecycle Approval", "Independent approval of exact-book period opening and close transitions."),
+                new("AccountingBookLifecycle", "Accounting Book Lifecycle", typeof(AccountingBook).FullName,
+                    "Accounting Book Lifecycle Approval", "Independent approval of governed accounting-book state transitions."),
 
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",

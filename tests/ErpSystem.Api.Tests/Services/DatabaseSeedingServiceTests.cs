@@ -127,6 +127,26 @@ public partial class DatabaseSeedingServiceTests
         seedMethod.Should().NotBeNull();
         await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
 
+        var bookWorkflowCodes = new[]
+        {
+            "AccountingBookInitialization", "AccountingBookPeriodLifecycle", "AccountingBookLifecycle"
+        };
+        var bookDefinitions = await context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .Include(definition => definition.Steps)
+            .Where(definition => definition.TenantId == tenant.Id &&
+                bookWorkflowCodes.Contains(definition.EntityType.Code))
+            .ToListAsync();
+        bookDefinitions.Should().HaveCount(3);
+        bookDefinitions.Select(definition => definition.EntityType.Code).Should().BeEquivalentTo(bookWorkflowCodes);
+        bookDefinitions.Should().OnlyContain(definition => definition.IsActive &&
+            definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+            definition.Steps.Count(step => step.StepType == WorkflowStepType.Approval && !step.IsDeleted) == 1);
+        bookDefinitions.SelectMany(definition => definition.Steps)
+            .Where(step => step.StepType == WorkflowStepType.Approval)
+            .Should().OnlyContain(step => step.Name == "Financial Controller Review" &&
+                step.Configuration != null && step.Configuration.Contains("Financial Controller"));
+
         var paymentDefinitions = await context.WorkflowDefinitions
             .Include(definition => definition.EntityType)
             .Include(definition => definition.Steps)
