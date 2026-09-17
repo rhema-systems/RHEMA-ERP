@@ -329,3 +329,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917155507_AddLeaveRequestSuggestionAndReschedule")] partial class AddLeaveRequestSuggestionAndReschedule { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917163710_AddLeaveReminderEngine")] partial class AddLeaveReminderEngine { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917192244_AddLeaveRecall")] partial class AddLeaveRecall { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260917203359_AddLeaveEncashmentPolicySettings")] partial class AddLeaveEncashmentPolicySettings { }

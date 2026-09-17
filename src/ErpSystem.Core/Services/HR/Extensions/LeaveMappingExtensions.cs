@@ -399,6 +399,7 @@ namespace ErpSystem.Application.Extensions
             Year = entity.Year,
             DaysEncashed = entity.DaysEncashed,
             AmountPaid = entity.AmountPaid,
+            RateBasis = entity.RateBasis,
             Status = entity.Status,
             ProcessedDate = entity.ProcessedDate,
             ProcessedByEmployeeId = entity.ProcessedByEmployeeId,

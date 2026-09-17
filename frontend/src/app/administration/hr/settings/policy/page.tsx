@@ -92,6 +92,14 @@ const schema = z
     settlementDaysPerYear: z.coerce.number().int().min(1).max(366),
     attendanceRateIncludesApprovedLeave: z.boolean(),
 
+    allowInServiceEncashment: z.boolean(),
+    encashmentWorkingDaysPerMonth: z.coerce.number().int().min(1).max(31),
+    leaveStartingReminderDays: z.coerce.number().int().min(0).max(180),
+    leaveClosureGraceDays: z.coerce.number().int().min(0).max(180),
+    leaveUndecidedChaseDays: z.coerce.number().int().min(0).max(180),
+    mandatoryLeaveChaseFromMonth: z.coerce.number().int().min(1).max(12),
+    leaveCarryOverExpiryReminderDays: z.coerce.number().int().min(0).max(365),
+
     budgetEnforcementMode: z.string(),
     establishmentEnforcementMode: z.string(),
     salaryStructureTiers: z.string(),
@@ -199,11 +207,35 @@ export default function PolicySettingsPage() {
       disciplineBacklogHorizonDays: data.disciplineBacklogHorizonDays,
       settlementDaysPerYear: data.settlementDaysPerYear,
       attendanceRateIncludesApprovedLeave: data.attendanceRateIncludesApprovedLeave,
+      allowInServiceEncashment: data.allowInServiceEncashment,
+      encashmentWorkingDaysPerMonth: data.encashmentWorkingDaysPerMonth,
+      leaveStartingReminderDays: data.leaveStartingReminderDays,
+      leaveClosureGraceDays: data.leaveClosureGraceDays,
+      leaveUndecidedChaseDays: data.leaveUndecidedChaseDays,
+      mandatoryLeaveChaseFromMonth: data.mandatoryLeaveChaseFromMonth,
+      leaveCarryOverExpiryReminderDays: data.leaveCarryOverExpiryReminderDays,
     });
   }, [data, form]);
 
   const genderSpecific = !!form.watch('useGenderSpecificRetirementAge');
   const proceduralDays = Number(form.watch('proceduralAbsenceDays') ?? 0);
+
+  // ⚠ The whole point of showing these two together. Encashment divides monthly emoluments by
+  // WORKING DAYS PER MONTH; a final settlement divides annualised pay by CALENDAR DAYS PER YEAR. At
+  // the defaults that is ~38% apart on the same salary. They are different money events and are
+  // deliberately not merged — but a client should meet that gap here, on a settings screen,
+  // rather than in a payout somebody has already queried.
+  const SAMPLE_MONTHLY = 6000;
+  const encashDivisor = Number(form.watch('encashmentWorkingDaysPerMonth') ?? 0);
+  const settleDivisor = Number(form.watch('settlementDaysPerYear') ?? 0);
+  const encashDaily = encashDivisor > 0 ? SAMPLE_MONTHLY / encashDivisor : null;
+  const settleDaily = settleDivisor > 0 ? (SAMPLE_MONTHLY * 12) / settleDivisor : null;
+  const spreadPct =
+    encashDaily && settleDaily
+      ? Math.abs(encashDaily - settleDaily) / Math.min(encashDaily, settleDaily)
+      : null;
+  const money = (n: number) =>
+    n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
   // The weights are relative, so what actually matters is their share. Show it.
   const weights = [
@@ -265,6 +297,13 @@ export default function PolicySettingsPage() {
         disciplineBacklogHorizonDays: Number(v.disciplineBacklogHorizonDays),
         settlementDaysPerYear: Number(v.settlementDaysPerYear),
         attendanceRateIncludesApprovedLeave: v.attendanceRateIncludesApprovedLeave,
+        allowInServiceEncashment: v.allowInServiceEncashment,
+        encashmentWorkingDaysPerMonth: Number(v.encashmentWorkingDaysPerMonth),
+        leaveStartingReminderDays: Number(v.leaveStartingReminderDays),
+        leaveClosureGraceDays: Number(v.leaveClosureGraceDays),
+        leaveUndecidedChaseDays: Number(v.leaveUndecidedChaseDays),
+        mandatoryLeaveChaseFromMonth: Number(v.mandatoryLeaveChaseFromMonth),
+        leaveCarryOverExpiryReminderDays: Number(v.leaveCarryOverExpiryReminderDays),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'policy-settings'] });
@@ -609,6 +648,137 @@ export default function PolicySettingsPage() {
               label="Approved leave counts as an expected working day"
               description="On: leave sits in the attendance denominator, so a day on approved leave lowers the rate and DaysOnLeave shows why. Off: leave leaves the calculation entirely, as weekends and public holidays already do. Applies to today's rate, the trend and the chronic-absentee ranking together."
             />
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Leave — encashment</CardTitle>
+            <CardDescription>
+              Whether unused leave can be cashed in while still employed, and what a day of it is
+              worth.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SwitchField
+              form={form}
+              name="allowInServiceEncashment"
+              label="Allow leave to be encashed while still employed"
+              description="Off: leave is only ever paid out when somebody leaves, and the in-service encashment screen refuses. On: employees may convert unused days to cash, for whichever leave types are marked convertible. This switch decides whether the route exists at all - the per-type setting still decides which leave may use it."
+            />
+            <p className="text-sm text-muted-foreground">
+              FR-HR-046 says leave is encashed <em>only on exit, no other route</em> — so a new
+              tenant starts with this off. Turn it on if this organisation&apos;s policy differs.
+            </p>
+
+            {/* The two daily-rate bases, shown together on purpose. */}
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-4 dark:border-amber-900 dark:bg-amber-950/40">
+              <NumberField
+                form={form}
+                name="encashmentWorkingDaysPerMonth"
+                label="Encashment — working days per month"
+                required
+              />
+              <p className="mt-2 text-sm">
+                <strong>This one moves money.</strong> A day of encashed leave is worth monthly
+                basic plus linked allowances divided by this number. A leave type may set its own
+                figure; this is what every type without one falls back to.
+              </p>
+
+              <div className="mt-3 rounded border bg-background/60 p-3 text-sm">
+                <p className="font-medium">
+                  On a salary of {money(SAMPLE_MONTHLY)} a month, the two bases in force right now:
+                </p>
+                <table className="mt-2 w-full">
+                  <tbody>
+                    <tr>
+                      <td className="py-1 pr-3">Encashed leave, per day</td>
+                      <td className="py-1 pr-3 text-muted-foreground">
+                        {money(SAMPLE_MONTHLY)} / {encashDivisor || '-'}
+                      </td>
+                      <td className="py-1 text-right font-medium">
+                        {encashDaily === null ? '-' : money(encashDaily)}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="py-1 pr-3">Final settlement, per day</td>
+                      <td className="py-1 pr-3 text-muted-foreground">
+                        {money(SAMPLE_MONTHLY)} x 12 / {settleDivisor || '-'}
+                      </td>
+                      <td className="py-1 text-right font-medium">
+                        {settleDaily === null ? '-' : money(settleDaily)}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                {spreadPct !== null && spreadPct > 0.005 && (
+                  <p className="mt-2">
+                    The same day of leave is worth{' '}
+                    <strong>{(spreadPct * 100).toFixed(0)}% more</strong> under one basis than the
+                    other.
+                  </p>
+                )}
+              </div>
+
+              <p className="mt-2 text-sm">
+                <strong>That gap is not necessarily wrong.</strong> Encashing unused days while
+                employed is not the same event as a final settlement on exit, and the two are
+                deliberately configurable apart. What matters is that it is a choice: every
+                encashment and every settlement records the basis that produced it, so changing
+                either number never rewrites an amount already paid.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Leave — reminder cadence</CardTitle>
+            <CardDescription>
+              How persistently the leave module chases people. All five were fixed in code until
+              now, so changing any of them used to need a release.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="leaveStartingReminderDays"
+                label="Announce approved leave this many days ahead"
+                required
+              />
+              <NumberField
+                form={form}
+                name="leaveClosureGraceDays"
+                label="Grace before chasing unclosed leave"
+                required
+              />
+            </FieldRow>
+            <FieldRow>
+              <NumberField
+                form={form}
+                name="leaveUndecidedChaseDays"
+                label="Chase an undecided request after this many days"
+                required
+              />
+              <NumberField
+                form={form}
+                name="leaveCarryOverExpiryReminderDays"
+                label="Warn this many days before carry-over expires"
+                required
+              />
+            </FieldRow>
+            <NumberField
+              form={form}
+              name="mandatoryLeaveChaseFromMonth"
+              label="Start chasing outstanding mandatory leave from month"
+              required
+            />
+            <p className="text-sm text-muted-foreground">
+              Month 9 is September — late enough that the chase is not noise, early enough that
+              there is still a quarter of the year in which to take the leave. Chasing from January
+              says nothing; chasing in December is too late to act on.
+            </p>
           </CardContent>
         </Card>
 

@@ -1,6 +1,6 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1 BUILT and verified. G2–G7 planned, not built.**
+**Status:** 2026-09-17 — **G1 and G2 BUILT and verified. G3–G7 planned, not built.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -44,13 +44,62 @@ request truncated to nothing routes to the full reverse rather than returning ea
 `PostAsync` that prunes instead — the rule then needs no caller to remember it, and no future
 operation that shortens a range can reintroduce the bug.
 
-### G2–G7 — not started
+### G2 — the configuration turn: BUILT 2026-09-17
 
-Unchanged from § 4 below.
+Migration `20260917203359_AddLeaveEncashmentPolicySettings` (seven columns on
+`CompanyHrPolicySettings`, one on `LeaveEncashments`, guarded SQL, registered).
+
+**Verified by `dev-harness/hr-leave` slice 6 — 33 assertions, green twice. Suite total 277 across six
+slices, green twice.**
+
+**All five reminder windows carry the two-position test.** Three of them briefly shipped marked
+*Enforced (wiring)* — read from settings, but with no fixture to make their sweep produce anything,
+so flipping the value could not be observed either way. Closed rather than left: *"reads the
+setting"* is not *"uses it correctly"*, and each had a plausible-looking way to be wrong (a sign,
+an off-by-one, and an inverted skip condition). The closure-grace fixture turned out to be nearly
+free — **recall** already produces leave ending today, which is exactly what that sweep wants.
+
+| Now a setting | Was |
+|---|---|
+| `AllowInServiceEncashment` — **default false** | FR-HR-046 and the shipped code contradicted each other, both live |
+| `EncashmentWorkingDaysPerMonth` — default 22 | `private const int` in `EmolumentService` |
+| The five reminder windows | five `private const`s marked *"ours, not TDC's"* |
+
+**L-D7 is closed without merging the two bases.** `GetEncashmentDailyRateAsync` returns
+`EncashmentDailyRate(Rate, Basis)` — figure and sentence built from the same divisor, so the words
+cannot describe a basis other than the one that produced them — and that sentence is stored on
+`LeaveEncashment.RateBasis` at payout time, as the settlement has done since FR-HR-184. The two
+bases stay separate (different money events) but now appear on **one screen with a live worked
+example** naming the spread.
+
+⚠ **Two things the scaffold got wrong, and one I got wrong**
+
+- EF emitted `defaultValue: 0` for all six integer columns and repaired only the single seeded row.
+  On a migrated database every other tenant would have taken a **zero divisor** and a reminder engine
+  chasing from *"month 0"*. Every column now carries its real default. Same failure the seed block
+  already records for `WrittenQueryHours`.
+- My first `UPDATE` guard included `AND [UpdatedAt] IS NULL`, meaning to avoid overturning a
+  deliberate choice. **It silently did nothing on the database it was written for** — the seeded row
+  had been edited through the settings page on 2026-09-14, so it looked customised and the demo
+  tenant kept in-service encashment OFF, the exact outcome the statement exists to prevent. The
+  reasoning was wrong: the column did not exist until that migration created it, so no choice about
+  it can predate the migration. Guard dropped; the live row was corrected by hand.
+- The harness's first green was **vacuous**: `leave.emp` has no salary, so every derived rate was
+  0.00 and *"changing the setting changes the money"* passed reading `22 → 0, 30 → 0`. The fixture
+  now carries pay and the assertions state exact figures.
+
+**Also delivered:** `docs/HR-CONFIGURATION-REGISTER.md` — started here rather than at G6, because it
+is what stops these eight becoming another 14 dead fields. Leave and encashment are complete in it;
+the rest of HR is listed as unsurveyed.
+
+### G3–G7 — not started
+
+Unchanged from § 4 below. **G6 is partly done** — the register exists and covers leave; what remains
+is the survey of the other modules.
 
 ---
 
-## 0. What this closes, and why it is not only leave
+## 0.1 The reframe — what this closes, and why it is not only leave
 
 The leave closure plan finished with seven open items. It filed four of them as *"blocked on TDC"*.
 

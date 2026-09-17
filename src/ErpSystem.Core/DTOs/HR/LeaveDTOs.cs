@@ -667,6 +667,14 @@ public class LeaveEncashmentDto
     public int Year { get; set; }
     public decimal DaysEncashed { get; set; }
     public decimal AmountPaid { get; set; }
+
+    /// <summary>
+    /// How the amount was arrived at, in words. ⚠ Recorded at payout time, not recomputed — the
+    /// divisor behind it is a setting, so a figure that cannot name its own basis stops reconciling
+    /// the moment somebody edits it.
+    /// </summary>
+    public string? RateBasis { get; set; }
+
     public LeaveEncashmentStatus Status { get; set; }
     public DateTime? ProcessedDate { get; set; }
     public Guid? ProcessedByEmployeeId { get; set; }

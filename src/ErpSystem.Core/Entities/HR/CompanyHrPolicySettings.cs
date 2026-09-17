@@ -384,4 +384,92 @@ public class CompanyHrPolicySettings : TenantEntity
     /// the dashboard disagree with itself.</para>
     /// </remarks>
     public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
+
+    // ── Leave encashment (residue plan G2) ───────────────────────────────────────────────────
+
+    /// <summary>
+    /// Whether leave may be encashed <b>while still employed</b>, as opposed to only on exit.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>This settles a requirements conflict rather than expressing a preference.</b>
+    /// FR-HR-046 says leave is encashed <i>"only on exit, no other route"</i> — and the module ships
+    /// an in-service encashment path, with annual leave flagged <c>AllowCashConversion</c> in the
+    /// seed. <b>Both readings were live in the product at once.</b></para>
+    ///
+    /// <para><b>Defaults to false</b>, which is FR-HR-046's literal reading, so a fresh tenant
+    /// matches the requirement out of the box. A client whose policy permits in-service encashment
+    /// turns it on <i>deliberately</i>, rather than getting it by accident. This is a product
+    /// serving many clients, not a bespoke build — so the conflict is resolved by a default, not by
+    /// waiting for one client to answer.</para>
+    ///
+    /// <para>⚠ <b>It gates <c>LeaveType.AllowCashConversion</c>, it does not replace it.</b> The
+    /// per-type flag still decides <i>which</i> leave may be converted; this decides whether the
+    /// in-service route exists at all. Off here means off for every type, whatever they say.</para>
+    ///
+    /// <para>⚠ The TDC demo tenant is seeded with this ON, because stakeholders have already been
+    /// shown the encashment screen. Turning it off by default without that seed line would make a
+    /// demonstrated feature vanish.</para>
+    /// </remarks>
+    public bool AllowInServiceEncashment { get; set; } = false;
+
+    /// <summary>
+    /// Working days in a month, used to turn monthly emoluments into a daily encashment rate when a
+    /// leave type does not set its own divisor.
+    /// </summary>
+    /// <remarks>
+    /// <para>Was a private const in <c>EmolumentService</c> — the last genuinely hardcoded piece of
+    /// the encashment rate, and the fallback every leave type lands on until somebody edits it.</para>
+    ///
+    /// <para>⚠ <b>Read this beside <see cref="SettlementDaysPerYear"/>, and expect them to
+    /// disagree.</b> Encashment computes <c>(basic + linked allowances) ÷ this</c>; a settlement
+    /// computes <c>monthly × 12 ÷ SettlementDaysPerYear</c>. At the defaults — 22 working days a
+    /// month against 365 calendar days a year — that is roughly a <b>38% spread on the same
+    /// salary</b>.</para>
+    ///
+    /// <para><b>That is not necessarily wrong, and the two are deliberately not merged.</b>
+    /// Encashing five unused days while employed is not the same money event as a final settlement
+    /// on exit, and plenty of clients will want different bases for each. What was wrong is that
+    /// they sat on different screens at different scopes, so nobody could see the gap. They are now
+    /// presented together with a worked example, and leave stamps its basis onto the payout the way
+    /// the settlement already did.</para>
+    /// </remarks>
+    [Range(1, 31)]
+    public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+
+    // ── Leave reminder windows (residue plan G2) ─────────────────────────────────────────────
+    //
+    // All five were private consts in LeaveReminderService, documented there as "ours, not TDC's".
+    // They are the cadence at which the module nags people, which is exactly the sort of thing one
+    // client wants weekly and another wants fortnightly — so it belongs here rather than in a
+    // deploy. Same argument as GrievanceRungChaseDays above.
+    //
+    // ⚠ NOT moved: the reminder engine's 90-day backlog horizon. That one stops the first run on an
+    // established database queueing years of history at once (area 9 queued 275, of which 242 were
+    // history). It protects the system from itself; it is not a policy anybody should be choosing.
+
+    /// <summary>Days before a start date that approved leave is announced to employee and manager.</summary>
+    [Range(0, 180)]
+    public int LeaveStartingReminderDays { get; set; } = 7;
+
+    /// <summary>Days after an end date before leave nobody has closed is chased.</summary>
+    [Range(0, 180)]
+    public int LeaveClosureGraceDays { get; set; } = 2;
+
+    /// <summary>Days a request may sit undecided before its approver is chased.</summary>
+    [Range(0, 180)]
+    public int LeaveUndecidedChaseDays { get; set; } = 5;
+
+    /// <summary>
+    /// Month of the year from which outstanding mandatory leave starts being chased (9 = September).
+    /// </summary>
+    /// <remarks>
+    /// Late enough that the chase is not noise, early enough that there is still time to take the
+    /// leave. Chasing in January says nothing; chasing in December is too late to act on.
+    /// </remarks>
+    [Range(1, 12)]
+    public int MandatoryLeaveChaseFromMonth { get; set; } = 9;
+
+    /// <summary>Days before carry-over expires that the employee is warned.</summary>
+    [Range(0, 365)]
+    public int LeaveCarryOverExpiryReminderDays { get; set; } = 30;
 }

@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Entities;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -34,45 +35,41 @@ public class LeaveReminderService : ILeaveReminderService
     private readonly IAppEventBus _appEventBus;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<LeaveReminderService> _logger;
+    private readonly ICompanyHrPolicyProvider _policyProvider;
 
     public LeaveReminderService(
         IUnitOfWork unitOfWork,
         IAppEventBus appEventBus,
         ICurrentUserProvider currentUserProvider,
-        ILogger<LeaveReminderService> logger)
+        ILogger<LeaveReminderService> logger,
+        ICompanyHrPolicyProvider policyProvider)
     {
         _unitOfWork = unitOfWork;
         _appEventBus = appEventBus;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _policyProvider = policyProvider;
     }
 
     private const string TopicEntityType = "LeaveReminder";
     private const string Audience = "Internal";
 
-    /// <summary>How far ahead approved leave is announced.</summary>
-    /// <remarks>
-    /// 7 days is the working assumption, not TDC's number. It is long enough for a reliever to be
-    /// briefed and short enough that the reminder still feels about this leave rather than about
-    /// the year. Flagged for TDC alongside the other assumed windows.
-    /// </remarks>
-    private const int LeaveStartingHorizonDays = 7;
-
-    /// <summary>Grace after the end date before an unclosed leave is chased.</summary>
-    private const int ClosureGraceDays = 2;
-
-    /// <summary>How long a request may sit undecided before the approver is chased.</summary>
-    private const int PendingDecisionDays = 5;
-
-    /// <summary>How far into the year mandatory leave is chased for not being taken or booked.</summary>
-    /// <remarks>
-    /// Month 9 — so the chase lands with a quarter of the year left, which is enough time to take
-    /// the leave. Chasing in January would be noise; chasing in December would be too late to act.
-    /// </remarks>
-    private const int MandatoryLeaveChaseFromMonth = 9;
-
-    /// <summary>How far ahead expiring carry-over is chased.</summary>
-    private const int CarryOverHorizonDays = 30;
+    // ⚠ The five reminder windows are no longer constants here — they live on
+    // CompanyHrPolicySettings and are read per tenant in FindCandidatesAsync (residue plan G2).
+    //
+    // They used to be private consts documented as "the working assumption, not TDC's number", which
+    // was honest and still wrong: the cadence at which a system nags people is exactly the kind of
+    // thing one client wants weekly and another fortnightly, and changing it cost a deploy. This is
+    // a product, not one client's build.
+    //
+    //   LeaveStartingReminderDays          was 7
+    //   LeaveClosureGraceDays              was 2
+    //   LeaveUndecidedChaseDays            was 5
+    //   MandatoryLeaveChaseFromMonth       was 9
+    //   LeaveCarryOverExpiryReminderDays   was 30
+    //
+    // The defaults on the entity are those same numbers, so nothing changes for an existing tenant
+    // until somebody edits the settings page.
 
     /// <summary>
     /// How far back the first sweep looks. Without this the first run on an established database
@@ -333,11 +330,16 @@ public class LeaveReminderService : ILeaveReminderService
         var backlogFloor = today.AddDays(-BacklogHorizonDays);
         var results = new List<Candidate>();
 
+        // ⚠ GetForTenantAsync, not GetAsync: this runs from the nightly host, which loops every
+        // tenant with no signed-in user to infer one from. GetAsync would throw there — or worse,
+        // read some other tenant's windows.
+        var policy = await _policyProvider.GetForTenantAsync(tenantId, cancellationToken);
+
         // ── 1. Approved leave about to start, and nobody has said whether it is still going ────
         //
         // The other half of the confirm action (R-7). Once somebody answers, the leave stops being
         // chased — which is why ObservanceConfirmedDate is in the filter rather than only on screen.
-        var startHorizon = today.AddDays(LeaveStartingHorizonDays);
+        var startHorizon = today.AddDays(policy.LeaveStartingReminderDays);
         var starting = await _unitOfWork.Repository<LeaveRequest>()
             .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
                             && r.Status == LeaveStatus.Approved
@@ -362,7 +364,7 @@ public class LeaveReminderService : ILeaveReminderService
         //
         // `Close` existed, refused before the end date, and nobody was ever prompted to use it — so
         // approved leave stayed approved for ever (R-10). This is the prompt.
-        var closureDue = today.AddDays(-ClosureGraceDays);
+        var closureDue = today.AddDays(-policy.LeaveClosureGraceDays);
         var unclosed = await _unitOfWork.Repository<LeaveRequest>()
             .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
                             && (r.Status == LeaveStatus.Approved || r.Status == LeaveStatus.InProgress)
@@ -389,7 +391,7 @@ public class LeaveReminderService : ILeaveReminderService
         // Chased on its REQUEST date, not its start date: a request filed months ahead and ignored
         // is exactly the case worth catching, and waiting for the start date to approach would
         // catch it far too late.
-        var pendingSince = at.AddDays(-PendingDecisionDays);
+        var pendingSince = at.AddDays(-policy.LeaveUndecidedChaseDays);
         var undecided = await _unitOfWork.Repository<LeaveRequest>()
             .GetQueryable(r => r.TenantId == tenantId && !r.IsDeleted
                             && (r.Status == LeaveStatus.Pending || r.Status == LeaveStatus.ChangesSuggested)
@@ -421,7 +423,7 @@ public class LeaveReminderService : ILeaveReminderService
         // The compliance register already answers Taken / Scheduled / Outstanding and nobody was
         // ever told about the Outstanding ones (L-23). Only chased from month 9, so it lands with
         // a quarter of the year left to act.
-        if (today.Month >= MandatoryLeaveChaseFromMonth)
+        if (today.Month >= policy.MandatoryLeaveChaseFromMonth)
         {
             var year = today.Year;
             var yearEnd = new DateOnly(year, 12, 31);
@@ -477,7 +479,7 @@ public class LeaveReminderService : ILeaveReminderService
             // "Usable only in Jan–Mar" for ExpiryMonths = 3 means it lapses at the END of month 3.
             var expiry = new DateOnly(today.Year, 1, 1).AddMonths(b.ExpiryMonths).AddDays(-1);
             var days = expiry.DayNumber - today.DayNumber;
-            if (days > CarryOverHorizonDays || days < -BacklogHorizonDays) continue;
+            if (days > policy.LeaveCarryOverExpiryReminderDays || days < -BacklogHorizonDays) continue;
 
             // Already used more than the carried amount, so there is nothing left to lose.
             if (b.UsedDays >= b.CarriedOverDays) continue;

@@ -28,6 +28,7 @@ public class EmolumentService : IEmolumentService
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
     private readonly ILogger<EmolumentService> _logger;
+    private readonly ICompanyHrPolicyProvider _policyProvider;
 
     public EmolumentService(
         IGenericRepository<PayComponent> componentRepo,
@@ -40,7 +41,8 @@ public class EmolumentService : IEmolumentService
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
-        ILogger<EmolumentService> logger)
+        ILogger<EmolumentService> logger,
+        ICompanyHrPolicyProvider policyProvider)
     {
         _componentRepo = componentRepo;
         _positionCompRepo = positionCompRepo;
@@ -53,6 +55,7 @@ public class EmolumentService : IEmolumentService
         _unitOfWork = unitOfWork;
         _clock = clock;
         _logger = logger;
+        _policyProvider = policyProvider;
     }
 
     /// <summary>
@@ -453,7 +456,7 @@ public class EmolumentService : IEmolumentService
         return HrBasicPay.Resolve(employee, assignment, payrollBasic).Amount ?? 0m;
     }
 
-    public async Task<decimal> GetEncashmentDailyRateAsync(Guid employeeId, Guid leaveTypeId, DateOnly asOf)
+    public async Task<EncashmentDailyRate> GetEncashmentDailyRateAsync(Guid employeeId, Guid leaveTypeId, DateOnly asOf)
     {
         var tenantId = GetTenantId();
 
@@ -463,7 +466,13 @@ public class EmolumentService : IEmolumentService
         if (leaveType == null) throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
 
         if (leaveType.EncashmentRateBasis == EncashmentRateBasis.Manual)
-            return leaveType.EncashmentRatePerDay ?? 0m;
+        {
+            var manual = leaveType.EncashmentRatePerDay ?? 0m;
+            return new EncashmentDailyRate(manual,
+                manual > 0m
+                    ? $"A fixed rate of {manual:N4} per day, set on the '{leaveType.Name}' leave type."
+                    : $"No rate is set on the '{leaveType.Name}' leave type, which is configured to use a fixed one.");
+        }
 
         var employee = await _employeeRepo.GetQueryable()
             .Include(e => e.Position)
@@ -478,11 +487,32 @@ public class EmolumentService : IEmolumentService
             .Where(c => c.ComponentType == PayComponentType.Allowance && linkedIds.Contains(c.PayComponentId))
             .Sum(c => c.Amount);
 
+        // ⚠ The fallback is the TENANT'S number now, not a private const. It was
+        // `DefaultWorkingDaysPerMonth = 22` in this file — the last genuinely hardcoded piece of the
+        // encashment rate, and the one every leave type lands on until somebody edits its own
+        // divisor. A constant that decides what a day of leave is worth is a policy, and policy
+        // belongs in settings where a client can see and change it (residue plan G2).
+        var policy = await _policyProvider.GetAsync();
         var divisor = leaveType.EncashmentWorkingDaysPerMonth > 0
             ? leaveType.EncashmentWorkingDaysPerMonth
-            : DefaultWorkingDaysPerMonth;
+            : policy.EncashmentWorkingDaysPerMonth;
 
-        return Math.Round((basic + linkedAllowances) / divisor, 2);
+        // Guard the fallback's fallback: a settings row edited to 0 would divide by zero, and
+        // [Range] only binds on the way in through the API.
+        if (divisor <= 0) divisor = DefaultWorkingDaysPerMonth;
+
+        var monthly = basic + linkedAllowances;
+        var rate = Math.Round(monthly / divisor, 2);
+
+        // ⚠ Built from the very number used above, so the words can never describe a basis other
+        // than the one that produced the figure beside them.
+        var source = leaveType.EncashmentWorkingDaysPerMonth > 0
+            ? $"the '{leaveType.Name}' leave type"
+            : "HR policy settings";
+
+        return new EncashmentDailyRate(rate,
+            $"{monthly:N2} (basic + linked allowances) ÷ {divisor} working days = {rate:N2} per day, "
+            + $"per {source}.");
     }
 
     // ─── Effective-component composition ───────────────────────────────────────

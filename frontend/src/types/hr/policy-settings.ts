@@ -86,6 +86,28 @@ export interface CompanyHrPolicySettings {
   settlementDaysPerYear: number;
   attendanceRateIncludesApprovedLeave: boolean;
 
+  /**
+   * ⚠ Settles a requirements conflict, not a preference. FR-HR-046 says leave is encashed only on
+   * exit; the module ships an in-service path and the seed flags annual leave convertible. Both
+   * readings were live at once. Defaults to the FRD's reading for a new tenant; the seeded demo
+   * tenant has it ON, because the encashment screen has already been demonstrated.
+   */
+  allowInServiceEncashment: boolean;
+  /**
+   * ⚠ Read beside `settlementDaysPerYear` and expect them to disagree — 22 working days a month
+   * against 365 calendar days a year is roughly 38% apart on the same salary. They are different
+   * money events and deliberately not merged; the settings screen shows both with a worked example
+   * so the gap is met there rather than in a payout.
+   */
+  encashmentWorkingDaysPerMonth: number;
+
+  /** The leave reminder cadence. All five were private constants before. */
+  leaveStartingReminderDays: number;
+  leaveClosureGraceDays: number;
+  leaveUndecidedChaseDays: number;
+  mandatoryLeaveChaseFromMonth: number;
+  leaveCarryOverExpiryReminderDays: number;
+
   createdAt: string;
   createdBy: string | null;
   updatedAt: string | null;

@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.Common;
 using Microsoft.EntityFrameworkCore;
@@ -27,6 +28,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
     private readonly IEmolumentService _emolumentService;
     private readonly IGenericRepository<LeaveType> _leaveTypeRepository;
     private readonly IDateTimeProvider _clock;
+    private readonly ICompanyHrPolicyProvider _policyProvider;
 
     public LeaveEncashmentService(
         IGenericRepository<LeaveEncashment> encashmentRepository,
@@ -40,7 +42,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         ILeaveBalanceRecalculationService recalculationService,
         IEmolumentService emolumentService,
         IGenericRepository<LeaveType> leaveTypeRepository,
-        IDateTimeProvider clock)
+        IDateTimeProvider clock,
+        ICompanyHrPolicyProvider policyProvider)
     {
         _encashmentRepository = encashmentRepository;
         _leaveRepository = leaveRepository;
@@ -54,6 +57,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         _emolumentService = emolumentService;
         _leaveTypeRepository = leaveTypeRepository;
         _clock = clock;
+        _policyProvider = policyProvider;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -100,6 +104,21 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         if (leaveRequest.Encashment != null)
             throw new InvalidOperationException("This leave request has already been encashed.");
 
+        // ⚠ The tenant policy is asked FIRST, and the order matters. FR-HR-046 says leave is
+        // encashed "only on exit, no other route", while this path and the seeded
+        // AllowCashConversion flag say otherwise — both readings were live in the product at once
+        // (residue plan L-D8). The switch settles it per client rather than per requirement
+        // document, and it defaults OFF, which is FR-HR-046's reading.
+        //
+        // Asked before the leave type so the refusal names the real reason. A tenant with the route
+        // switched off should be told the route is closed, not sent away to change a flag on a leave
+        // type that would make no difference.
+        var policy = await _policyProvider.GetAsync();
+        if (!policy.AllowInServiceEncashment)
+            throw new InvalidOperationException(
+                "Leave is encashed only when an employee leaves, not while they are still employed. "
+                + "If that is not this organisation's policy, switch on in-service encashment in HR policy settings.");
+
         // The leave type must permit cash conversion before any encashment can be requested.
         var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         if (!leaveType.AllowCashConversion)
@@ -124,8 +143,19 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         // amount only if the derivation yields nothing (e.g. no rate configured).
         var asOf = leaveRequest.StartDate;
         var dailyRate = await _emolumentService.GetEncashmentDailyRateAsync(dto.EmployeeId, dto.LeaveTypeId, asOf);
-        var computedAmount = Math.Round(dailyRate * dto.DaysEncashed, 2);
+        var computedAmount = Math.Round(dailyRate.Rate * dto.DaysEncashed, 2);
         var amountPaid = computedAmount > 0 ? computedAmount : dto.AmountPaid;
+
+        // ⚠ The basis is stored WITH the payout, exactly as the final settlement already does. Leave
+        // encashment and a settlement compute a daily rate from deliberately different bases — 22
+        // working days a month here against 365 calendar days a year there, roughly 38% apart on the
+        // same salary — so an amount that cannot say which basis produced it is unauditable the
+        // moment either setting is edited. Recorded when the derivation is what paid; when the
+        // caller's own figure is used instead, the record says that rather than describing a
+        // calculation that did not happen.
+        var rateBasis = computedAmount > 0
+            ? dailyRate.Basis
+            : $"Amount entered by hand; no rate could be derived. ({dailyRate.Basis})";
 
         var entity = new LeaveEncashment
         {
@@ -136,6 +166,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
             Year = dto.Year,
             DaysEncashed = dto.DaysEncashed,
             AmountPaid = amountPaid,
+            RateBasis = rateBasis,
             Notes = dto.Notes,
             Status = LeaveEncashmentStatus.Submitted
         };

@@ -107,6 +107,15 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int DisciplineBacklogHorizonDays { get; set; }
     public int SettlementDaysPerYear { get; set; }
     public bool AttendanceRateIncludesApprovedLeave { get; set; }
+
+    // Leave encashment and the reminder cadence (residue plan G2).
+    public bool AllowInServiceEncashment { get; set; }
+    public int EncashmentWorkingDaysPerMonth { get; set; }
+    public int LeaveStartingReminderDays { get; set; }
+    public int LeaveClosureGraceDays { get; set; }
+    public int LeaveUndecidedChaseDays { get; set; }
+    public int MandatoryLeaveChaseFromMonth { get; set; }
+    public int LeaveCarryOverExpiryReminderDays { get; set; }
 }
 
 /// <summary>
@@ -197,4 +206,23 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(1, 366)] public int SettlementDaysPerYear { get; set; } = 365;
 
     public bool AttendanceRateIncludesApprovedLeave { get; set; } = true;
+
+    /// <summary>
+    /// ⚠ Settles a requirements conflict rather than expressing a preference: FR-HR-046 says leave
+    /// is encashed only on exit, and the module ships an in-service path. Defaults to the FRD's
+    /// reading. See the entity.
+    /// </summary>
+    public bool AllowInServiceEncashment { get; set; } = false;
+
+    /// <summary>
+    /// ⚠ Read beside <see cref="SettlementDaysPerYear"/> and expect them to differ — roughly 38% on
+    /// the same salary at the defaults. They are different money events and deliberately not merged.
+    /// </summary>
+    [Range(1, 31)] public int EncashmentWorkingDaysPerMonth { get; set; } = 22;
+
+    [Range(0, 180)] public int LeaveStartingReminderDays { get; set; } = 7;
+    [Range(0, 180)] public int LeaveClosureGraceDays { get; set; } = 2;
+    [Range(0, 180)] public int LeaveUndecidedChaseDays { get; set; } = 5;
+    [Range(1, 12)]  public int MandatoryLeaveChaseFromMonth { get; set; } = 9;
+    [Range(0, 365)] public int LeaveCarryOverExpiryReminderDays { get; set; } = 30;
 }

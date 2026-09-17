@@ -4342,6 +4342,29 @@ private void ConfigureHREntities(ModelBuilder builder)
                 // a 38% spread on the same facts, and TDC has not chosen. See the entity.
                 SettlementDaysPerYear          = 365,
                 AttendanceRateIncludesApprovedLeave = true,
+                // Residue plan G2. Same rule as the block above: every property must appear here or
+                // the DbContext will not build at design time.
+                //
+                // ⚠ AllowInServiceEncashment is seeded TRUE and the entity's own default is FALSE,
+                // and that difference is deliberate. FR-HR-046 says leave is encashed only on exit,
+                // so a brand-new tenant should start there — but this seeded tenant is the one the
+                // demo runs on, the encashment screen has already been shown to stakeholders, and
+                // defaulting it off without this line would make a demonstrated feature disappear.
+                // A client who wants the FRD's reading switches it off; a fresh tenant already has it.
+                AllowInServiceEncashment       = true,
+                // The divisor that decides what a day of unused leave is worth. Was a private const
+                // in EmolumentService. ⚠ Read it against SettlementDaysPerYear above — 22 working
+                // days a month against 365 calendar days a year is ~38% apart on the same salary.
+                // Different money events, deliberately not merged; see the entity.
+                EncashmentWorkingDaysPerMonth  = 22,
+                // The reminder cadence, previously five private consts in LeaveReminderService.
+                // Each value is exactly what its constant was, so the seeded tenant is nagged today
+                // on the same schedule as yesterday.
+                LeaveStartingReminderDays      = 7,
+                LeaveClosureGraceDays          = 2,
+                LeaveUndecidedChaseDays        = 5,
+                MandatoryLeaveChaseFromMonth   = 9,
+                LeaveCarryOverExpiryReminderDays = 30,
                 CreatedAt                      = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt                      = (DateTime?)null,
                 CreatedBy                      = "System",

@@ -69,6 +69,13 @@ public static class CompanyHrPolicyMappingExtensions
             DisciplineBacklogHorizonDays          = entity.DisciplineBacklogHorizonDays,
             SettlementDaysPerYear                 = entity.SettlementDaysPerYear,
             AttendanceRateIncludesApprovedLeave   = entity.AttendanceRateIncludesApprovedLeave,
+            AllowInServiceEncashment              = entity.AllowInServiceEncashment,
+            EncashmentWorkingDaysPerMonth         = entity.EncashmentWorkingDaysPerMonth,
+            LeaveStartingReminderDays             = entity.LeaveStartingReminderDays,
+            LeaveClosureGraceDays                 = entity.LeaveClosureGraceDays,
+            LeaveUndecidedChaseDays               = entity.LeaveUndecidedChaseDays,
+            MandatoryLeaveChaseFromMonth          = entity.MandatoryLeaveChaseFromMonth,
+            LeaveCarryOverExpiryReminderDays      = entity.LeaveCarryOverExpiryReminderDays,
         };
     }
 
@@ -128,5 +135,12 @@ public static class CompanyHrPolicyMappingExtensions
         entity.DisciplineBacklogHorizonDays        = dto.DisciplineBacklogHorizonDays;
         entity.SettlementDaysPerYear               = dto.SettlementDaysPerYear;
         entity.AttendanceRateIncludesApprovedLeave = dto.AttendanceRateIncludesApprovedLeave;
+        entity.AllowInServiceEncashment           = dto.AllowInServiceEncashment;
+        entity.EncashmentWorkingDaysPerMonth      = dto.EncashmentWorkingDaysPerMonth;
+        entity.LeaveStartingReminderDays          = dto.LeaveStartingReminderDays;
+        entity.LeaveClosureGraceDays              = dto.LeaveClosureGraceDays;
+        entity.LeaveUndecidedChaseDays            = dto.LeaveUndecidedChaseDays;
+        entity.MandatoryLeaveChaseFromMonth       = dto.MandatoryLeaveChaseFromMonth;
+        entity.LeaveCarryOverExpiryReminderDays   = dto.LeaveCarryOverExpiryReminderDays;
     }
 }

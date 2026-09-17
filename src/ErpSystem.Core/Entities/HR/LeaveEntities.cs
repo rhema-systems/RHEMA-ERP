@@ -623,6 +623,22 @@ public class LeaveEncashment : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal AmountPaid { get; set; }
 
+    /// <summary>
+    /// How <see cref="AmountPaid"/> was arrived at, in words — the monthly figure, the divisor, the
+    /// resulting daily rate, and where that divisor came from.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Stored rather than derived on read, and that is the point. Leave encashment and a final
+    /// settlement use deliberately different bases — working days per month here, calendar days per
+    /// year there, roughly 38% apart on the same salary — and either can be re-configured at any
+    /// time. A payout that cannot say which basis produced it becomes unauditable the moment
+    /// somebody edits a setting, because the figure no longer reconciles with the live rule and
+    /// nothing records the rule that was live when it was paid. The final settlement has recorded
+    /// its basis this way since FR-HR-184; leave does now too (residue plan G2).
+    /// </remarks>
+    [MaxLength(500)]
+    public string? RateBasis { get; set; }
+
     public LeaveEncashmentStatus Status { get; set; } = LeaveEncashmentStatus.Draft;
 
     // Set after payment is made (null until then)
