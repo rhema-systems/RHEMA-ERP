@@ -9,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.AspNetCore.Authorization;
@@ -277,6 +278,64 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         readiness.IsReady.Should().BeTrue();
         readiness.RequiredPeriodCount.Should().Be(1);
         readiness.ReadyPeriodCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task ManifestPreparedMappings_InitializeAndBecomeExecutableOnlyAfterApprovedActivation()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        foreach (var mapping in db.AccountAccountingBooks.Local)
+        {
+            mapping.IsEnabled = false;
+            mapping.CreatedBy = $"System ({FinanceClassificationManifestSeeder.ManifestVersion})";
+        }
+        await db.SaveChangesAsync();
+
+        var maker = Guid.NewGuid();
+        var initialization = InitializationService(db, state.TenantId, maker);
+        var preparation = await initialization.PrepareAsync(state.Book.Id, "IndependentOpeningBalances", new DateTime(2025, 12, 31), null);
+        preparation.Accounts.Should().HaveCount(2);
+        await initialization.ConfigureAsync(state.Book.Id, Independent(state, "manifest-prepared", 0m));
+        await initialization.SubmitAsync(state.Book.Id);
+        var evidence = db.AccountingBookInitializations.Single();
+        evidence.RowVersion = [7];
+        await db.SaveChangesAsync();
+        await InitializationService(db, state.TenantId, Guid.NewGuid()).ApproveAsync(state.Book.Id,
+            new DecideAccountingBookInitializationDto { Reason = "Approved opening authority", RowVersion = Convert.ToBase64String([7]) });
+        db.AccountingBookPeriods.Add(new AccountingBookPeriod { TenantId = state.TenantId, AccountingBookId = state.Book.Id,
+            FiscalPeriodId = state.Period.Id, PeriodStatus = AccountingBookPeriodStatus.Open });
+        state.Book.RowVersion = [8];
+        await db.SaveChangesAsync();
+        db.AccountAccountingBooks.Should().OnlyContain(mapping => !mapping.IsEnabled);
+
+        var lifecycle = new AccountingBookService(db, User(state.TenantId, maker).Object, Workflow().Object, Audit().Object);
+        await lifecycle.RequestTransitionAsync(state.Book.Id, new RequestAccountingBookTransitionDto
+            { TargetStatus = "Active", Reason = "Opening and period approved", RowVersion = Convert.ToBase64String([8]) });
+        db.AccountAccountingBooks.Should().OnlyContain(mapping => !mapping.IsEnabled);
+        await new AccountingBookService(db, User(state.TenantId, Guid.NewGuid()).Object, Workflow().Object, Audit().Object)
+            .ApproveTransitionAsync(state.Book.Id, new DecideAccountingBookTransitionDto
+                { Reason = "Independent activation approval", RowVersion = Convert.ToBase64String([8]) });
+
+        state.Book.LifecycleStatus.Should().Be(AccountingBookLifecycleStatus.Active);
+        db.AccountAccountingBooks.Should().OnlyContain(mapping => mapping.IsEnabled);
+        (await initialization.ValidateCurrentApprovedEvidenceAsync(state.Book.Id)).IsValid.Should().BeTrue();
+
+        await lifecycle.RequestTransitionAsync(state.Book.Id, new RequestAccountingBookTransitionDto
+            { TargetStatus = "Suspended", Reason = "Pause test posting", RowVersion = Convert.ToBase64String([8]) });
+        await new AccountingBookService(db, User(state.TenantId, Guid.NewGuid()).Object, Workflow().Object, Audit().Object)
+            .ApproveTransitionAsync(state.Book.Id, new DecideAccountingBookTransitionDto
+                { Reason = "Independent suspension approval", RowVersion = Convert.ToBase64String([8]) });
+        db.AccountAccountingBooks.Should().OnlyContain(mapping => !mapping.IsEnabled);
+
+        (await initialization.GetReadinessAsync(state.Book.Id)).IsReady.Should().BeTrue();
+        await lifecycle.RequestTransitionAsync(state.Book.Id, new RequestAccountingBookTransitionDto
+            { TargetStatus = "Active", Reason = "Resume test posting", RowVersion = Convert.ToBase64String([8]) });
+        await new AccountingBookService(db, User(state.TenantId, Guid.NewGuid()).Object, Workflow().Object, Audit().Object)
+            .ApproveTransitionAsync(state.Book.Id, new DecideAccountingBookTransitionDto
+                { Reason = "Independent resumption approval", RowVersion = Convert.ToBase64String([8]) });
+        db.AccountAccountingBooks.Should().OnlyContain(mapping => mapping.IsEnabled);
+        (await initialization.ValidateCurrentApprovedEvidenceAsync(state.Book.Id)).IsValid.Should().BeTrue();
     }
 
     [Fact]

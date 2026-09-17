@@ -202,7 +202,7 @@ public sealed class FinanceClassificationManifestSeeder
     private static bool IsBookPostingReady(AccountingBook book) =>
         !book.IsDeleted && book.IsActive && book.AllowsPosting;
 
-    private static bool IsUntouchedManifestOwnedMapping(AccountAccountingBook mapping) =>
+    public static bool IsUntouchedManifestOwnedMapping(AccountAccountingBook mapping) =>
         mapping.UpdatedBy is null
         && mapping.CreatedBy is "System (FIN-CLASSIFICATION-1.0)"
             or "System (FIN-CLASSIFICATION-2.0)"

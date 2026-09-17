@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
@@ -171,6 +172,15 @@ public sealed class AccountingBookService : IAccountingBookService
             book.LifecycleStatus = target;
             if (target == AccountingBookLifecycleStatus.Initializing) book.InitializationStartedAtUtc ??= DateTime.UtcNow;
             ApplyPostingFlags(book); ClearPending(book, true);
+            if (target is AccountingBookLifecycleStatus.Active or AccountingBookLifecycleStatus.Suspended)
+            {
+                // Manifest mappings are prepared while inactive, executable only while the
+                // governed book is active, and retained for a later governed resumption.
+                var preparedMappings = await _db.AccountAccountingBooks.Where(item => item.TenantId == TenantId
+                    && item.AccountingBookId == book.Id && !item.IsDeleted).ToListAsync(ct);
+                foreach (var mapping in preparedMappings.Where(FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping))
+                    mapping.IsEnabled = target == AccountingBookLifecycleStatus.Active;
+            }
         }
         book.UpdatedAt = DateTime.UtcNow; book.UpdatedBy = ActorName();
         await _db.SaveChangesAsync(ct);

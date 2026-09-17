@@ -9,6 +9,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
+using ErpSystem.Data.Seeders;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 
@@ -51,10 +52,14 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         var tenantCurrency = await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId && !item.IsDeleted).Select(item => item.BaseCurrency).SingleOrDefaultAsync(cancellationToken);
         if (tenantCurrency is not { Length: 3 } || tenantCurrency.Any(ch => ch is < 'A' or > 'Z')) throw new InvalidOperationException("Canonical tenant functional-currency authority is required.");
         var mappings = await _db.AccountAccountingBooks.AsNoTracking().Include(item => item.Account).Include(item => item.AccountClassification)
-            .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && item.IsEnabled && !item.IsDeleted)
-            .OrderBy(item => item.Account.AccountNumber).ToListAsync(cancellationToken);
-        if (mappings.Any(item => item.Account.IsDeleted || item.AccountClassification == null || item.AccountClassification.Status != AccountClassificationStatus.Active
-            || !item.AccountClassification.IsPostingClassification || item.AccountClassification.TenantId != TenantId || item.AccountClassification.AccountingBookId != book.Id))
+            .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
+            .ToListAsync(cancellationToken);
+        mappings = mappings.Where(item => item.IsEnabled || !book.IsActive && FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(item))
+            .OrderBy(item => item.Account.AccountNumber).ToList();
+        if (mappings.Any(item => item.Account == null || item.Account.IsDeleted || item.Account.TenantId != TenantId
+            || item.AccountClassification == null || item.AccountClassification.IsDeleted || item.AccountClassification.Status != AccountClassificationStatus.Active
+            || !item.AccountClassification.IsPostingClassification || item.AccountClassification.TenantId != TenantId
+            || item.AccountClassification.AccountingBookId != book.Id || item.AccountClassification.CoreAccountType != item.Account.AccountType))
             throw new InvalidOperationException("Initialization contains an invalid mapped account or classification.");
         var balances = await _db.AccountBalances.AsNoTracking().Include(item => item.FiscalPeriod)
             .Where(item => item.TenantId == TenantId && item.AccountingBookId == authorityBook.Id && !item.IsDeleted && item.FiscalPeriod.EndDate <= cutoffDate.Date)
@@ -276,10 +281,13 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             throw new InvalidOperationException("INITIALIZATION_CUTOFF_PERIOD_INVALID: Cutoff must be the end date of exactly one live same-tenant fiscal period.");
         var cutoffPeriod = cutoffPeriods[0];
         var mappings = await _db.AccountAccountingBooks.AsNoTracking().Include(item => item.Account).Include(item => item.AccountClassification)
-            .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && item.IsEnabled && !item.IsDeleted).OrderBy(item => item.AccountId).ToListAsync(ct);
-        if (mappings.Count == 0 || mappings.Any(item => item.Account == null || item.Account.IsDeleted || item.AccountClassification == null
-            || item.AccountClassification.Status != AccountClassificationStatus.Active || !item.AccountClassification.IsPostingClassification
-            || item.AccountClassification.TenantId != TenantId || item.AccountClassification.AccountingBookId != book.Id))
+            .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted).ToListAsync(ct);
+        mappings = mappings.Where(item => item.IsEnabled || !book.IsActive && FinanceClassificationManifestSeeder.IsUntouchedManifestOwnedMapping(item))
+            .OrderBy(item => item.AccountId).ToList();
+        if (mappings.Count == 0 || mappings.Any(item => item.Account == null || item.Account.IsDeleted || item.Account.TenantId != TenantId
+            || item.AccountClassification == null || item.AccountClassification.IsDeleted || item.AccountClassification.Status != AccountClassificationStatus.Active
+            || !item.AccountClassification.IsPostingClassification || item.AccountClassification.TenantId != TenantId
+            || item.AccountClassification.AccountingBookId != book.Id || item.AccountClassification.CoreAccountType != item.Account.AccountType))
             throw new InvalidOperationException("Initialization requires complete enabled account mappings with compatible active posting classifications.");
         var lines = requested.OrderBy(item => item.AccountId).ToList();
         if (lines.Count != mappings.Count || lines.Select(item => item.AccountId).Distinct().Count() != lines.Count
@@ -340,7 +348,9 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             .Select(item => new { item.Id, item.JournalEntryId, item.FiscalPeriodId, item.AccountId, item.TransactionDate, item.DebitAmount, item.CreditAmount, item.TransactionCurrency, item.ForeignCurrencyAmount, item.ExchangeRate })
             .Select(item => $"{item.Id:N}:{item.JournalEntryId:N}:{item.FiscalPeriodId:N}:{item.AccountId:N}:{item.TransactionDate:O}:{D(item.DebitAmount)}:{D(item.CreditAmount)}:{item.TransactionCurrency}:{D(item.ForeignCurrencyAmount ?? 0)}:{D(item.ExchangeRate ?? 0)}"));
         var lineEvidence = string.Join('|', lines.Select(item => $"{item.AccountId:N}:{item.CurrencyCode}:{D(item.OpeningDebit)}:{D(item.OpeningCredit)}:{D(item.BaseBookSignedBalance)}:{D(item.OpeningAdjustment)}"));
-        var evidence = Hash($"BOOK-INITIALIZATION-EVIDENCE-V1|{TenantId:N}|{book.Id:N}|{book.Code}|{book.BookType}|{book.LifecycleStatus}|{book.FunctionalCurrencyCode}|{mode}|{cutoff:yyyy-MM-dd}|{cutoffPeriod.Id:N}|{cutoffPeriod.PeriodCode}|{cutoffPeriod.StartDate:O}|{cutoffPeriod.EndDate:O}|{source?.Id:N}|{source?.Code}|{source?.BookType}|{source?.LifecycleStatus}|{source?.FunctionalCurrencyCode}|{source?.IsActive}|{source?.AllowsPosting}|{idempotencyKey}|{reason}|{lineEvidence}");
+        // Lifecycle activation changes the book's state but not its approved opening authority.
+        // The source's active/postable state is revalidated separately on every evidence read.
+        var evidence = Hash($"BOOK-INITIALIZATION-EVIDENCE-V2|{TenantId:N}|{book.Id:N}|{book.Code}|{book.BookType}|{book.FunctionalCurrencyCode}|{mode}|{cutoff:yyyy-MM-dd}|{cutoffPeriod.Id:N}|{cutoffPeriod.PeriodCode}|{cutoffPeriod.StartDate:O}|{cutoffPeriod.EndDate:O}|{source?.Id:N}|{source?.Code}|{source?.BookType}|{source?.FunctionalCurrencyCode}|{idempotencyKey}|{reason}|{lineEvidence}");
         var reconciliation = Hash($"BOOK-INITIALIZATION-RECONCILIATION-V1|{evidence}|{authority}|{balanceEvidence}|{transactionEvidence}|{D(debit)}|{D(credit)}");
         return new Prepared(lines, mappings.Count, debit, credit, evidence, reconciliation, cutoffPeriod.Id);
     }
