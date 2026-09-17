@@ -346,14 +346,22 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         outcomes.Count(item => item.Result is not null).Should().Be(1,
             "posting outcomes were {0}", string.Join(" | ", outcomes.Select(item =>
                 item.Error?.ToString() ?? "success")));
+        outcomes.Single(item => item.Result is not null).Result!.WasDuplicate.Should().BeFalse();
         outcomes.Count(item => item.Error?.Message.Contains("PARALLEL_BOOK_POSTING_DISABLED", StringComparison.Ordinal) == true)
             .Should().Be(1);
         await using var verification = database.CreateContext();
         (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
         (await verification.JournalEntries.CountAsync()).Should().Be(1);
-        (await verification.Accounts.SingleAsync(item => item.Id == seeded.DebitAccountId)).Balance.Should().Be(-100m);
-        (await verification.Accounts.SingleAsync(item => item.Id == seeded.CreditAccountId)).Balance.Should().Be(-100m);
+        // Either book can win the race. Only the primary book updates the legacy compatibility view.
+        var primaryBookWon = outcomes[0].Result is not null;
+        var expectedCompatibilityBalance = primaryBookWon ? -100m : 0m;
+        (await verification.Accounts.SingleAsync(item => item.Id == seeded.DebitAccountId)).Balance
+            .Should().Be(expectedCompatibilityBalance);
+        (await verification.Accounts.SingleAsync(item => item.Id == seeded.CreditAccountId)).Balance
+            .Should().Be(expectedCompatibilityBalance);
         (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.AccountBalances.Select(item => item.BookClassification).Distinct().ToListAsync())
+            .Should().ContainSingle().Which.Should().Be(primaryBookWon ? "IFRS" : "LOCAL_STATUTORY");
         (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
             .ClosingBalance.Should().Be(100m);
     }

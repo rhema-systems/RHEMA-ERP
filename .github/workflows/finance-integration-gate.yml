@@ -162,7 +162,7 @@ jobs:
           dotnet test tests/ErpSystem.Core.Tests/ErpSystem.Core.Tests.csproj \
             --configuration Debug \
             --no-build \
-            --filter "FullyQualifiedName~E2E012CycleCountFinanceLifecycleTests.Abc_blind_count_recount_dual_approval_and_audit_attestation_reconcile_to_finance_posting" \
+            --filter "FullyQualifiedName~E2E012CycleCountFinanceLifecycleTests.Counter_reviews_corrects_then_submits_for_independent_approvals_and_finance_posting" \
             --logger "trx;LogFileName=finance-inventory-contract.trx" \
             --results-directory artifacts/finance-test-results
 
