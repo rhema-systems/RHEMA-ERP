@@ -596,6 +596,12 @@ public class LeaveRequestDto
     // keeps its number, its status and its approval — EndDate is simply earlier than it was, and
     // PreRecallEndDate is what it used to be. A screen showing a recalled request should say both,
     // or the leave looks like it was always this short.
+    /// <summary>
+    /// The medical board that ruled on this absence, when one sat. ⚠ A bare id across a module
+    /// boundary — leave reads the board and never writes it.
+    /// </summary>
+    public Guid? MedicalBoardId { get; set; }
+
     public DateOnly? RecallEffectiveDate { get; set; }
     public DateOnly? PreRecallEndDate { get; set; }
     public DateTime? RecalledDate { get; set; }

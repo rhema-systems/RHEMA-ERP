@@ -268,6 +268,13 @@ const STATUS_VARIANTS: Record<string, BadgeVariant> = {
   verified: 'default',
   notapplicable: 'outline',
 
+  // MedicalBoardStatus (residue plan G4). A board that has been convened is under way but has said
+  // nothing yet, so it reads as neutral as a pending thing does; a concluded one has reported, which
+  // is the only state leave and separation act on, so it carries the same weight as any other
+  // settled outcome. `cancelled` and `requested` are already mapped above.
+  convened: 'secondary',
+  concluded: 'default',
+
   // PreEmploymentCheckStatus. "CompletedWithCaution" is not clean but is not a failure either.
   completedwithcaution: 'secondary',
 

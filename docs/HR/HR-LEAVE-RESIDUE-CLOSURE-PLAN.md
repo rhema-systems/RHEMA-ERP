@@ -1,6 +1,6 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1, G2 and G3 BUILT and verified. G4–G7 planned, not built.**
+**Status:** 2026-09-17 — **G1–G4 BUILT and verified. G5–G7 planned, not built.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -137,7 +137,57 @@ rather than anyone's rule. **L-D10 remains TDC's to answer, but nothing waits on
 Unlike in-service encashment there is no already-demonstrated screen to protect, so the safe default
 was taken rather than forcing it.
 
-### G4–G7 — not started
+### G4 — the medical board: BUILT 2026-09-17
+
+Migration `20260917223219_AddMedicalBoards` — three tables (`MedicalBoards`, `MedicalBoardMembers`,
+`MedicalBoardSittings`) and two bridge columns, guarded SQL, registered.
+
+**Verified by `dev-harness/hr-leave` slice 8 — 63 assertions, green twice. Suite total 374 across
+eight slices, green twice.**
+
+**It lives in Medical, gated on `HR.Medical.*`.** The SHE↔Medical boundary settles it: Medical owns
+clinical records and other modules bridge by reference. It reuses `MedicalExamResult` — *Fit / Fit
+with restrictions / Temporarily unfit / Unfit / Requires further investigation* — rather than
+minting a parallel enum that could drift.
+
+**The recommendation is fields on the board, not a fourth entity.** One board produces one
+recommendation; a separate table would imply it can report twice, and then nothing could answer
+*"what did the board decide?"* without choosing a row.
+
+| Rule | Why |
+|---|---|
+| **A ratchet**: Requested → Convened → Concluded, cancel until it reports, **no un-conclude** | membership and sittings are part of what the recommendation MEANS; editing them afterwards would rewrite who decided, while leave approved on it stays approved |
+| **No members → cannot convene** | a board is its panel |
+| **No sitting → cannot report** | a board that never met cannot have reached a finding |
+| ⚠ **The subject cannot sit on their own board** | nobody rules on their own fitness, and it would discredit the finding leave and separation rest on |
+| **One chair; nobody seated twice** | the minutes would read as a larger board than sat |
+
+**A member is one of three things** — a registered physician, an **employee** (HR as secretary, a
+staff or union representative, an in-house nurse), or a free-text name for the outside clinician who
+is in nobody's register. The employee arm was added after the module owner asked whether a board can
+include an employee; the first cut had only the other two, which would have forced somebody to invent
+a register entry for their own HR manager.
+
+**The bridge is one way, and the schema enforces it.** `LeaveRequest.MedicalBoardId` and
+`EmployeeSeparation.MedicalBoardId` are bare `Guid`s with **no navigation and no foreign key** —
+verified in the database after migrating. A navigation would put the board in those modules' object
+graphs, where an EF fixup could modify a clinical record through a leave save.
+
+⚠ **Linking and enforcing are deliberately separate.** A request may link a board that is only
+*Requested* or *Convened* — a board is usually asked for before it sits, and the request should say
+which one it waits on. **The evidence gate insists on `Concluded`.** Slice 8's sharpest assertion is
+that a convened board does NOT satisfy the rule and the same board, once it reports, does. `PUT
+/api/Leaves/{id}/medical-board` is what sets the link; without it the board arm of the gate would
+have been unreachable, which is travel's T-23 shape.
+
+**⚠ A comment I wrote was wrong, and the harness caught it.** The controller claimed *"the HR desk is
+not automatically entitled to read why somebody was found unfit"*. It is: `HrPermissions.HrStaffGrants`
+gives the HR role `ViewMedicalRecords` and `MaintainMedicalRecords`, deliberately, because HR
+administers the process even though clinicians decide it. **"Gated on `HR.Medical.*`" does not mean
+"HR cannot see it"** — it means the entitlement lives in one grant map instead of being implied by
+role checks across controllers. An employee and a line manager are refused; both asserted.
+
+### G5–G7 — not started
 
 Unchanged from § 4 below. **G6 is partly done** — the register exists and covers leave; what remains
 is the survey of the other modules.

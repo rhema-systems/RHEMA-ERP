@@ -234,6 +234,12 @@ public partial class ApplicationDbContext
     public DbSet<EmployeeMedicalExamDocument> EmployeeMedicalExamDocuments { get; set; } = null!;
     public DbSet<MedicalClaimPreAuthorization> MedicalClaimPreAuthorizations { get; set; } = null!;
     public DbSet<MedicalReferral> MedicalReferrals { get; set; } = null!;
+
+    // Medical boards (residue plan G4 / R-15b). ⚠ Read by leave and separation, written by
+    // neither — the bridge is one-way on purpose.
+    public DbSet<MedicalBoard> MedicalBoards { get; set; } = null!;
+    public DbSet<MedicalBoardMember> MedicalBoardMembers { get; set; } = null!;
+    public DbSet<MedicalBoardSitting> MedicalBoardSittings { get; set; } = null!;
     public DbSet<MedicalAppointment> MedicalAppointments { get; set; } = null!;
     public DbSet<NHISClaim> NHISClaims { get; set; } = null!;
     public DbSet<NHISClaimDocument> NHISClaimDocuments { get; set; } = null!;

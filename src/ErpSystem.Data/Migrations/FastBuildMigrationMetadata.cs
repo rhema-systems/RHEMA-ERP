@@ -331,3 +331,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917192244_AddLeaveRecall")] partial class AddLeaveRecall { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917203359_AddLeaveEncashmentPolicySettings")] partial class AddLeaveEncashmentPolicySettings { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917213834_AddLeaveMedicalEvidence")] partial class AddLeaveMedicalEvidence { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260917223219_AddMedicalBoards")] partial class AddMedicalBoards { }

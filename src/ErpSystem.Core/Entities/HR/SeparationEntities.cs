@@ -70,6 +70,18 @@ public class EmployeeSeparation : TenantEntity
     /// <summary>Why the employee is leaving. Reporting only; <see cref="SeparationType"/> drives behaviour.</summary>
     public TerminationReason? ReasonCategory { get; set; }
 
+    /// <summary>
+    /// The medical board whose recommendation this separation rests on, for a medical retirement
+    /// (residue plan G4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A bare <c>Guid</c> across a module boundary — no navigation, no foreign key. The board is
+    /// a Medical-module record; separation READS it and never writes to it. <c>MedicalRetirement</c>
+    /// already existed as a reason; what it never had was anything to point at showing WHO decided
+    /// the employee was unfit and on what finding.
+    /// </remarks>
+    public Guid? MedicalBoardId { get; set; }
+
     [MaxLength(2000)]
     public string? ReasonNotes { get; set; }
 

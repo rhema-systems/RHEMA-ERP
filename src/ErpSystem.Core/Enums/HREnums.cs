@@ -4790,6 +4790,53 @@ public enum MedicalReferralStatus
     Expired = 6
 }
 
+/// <summary>
+/// Where a medical board has got to (residue plan G4 / R-15b).
+/// </summary>
+/// <remarks>
+/// ⚠ A board is <b>convened for one employee about one question</b>, so its lifecycle is a case's,
+/// not a committee's. A standing panel that sits repeatedly on different people would need a
+/// different model, and TDC has not described one.
+/// </remarks>
+public enum MedicalBoardStatus
+{
+    /// <summary>Somebody has asked for a board. Nobody has been appointed to it yet.</summary>
+    [Description("Requested")]
+    Requested = 1,
+
+    /// <summary>Members appointed; it may now sit. Its recommendation is not yet given.</summary>
+    [Description("Convened")]
+    Convened = 2,
+
+    /// <summary>It has reported. ⚠ The only status leave and separation will act on.</summary>
+    [Description("Concluded")]
+    Concluded = 3,
+
+    [Description("Cancelled")]
+    Cancelled = 4
+}
+
+/// <summary>What a person is doing on a medical board.</summary>
+/// <remarks>
+/// ⚠ A member may be a registered <c>Physician</c> or somebody named only here — a board commonly
+/// includes a doctor from outside the organisation who is in nobody's register. Both are recorded,
+/// and the entity requires one or the other rather than pretending every member is on file.
+/// </remarks>
+public enum MedicalBoardMemberRole
+{
+    [Description("Chair")]
+    Chair = 1,
+
+    [Description("Member")]
+    Member = 2,
+
+    [Description("Secretary")]
+    Secretary = 3,
+
+    [Description("Observer")]
+    Observer = 4
+}
+
 public enum MedicalAppointmentStatus
 {
     [Description("Draft")]

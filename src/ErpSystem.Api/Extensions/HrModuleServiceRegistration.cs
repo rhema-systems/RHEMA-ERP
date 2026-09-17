@@ -627,6 +627,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<INHISService, NHISService>();
         services.AddScoped<IMedicalExpenseClaimService, MedicalExpenseClaimService>();
         services.AddScoped<IMedicalDashboardService, MedicalDashboardService>();
+        // Medical boards (residue plan G4). ⚠ Leave and separation READ these; neither writes one.
+        services.AddScoped<IMedicalBoardService, MedicalBoardService>();
         services.AddScoped<IStaffMovementService, StaffMovementService>();
         services.AddScoped<IStaffPromotionService, StaffPromotionService>();
         services.AddScoped<IStaffTransferService, StaffTransferService>();

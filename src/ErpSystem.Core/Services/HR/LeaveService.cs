@@ -2,6 +2,7 @@ using System.Text;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -35,6 +36,17 @@ public class LeaveService : ILeaveService
     private readonly IGenericRepository<StaffDailyAttendance> _dailyAttendanceRepository;
     private readonly IGenericRepository<PublicHoliday> _holidayNameLookupRepository;
     private readonly IGenericRepository<LeaveRequestAttachment> _attachmentRepository;
+
+    /// <summary>
+    /// The medical board register, READ ONLY.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Leave never writes a board. The board is a Medical-module record and the bridge is one
+    /// way by design — this service asks whether one has concluded and does nothing else with it.
+    /// A shared mutable clinical record across three modules is how three modules come to
+    /// disagree about what a board decided.
+    /// </remarks>
+    private readonly IGenericRepository<MedicalBoard> _medicalBoardRepository;
     private readonly IEmployeeRepository _employeeRepository;
     private readonly ILeaveTypeService _leaveTypeService;
     private readonly IUnitOfWork _unitOfWork;
@@ -67,6 +79,7 @@ public class LeaveService : ILeaveService
             IGenericRepository<StaffDailyAttendance> dailyAttendanceRepository,
             IGenericRepository<PublicHoliday> holidayNameLookupRepository,
             IGenericRepository<LeaveRequestAttachment> attachmentRepository,
+            IGenericRepository<MedicalBoard> medicalBoardRepository,
             IEmployeeRepository employeeRepository,
             ILeaveTypeService leaveTypeService,
             ILogger<LeaveService> logger,
@@ -92,6 +105,7 @@ public class LeaveService : ILeaveService
         _dailyAttendanceRepository = dailyAttendanceRepository;
         _holidayNameLookupRepository = holidayNameLookupRepository;
         _attachmentRepository = attachmentRepository;
+        _medicalBoardRepository = medicalBoardRepository;
         _employeeRepository = employeeRepository;
         _leaveTypeService = leaveTypeService;
         _logger = logger;
@@ -642,13 +656,36 @@ public class LeaveService : ILeaveService
 
         var cumulative = takenThisYear + request.TotalDays;
 
-        if (cumulative > boardThreshold
-            && !attached.Contains(LeaveEvidenceKind.MedicalBoardRecommendation))
+        if (cumulative <= boardThreshold) return;
+
+        // ⚠ TWO ways to satisfy this, and the order matters for the message below.
+        //
+        // The strong form is a board that actually sat in the Medical module and CONCLUDED — a
+        // record naming who ruled, on what finding, and when. The typed attachment remains the
+        // other form, because plenty of organisations hold their boards on paper and file the
+        // report; refusing them would make the rule unusable rather than rigorous.
+        //
+        // ⚠ Only Concluded counts. A board that has been requested or convened has not said
+        // anything yet, and accepting one would let an absence through on the strength of a
+        // meeting somebody has merely scheduled.
+        var hasReport = attached.Contains(LeaveEvidenceKind.MedicalBoardRecommendation);
+
+        if (!hasReport && request.MedicalBoardId is Guid boardId)
+        {
+            hasReport = await _medicalBoardRepository
+                .GetQueryable()
+                .AnyAsync(b => b.TenantId == tenantId
+                            && b.Id == boardId
+                            && b.EmployeeId == request.EmployeeId
+                            && b.Status == MedicalBoardStatus.Concluded);
+        }
+
+        if (!hasReport)
         {
             throw new InvalidOperationException(
                 $"This would take {leaveType.Name} to {cumulative:0.##} day(s) in {request.StartDate.Year}, "
-                + $"past the {boardThreshold}-day point at which a medical board must sit. Attach the board's "
-                + "recommendation before submitting.");
+                + $"past the {boardThreshold}-day point at which a medical board must sit. Link a concluded "
+                + "medical board, or attach its recommendation, before submitting.");
         }
     }
 
@@ -1026,6 +1063,48 @@ public class LeaveService : ILeaveService
         _logger.LogInformation(
             "Leave request {number} recalled from {effective}: now ends {end}, {restored} day(s) restored",
             request.RequestNumber, dto.EffectiveDate, newEndDate, daysBefore - daysAfter);
+
+        return await GetLeaveRequestByIdAsync(id);
+    }
+
+    /// <inheritdoc />
+    public async Task<LeaveRequestDto> LinkMedicalBoardAsync(Guid id, Guid? medicalBoardId)
+    {
+        var request = await GetOwnedLeaveRequestAsync(id);
+        var tenantId = GetTenantId();
+
+        if (medicalBoardId is Guid boardId)
+        {
+            // ⚠ The board must be about THIS employee. Without that check a request could be
+            // satisfied by somebody else's board — which is not a theoretical worry, because the
+            // board number is the natural thing to paste and boards are requested in batches.
+            var board = await _medicalBoardRepository
+                .GetQueryable()
+                .Where(b => b.TenantId == tenantId && b.Id == boardId)
+                .Select(b => new { b.EmployeeId, b.Status })
+                .FirstOrDefaultAsync();
+
+            if (board is null)
+                throw new ArgumentException($"Medical board '{boardId}' not found.");
+
+            if (board.EmployeeId != request.EmployeeId)
+                throw new InvalidOperationException(
+                    "That medical board is about a different employee, so it cannot stand as evidence "
+                    + "for this request.");
+
+            // ⚠ A cancelled board is linkable to nothing. Note that a REQUESTED or CONVENED board
+            // IS linkable on purpose: the board is usually asked for before it sits, and the request
+            // should be able to say which board it is waiting on. The evidence gate is what insists
+            // on Concluded — linking records intent, the gate enforces the rule.
+            if (board.Status == MedicalBoardStatus.Cancelled)
+                throw new InvalidOperationException(
+                    "That medical board was cancelled, so it cannot stand as evidence.");
+        }
+
+        request.MedicalBoardId = medicalBoardId;
+
+        await _leaveRepository.UpdateAsync(request);
+        await _unitOfWork.SaveChangesAsync();
 
         return await GetLeaveRequestByIdAsync(id);
     }

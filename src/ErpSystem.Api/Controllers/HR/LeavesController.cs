@@ -1058,6 +1058,44 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
+        /// Point this request at the medical board that ruled on the absence
+        /// </summary>
+        /// <remarks>
+        /// Residue plan G4. Pass a null id to unlink.
+        ///
+        /// <para>⚠ A board that is only REQUESTED or CONVENED can be linked — a board is usually
+        /// asked for before it sits, and the request should be able to say which one it is waiting
+        /// on. The evidence gate is what insists on <b>Concluded</b>: linking records intent, the
+        /// gate enforces the rule.</para>
+        ///
+        /// <para>⚠ The board must be about the same employee.</para>
+        /// </remarks>
+        [HttpPut("{id}/medical-board")]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<LeaveRequestDto>> LinkMedicalBoard(
+            Guid id, [FromBody] Guid? medicalBoardId)
+        {
+            try
+            {
+                // Self-or-desk, like the other things done TO a request: an employee may attach
+                // their own evidence, and HR may do it for anybody.
+                if (!await CanActOnRequestAsync(id, HrPermissions.LeaveWritePolicy))
+                    return Forbid();
+
+                return Ok(await _leaveService.LinkMedicalBoardAsync(id, medicalBoardId));
+            }
+            catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error linking medical board to leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while linking the medical board");
+            }
+        }
+
+        /// <summary>
         /// Record that approved leave is still going ahead
         /// </summary>
         /// <remarks>

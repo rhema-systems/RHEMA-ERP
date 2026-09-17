@@ -117,6 +117,14 @@ export interface LeaveRequest {
    * ⚠ A screen showing a recalled request must show both dates, or the leave reads as though it
    * was always this short and the recall becomes invisible.
    */
+  /**
+   * The medical board that ruled on this absence, when one sat (G4).
+   *
+   * ⚠ A bare id across a module boundary. Leave READS the board — it never writes one — and a
+   * board only satisfies the evidence rule once it has CONCLUDED.
+   */
+  medicalBoardId?: string | null;
+
   recallEffectiveDate?: string | null;
   preRecallEndDate?: string | null;
   recalledDate?: string | null;

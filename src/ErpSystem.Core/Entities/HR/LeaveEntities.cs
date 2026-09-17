@@ -560,6 +560,22 @@ public class LeaveRequest : TenantEntity
     public string? RecallReason { get; set; }
 
     /// <summary>
+    /// The medical board that ruled on this absence, when one sat (residue plan G4).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>A bare Guid across a module boundary, with no navigation and no foreign key.</b>
+    /// The board is a Medical-module record and the bridge is <b>by reference, one way</b>: leave
+    /// READS it to satisfy the board rule, and never writes to it. A navigation would make the board
+    /// part of leave's object graph, and an EF fixup would then be able to modify a clinical record
+    /// through a leave save — which is exactly the coupling the SHE↔Medical boundary exists to
+    /// prevent.</para>
+    ///
+    /// <para>The typed <c>MedicalBoardRecommendation</c> attachment remains the other way to satisfy
+    /// the rule, for clients who hold their boards on paper.</para>
+    /// </remarks>
+    public Guid? MedicalBoardId { get; set; }
+
+    /// <summary>
     /// Days handed back to the balance by the recall. Recorded rather than derived: the balance
     /// re-derives itself from <see cref="TotalDays"/>, but "how many days did this recall return"
     /// is a fact about the event that nothing else preserves once the dates are truncated.

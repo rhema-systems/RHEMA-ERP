@@ -30,6 +30,17 @@ public interface ILeaveService
     /// restored, and the request keeps its number, its status and its approval.
     /// </summary>
     Task<LeaveRequestDto> RecallAsync(Guid id, RecallLeaveRequestDto dto);
+
+    /// <summary>
+    /// Points a leave request at the medical board that ruled on the absence, or unlinks it
+    /// (residue plan G4). Pass null to unlink.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Leave READS the board; it never writes one. This records which board a request rests on,
+    /// which is what the evidence gate then checks. Without it the board arm of that gate would be
+    /// unreachable — a rule nobody could satisfy, which is travel's T-23 shape.
+    /// </remarks>
+    Task<LeaveRequestDto> LinkMedicalBoardAsync(Guid id, Guid? medicalBoardId);
     Task<LeaveRequestDto> GetLeaveRequestByIdAsync(Guid id);
     Task<LeaveRequestDto?> GetLeaveRequestByNumberAsync(string applicationNumber);
     Task<PagedResult<LeaveRequestDto>> GetEmployeeLeaveHistoryAsync(Guid employeeId, int year, int pageNumber, int pageSize, LeaveStatus? status = null);

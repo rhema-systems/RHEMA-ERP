@@ -1690,6 +1690,8 @@ export const navigationItems: NavItem[] = [
           // "My Medical Claims" moved to the portal (/me/medical/claims).
           { title: 'NHIS Claims', href: '/hr/medical/nhis', icon: Landmark, permissions: ['HR.Medical.Read'] },
           { title: 'Clinical', href: '/hr/medical/clinical', icon: ClipboardCheck, permissions: ['HR.Medical.Read'] },
+          // Medical boards (residue plan G4). Leave and separation READ these; neither writes one.
+          { title: 'Medical Boards', href: '/hr/medical/boards', icon: Gavel, permissions: ['HR.Medical.Read'] },
           { title: 'Health Records', href: '/hr/medical/health', icon: FileHeart, permissions: ['HR.Medical.Read'] },
           { title: 'Healthcare Facilities', href: '/hr/medical/facilities', icon: Hospital, permissions: ['HR.Medical.Read'] },
           { title: 'Physicians', href: '/hr/medical/physicians', icon: Stethoscope, permissions: ['HR.Medical.Read'] },

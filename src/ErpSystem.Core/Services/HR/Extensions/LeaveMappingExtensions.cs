@@ -302,6 +302,7 @@ namespace ErpSystem.Application.Extensions
             RescheduleCount = entity.RescheduleCount,
             ObservanceConfirmedDate = entity.ObservanceConfirmedDate,
             ObservanceConfirmedById = entity.ObservanceConfirmedById,
+            MedicalBoardId = entity.MedicalBoardId,
             RecallEffectiveDate = entity.RecallEffectiveDate,
             PreRecallEndDate = entity.PreRecallEndDate,
             RecalledDate = entity.RecalledDate,
