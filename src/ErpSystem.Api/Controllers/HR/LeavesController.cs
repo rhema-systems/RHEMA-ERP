@@ -1215,6 +1215,46 @@ namespace ErpSystem.Api.Controllers.HR
         /// Recalculate leave balance(s) from source data (admin operation).
         /// If LeaveTypeId is provided only that type is recalculated; otherwise all leave types for the employee are recalculated.
         /// </summary>
+        /// <summary>
+        /// Recalculate EVERY balance in the tenant for a year (admin operation)
+        /// </summary>
+        /// <remarks>
+        /// <para>⚠ <b>Finding L-19.</b> Recalculation was one employee at a time, which is right for
+        /// the ordinary case — it runs after every approval, cancellation and adjustment. But a
+        /// policy correction reaches everybody: change an accrual rule, fix an entitlement, or land
+        /// the <c>UsedDays</c> correction that G1 shipped, and nine hundred balances are stale with
+        /// no route through the UI to put them right.</para>
+        ///
+        /// <para><b>Safe to run and safe to re-run.</b> It DERIVES the counters from requests and
+        /// adjustments that already exist, never invents a figure, and never touches
+        /// <c>EntitledDays</c> or <c>CarriedOverDays</c>. That is why it has no dry run, unlike the
+        /// year-end jobs — there is nothing to preview when running twice gives the same answer as
+        /// running once.</para>
+        ///
+        /// <para>⚠ <b>Admin tier</b>, a step above the per-employee call beside it: this one walks
+        /// the whole tenant and is heavy.</para>
+        /// </remarks>
+        /// <response code="200">What it did, including any employee it could not finish</response>
+        [HttpPost("balances/recalculate-all")]
+        [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
+        [ProducesResponseType(typeof(LeaveBulkRecalculationResult), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<LeaveBulkRecalculationResult>> RecalculateAllBalances(
+            [FromQuery] int year, [FromQuery] Guid? leaveTypeId = null, CancellationToken ct = default)
+        {
+            if (year < 2000)
+                return BadRequest(new { message = "A valid year is required." });
+
+            try
+            {
+                return Ok(await _recalculationService.RecalculateTenantAsync(year, leaveTypeId, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("balances/recalculate")]
         [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(StatusCodes.Status200OK)]

@@ -169,6 +169,22 @@ export function LeaveRequestForm({
         ) + 1
       : null;
 
+
+  /*
+   * ⚠ L-15, reshaped by G3. The finding was "no attachment can be added while raising a
+   * request", and the fix is NOT an uploader here: the controlled upload gate needs a request id,
+   * so there is nothing to attach a file to until the record exists. Save as draft already does
+   * that, and both forms have the button.
+   *
+   * What G3 changed is the cost of not knowing. A sick-leave request longer than the
+   * self-certification period is now REFUSED at submit, so somebody fills the whole form, presses
+   * Submit, and is told to go and get a certificate - having never been warned. That is the actual
+   * complaint, and it is answered by saying so BEFORE the button, and naming the route.
+   */
+  const needsCertificate =
+    !!selectedType?.requiresMedicalCertificate &&
+    spanDays !== null &&
+    spanDays > (selectedType.selfCertificationDays ?? 0);
   return (
     <Card className="max-w-3xl">
       <form onSubmit={form.handleSubmit((v) => onSubmit(v, false))}>
@@ -178,6 +194,21 @@ export function LeaveRequestForm({
             Submitting starts the approval workflow configured for leave requests.
           </CardDescription>
         </CardHeader>
+
+
+        {/* Said before Submit, not after it is refused. */}
+        {needsCertificate && (
+          <div className="mx-6 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
+            <p className="font-medium">
+              This needs excuse duty — a medical certificate — attached before it can be submitted.
+            </p>
+            <p className="mt-1">
+              {selectedType?.name} allows {selectedType?.selfCertificationDays ?? 0} day(s) on the
+              employee&apos;s own word, and this is {spanDays}.{' '}
+              <strong>Save as draft</strong>, attach the certificate on the request, then submit it.
+            </p>
+          </div>
+        )}
 
         {/* Say where the dates came from, so nobody wonders why the form arrived filled in. */}
         {form.watch('leavePlanId') && (

@@ -1,7 +1,7 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1–G4 BUILT. G5a BUILT. G5b two of five done (L-12, L-20).
-L-15, L-19, L-22 and G6's wider survey outstanding.**
+**Status:** 2026-09-17 — **G1–G4 BUILT. G5a BUILT. G5b four of five done (L-12, L-15, L-19, L-20).
+L-22 and G6's wider survey outstanding.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -240,12 +240,40 @@ as *"remove them all"*. The form owns the value, so there is nothing to forget. 
 from the **detail** projection — the plain GET does not carry the links, and fetching from there would
 show nothing ticked and clear every link on save.
 
+### G5b continued — L-15 and L-19 done 2026-09-17
+
+#### ⚠ L-15 turned out not to be what the finding said
+
+Recorded as *"no attachment can be added while raising a request"*, which reads like a missing
+uploader. **It is not one.** The controlled upload gate needs a request id, so there is nothing to
+attach a file **to** until the record exists — and both forms already carry **Save as draft**, so the
+route works: draft, attach, submit.
+
+**What G3 changed is the cost of not knowing.** Sick leave past the self-certification period is now
+*refused at submit*, so somebody fills the whole form, presses Submit, and is told to go and get a
+certificate — having never been warned. That is the real complaint, and it is answered by saying so
+**before** the button and naming the route. Both the desk form and the portal form now compute it
+live from the selected leave type and the dates.
+
+#### L-19 — a tenant-wide recalculation
+
+`POST /api/Leaves/balances/recalculate-all?year=&leaveTypeId=`, **admin tier** — a step above the
+per-employee call beside it, because this one walks the whole tenant.
+
+| Decision | Why |
+|---|---|
+| **No dry run**, unlike the year-end jobs | it DERIVES its counters from requests and adjustments that already exist, never invents a figure, and never touches `EntitledDays` or `CarriedOverDays`. There is nothing to preview when running twice gives the same answer as running once — **asserted**, not assumed |
+| **Driven off the BALANCES that exist**, not the employee register | walking every employee would *mint* balances for people who never had one, which is a different operation and not what a correction pass is for |
+| **One employee's failure does not abandon the other 899** | it is counted, noted, and the pass continues. A correction that stops halfway leaves the tenant worse than one that never ran, because nobody can tell which half is current |
+
+It also gives G1's `UsedDays` correction a route to reach everybody, which it did not have.
+
+**Verified by slice 9, now 30 assertions. Suite total 404 across nine slices, green twice.**
+
 ### Still open in G5b
 
-**L-15** no attachment can be added while raising a request (the sick-note case — needs a
-draft-then-attach flow) · **L-19** recalculate is one employee at a time, with no organisation-wide
-run (needs a new endpoint, and it is a heavy operation) · **L-22** compliance is read-only apart from
-the export.
+**L-22** — compliance is read-only apart from the export: no department filter, and no link from a
+row to the employee or to raising leave on their behalf.
 
 ### G6–G7 — outstanding
 

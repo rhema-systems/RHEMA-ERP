@@ -157,6 +157,7 @@ export function MyLeaveRequestForm({
   const balance = balances?.find((b) => b.leaveTypeId === leaveTypeId);
   const selectedType = leaveTypes?.find((t) => t.id === leaveTypeId);
 
+
   // Calendar-day span; the server computes the authoritative chargeable total.
   const spanDays =
     startDate && endDate && endDate >= startDate
@@ -164,6 +165,15 @@ export function MyLeaveRequestForm({
           (new Date(endDate).getTime() - new Date(startDate).getTime()) / 86_400_000,
         ) + 1
       : null;
+  /*
+   * ⚠ L-15, reshaped by G3 — see the note on the HR desk form. There is no uploader here
+   * because the controlled upload gate needs a request id, so nothing exists to attach a file
+   * to until the record does. What matters is not being REFUSED at submit with no warning.
+   */
+  const needsCertificate =
+    !!selectedType?.requiresMedicalCertificate &&
+    spanDays !== null &&
+    spanDays > (selectedType.selfCertificationDays ?? 0);
 
   return (
     <Card>
@@ -239,6 +249,20 @@ export function MyLeaveRequestForm({
               can be saved any time.
             </p>
           ) : null}
+
+          {/* Said before Submit, not after it is refused. */}
+          {needsCertificate && (
+            <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
+              <p className="font-medium">
+                You will need a medical certificate — excuse duty — for this.
+              </p>
+              <p className="mt-1">
+                {selectedType?.name} lets you take {selectedType?.selfCertificationDays ?? 0} day(s)
+                on your own word, and you have chosen {spanDays}.{' '}
+                <strong>Save it as a draft</strong>, attach the certificate, then submit it.
+              </p>
+            </div>
+          )}
 
           <FieldRow>
             <DateField form={form} name="startDate" label="Start date" required />

@@ -196,4 +196,58 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
             await RecalculateAsync(employeeId, leaveTypeId, year);
         }
     }
+
+    /// <inheritdoc />
+    public async Task<LeaveBulkRecalculationResult> RecalculateTenantAsync(
+        int year, Guid? leaveTypeId = null, CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var result = new LeaveBulkRecalculationResult { Year = year, LeaveTypeId = leaveTypeId };
+
+        // Driven off the BALANCES that exist, not off the employee register. A recalculation
+        // re-derives figures onto rows that are already there; walking every employee would mint
+        // balances for people who have never had one, which is a different operation entirely and
+        // not what a correction pass is for.
+        var pairs = await _leaveBalanceRepository
+            .GetQueryable()
+            .Where(lb => lb.TenantId == tenantId
+                      && lb.Year == year
+                      && (leaveTypeId == null || lb.LeaveTypeId == leaveTypeId))
+            .Select(lb => new { lb.EmployeeId, lb.LeaveTypeId })
+            .Distinct()
+            .ToListAsync(ct);
+
+        foreach (var pair in pairs.GroupBy(p => p.EmployeeId))
+        {
+            ct.ThrowIfCancellationRequested();
+
+            try
+            {
+                foreach (var type in pair.Select(p => p.LeaveTypeId).Distinct())
+                    await RecalculateAsync(pair.Key, type, year);
+
+                result.EmployeesProcessed++;
+            }
+            catch (Exception ex)
+            {
+                // ⚠ One employee's failure must not abandon the other 899. A correction pass that
+                // stops halfway leaves the tenant in a worse state than one that never ran, because
+                // nobody can tell which half is current.
+                result.EmployeesFailed++;
+                result.Notes.Add($"Employee {pair.Key}: {ex.Message}");
+                _logger.LogError(ex, "Bulk leave recalculation failed for employee {EmployeeId}", pair.Key);
+            }
+        }
+
+        result.Notes.Insert(0,
+            $"Recalculated {result.EmployeesProcessed} employee(s) for {year}"
+            + (leaveTypeId is null ? " across every leave type" : " on one leave type")
+            + (result.EmployeesFailed > 0 ? $"; {result.EmployeesFailed} failed." : "."));
+
+        _logger.LogInformation(
+            "Bulk leave recalculation for {Year}: {Processed} employee(s), {Failed} failed",
+            year, result.EmployeesProcessed, result.EmployeesFailed);
+
+        return result;
+    }
 }
