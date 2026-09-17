@@ -27,6 +27,7 @@ interface FinanceWorkflowApprovalQueueItem {
     workflowName?: string | null;
     canApprove: boolean;
     canReject: boolean;
+    decisionOnDetailPage?: boolean;
     approveDisabledReason?: string | null;
     rejectDisabledReason?: string | null;
     metadata?: Record<string, string>;
@@ -96,6 +97,7 @@ function toWorkflowApprovalItem(row: FinanceWorkflowApprovalQueueItem): Approval
         submittedBy: row.submittedBy,
         canApprove: row.canApprove,
         canReject: row.canReject,
+        decisionOnDetailPage: row.decisionOnDetailPage,
         approveDisabledReason: row.approveDisabledReason,
         rejectDisabledReason: row.rejectDisabledReason,
         metadata: toMetadata(row),
@@ -126,9 +128,9 @@ async function rejectFinanceWorkflowApproval(item: ApprovalQueueItem, reason: st
 const allFinanceWorkflowDefinition: ApprovalQueueDefinition = {
     id: FINANCE_APPROVAL_QUEUE_IDS.financeWorkflows,
     title: 'Finance Workflow Approvals',
-    documentLabel: 'Finance Documents',
-    description: 'Finance transactions and documents awaiting your current workflow step.',
-    emptyMessage: 'No finance documents are awaiting your approval.',
+    documentLabel: 'Finance Items',
+    description: 'Finance documents and accounting-book transitions awaiting your current workflow step.',
+    emptyMessage: 'No finance items are awaiting your approval.',
     accessDeniedMessage: 'You need a finance approver role to review finance workflow approvals.',
     icon: ClipboardCheck,
     accentClassName: 'border-sky-100 bg-sky-50/50',

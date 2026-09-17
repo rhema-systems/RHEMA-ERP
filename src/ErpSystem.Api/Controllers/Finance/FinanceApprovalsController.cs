@@ -165,6 +165,8 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded;
         var canRejectByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
+        var canApproveBookTransitions = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookTransitions)).Succeeded;
 
         var currentRoles = roleSet.ToArray();
         var pageRows = await QueryPendingApprovals(tenantId)
@@ -184,7 +186,7 @@ public class FinanceApprovalsController : ControllerBase
         var approvals = pageRows
             .Take(pageSize)
             .Where(approval => CanActOnApproval(approval, currentUserId.Value, roleSet))
-            .Where(approval => IsFinanceEntity(
+            .Where(approval => IsFinanceQueueEntity(
                 approval.StepInstance.WorkflowInstance.EntityType.Code ??
                 approval.StepInstance.WorkflowInstance.EntityType.Name))
             .ToList();
@@ -231,6 +233,51 @@ public class FinanceApprovalsController : ControllerBase
         {
             var instance = approval.StepInstance.WorkflowInstance;
             var entityType = instance.EntityType.Code ?? instance.EntityType.Name;
+            if (IsAccountingBookLifecycle(entityType))
+            {
+                // Book decisions must go through AccountingBookService.DecideAsync. Generic
+                // workflow approval would skip lifecycle validation, mapping changes and audit.
+                if (!canApproveBookTransitions || instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var book = await _db.AccountingBooks.AsNoTracking().FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId && !item.IsDeleted && item.Id == instance.EntityId &&
+                    item.TransitionWorkflowInstanceId == instance.Id &&
+                    item.PendingLifecycleStatus.HasValue &&
+                    item.TransitionRequestedByUserId.HasValue &&
+                    item.TransitionRequestedByUserId != currentUserId.Value,
+                    cancellationToken);
+                if (book == null || !await _workflowService.CanUserApproveAsync(
+                        "AccountingBookLifecycle", book.Id, currentUserId.Value))
+                    continue;
+
+                results.Add(new FinanceApprovalQueueItemDto
+                {
+                    ApprovalId = approval.Id,
+                    EntityId = book.Id,
+                    EntityType = "AccountingBookLifecycle",
+                    Reference = book.Code,
+                    Title = $"{book.Name}: {book.LifecycleStatus} to {book.PendingLifecycleStatus}",
+                    DetailHref = "/finance/settings/accounting-books",
+                    DocumentType = "Accounting Book",
+                    Module = "Finance Settings",
+                    CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
+                    StatusLabel = "Pending transition",
+                    SubmittedAt = book.TransitionRequestedAtUtc ?? instance.StartedDate ?? instance.CreatedDate,
+                    SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
+                        new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
+                            .Where(value => !string.IsNullOrWhiteSpace(value))),
+                    ApproverRole = approval.ApproverRole,
+                    WorkflowName = instance.WorkflowDefinition?.Name,
+                    DecisionOnDetailPage = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Target state"] = book.PendingLifecycleStatus!.Value.ToString()
+                    }
+                });
+                continue;
+            }
+
             if (!IsFinanceEntity(entityType))
             {
                 continue;
@@ -2673,6 +2720,12 @@ public class FinanceApprovalsController : ControllerBase
     internal static bool IsFinanceEntity(string? entityType)
         => FinanceWorkflowEntityKeys.Contains(Normalize(entityType));
 
+    internal static bool IsFinanceQueueEntity(string? entityType)
+        => IsFinanceEntity(entityType) || IsAccountingBookLifecycle(entityType);
+
+    private static bool IsAccountingBookLifecycle(string? entityType)
+        => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
+
     internal static string ResolveDetailHref(string? entityType, Guid entityId, string? displayUrl)
     {
         if (!string.IsNullOrWhiteSpace(displayUrl))
@@ -2860,6 +2913,7 @@ public class FinanceApprovalsController : ControllerBase
         public string? WorkflowName { get; set; }
         public bool CanApprove { get; set; }
         public bool CanReject { get; set; }
+        public bool DecisionOnDetailPage { get; set; }
         public string? ApproveDisabledReason { get; set; }
         public string? RejectDisabledReason { get; set; }
         public Dictionary<string, string> Metadata { get; set; } = new();
