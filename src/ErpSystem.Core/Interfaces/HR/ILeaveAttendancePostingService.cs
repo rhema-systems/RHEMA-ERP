@@ -22,15 +22,23 @@ namespace ErpSystem.Core.Interfaces.HR;
 public interface ILeaveAttendancePostingService
 {
     /// <summary>
-    /// Marks each chargeable day of an approved request as <c>OnLeave</c>, carrying the request id.
+    /// Makes the <c>OnLeave</c> days carrying this request's id <b>exactly</b> the chargeable days
+    /// of its current range — adding what is missing and dropping what no longer belongs.
     /// Idempotent: posting the same request twice does not double-write.
     /// </summary>
-    /// <returns>What was written, and what was deliberately left alone.</returns>
+    /// <returns>What was written, what was deliberately left alone, and what was dropped.</returns>
     /// <remarks>
-    /// ⚠ <paramref name="tenantId"/> is explicit rather than read from the ambient user context.
+    /// <para>⚠ <paramref name="tenantId"/> is explicit rather than read from the ambient user context.
     /// The nightly reconciliation calls this from a background service, where there is no signed-in
     /// user and no tenant to infer — a service that only works inside a request is a service that
-    /// silently does nothing on a timer.
+    /// silently does nothing on a timer.</para>
+    ///
+    /// <para>⚠ <b>This converges on the day set, not just on the status</b>, and that is deliberate.
+    /// An earlier version only ever added, which was correct while every operation that shortened a
+    /// request also passed through a status that counts as not-taken — cancel and reschedule both
+    /// do. <b>Recall does not</b>: it truncates while the leave stays Approved, so the reconciler
+    /// takes this arm and the dropped days would be stranded, marking somebody on leave they are
+    /// not on. Making the rule absolute here means no future caller has to remember it.</para>
     /// </remarks>
     Task<LeaveAttendancePostingResult> PostAsync(
         LeaveRequest request, Guid tenantId, IReadOnlyList<DateOnly> chargeableDays,
@@ -56,4 +64,9 @@ public interface ILeaveAttendancePostingService
 /// here is worth surfacing rather than swallowing, because those days will not reach the payroll
 /// export as leave.
 /// </param>
-public sealed record LeaveAttendancePostingResult(int DaysWritten, int DaysSkipped);
+/// <param name="DaysPruned">
+/// Days that carried this request's id and are no longer inside its dates, so were given up — the
+/// tail a recall cut off, or anything a repair sweep found stranded. Non-zero outside a recall means
+/// something upstream shortened a request without reconciling, which is worth knowing about.
+/// </param>
+public sealed record LeaveAttendancePostingResult(int DaysWritten, int DaysSkipped, int DaysPruned = 0);

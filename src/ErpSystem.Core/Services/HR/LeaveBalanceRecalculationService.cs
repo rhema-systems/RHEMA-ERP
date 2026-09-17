@@ -95,7 +95,27 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
             await _leaveBalanceRepository.AddAsync(balance);
         }
 
-        // UsedDays — sum of approved requests
+        // UsedDays — sum of every request whose days are actually being taken.
+        //
+        // ⚠ This used to be `Status == Approved` alone, and that was a defect with a long fuse.
+        // CloseLeaveRequestAsync sets the status to Completed, and closing does not itself
+        // recalculate — so the days were not returned at closure, they were returned by the NEXT
+        // recalculation, whenever that happened to run (the next approval, cancellation or
+        // adjustment for the same employee and type). An employee who took five days and had the
+        // leave closed silently got those five days back, attributed to nothing and traceable to
+        // nothing. The register and the compliance read, which both ask what has been TAKEN, were
+        // wrong the same way.
+        //
+        // ⚠ InProgress belongs here too and is no longer hypothetical: leave that is happening
+        // right now has been taken, not requested. Before R-14 nothing ever assigned that status,
+        // so the question never arose; the sweep that advances a request into it now makes this
+        // load-bearing. Had it been left below, a day's leave would have jumped from Used to
+        // Pending the morning it started.
+        //
+        // The three statuses here are exactly LeaveService.CountsAsTaken, and they must stay that
+        // way: that method decides whether attendance days exist for a request, so a status counted
+        // as taken on the attendance register and not in the balance would put the two permanently
+        // out of step.
         balance.UsedDays = await _leaveRequestRepository
             .GetQueryable()
             .Where(r =>
@@ -103,10 +123,16 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
                 r.EmployeeId  == employeeId &&
                 r.LeaveTypeId == leaveTypeId &&
                 r.StartDate.Year == year &&
-                r.Status == LeaveStatus.Approved)
+                (r.Status == LeaveStatus.Approved ||
+                 r.Status == LeaveStatus.InProgress ||
+                 r.Status == LeaveStatus.Completed))
             .SumAsync(r => (decimal?)r.TotalDays) ?? 0m;
 
-        // PendingDays — sum of pending / in-progress requests
+        // PendingDays — days asked for and not yet granted.
+        //
+        // ⚠ InProgress moved OUT of here and into UsedDays above. It must not appear in both:
+        // AvailableDays subtracts Used and Pending separately, so a status counted twice would
+        // charge the employee twice for the same leave.
         balance.PendingDays = await _leaveRequestRepository
             .GetQueryable()
             .Where(r =>
@@ -114,7 +140,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
                 r.EmployeeId  == employeeId &&
                 r.LeaveTypeId == leaveTypeId &&
                 r.StartDate.Year == year &&
-                (r.Status == LeaveStatus.Pending || r.Status == LeaveStatus.InProgress))
+                r.Status == LeaveStatus.Pending)
             .SumAsync(r => (decimal?)r.TotalDays) ?? 0m;
 
         // AdjustmentDays — sum of all adjustments linked to this balance

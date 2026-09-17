@@ -76,6 +76,28 @@ public class LeaveRemindersController : ControllerBase
     }
 
     /// <summary>
+    /// Advance approved leave that has started into in-progress, on demand
+    /// </summary>
+    /// <remarks>
+    /// <para>The same pass the nightly host runs, triggerable now — for the reason given on
+    /// <c>reconcile-attendance</c> above: a job reachable only from a timer cannot be proved by a
+    /// harness, and a recall cannot be demonstrated until something has advanced a request into the
+    /// status recall is defined against.</para>
+    ///
+    /// <para>Unlike the reconciler, <b>a non-zero count here is entirely routine</b> — it is simply
+    /// how many people started their leave today.</para>
+    /// </remarks>
+    [HttpPost("advance-in-progress")]
+    public async Task<ActionResult> AdvanceInProgress(CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var advanced = await _leaveService.AdvanceLeaveInProgressAsync(tenantId, ct);
+        return Ok(new { advanced });
+    }
+
+    /// <summary>
     /// What a sweep would fire, without firing it.
     /// </summary>
     /// <param name="asOf">

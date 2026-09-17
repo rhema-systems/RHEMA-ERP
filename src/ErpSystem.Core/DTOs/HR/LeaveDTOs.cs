@@ -467,6 +467,22 @@ public class RescheduleLeaveRequestDto
     public string Reason { get; set; } = string.Empty;
 }
 
+/// <summary>
+/// Calls an employee back before their leave ends (residue plan R-14).
+/// </summary>
+/// <remarks>
+/// ⚠ <see cref="EffectiveDate"/> is <b>the first day the employee is expected back at work</b>, not
+/// the last day of their leave. That is the date a recall notice actually states, and naming it the
+/// other way round is a one-day error nobody would catch on a screen — the service takes the day
+/// before it as the new end date.
+/// <para>A reason is REQUIRED: a recall is the employer's act, and its record has to say why.</para>
+/// </remarks>
+public class RecallLeaveRequestDto
+{
+    public DateOnly EffectiveDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+}
+
 public class CreateLeaveRequestDto
 {
     public Guid EmployeeId { get; set; }
@@ -552,6 +568,18 @@ public class LeaveRequestDto
     public DateTime? ObservanceConfirmedDate { get; set; }
     public Guid? ObservanceConfirmedById { get; set; }
     public string? ObservanceConfirmedByName { get; set; }
+
+    // Set when the employee was called back before their end date (residue plan R-14). The request
+    // keeps its number, its status and its approval — EndDate is simply earlier than it was, and
+    // PreRecallEndDate is what it used to be. A screen showing a recalled request should say both,
+    // or the leave looks like it was always this short.
+    public DateOnly? RecallEffectiveDate { get; set; }
+    public DateOnly? PreRecallEndDate { get; set; }
+    public DateTime? RecalledDate { get; set; }
+    public Guid? RecalledById { get; set; }
+    public string? RecalledByName { get; set; }
+    public string? RecallReason { get; set; }
+    public decimal? DaysRestored { get; set; }
 
     /// <summary>
     /// Attendance days recorded as <c>OnLeave</c> against this request. Filled on the single-request

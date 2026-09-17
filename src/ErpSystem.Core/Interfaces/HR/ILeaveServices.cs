@@ -24,6 +24,12 @@ public interface ILeaveService
 
     /// <summary>Record that approved leave is still going ahead. Moves no days, changes no status.</summary>
     Task<LeaveRequestDto> ConfirmObservanceAsync(Guid id);
+
+    /// <summary>
+    /// Call an employee back before their leave ends. TRUNCATES: days taken stand, days after are
+    /// restored, and the request keeps its number, its status and its approval.
+    /// </summary>
+    Task<LeaveRequestDto> RecallAsync(Guid id, RecallLeaveRequestDto dto);
     Task<LeaveRequestDto> GetLeaveRequestByIdAsync(Guid id);
     Task<LeaveRequestDto?> GetLeaveRequestByNumberAsync(string applicationNumber);
     Task<PagedResult<LeaveRequestDto>> GetEmployeeLeaveHistoryAsync(Guid employeeId, int year, int pageNumber, int pageSize, LeaveStatus? status = null);
@@ -88,6 +94,15 @@ public interface ILeaveService
     /// </remarks>
     Task<int> ReconcileRecentAttendanceAsync(
         Guid tenantId, int lookbackDays = 14, CancellationToken ct = default);
+
+    /// <summary>
+    /// Moves approved leave that has started into <c>InProgress</c>. Returns how many were advanced.
+    /// </summary>
+    /// <remarks>
+    /// One-directional and balance-neutral — see the implementation. It is what gives the product a
+    /// notion of leave that is currently happening, which recall (R-14) is defined against.
+    /// </remarks>
+    Task<int> AdvanceLeaveInProgressAsync(Guid tenantId, CancellationToken ct = default);
 
     /// <summary>
     /// Approve or reject several requests, one real service call each.

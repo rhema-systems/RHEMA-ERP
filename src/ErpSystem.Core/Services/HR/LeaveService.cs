@@ -173,7 +173,13 @@ public class LeaveService : ILeaveService
         var query = _leaveRepository.GetQueryable()
             .Where(la => la.TenantId == tenantId &&
                         la.EmployeeId == employeeId &&
-                        (la.Status == LeaveStatus.Approved || la.Status == LeaveStatus.Pending) &&
+                        // ⚠ InProgress is here because leave being taken right now is the most
+                        // obvious kind of clash there is. It was omitted while nothing ever set
+                        // that status; the R-14 sweep sets it, so without this an employee could
+                        // book leave on top of leave they are currently on.
+                        (la.Status == LeaveStatus.Approved ||
+                         la.Status == LeaveStatus.Pending ||
+                         la.Status == LeaveStatus.InProgress) &&
                         (la.StartDate <= endDate && la.EndDate >= startDate));
 
         if (excludeRequestId.HasValue)
@@ -186,10 +192,13 @@ public class LeaveService : ILeaveService
     {
         var tenantId = GetTenantId();
 
+        // ⚠ Both checks take InProgress as well as Approved. A reliever who is on leave RIGHT NOW is
+        // the one case this guard most needs to catch, and it would have missed it once the R-14
+        // sweep started advancing requests into that status.
         var relieverOnLeave = await _leaveRepository.GetQueryable()
             .AnyAsync(la => la.TenantId == tenantId &&
                            la.EmployeeId == relieverId &&
-                           la.Status == LeaveStatus.Approved &&
+                           (la.Status == LeaveStatus.Approved || la.Status == LeaveStatus.InProgress) &&
                            la.StartDate <= endDate &&
                            la.EndDate >= startDate);
 
@@ -199,7 +208,7 @@ public class LeaveService : ILeaveService
         return await _leaveRepository.GetQueryable()
             .AnyAsync(la => la.TenantId == tenantId &&
                            la.RelieverEmployeeId == relieverId &&
-                           la.Status == LeaveStatus.Approved &&
+                           (la.Status == LeaveStatus.Approved || la.Status == LeaveStatus.InProgress) &&
                            la.StartDate <= endDate &&
                            la.EndDate >= startDate);
     }
@@ -831,6 +840,113 @@ public class LeaveService : ILeaveService
         return await GetLeaveRequestByIdAsync(id);
     }
 
+    /// <summary>
+    /// Calls an employee back before their leave ends — curtailment (residue plan R-14).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this is not any of the three things that already existed.</b> <i>Cancel</i>
+    /// releases every day including the ones already taken; <i>Close</i> refuses before the end
+    /// date; <i>Reschedule</i> records that the leave <b>moved</b>, which is a different fact and
+    /// re-opens the approval. Before this, the only route was to cancel and re-key a shorter
+    /// request, which loses the number and the approval and leaves the record claiming the leave
+    /// was never validly granted.</para>
+    ///
+    /// <para><b>So this truncates and keeps everything else.</b> Days up to the recall stand as
+    /// taken, days after are restored to the balance, and the request keeps its number, its status
+    /// and its approval — because the leave <i>was</i> validly approved and then interrupted. The
+    /// approval is deliberately NOT re-opened: unlike a reschedule, nobody is being asked to
+    /// authorise dates they have not seen. The employer is standing on the approval it already
+    /// gave and taking part of it back.</para>
+    ///
+    /// <para>⚠ <b>The balance is not adjusted here.</b> <c>UsedDays</c> derives from the approved
+    /// requests, so shortening <c>TotalDays</c> and re-deriving is what gives the days back. Writing
+    /// an adjustment as well would return them twice.</para>
+    /// </remarks>
+    public async Task<LeaveRequestDto> RecallAsync(Guid id, RecallLeaveRequestDto dto)
+    {
+        var request = await GetOwnedLeaveRequestAsync(id);
+
+        if (!CountsAsTaken(request.Status))
+            throw new InvalidOperationException(
+                "Only leave that has been approved can be recalled. Nothing has been granted yet on this request.");
+
+        if (request.ClosureDate.HasValue)
+            throw new InvalidOperationException("This leave has already been closed, so there is nothing to recall from.");
+
+        if (string.IsNullOrWhiteSpace(dto.Reason))
+            throw new InvalidOperationException(
+                "Say why the employee is being recalled. A recall is the employer's act and the record has to carry its reason.");
+
+        // ⚠ Not RefuseSelfApproval - that guard is about approving, and its message would be wrong
+        // here. The rule is the same shape and the reason is different: a recall is something an
+        // employer does TO somebody, so the subject cannot be the one doing it. Without this, an
+        // employee could shorten their own approved leave and hand themselves the days back.
+        if (_currentUserService.EmployeeId is Guid me && me != Guid.Empty && me == request.EmployeeId)
+            throw new InvalidOperationException(
+                "You cannot recall yourself from leave. A recall is the employer's act and has to be recorded by someone else.");
+
+        if (dto.EffectiveDate <= request.StartDate)
+            throw new InvalidOperationException(
+                "A recall dated on or before the first day of the leave means none of it was taken. Cancel the request instead - "
+                + "that is the action that releases every day.");
+
+        if (dto.EffectiveDate > request.EndDate)
+            throw new InvalidOperationException(
+                $"This leave already ends on {request.EndDate:dd MMM yyyy}, so a recall from {dto.EffectiveDate:dd MMM yyyy} "
+                + "would give nothing back. Close the leave instead.");
+
+        var leaveType = await GetOwnedLeaveTypeAsync(request.LeaveTypeId);
+
+        // The day before they are due back is the last day of leave.
+        var newEndDate = dto.EffectiveDate.AddDays(-1);
+        var daysBefore = request.TotalDays;
+        var daysAfter = await CalculateLeaveDaysAsync(request.StartDate, newEndDate, leaveType);
+
+        if (daysAfter >= daysBefore)
+            throw new InvalidOperationException(
+                "That recall date does not shorten the leave - every chargeable day falls before it. "
+                + "Check the date against the leave type's weekend and holiday rules.");
+
+        // Only the FIRST recall records what the request used to end on. A leave curtailed twice
+        // should still show the end date that was approved, not the end date of the previous recall
+        // - the same rule OriginalEndDate follows for reschedules, and the reason these are separate
+        // columns: a request can be rescheduled and later recalled, and both facts have to survive.
+        request.PreRecallEndDate ??= request.EndDate;
+
+        request.EndDate = newEndDate;
+        request.TotalDays = daysAfter;
+        request.RecallEffectiveDate = dto.EffectiveDate;
+        request.RecalledDate = _clock.UtcNow;
+        request.RecalledById = _currentUserService.EmployeeId;
+        request.RecallReason = dto.Reason.Trim();
+
+        // Cumulative, so a second recall does not overwrite what the first gave back.
+        request.DaysRestored = (request.DaysRestored ?? 0m) + (daysBefore - daysAfter);
+
+        // A "yes, still going" was given against dates that no longer exist.
+        request.ObservanceConfirmedDate = null;
+        request.ObservanceConfirmedById = null;
+
+        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        {
+            await _leaveRepository.UpdateAsync(request);
+            await _unitOfWork.SaveChangesAsync(ct);
+            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+        });
+
+        // ⚠ This is the call that makes the truncation real on the attendance register, and it only
+        // works because PostAsync prunes. The status is still Approved, so the reconciler takes its
+        // POST arm - and posting used to only ever add, which would have left the recalled tail
+        // marking the employee on leave they are now back from. See ILeaveAttendancePostingService.
+        await ReconcileAttendanceAsync(request.Id);
+
+        _logger.LogInformation(
+            "Leave request {number} recalled from {effective}: now ends {end}, {restored} day(s) restored",
+            request.RequestNumber, dto.EffectiveDate, newEndDate, daysBefore - daysAfter);
+
+        return await GetLeaveRequestByIdAsync(id);
+    }
+
     public async Task<LeaveRequestDto> ConfirmObservanceAsync(Guid id)
     {
         var request = await GetOwnedLeaveRequestAsync(id);
@@ -967,9 +1083,9 @@ public class LeaveService : ILeaveService
                           && d.LeaveRequestId == request.Id
                           && d.Status == StaffAttendanceStatus.OnLeave);
 
-        // The two actor columns are bare Guids with no navigation (see the entity's note on shadow
+        // These actor columns are bare Guids with no navigation (see the entity's note on shadow
         // FKs), so their names are resolved here rather than Include()d.
-        var actorIds = new[] { request.RescheduledById, request.ObservanceConfirmedById }
+        var actorIds = new[] { request.RescheduledById, request.ObservanceConfirmedById, request.RecalledById }
             .Where(x => x.HasValue).Select(x => x!.Value).Distinct().ToList();
 
         if (actorIds.Count > 0)
@@ -988,6 +1104,7 @@ public class LeaveService : ILeaveService
 
             dto.RescheduledByName = NameOf(request.RescheduledById);
             dto.ObservanceConfirmedByName = NameOf(request.ObservanceConfirmedById);
+            dto.RecalledByName = NameOf(request.RecalledById);
         }
 
         // The plan it came from, named rather than shown as a Guid.
@@ -1787,7 +1904,11 @@ public class LeaveService : ILeaveService
     {
         var request = await GetOwnedLeaveRequestAsync(id);
 
-        if (request.Status != LeaveStatus.Approved)
+        // ⚠ InProgress closes too, and leaving it out would have been a deadlock. Leave that has
+        // started is precisely the leave that reaches its end date and needs closing — and reminder
+        // sweep 2 chases exactly those requests. Without this, the sweep would chase a request for
+        // ever while the action it points at refused it.
+        if (request.Status != LeaveStatus.Approved && request.Status != LeaveStatus.InProgress)
         {
             throw new InvalidOperationException("Only approved leave requests can be closed.");
         }
@@ -1910,6 +2031,56 @@ public class LeaveService : ILeaveService
         return repaired;
     }
 
+    /// <summary>
+    /// Advances approved leave that has started into <see cref="LeaveStatus.InProgress"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Why this exists at all.</b> <c>InProgress</c> had been in the enum since the port
+    /// and <b>nothing anywhere assigned it</b> — eight places read or filtered on it and no code
+    /// path ever set it, so the product had no notion of leave that is currently happening. That is
+    /// the precondition for recall (R-14): "call this person back" only means something against
+    /// leave somebody is actually on.</para>
+    ///
+    /// <para>⚠ <b>One-directional, on purpose.</b> Approved leave whose dates contain today becomes
+    /// InProgress; nothing here moves a request back. Leave whose end date has passed stays
+    /// InProgress until a human closes it — that is the same state a request reaches when its leave
+    /// simply ends, and reminder sweep 2 chases both. Flipping statuses back and forth around a
+    /// recall would churn the record and tell nobody anything.</para>
+    ///
+    /// <para>⚠ <b>This cannot move a balance, and that is by design.</b> Approved and InProgress are
+    /// both counted in <c>UsedDays</c>, so the transition is invisible to the arithmetic. If the two
+    /// are ever split across Used and Pending again, this sweep silently starts rewriting people's
+    /// balances every morning.</para>
+    /// </remarks>
+    public async Task<int> AdvanceLeaveInProgressAsync(Guid tenantId, CancellationToken ct = default)
+    {
+        var today = _clock.TodayUtc;
+
+        var starting = await _leaveRepository
+            .GetQueryable()
+            .Where(r => r.TenantId == tenantId
+                     && r.Status == LeaveStatus.Approved
+                     && r.StartDate <= today
+                     && r.EndDate >= today)
+            .ToListAsync(ct);
+
+        if (starting.Count == 0) return 0;
+
+        foreach (var request in starting)
+        {
+            ct.ThrowIfCancellationRequested();
+            request.Status = LeaveStatus.InProgress;
+            await _leaveRepository.UpdateAsync(request);
+        }
+
+        await _unitOfWork.SaveChangesAsync(ct);
+
+        _logger.LogInformation(
+            "{count} leave request(s) advanced to in-progress for tenant {tenant}", starting.Count, tenantId);
+
+        return starting.Count;
+    }
+
     private async Task PostAttendanceForApprovedLeaveAsync(LeaveRequest request, Guid tenantId)
     {
         try
@@ -1920,8 +2091,8 @@ public class LeaveService : ILeaveService
             await _unitOfWork.SaveChangesAsync();
 
             _logger.LogInformation(
-                "Leave request {number}: {written} attendance day(s) marked on leave, {skipped} left alone",
-                request.RequestNumber, result.DaysWritten, result.DaysSkipped);
+                "Leave request {number}: {written} attendance day(s) marked on leave, {skipped} left alone, {pruned} dropped",
+                request.RequestNumber, result.DaysWritten, result.DaysSkipped, result.DaysPruned);
         }
         catch (Exception ex)
         {

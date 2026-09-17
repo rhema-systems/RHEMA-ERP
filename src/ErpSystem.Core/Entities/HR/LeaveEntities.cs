@@ -476,6 +476,43 @@ public class LeaveRequest : TenantEntity
     public DateTime? ObservanceConfirmedDate { get; set; }
     public Guid? ObservanceConfirmedById { get; set; }
 
+    // ── Recall from leave (curtailment) ──────────────────────────────────────────────────────
+    // The employer calls somebody back before their end date (residue plan R-14). Deliberately NOT
+    // a cancellation, NOT an amendment and NOT a reschedule, because none of those record the fact:
+    //
+    //   Cancel     releases every day, including the ones already taken.
+    //   Close      refuses before the end date.
+    //   Reschedule says the leave MOVED. Recalled leave did not move — it was interrupted.
+    //
+    // So curtailment TRUNCATES: days up to the recall stand as taken, days after are restored to
+    // the balance, and the request keeps its number and its approval, because the leave was validly
+    // granted and then cut short. That distinction is not pedantry — restored days are often
+    // protected from the normal carry-over expiry, and recall costs can be reimbursable, and
+    // neither rule can be written against a record that says "cancelled".
+    //
+    // ⚠ The pre-recall end date is its own column rather than reusing OriginalEndDate above.
+    // OriginalEndDate means "the dates before the first reschedule"; conflating a move with an
+    // interruption would make both unreadable, and a request can be rescheduled AND later recalled.
+    //
+    // ⚠ No navigation on RecalledById — same reason as RescheduledById and ApprovedById above.
+    public DateOnly? RecallEffectiveDate { get; set; }
+
+    /// <summary>The end date the request carried before it was recalled. Null if never recalled.</summary>
+    public DateOnly? PreRecallEndDate { get; set; }
+
+    public DateTime? RecalledDate { get; set; }
+    public Guid? RecalledById { get; set; }
+
+    [MaxLength(500)]
+    public string? RecallReason { get; set; }
+
+    /// <summary>
+    /// Days handed back to the balance by the recall. Recorded rather than derived: the balance
+    /// re-derives itself from <see cref="TotalDays"/>, but "how many days did this recall return"
+    /// is a fact about the event that nothing else preserves once the dates are truncated.
+    /// </summary>
+    public decimal? DaysRestored { get; set; }
+
     // Workflow integration
     public Guid? WorkflowInstanceId { get; set; }
     public Guid? ApprovedById { get; set; }

@@ -50,6 +50,7 @@ import {
   RescheduleDialog,
   SuggestedDatesPanel,
   RescheduleTrailPanel,
+  RecallPanel,
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
 
 const fmtDate = (d: string) =>
@@ -323,6 +324,9 @@ export default function MyLeaveRequestDetailPage({
 
       <SuggestedDatesPanel request={request} />
       <RescheduleTrailPanel request={request} />
+      {/* Read-only here. Recall is the employer's act, but the employee is the person it happens
+          to, so their own copy of the record has to say it happened and why. */}
+      <RecallPanel request={request} />
 
       <Card>
         <CardHeader>

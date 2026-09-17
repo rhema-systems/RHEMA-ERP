@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Loader2, Pencil, Ban, CheckCheck, CalendarClock, CornerUpLeft, CircleCheck } from 'lucide-react';
+import { Loader2, Pencil, Ban, CheckCheck, CalendarClock, CornerUpLeft, CircleCheck, PhoneCall } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -24,9 +24,12 @@ import {
   SuggestDatesDialog,
   RespondToSuggestionDialog,
   RescheduleDialog,
+  RecallDialog,
   SuggestedDatesPanel,
   RescheduleTrailPanel,
+  RecallPanel,
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
+import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -55,9 +58,12 @@ export default function LeaveRequestDetailPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const { user } = useAuth();
+  const { canWrite } = useLeavePermissions();
 
   const [action, setAction] = useState<null | 'cancel' | 'close'>(null);
-  const [dateDialog, setDateDialog] = useState<null | 'suggest' | 'respond' | 'reschedule'>(null);
+  const [dateDialog, setDateDialog] = useState<null | 'suggest' | 'respond' | 'reschedule' | 'recall'>(
+    null,
+  );
   const [busy, setBusy] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [closureNotes, setClosureNotes] = useState('');
@@ -104,12 +110,19 @@ export default function LeaveRequestDetailPage() {
   });
 
   /**
-   * The three date-change acts. Each one returns the updated request, so the only thing left to do
+   * The four date-change acts. Each one returns the updated request, so the only thing left to do
    * is refetch — including the workflow panel, because sending back CANCELS the live approval and
    * both answering and rescheduling START A NEW ONE. A stale panel would show an approval that is
    * no longer the one in force.
+   *
+   * ⚠ Recall is the exception: it deliberately does NOT touch the approval, because the leave was
+   * validly granted and then interrupted. The panel is refetched anyway — it costs one request and
+   * makes the rule "always refresh both" instead of "refresh both except here".
    */
-  const runDateChange = async (what: 'suggest' | 'respond' | 'reschedule', run: () => Promise<unknown>) => {
+  const runDateChange = async (
+    what: 'suggest' | 'respond' | 'reschedule' | 'recall',
+    run: () => Promise<unknown>,
+  ) => {
     setBusy(true);
     try {
       await run();
@@ -121,13 +134,17 @@ export default function LeaveRequestDetailPage() {
             ? 'Sent back'
             : what === 'respond'
               ? 'Answered'
-              : 'Moved',
+              : what === 'recall'
+                ? 'Recalled'
+                : 'Moved',
         description:
           what === 'suggest'
             ? 'The employee has been asked to accept or counter the dates.'
             : what === 'respond'
               ? 'The request is back with the approver on the settled dates.'
-              : 'The dates have moved and the request is back in approval.',
+              : what === 'recall'
+                ? 'The leave has been shortened and the remaining days are back on the balance.'
+                : 'The dates have moved and the request is back in approval.',
       });
       setDateDialog(null);
     } catch (e: any) {
@@ -206,6 +223,11 @@ export default function LeaveRequestDetailPage() {
   // Moving approved dates, and saying it is still going ahead. Neither applies once it is closed.
   const canReschedule = r.status === 'Approved' && !r.closureDate;
   const canConfirm = canReschedule && !r.observanceConfirmedDate;
+  // Recall applies to leave that has been granted, including leave already under way — that is the
+  // case it mainly exists for. HR-only: the server gates it on the write permission outright rather
+  // than self-or-HR, so offering it to someone who cannot use it would only produce a 403.
+  const canRecall =
+    canWrite && (r.status === 'Approved' || r.status === 'InProgress') && !r.closureDate;
 
   return (
     <div className="space-y-6 p-6">
@@ -248,6 +270,11 @@ export default function LeaveRequestDetailPage() {
                 <CircleCheck className="mr-2 h-4 w-4" /> Still going ahead
               </Button>
             )}
+            {canRecall && (
+              <Button variant="outline" onClick={() => setDateDialog('recall')}>
+                <PhoneCall className="mr-2 h-4 w-4" /> Recall
+              </Button>
+            )}
 
             {canClose && (
               <Button variant="outline" onClick={() => setAction('close')}>
@@ -273,6 +300,7 @@ export default function LeaveRequestDetailPage() {
         <TabsContent value="overview" className="space-y-4 pt-4">
           <SuggestedDatesPanel request={r} />
           <RescheduleTrailPanel request={r} />
+          <RecallPanel request={r} />
 
           <InfoCard title="Leave">
             <InfoRow label="Leave type" value={r.leaveTypeName} />
@@ -394,6 +422,14 @@ export default function LeaveRequestDetailPage() {
         onOpenChange={(open) => setDateDialog(open ? 'reschedule' : null)}
         busy={busy}
         onConfirm={(values) => runDateChange('reschedule', () => leaveService.reschedule(id, values))}
+      />
+
+      <RecallDialog
+        request={r}
+        open={dateDialog === 'recall'}
+        onOpenChange={(open) => setDateDialog(open ? 'recall' : null)}
+        busy={busy}
+        onConfirm={(values) => runDateChange('recall', () => leaveService.recall(id, values))}
       />
 
       <ConfirmationDialog

@@ -381,6 +381,14 @@ first if you are checking the module against the requirement rather than against
 Two real requirements that waves A–E did not cover, recorded here so they are not lost. **Both are
 features, not fixes**, and both were deferred until after F1.
 
+> ▶ **Both have since moved to `HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`, and R-14 is BUILT** (2026-09-17,
+> slice G1 — 51 assertions in `dev-harness/hr-leave` slice 5). Read that plan's § 0 for what the
+> code now does; the sketch below is what was proposed, not what was built. **The one deviation
+> worth knowing:** the fix is in `PostAsync`, which now prunes days outside the request's current
+> range, not in `ReverseAsync` as sketched below — so the invariant converges on the day set and no
+> future caller has to remember the rule. R-15 is planned there too, in full, with the medical board
+> as a Medical-module record.
+
 | ID | What | Why it is not covered by anything built |
 |---|---|---|
 | **R-14** | **Recall from leave — an employee called back before their end date.** | There is **no correct action** for this today. *Cancel* releases every day including the ones already taken; *Close* refuses before the end date; *Reschedule* records that the leave moved, which is a different fact. The only route is cancel-and-re-key a shorter request, losing the number and the approval. ⚠ **And nothing writes `LeaveStatus.InProgress`** — every reference in the solution reads or filters on it and no code path sets it, so the system has no notion of leave that is currently happening, which is the precondition for recalling somebody from it |

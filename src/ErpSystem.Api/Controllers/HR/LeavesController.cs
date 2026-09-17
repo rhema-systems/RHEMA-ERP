@@ -1008,6 +1008,56 @@ namespace ErpSystem.Api.Controllers.HR
         }
 
         /// <summary>
+        /// Recall an employee from leave before their end date
+        /// </summary>
+        /// <remarks>
+        /// Curtailment (residue plan R-14). The leave is <b>truncated</b>: days up to the recall
+        /// stand as taken, days after are restored to the balance, and the request keeps its number,
+        /// its status and its approval — because it was validly approved and then interrupted.
+        ///
+        /// <para>⚠ <c>effectiveDate</c> is <b>the first day the employee is back at work</b>, not
+        /// the last day of their leave.</para>
+        ///
+        /// <para>⚠ <b>Gated on the write policy outright, not self-or-HR</b>, unlike reschedule
+        /// beside it. A recall is the employer's act: an employee may ask to move their own leave,
+        /// but may not call themselves back and hand themselves the days. The service refuses the
+        /// subject a second time, so this holds even for an HR user recalling themselves.</para>
+        /// </remarks>
+        /// <response code="200">The truncated request</response>
+        /// <response code="400">Not approved, already closed, no reason, or a date that gives nothing back</response>
+        [HttpPut("{id}/recall")]
+        [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
+        [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        [ProducesResponseType(StatusCodes.Status404NotFound)]
+        public async Task<ActionResult<LeaveRequestDto>> Recall(
+            Guid id, [FromBody] RecallLeaveRequestDto dto)
+        {
+            try
+            {
+                return Ok(await _leaveService.RecallAsync(id, dto));
+            }
+            catch (ArgumentException ex)
+            {
+                return NotFound(new { message = ex.Message });
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                return Unauthorized(new { message = ex.Message });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Error recalling leave request {LeaveRequestId}", id);
+                return StatusCode(500, "An error occurred while recalling the employee from leave");
+            }
+        }
+
+        /// <summary>
         /// Record that approved leave is still going ahead
         /// </summary>
         /// <remarks>

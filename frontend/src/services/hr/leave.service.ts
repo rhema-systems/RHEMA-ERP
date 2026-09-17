@@ -21,6 +21,7 @@ import type {
   SuggestLeavePlanChangesRequest,
   RespondToLeaveSuggestionRequest,
   SuggestLeaveRequestChanges,
+  RecallLeaveRequest,
   RescheduleLeaveRequest,
   LeaveCalendarScope,
   LeaveCalendarData,
@@ -117,6 +118,20 @@ class LeaveService {
    */
   reschedule(id: string, data: RescheduleLeaveRequest): Promise<LeaveRequest> {
     return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/reschedule`, data);
+  }
+
+  /**
+   * Call an employee back before their leave ends (R-14).
+   *
+   * ⚠ Unlike {@link reschedule}, this does NOT re-open the approval — the leave was validly
+   * approved and then interrupted, so the employer stands on the approval it already gave. Days up
+   * to the recall stand as taken; the rest go back to the balance.
+   *
+   * ⚠ HR-only. The server gates this on the write permission outright rather than self-or-HR, so an
+   * employee cannot recall themselves and hand back their own days.
+   */
+  recall(id: string, data: RecallLeaveRequest): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/recall`, data);
   }
 
   /**

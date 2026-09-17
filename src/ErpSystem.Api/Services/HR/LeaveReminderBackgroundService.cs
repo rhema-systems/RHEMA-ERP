@@ -94,6 +94,18 @@ public sealed class LeaveReminderBackgroundService : BackgroundService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
+            // ⚠ FIRST, before anything reads a leave status. Approved leave that started today
+            // becomes InProgress here, and both the reminder sweep below and the reconciler after it
+            // reason about statuses — running this last would leave every one of them a day stale.
+            try
+            {
+                await leaveService.AdvanceLeaveInProgressAsync(tenantId, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Advancing leave to in-progress failed for tenant {TenantId}", tenantId);
+            }
+
             try
             {
                 await reminderService.RunSweepForTenantAsync(

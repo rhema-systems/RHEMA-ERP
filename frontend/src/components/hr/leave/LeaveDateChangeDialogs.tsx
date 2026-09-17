@@ -18,7 +18,7 @@
  */
 
 import { useState } from 'react';
-import { CalendarClock, CornerUpLeft, Info } from 'lucide-react';
+import { CalendarClock, CornerUpLeft, Info, PhoneCall } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -423,5 +423,159 @@ export function RescheduleTrailPanel({ request }: { request: LeaveRequest }) {
         {request.rescheduledByName ? ` by ${request.rescheduledByName}` : ''}.
       </p>
     </div>
+  );
+}
+
+/**
+ * Shown once somebody has been recalled, so the record does not read as though the leave was
+ * always this short. Without this panel a recall is invisible — the end date simply looks earlier.
+ */
+export function RecallPanel({ request }: { request: LeaveRequest }) {
+  if (!request.recalledDate) return null;
+
+  return (
+    <div className="rounded-md border border-orange-300/60 bg-orange-50 p-4 text-sm dark:border-orange-900/60 dark:bg-orange-950/40">
+      <p className="flex items-center gap-2 font-medium">
+        <PhoneCall className="h-4 w-4 shrink-0" /> Recalled from leave
+      </p>
+      <p className="mt-1">
+        Approved to {day(request.preRecallEndDate)}, but expected back on{' '}
+        {day(request.recallEffectiveDate)} — so the leave now ends {day(request.endDate)}.
+        {typeof request.daysRestored === 'number' && request.daysRestored > 0 && (
+          <>
+            {' '}
+            <span className="font-medium">
+              {request.daysRestored} day{request.daysRestored === 1 ? '' : 's'}
+            </span>{' '}
+            went back to the balance.
+          </>
+        )}
+      </p>
+      {request.recallReason && (
+        <p className="mt-2 whitespace-pre-wrap text-muted-foreground">{request.recallReason}</p>
+      )}
+      <p className="mt-2 text-xs text-muted-foreground">
+        Recorded {day(request.recalledDate)}
+        {request.recalledByName ? ` by ${request.recalledByName}` : ''}. The approval stands — this
+        leave was granted and then interrupted.
+      </p>
+    </div>
+  );
+}
+
+// ── Call somebody back ─────────────────────────────────────────────────────────────────────────
+
+export function RecallDialog({
+  request,
+  open,
+  onOpenChange,
+  busy,
+  onConfirm,
+}: {
+  request: LeaveRequest;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  busy: boolean;
+  onConfirm: (values: { effectiveDate: string; reason: string }) => void;
+}) {
+  const [effective, setEffective] = useState('');
+  const [reason, setReason] = useState('');
+
+  const start = day(request.startDate);
+  const end = day(request.endDate);
+
+  // The server refuses both of these too; catching them here means the user is told before they
+  // press rather than after, and told in terms of what to do instead.
+  const onOrBeforeStart = !!effective && effective <= start;
+  const afterEnd = !!effective && effective > end;
+  const invalid = !effective || !reason.trim() || onOrBeforeStart || afterEnd;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (next) {
+          setEffective('');
+          setReason('');
+        }
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="sm:max-w-[520px]">
+        <DialogHeader>
+          <DialogTitle>Recall from leave</DialogTitle>
+          <DialogDescription>
+            {request.requestNumber} runs {start} to {end}. Recalling keeps the days already taken and
+            returns the rest — the request keeps its number and its approval.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="recall-effective">
+              First day back at work <span className="text-red-500">*</span>
+            </Label>
+            <Input
+              id="recall-effective"
+              type="date"
+              value={effective}
+              min={start}
+              max={end}
+              onChange={(e) => setEffective(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">
+              The day they return, not the last day of their leave. Leave is counted up to the day
+              before this.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="recall-reason">
+              Why they are being recalled <span className="text-red-500">*</span>
+            </Label>
+            <Textarea
+              id="recall-reason"
+              rows={3}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="e.g. the plant shutdown was brought forward and their sign-off is needed."
+            />
+            <p className="text-xs text-muted-foreground">
+              Required. A recall is the employer&apos;s act and the record has to carry its reason.
+            </p>
+          </div>
+
+          {onOrBeforeStart && (
+            <div className="flex gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
+              <p>
+                That is on or before the first day of the leave, so none of it would be taken.{' '}
+                <span className="font-medium">Cancel the request instead</span> — that is the action
+                that releases every day.
+              </p>
+            </div>
+          )}
+
+          {afterEnd && (
+            <div className="flex gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm dark:border-amber-900/60 dark:bg-amber-950/40">
+              <Info className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
+              <p>
+                The leave already ends {end}, so this would give nothing back.{' '}
+                <span className="font-medium">Close the leave instead.</span>
+              </p>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button disabled={invalid || busy} onClick={() => onConfirm({ effectiveDate: effective, reason: reason.trim() })}>
+            <PhoneCall className="mr-2 h-4 w-4" /> Recall
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -296,8 +296,15 @@ namespace ErpSystem.Application.Extensions
             RescheduleCount = entity.RescheduleCount,
             ObservanceConfirmedDate = entity.ObservanceConfirmedDate,
             ObservanceConfirmedById = entity.ObservanceConfirmedById,
-            // RescheduledByName / ObservanceConfirmedByName are filled by the reads that need them:
-            // the actor columns are bare Guids (no navigation — see the entity's note on shadow FKs).
+            RecallEffectiveDate = entity.RecallEffectiveDate,
+            PreRecallEndDate = entity.PreRecallEndDate,
+            RecalledDate = entity.RecalledDate,
+            RecalledById = entity.RecalledById,
+            RecallReason = entity.RecallReason,
+            DaysRestored = entity.DaysRestored,
+            // RescheduledByName / ObservanceConfirmedByName / RecalledByName are filled by the reads
+            // that need them: the actor columns are bare Guids (no navigation — see the entity's
+            // note on shadow FKs).
             ClosureDate = entity.ClosureDate,
             ClosureNotes = entity.ClosureNotes,
             CancellationDate = entity.CancellationDate,

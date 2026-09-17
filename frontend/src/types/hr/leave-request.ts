@@ -109,6 +109,22 @@ export interface LeaveRequest {
   observanceConfirmedById?: string | null;
   observanceConfirmedByName?: string | null;
 
+  /**
+   * Set when the employee was called back before their end date (R-14). The request keeps its
+   * number, its status and its approval — `endDate` is simply earlier than it was, and
+   * `preRecallEndDate` is what it used to be.
+   *
+   * ⚠ A screen showing a recalled request must show both dates, or the leave reads as though it
+   * was always this short and the recall becomes invisible.
+   */
+  recallEffectiveDate?: string | null;
+  preRecallEndDate?: string | null;
+  recalledDate?: string | null;
+  recalledById?: string | null;
+  recalledByName?: string | null;
+  recallReason?: string | null;
+  daysRestored?: number | null;
+
   closureDate?: string | null;
   closureNotes?: string | null;
   cancellationDate?: string | null;
@@ -130,6 +146,18 @@ export interface SuggestLeaveRequestChanges {
 export interface RescheduleLeaveRequest {
   startDate: string;
   endDate: string;
+  reason: string;
+}
+
+/**
+ * Calling an employee back before their leave ends.
+ *
+ * ⚠ `effectiveDate` is **the first day the employee is back at work**, not the last day of their
+ * leave — that is what a recall notice states, and the server takes the day before it as the new
+ * end date. Reading it the other way round is a one-day error no screen would catch.
+ */
+export interface RecallLeaveRequest {
+  effectiveDate: string;
   reason: string;
 }
 
