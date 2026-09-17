@@ -323,6 +323,9 @@ exit 0
             throw "Final-clone invariant contract is missing: $requiredText"
         }
     }
+    if ($finalInvariantText.Contains("Status,N'|',Balance,N'|'")) {
+        throw 'Final-clone account fingerprint still references retired unscoped Account.Balance.'
+    }
     if ($finalInvariantText -match 'seed must not create (journal|account transaction|posting event)') {
         throw 'Final-clone invariants incorrectly assume an empty historical business dataset.'
     }

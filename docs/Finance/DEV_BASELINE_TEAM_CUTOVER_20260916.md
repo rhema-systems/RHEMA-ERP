@@ -42,6 +42,20 @@ is intentional; it is not a generic team-wide reset command. A backup of a
 disposable database is a recovery precaution, not permission to destroy data
 that its owner needs. Historical backups must be retained.
 
+## Local verification after the balance-column removal
+
+The 2026-09-17 owner-local guarded reset applied the current baseline and
+completed its first seed, but stopped at `SEED_AND_INVARIANTS`: the invariant
+query still referenced the retired `Accounts.Balance` column. Its verified
+backup and terminal `FAILED_NO_AUTOMATIC_RETRY` evidence were retained. The
+query has been corrected, and an offline safety assertion now rejects that
+stale reference. On the already recreated local database, the corrected
+invariant output was identical before and after a second seed, and
+`DBCC CHECKDB` passed. This is useful local verification, but it does **not**
+turn the failed guarded-reset evidence package into a PASS. A fresh full
+guarded run with new external evidence is required before claiming that gate
+complete for anyone else's cutover.
+
 ## Verification and merge coordination
 
 - Before any reset, confirm the developer's target identity, owner decision,

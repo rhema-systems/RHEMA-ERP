@@ -45,7 +45,7 @@ FROM dbo.__EFMigrationsHistory ORDER BY MigrationId;
 SELECT N'ACCOUNT|' + CONVERT(nvarchar(36),Id) + N'|' + CONVERT(varchar(64),HASHBYTES('SHA2_256',CONCAT(CAST(N'' AS nvarchar(max)),N'ACCOUNT|',Id,N'|',TenantId,N'|',AccountCode,N'|',AccountNumber,N'|',AccountName,N'|',AccountType,N'|',
   COALESCE(AccountCategory,N''),N'|',COALESCE(AccountSubCategory,N''),N'|',COALESCE(CONVERT(nvarchar(36),ParentAccountId),N''),N'|',IsSegmented,N'|',CurrencyCode,N'|',
   IsMultiCurrency,N'|',IsIFRSClassified,N'|',IsBaseClassified,N'|',IsLocalClassified,N'|',AllowDirectPosting,N'|',IsControlAccount,N'|',
-  RequireDepartmentCode,N'|',RequireProjectCode,N'|',BudgetTrackingEnabled,N'|',Status,N'|',Balance,N'|',DebitBalance,N'|',CreditBalance,N'|',
+  RequireDepartmentCode,N'|',RequireProjectCode,N'|',BudgetTrackingEnabled,N'|',Status,N'|',DebitBalance,N'|',CreditBalance,N'|',
   OpeningBalance,N'|',IsSystemAccount,N'|',IsDeleted)),2)
 FROM dbo.Accounts ORDER BY TenantId,Id;
 SELECT N'ACCOUNT_SEGMENT_VALUE|' + CONVERT(nvarchar(36),v.Id) + N'|' + CONVERT(varchar(64),HASHBYTES('SHA2_256',CONCAT(CAST(N'' AS nvarchar(max)),N'ACCOUNT_SEGMENT_VALUE|',v.Id,N'|',v.TenantId,N'|',v.AccountId,N'|',v.SegmentStructureId,N'|',v.SegmentValue,N'|',
