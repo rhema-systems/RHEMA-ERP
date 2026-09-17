@@ -36,7 +36,7 @@ export default function EditLeaveTypePage() {
     setSubmitting(true);
     try {
       await leaveTypeService.update(id, {
-        ...leaveTypeFormToRequest(values, leaveType?.allowanceComponentIds ?? []),
+        ...leaveTypeFormToRequest(values),
         isActive: values.isActive,
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-types'] });
@@ -89,6 +89,10 @@ export default function EditLeaveTypePage() {
             allowCashConversion: leaveType.allowCashConversion,
             requiresReliever: leaveType.requiresReliever,
             mandatoryAnnualLeave: leaveType.mandatoryAnnualLeave,
+            // ⚠ Seeded from the DETAIL projection. If this were ever fetched from the plain
+            // GET it would arrive undefined, the form would show nothing ticked, and saving
+            // would clear every link — which is exactly the money-losing shape L-13 was about.
+            allowanceComponentIds: leaveType.allowanceComponentIds ?? [],
             requiresMedicalCertificate: leaveType.requiresMedicalCertificate,
             selfCertificationDays: String(leaveType.selfCertificationDays ?? 3),
             // Blank, not '0' — no board at all is a different statement from a zero threshold.

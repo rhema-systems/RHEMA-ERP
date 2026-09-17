@@ -3,6 +3,7 @@
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { useQuery } from '@tanstack/react-query';
 import { Loader2, Save } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -27,6 +28,7 @@ import {
   TextField,
   TextareaField,
 } from '@/components/hr/employee/tabs/fields';
+import { payComponentService } from '@/services/hr/compensation.service';
 
 export const leaveTypeSchema = z
   .object({
@@ -54,6 +56,7 @@ export const leaveTypeSchema = z
     medicalBoardThresholdDays: z.string().optional().or(z.literal('')),
     minServiceMonthsToAccess: z.string().optional().or(z.literal('')),
     encashmentRateBasis: z.enum(['DerivedFromEmoluments', 'Manual']),
+    allowanceComponentIds: z.array(z.string()),
     encashmentRatePerDay: z.string().optional().or(z.literal('')),
     encashmentWorkingDaysPerMonth: z.coerce.number().int().min(1, 'Must be at least 1'),
     isActive: z.boolean(),
@@ -95,6 +98,7 @@ export const emptyLeaveType: LeaveTypeFormValues = {
   medicalBoardThresholdDays: '90',
   minServiceMonthsToAccess: '',
   encashmentRateBasis: 'DerivedFromEmoluments',
+  allowanceComponentIds: [],
   encashmentRatePerDay: '',
   encashmentWorkingDaysPerMonth: 22,
   isActive: true,
@@ -124,6 +128,16 @@ export function LeaveTypeForm({
 
   const allowCarryOver = form.watch('allowCarryOver');
   const allowCashConversion = form.watch('allowCashConversion');
+  const rateBasis = form.watch('encashmentRateBasis');
+  const selectedAllowances = form.watch('allowanceComponentIds') ?? [];
+
+  // Only allowances feed the derived rate — a deduction or a tax component would make the
+  // arithmetic meaningless, so the list is filtered rather than left for somebody to get right.
+  const { data: payComponents, isLoading: componentsLoading } = useQuery({
+    queryKey: ['hr', 'pay-components', 'allowances'],
+    queryFn: () => payComponentService.getAll(true),
+  });
+  const allowanceOptions = (payComponents ?? []).filter((c) => c.componentType === 'Allowance');
   const requiresCertificate = form.watch('requiresMedicalCertificate');
   const selfCertDays = form.watch('selfCertificationDays');
   const boardDays = form.watch('medicalBoardThresholdDays');
@@ -295,6 +309,62 @@ export function LeaveTypeForm({
                   label="Working days per month"
                   required
                 />
+
+                {/*
+                  ⚠ L-12. These links decide what a day of encashed leave is WORTH: the derived rate
+                  is (monthly basic + the allowances ticked here) divided by the working-days figure
+                  above. They existed in the database and on the API from the start, and there was
+                  no way to set them from any screen — so every leave type paid on basic alone
+                  unless somebody called the API by hand.
+                */}
+                {rateBasis === 'DerivedFromEmoluments' && (
+                  <div className="space-y-2">
+                    <Label>Allowances included in the rate</Label>
+                    {componentsLoading ? (
+                      <p className="text-sm text-muted-foreground">Loading allowances…</p>
+                    ) : allowanceOptions.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">
+                        No allowance pay components are defined. Payroll owns the component master;
+                        HR mirrors it.
+                      </p>
+                    ) : (
+                      <div className="grid gap-2 rounded-md border p-3 sm:grid-cols-2">
+                        {allowanceOptions.map((c) => {
+                          const checked = selectedAllowances.includes(c.id);
+                          return (
+                            <label key={c.id} className="flex items-start gap-2 text-sm">
+                              <input
+                                type="checkbox"
+                                className="mt-1"
+                                checked={checked}
+                                onChange={(e) =>
+                                  form.setValue(
+                                    'allowanceComponentIds',
+                                    e.target.checked
+                                      ? [...selectedAllowances, c.id]
+                                      : selectedAllowances.filter((x) => x !== c.id),
+                                    { shouldDirty: true },
+                                  )
+                                }
+                              />
+                              <span>
+                                {c.name}
+                                {c.code && (
+                                  <span className="ml-1 text-xs text-muted-foreground">({c.code})</span>
+                                )}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    <p className="text-xs text-muted-foreground">
+                      Tick nothing and an encashed day is worth basic pay alone.{' '}
+                      <strong>Removing one lowers what people are paid</strong> for leave they have
+                      already earned, so it is not a change to make casually.
+                    </p>
+                  </div>
+                )}
               </>
             )}
           </section>
@@ -324,10 +394,14 @@ export function LeaveTypeForm({
  * Shared by the new and edit pages: form values -> API payload. Allowance components are
  * owned by the Emoluments area, so the list is preserved rather than sent empty.
  */
-export function leaveTypeFormToRequest(
-  v: LeaveTypeFormValues,
-  allowanceComponentIds: string[] = [],
-) {
+/**
+ * ⚠ `allowanceComponentIds` now comes from the FORM, not from a caller.
+ *
+ * It used to be a parameter each page had to remember to echo back, and forgetting it sent an empty
+ * array — which the server reads as "remove them all" and which silently changed what a day of
+ * encashed leave was worth (finding L-13). The form owns the value, so there is nothing to forget.
+ */
+export function leaveTypeFormToRequest(v: LeaveTypeFormValues) {
   const num = (s?: string) => (s && s.trim() ? Number(s) : null);
   return {
     name: v.name,
@@ -359,6 +433,6 @@ export function leaveTypeFormToRequest(
     encashmentRateBasis: v.encashmentRateBasis,
     encashmentRatePerDay: num(v.encashmentRatePerDay),
     encashmentWorkingDaysPerMonth: v.encashmentWorkingDaysPerMonth,
-    allowanceComponentIds,
+    allowanceComponentIds: v.allowanceComponentIds ?? [],
   };
 }

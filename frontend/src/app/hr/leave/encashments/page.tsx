@@ -157,6 +157,7 @@ export default function LeaveEncashmentsPage() {
                   <TableHead>Year</TableHead>
                   <TableHead className="text-right">Days</TableHead>
                   <TableHead className="text-right">Amount</TableHead>
+                  <TableHead>How it was worked out</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Payment ref</TableHead>
                   <TableHead className="w-[60px]" />
@@ -175,7 +176,7 @@ export default function LeaveEncashmentsPage() {
                   ))
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={8}>
+                    <TableCell colSpan={9}>
                       <EmptyState
                         icon={Banknote}
                         title="No encashments"
@@ -192,6 +193,22 @@ export default function LeaveEncashmentsPage() {
                       <TableCell className="text-right">{e.daysEncashed}</TableCell>
                       <TableCell className="text-right">
                         {e.amountPaid?.toLocaleString() ?? '—'}
+                      </TableCell>
+                      {/*
+                        ⚠ L-20. The row used to show an amount and nothing else — not the rate, not the
+                        basic pay, not which allowances fed it — so anybody disputing the figure had
+                        nothing to read. The basis is stored ON the payout rather than recomputed,
+                        because the divisor behind it is a setting: recomputing would quietly restate
+                        old payouts the moment somebody edited it.
+                      */}
+                      <TableCell className="max-w-xs text-xs text-muted-foreground">
+                        {e.rateBasis ? (
+                          <span title={e.rateBasis}>{e.rateBasis}</span>
+                        ) : (
+                          <span className="italic">
+                            not recorded — paid before the basis was kept
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <StatusBadge status={e.status} />

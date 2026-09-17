@@ -439,6 +439,17 @@ export interface LeaveEncashment {
   year: number;
   daysEncashed: number;
   amountPaid: number;
+
+  /**
+   * How the amount was arrived at, in words — the monthly figure, the divisor, the resulting
+   * daily rate, and where that divisor came from.
+   *
+   * ⚠ **Recorded at payout time, not recomputed.** The divisor behind it is a setting, so a
+   * figure that cannot name its own basis stops reconciling the moment somebody edits it. This
+   * is what finding L-20 was missing: the row showed an amount and nothing to check it against.
+   */
+  rateBasis?: string | null;
+
   status: LeaveEncashmentStatus;
   processedDate?: string | null;
   processedByEmployeeId?: string | null;

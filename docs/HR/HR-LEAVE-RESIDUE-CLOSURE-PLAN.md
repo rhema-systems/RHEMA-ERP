@@ -1,7 +1,7 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1–G4 BUILT. G5a (the three deferred findings that could hurt) BUILT.
-G5b, G6 and G7 outstanding.**
+**Status:** 2026-09-17 — **G1–G4 BUILT. G5a BUILT. G5b two of five done (L-12, L-20).
+L-15, L-19, L-22 and G6's wider survey outstanding.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -223,12 +223,29 @@ records), and revives a row buried by the old code rather than inserting a dupli
 
 This is the third time this codebase has hit *"a soft delete does not release a unique index"*.
 
-### G5b — the five screen findings: NOT started
+### G5b — the screen findings: TWO of five done 2026-09-17
 
-**L-12** leave-type allowances have no screen · **L-15** no attachment can be added while raising a
-request · **L-19** recalculate is one employee at a time · **L-20** no encashment detail page and the
-derived rate is never shown (— G2 now **stores** that rate on the payout, so this one is a screen
-away) · **L-22** compliance is read-only apart from the export.
+Both are **frontend only** — the API already supported each, which is why neither carries a harness
+assertion beyond what slices 6 and 9 already prove about the endpoints. Verified by `tsc` on the
+scoped leave config, and slices 6 and 9 re-run green afterwards.
+
+| Done | What was wrong |
+|---|---|
+| **L-12** | The allowance links **decide what a day of encashed leave is worth** — the derived rate is (monthly basic + the ticked allowances) ÷ the working-days figure — and there was **no control anywhere** to set them. Every leave type paid on basic alone unless somebody called the API by hand. Now a checkbox list in the leave type's Encashment section, shown only when the rate is derived |
+| **L-20** | The encashment row showed an amount and nothing to check it against — not the rate, not the basic pay, not which allowances fed it. G2 had already started **storing** the basis on the payout, so this was one column away. It reads *"6,600.00 (basic + linked allowances) ÷ 22 working days = 300.00 per day, per HR policy settings."* Rows paid before G2 say so plainly rather than showing a blank |
+
+⚠ **A related hazard closed with L-12.** `leaveTypeFormToRequest` used to take the allowance ids as a
+PARAMETER each page had to remember to echo back; forgetting it sent `[]`, which the server now reads
+as *"remove them all"*. The form owns the value, so there is nothing to forget. The edit page seeds it
+from the **detail** projection — the plain GET does not carry the links, and fetching from there would
+show nothing ticked and clear every link on save.
+
+### Still open in G5b
+
+**L-15** no attachment can be added while raising a request (the sick-note case — needs a
+draft-then-attach flow) · **L-19** recalculate is one employee at a time, with no organisation-wide
+run (needs a new endpoint, and it is a heavy operation) · **L-22** compliance is read-only apart from
+the export.
 
 ### G6–G7 — outstanding
 
