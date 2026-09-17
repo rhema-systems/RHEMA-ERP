@@ -91,9 +91,32 @@ public class CreateLeaveTypeDto
     public List<Guid> AllowanceComponentIds { get; set; } = new();
 }
 
+/// <summary>
+/// Updating a leave type. ⚠ <b>A PUT here is a REPLACE</b>, as the verb says: every field sent
+/// becomes the new value and every field omitted becomes its default.
+/// </summary>
+/// <remarks>
+/// <para>⚠ <b>That is dangerous for the allowance links, and finding L-13 is about exactly this.</b>
+/// <c>LeaveTypeAllowance</c> rows decide what a day of encashed leave is <b>worth</b> — they feed
+/// the derived rate — and a caller who sent a partial body used to have every one of them silently
+/// deleted, changing people's money with no trace of what was removed.</para>
+///
+/// <para><b>So this one property is nullable and the others are not.</b> <c>null</c> means "I am not
+/// touching the allowances" and an empty list means "remove them all". A PUT that omits the field
+/// now leaves the links alone; a caller who genuinely wants none sends <c>[]</c> and says so. The
+/// replace-set semantics stay for every other field, because that is what PUT means and the screens
+/// send the whole object — but a flag reset to false is visible on the next read, whereas a deleted
+/// link is not.</para>
+/// </remarks>
 public class UpdateLeaveTypeDto : CreateLeaveTypeDto
 {
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// ⚠ <c>null</c> = leave the allowance links untouched. <c>[]</c> = remove them all.
+    /// Shadows the non-nullable property on the create DTO, deliberately.
+    /// </summary>
+    public new List<Guid>? AllowanceComponentIds { get; set; }
 }
 
 public class LeaveTypeDetailDto : LeaveTypeDto

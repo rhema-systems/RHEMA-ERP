@@ -90,6 +90,12 @@ worked example naming the spread, and every payout records the basis that produc
 **Precedence:** `LeaveType.EncashmentWorkingDaysPerMonth` (if > 0) → tenant setting → `22`. The
 stored `LeaveEncashment.RateBasis` names *which* of the two set it. Proved in slice 6 [3].
 
+⚠ **The allowance links that feed the derived rate are money too, and they were losable.** A
+leave-type PUT that omitted `allowanceComponentIds` deleted every link (L-13), and removal soft
+deleted against a unique index that is not filtered on `IsDeleted`, so a removed allowance could
+never be restored. Both fixed in G5a and asserted in slice 9. Recorded here because the register
+is about what decides money, and these rows do — they are just not spelled as a setting.
+
 ---
 
 ## 2. Leave — reminder cadence `CompanyHrPolicySettings`

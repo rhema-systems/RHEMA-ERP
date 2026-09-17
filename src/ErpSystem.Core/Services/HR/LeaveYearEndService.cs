@@ -61,10 +61,11 @@ public class LeaveYearEndService : ILeaveYearEndService
         return tenantId;
     }
 
-    public async Task<LeaveYearEndResult> ProcessCarryOverAsync(int fromYear, Guid? employeeId = null, CancellationToken ct = default)
+    public async Task<LeaveYearEndResult> ProcessCarryOverAsync(
+        int fromYear, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default)
     {
         var tenantId = GetTenantId();
-        var result = new LeaveYearEndResult();
+        var result = new LeaveYearEndResult { IsDryRun = dryRun };
         var toYear = fromYear + 1;
 
         var balances = await LoadBalancesAsync(fromYear, employeeId, ct);
@@ -91,6 +92,9 @@ public class LeaveYearEndService : ILeaveYearEndService
                                        && b.LeaveTypeId == balance.LeaveTypeId
                                        && b.Year == toYear, ct);
 
+            // ⚠ A dry run computes the same figure and writes nothing. It must still reach here,
+            // past every guard above, or the preview would count balances the real run would skip.
+            if (!dryRun)
             await _unitOfWork.ExecuteInTransactionAsync(async innerCt =>
             {
                 if (target == null)
@@ -121,13 +125,20 @@ public class LeaveYearEndService : ILeaveYearEndService
             result.TotalDaysCarriedOver += carryAmount;
         }
 
-        result.Notes.Add($"Carried over {result.TotalDaysCarriedOver} day(s) from {fromYear} into {toYear} across {result.BalancesAffected} balance(s).");
-        _logger.LogInformation("Leave carry-over processed for {FromYear}->{ToYear}: {Affected} balances, {Days} days",
-            fromYear, toYear, result.BalancesAffected, result.TotalDaysCarriedOver);
+        result.BalancesSkipped = result.BalancesProcessed - result.BalancesAffected;
+        result.Notes.Add(
+            $"Examined {result.BalancesProcessed} balance(s): carried over {result.TotalDaysCarriedOver} day(s) "
+            + $"from {fromYear} into {toYear} across {result.BalancesAffected}, left {result.BalancesSkipped} alone."
+            + (dryRun ? " NOTHING WAS WRITTEN - this was a dry run." : string.Empty));
+        _logger.LogInformation(
+            "Leave carry-over {Mode} for {FromYear}->{ToYear}: {Affected} of {Examined} balances, {Days} days",
+            dryRun ? "previewed" : "processed", fromYear, toYear,
+            result.BalancesAffected, result.BalancesProcessed, result.TotalDaysCarriedOver);
         return result;
     }
 
-    public async Task<LeaveYearEndResult> ProcessForfeitureAsync(int year, DateOnly? asOf = null, Guid? employeeId = null, CancellationToken ct = default)
+    public async Task<LeaveYearEndResult> ProcessForfeitureAsync(
+        int year, DateOnly? asOf = null, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default)
     {
         var performedBy = _currentUserService.EmployeeId is Guid actor && actor != Guid.Empty
             ? actor
@@ -155,6 +166,8 @@ public class LeaveYearEndService : ILeaveYearEndService
                 && balance.CarriedOverDays > 0
                 && effectiveAsOf >= yearStart.AddMonths(expiryMonths))
             {
+                // ⚠ Dry run: compute, count, write nothing.
+                if (!dryRun)
                 await _unitOfWork.ExecuteInTransactionAsync(async innerCt =>
                 {
                     balance.CarriedOverDays = 0m;
@@ -176,6 +189,8 @@ public class LeaveYearEndService : ILeaveYearEndService
                 var unused = balance.AvailableDays;
                 if (!alreadyForfeited && unused > 0)
                 {
+                    // ⚠ Dry run: compute, count, write nothing.
+                    if (!dryRun)
                     await _unitOfWork.ExecuteInTransactionAsync(async innerCt =>
                     {
                         var adjustment = new LeaveAdjustment
@@ -211,8 +226,16 @@ public class LeaveYearEndService : ILeaveYearEndService
             if (affected) result.BalancesAffected++;
         }
 
-        _logger.LogInformation("Leave forfeiture processed for {Year} as of {AsOf}: {Affected} balances, {Days} days forfeited",
-            year, effectiveAsOf, result.BalancesAffected, result.TotalDaysForfeited);
+        result.BalancesSkipped = result.BalancesProcessed - result.BalancesAffected;
+        result.Notes.Add(
+            $"Examined {result.BalancesProcessed} balance(s): forfeited {result.TotalDaysForfeited} day(s) "
+            + $"across {result.BalancesAffected}, left {result.BalancesSkipped} alone."
+            + (dryRun ? " NOTHING WAS WRITTEN - this was a dry run." : string.Empty));
+
+        _logger.LogInformation(
+            "Leave forfeiture {Mode} for {Year} as of {AsOf}: {Affected} of {Examined} balances, {Days} days forfeited",
+            dryRun ? "previewed" : "processed", year, effectiveAsOf,
+            result.BalancesAffected, result.BalancesProcessed, result.TotalDaysForfeited);
         return result;
     }
 

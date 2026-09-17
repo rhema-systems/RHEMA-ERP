@@ -1,6 +1,7 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1–G4 BUILT and verified. G5–G7 planned, not built.**
+**Status:** 2026-09-17 — **G1–G4 BUILT. G5a (the three deferred findings that could hurt) BUILT.
+G5b, G6 and G7 outstanding.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -187,10 +188,53 @@ administers the process even though clinicians decide it. **"Gated on `HR.Medica
 "HR cannot see it"** — it means the entitlement lives in one grant map instead of being implied by
 role checks across controllers. An employee and a line manager are refused; both asserted.
 
-### G5–G7 — not started
+### G5a — the three deferred findings that could hurt: BUILT 2026-09-17
 
-Unchanged from § 4 below. **G6 is partly done** — the register exists and covers leave; what remains
-is the survey of the other modules.
+No migration. **Verified by `dev-harness/hr-leave` slice 9 — 21 assertions, green twice. Suite total
+395 across nine slices, green twice.**
+
+| Finding | What it was | Fix |
+|---|---|---|
+| ⚠ **L-13** | **Silent data loss.** A leave-type PUT that did not mention the allowance links deleted every one of them. Those rows feed the derived encashment rate, so it changed what a day of leave is **worth**, with no trace of what was removed | `UpdateLeaveTypeDto.AllowanceComponentIds` is now nullable: **null = don't touch, `[]` = remove all**. Those are different requests and were indistinguishable |
+| **L-26** | The year-end report **overstated its own work** — "processed" counted every balance the loop looked at, including skipped ones. A run that examined 900 and changed 12 said "900 processed" | `BalancesSkipped` added; notes and logs now read *"Examined 900: carried over 48 days across 12, left 888 alone."* The counts were right; the word was wrong |
+| **L-24** | **No dry run on either year-end job**, and both move balances in bulk with no undo | `?dryRun=true`, with `IsDryRun` on the result so a preview cannot be mistaken for a run |
+
+**The replace-set asymmetry is deliberate.** Every other field on that PUT still replaces, because
+that is what PUT means and the screens send the whole object. Only the collection is special, and the
+reason is that **a flag reset to false is visible on the next read; a deleted link is not.**
+
+**Two design notes on the dry run.** It runs past every guard rather than short-circuiting, or the
+preview would count balances the real run would skip — slice 9 asserts it examined more than zero.
+And forfeiture still demands an employee-linked actor even in preview: *a preview that succeeds where
+the real run would fail is a false assurance, not a preview.*
+
+### ⚠ And a second, older bug that fixing L-13 exposed
+
+Removing an allowance link **soft**-deleted it, while
+`IX_LeaveTypeAllowance_Tenant_LeaveType_Component` is **unique and not filtered on `IsDeleted`**. The
+invisible row kept its slot, so re-adding the same allowance collided with something nothing could
+see and threw a 500. **Once an allowance was taken off a leave type it could never be put back**,
+which quietly caps what a day of encashed leave can be worth.
+
+**The old behaviour masked it**: every update wiped the links, so nobody ever reached the re-add
+path. `SyncAllowanceLinksAsync` now queries *including deleted*, **hard** deletes on removal (join
+rows carrying no human input — the same reasoning `LeaveAttendancePostingService.ReverseAsync`
+records), and revives a row buried by the old code rather than inserting a duplicate.
+
+This is the third time this codebase has hit *"a soft delete does not release a unique index"*.
+
+### G5b — the five screen findings: NOT started
+
+**L-12** leave-type allowances have no screen · **L-15** no attachment can be added while raising a
+request · **L-19** recalculate is one employee at a time · **L-20** no encashment detail page and the
+derived rate is never shown (— G2 now **stores** that rate on the payout, so this one is a screen
+away) · **L-22** compliance is read-only apart from the export.
+
+### G6–G7 — outstanding
+
+**G6 is partly done** — the register exists and covers leave; what remains is the survey of the other
+modules. **G7 is effectively done**: the harness slices were written alongside each slice rather than
+saved for the end, which is why every finding above was caught by one.
 
 ---
 
