@@ -1,10 +1,21 @@
 # HR Leave Management — System Guide and Demonstration Workbook
 
 **Status:** rewritten 2026-09-17 after waves A–E of
-[`HR-LEAVE-CLOSURE-PLAN.md`](HR-LEAVE-CLOSURE-PLAN.md); **brought up to date 2026-09-18, after
-G1–G5 of [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) were built too.**
-It describes the module as it now stands, not as it was on either of those mornings. Where the demo
-database will not show what the code can do, that is said in the step rather than smoothed over.
+[`HR-LEAVE-CLOSURE-PLAN.md`](HR-LEAVE-CLOSURE-PLAN.md); brought up to date 2026-09-18 after G1–G5 of
+[`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md); **and again the same day
+after Wave 1 and Wave 2a/2e of
+[`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md).** It describes the
+module as it now stands, not as it was on any of those mornings. Where the demo database will not
+show what the code can do, that is said in the step rather than smoothed over.
+
+> ### ⚠ If you demonstrate nothing else from the third build, do §2.3b
+>
+> **53 of the demonstration database's 97 annual leave balances carry the wrong entitlement** —
+> Juniors reading 21 where the rulebook says 15, Managers reading 21 where it says 30. Chapter 13
+> asks you to read that column aloud. Repairing it is five minutes, as admin, and it is now a button.
+>
+> The rest of what that build added is explained where it lives: **§1.3b** answers *"how does leave
+> work for somebody who just joined?"*, which this book could not answer before.
 
 > ### What the second build added, in one paragraph
 >
@@ -301,24 +312,107 @@ Three sources, in strict precedence, resolved by `LeaveEntitlementService`:
    …then clamped to LeaveType.MaxDaysPerYear if one is set.
 ```
 
+⚠ **That precedence runs once, when the balance row is created, and the answer is then STORED.**
+Nothing re-runs it afterwards. So if an allocation is corrected in March, balances opened in
+January keep January's figure — and the Entitled column on chapter 13 goes on reporting it.
+
+**There is now one control that re-runs it**, deliberately separate and admin-only: *Repair
+entitlements*, chapter 13. It previews every row it would change, naming both figures, before it
+changes anything.
+
+> **Why it is not automatic, if anybody asks:** re-deriving entitlement on every recalculation
+> would silently restate history the moment somebody edited an allocation with a retrospective
+> effective date. Somebody's balance would move and nothing would say why. An explicit pass with a
+> preview is the difference between a correction and a surprise.
+
 ### 1.3 Accrual — entitlement is not the same as availability
 
 A leave type with an **accrual policy** does not hand over the year's entitlement on 1 January. It
 builds up: monthly, quarterly, semi-annually or annually, either incrementally or as a full grant
 once the employee clears a minimum-service bar.
 
-Two switches shape the edges of the year, and **both are now read** — the second was inert until
-the closure build:
+Two switches shape the edges of the year, and **both now bind** — one was inert until the closure
+build, the other until 2026-09-18:
 
-| Switch | What it does |
-|---|---|
-| `ProRateOnJoin` | a mid-year joiner starts accruing from their hire date, not from January |
-| `ProRateOnExit` | a leaver **stops** accruing on their last day |
+| Switch | On | Off |
+|---|---|---|
+| `ProRateOnJoin` | a joiner accrues only from the date they **qualified**, so a mid-year start earns part of the year | once they qualify at all, they accrue on the **company's leave year** like everybody else |
+| `ProRateOnExit` | a leaver **stops** accruing on their last day | they accrue to the end of the year |
+
+> ⚠ **`ProRateOnJoin` was the longest-lived dead setting in this module**, and the shape of its
+> failure is worth one sentence because a survey will never find another one like it. It was read on
+> every single accrual calculation — in a branch that could not be entered. The condition compared
+> the hire date against a date that is never earlier than the hire date, so it was false for every
+> employee, every policy and every date.
+>
+> **The pro-rating happened anyway**, because the eligibility date had already anchored the window
+> to the hire date. What was missing was the other half: a client who wanted it **off** could not
+> have it off. Switching it on changes nothing today; switching it off is new.
 
 > ⚠ **`ProRateOnExit` applies to incremental accrual only**, exactly as its twin does. A policy set
 > to *full grant on eligibility* hands over the whole year the moment eligibility is reached, and a
 > "full grant" that is then reduced is not a full grant. If TDC wants a leaver's full grant scaled
 > down, that is a different setting and it has not been built. Recorded in the closure ledger.
+
+### 1.3b Somebody who just joined — the whole journey
+
+**This is the question the room asks most often, and the one this book could not answer until
+now.** Read it once; it explains three screens.
+
+#### The two service gates, which look like one
+
+| Gate | Lives on | Stops |
+|---|---|---|
+| **Min service to access** | the **leave type** | raising the request at all — refusal #2 in §1.5: *"has not yet completed the minimum service period"* |
+| **Min service months** | the **accrual policy** | anything accruing. The clock starts at hire **+** this |
+
+⚠ **They are different settings with almost the same name**, and on this database both are 12 for
+annual leave — which is why they look like one rule. A client could set the first to 6 and the
+second to 12, and then somebody could *ask* for leave three months before any of it had accrued.
+
+#### A new joiner, month by month
+
+Junior grade, hired **1 May**, on the demo configuration:
+
+| | Annual leave | Sick leave | Casual, compassionate, paternity |
+|---|---|---|---|
+| **Day one** | cannot request it. Refused on service until 1 May next year, and **accrues nothing** | **all 12 days**, immediately — full grant, no service bar | **the full entitlement**, immediately |
+| **Month 6** | still nothing | unchanged | unchanged |
+| **1 May, year two** | the gate opens and accrual starts | | |
+| **31 December, year two** | **14 days accrued** of 15 — eight completed months at 1.75 | | |
+
+> **Say this if somebody asks why sick leave is different:**
+>
+> "Nobody schedules illness around a service threshold. Annual leave is earned by service and the
+> configuration says so; sick leave is available from the first day, and so is compassionate leave.
+> That is a policy choice, it is on the leave type, and a different organisation sets it
+> differently."
+
+#### ⚠ What the hire date does and does not decide
+
+It anchors **three** things and nothing else: when somebody may first take a leave type, when
+accrual starts, and which day of the month accrual ticks over.
+
+**It does not give anybody their own leave year.** There is no anniversary-based entitlement here:
+
+| | |
+|---|---|
+| **The leave year is the calendar year** | 1 January to 31 December, for everybody |
+| **Carry-over expiry and the forfeiture cut-off** | measured from **1 January**, so *"expires after 3 months"* means 31 March for every employee |
+| **A July–June leave year** | not available. The tenant does have a `FiscalYearStartMonth`, and **leave ignores it completely** — only recruitment's budget check reads it |
+
+⚠ **And entitlement is never pro-rated.** A December joiner's Entitled column reads the **full**
+annual figure. Accrual limits what they can *book*, which imitates pro-rating from the employee's
+side — but the ledger says the whole year, and the year-end carry-over reads the ledger.
+
+> **The honest sentence, if a client asks for an anniversary leave year:**
+>
+> "Not today. Everything that depends on *when you joined* — when you qualify, when you start
+> earning — is already there. What runs on the calendar is the **year itself**, and moving that is a
+> change to what a leave year means, not a setting. It is written up rather than hand-waved."
+
+Both limits, and what it would cost to lift them, are in
+[`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) § 2.3.
 
 ### 1.4 ⚠ The two availability figures — and why you can now see both
 
@@ -630,6 +724,43 @@ legacy system on go-live day, and chapter 14 makes a virtue of it.
 ⚠ **And expect *Can take now* to be lower than *Available*.** That is §1.4, it is correct, and it
 is one of the better small moments in the book. Do not "fix" it.
 
+### 2.3b ⚠ Repair the Entitled column before you quote it
+
+**Measured on the demonstration database 2026-09-18: 53 of its 97 annual leave balances carry the
+wrong entitlement.** Not a rounding difference — the leave type's **default** where the rulebook
+says the employee's **staff-level allocation**:
+
+| Grade | People | Entitled reads | The rulebook says |
+|---|---|---|---|
+| Junior | **39** | 21 | **15** |
+| Senior | 44 | 21 | 21 *(right by coincidence)* |
+| Management | **14** | 21 | **30** |
+
+**Why:** every opening balance was loaded by posting an adjustment, and until 2026-09-18 that
+particular path recorded the type default instead of resolving the allocation. The demo seeder also
+opens the balances *before* it creates the allocations, so even the corrected code would resolve to
+the default at that moment. Both halves are fixed; the **rows already loaded are not, until somebody
+presses the button.**
+
+**Five minutes, as admin, in Window C:**
+
+1. `/hr/leave/balances` → set the **Year** → **🔧 Repair entitlements**.
+2. Read the preview. **Expect 53.** ⚠ A different number means that database differs from this
+   reading — stop and find out why rather than applying it.
+3. **Apply.**
+4. Spot-check: filter to a Junior and confirm Entitled now reads **15**.
+
+⚠ **Do this even if you are cutting chapter 13**, because §2.3 has you write those figures down and
+chapter 6's balance strip quotes the same arithmetic. And ⚠ **it is a real write** — chapter 21
+item 17.
+
+> **If somebody asks about it in the room, the honest answer is a good one:**
+>
+> "Entitlement is resolved once and stored, deliberately. That means a rulebook change does not
+> reach balances that already exist — and until recently nothing in the product could bring them
+> back into line. Now there is an administrator's control that shows you every row it would change
+> before it changes one. What you are looking at is the *after*."
+
 ### 2.4 Rehearse the two-stage approval, once, tonight
 
 This is the rehearsal that stops rule 1 biting you live. **It is different from the old one — there
@@ -767,6 +898,7 @@ People away in the current month (calendar)       : ____________
 [ ] 2.1  TWO-STAGE definitions confirmed active — the single most important check
 [ ] 2.2  anchor employee, manager and reliever written down
 [ ] 2.3  the seven balance figures read off and written in
+[ ] 2.3b Entitled repaired as admin — the preview said 53, and a Junior now reads 15
 [ ] 2.4  the two-stage approval rehearsed, attendance days seen, rehearsal cancelled
 [ ] 2.5  Window C (admin) open on /hr/leave/year-end, or chapter 17 cut
 [ ] 2.6a one reminder sweep run, so chapter 18 has a log to show
@@ -915,7 +1047,7 @@ button, and a row menu with **Edit** and **Remove**:
 | **Sub-types** | named variants | **Max days** — now an *annual* cap, enforced per request |
 | **Allocations** | days per staff level | **Effective from / to** — this is how a policy change is dated rather than overwritten |
 | **Eligibility** | who may take it | the **gender qualifier**, which ANDs onto an org-scoped rule |
-| **Accrual** | how entitlement builds | **Frequency**, **Mode**, and the two pro-rate switches |
+| **Accrual** | how entitlement builds | **Frequency**, **Mode**, and the two pro-rate switches. ⚠ **One active policy per leave type**, enforced — see below |
 
 ⚠ **Remove is `HR.Leave.Admin` on all four tabs and is hidden from `hr.head`.** Add and Edit are
 `HR.Leave.Write` and are available. So an HR officer can add and correct configuration but cannot
@@ -961,6 +1093,19 @@ more, and the form owns the value rather than asking each page to remember to ec
 
 ⚠ **Retired sub-types no longer appear in the pickers.** The rulebook tab still shows them, with an
 *Inactive* badge, because that is what the Status column is for.
+
+⚠ **A leave type may have exactly ONE active accrual policy, and adding a second is refused** with a
+message saying so. It used not to be: a second policy was accepted and the accrued figure then
+depended on which row the database returned first — the same balance could read differently between
+two page loads. The thing an administrator usually wants when they reach for a second policy is a
+**different rate per staff level**, which is not built; the refusal says that rather than leaving
+them to guess.
+
+⚠ **The Frequency picker no longer offers *Per pay period*.** It was a synonym for *Monthly* wearing
+a more specific label — the engine credits one period a month whatever the payroll cycle is — so on
+a fortnightly payroll the label was a claim the product could not honour. Accruing on a real pay
+cycle needs the pay calendar, which **payroll owns**. A policy created before this still shows the
+value, marked *(retired — accrues monthly)*, and stays editable.
 
 ### ▶ Walk it
 
@@ -1031,6 +1176,7 @@ of leave is worth in cash. §4.4.6 lists those, and chapter 4b is the screen the
 | **Sub-type → Active** | retired sub-types are filtered out of the request forms' picker **and refused by the service**, so the API door is shut too |
 | **Leave type → Active** | the **service** now refuses a retired type, not just the picker. Moving a draft onto a retired type is refused as well |
 | **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3 |
+| **Accrual → Pro-rate on join** *(2026-09-18)* | ⚠ **It was read on every accrual calculation and could not change the answer**, because its condition could never be true. ON is what always happened; **OFF is new** and accrues on the company's leave year instead. §1.3 |
 | **Calendar colour** | real, because a calendar exists. It colours the bands in chapter 9, and a type with no colour set falls back to a generated palette rather than showing nothing |
 | **Holiday → Observance type** | *Mandatory* and *Substitute Day* close the office; ***Optional* is a working day**, so leave taken on it is chargeable |
 | **Holiday → Active** | an inactive holiday no longer suppresses a leave day |
@@ -1123,6 +1269,13 @@ which for a product with more than one client is the same problem wearing differ
 | month 9 for mandatory leave | **Start chasing outstanding mandatory leave from month** | chapter 4b |
 | 30 days before carry-over lapses | **Warn this many days before carry-over expires** | chapter 4b |
 | 3 days' self-certification and a 90-day board threshold | **on the leave type**, because they are rules about a *kind of leave* | this chapter |
+
+**And two more, 2026-09-18**, from the entitlement plan rather than the residue plan:
+
+| Was | Is now |
+|---|---|
+| **`ProRateOnJoin`**, read everywhere and unable to bind | a switch with two working positions. ⚠ Its old status has no name in the four the configuration register uses — it was not a ghost, because it *was* read. The register calls that **Unreachable** now, and this was its first entry |
+| **`PerPayPeriod`**, an accrual frequency that silently meant *Monthly* | retired from the picker and refused by the API, rather than implemented — the pay cycle is payroll's fact and modelling it here would be a second rulebook |
 
 ⚠ **Each one shipped with an assertion that it binds in *both* positions** — set it one way, observe
 the behaviour, set it the other, observe the change. That rule exists because asserting a setting at
@@ -2509,7 +2662,12 @@ the arithmetic of the last two.
 
 ### 👁 On the page
 
-**Header.** Two buttons: **⬇ Export CSV** and **↻ Recalculate**.
+**Header.** Four buttons: **⬇ Export CSV** · **↻ Recalculate** · **↻ Recalculate everybody**
+*(admin)* · **🔧 Repair entitlements** *(admin)*.
+
+⚠ **The last two are hidden from anyone without the Admin tier**, which `hr.head` does not hold.
+That is rule 3, and it means an HR officer sees two buttons on this screen and an administrator sees
+four.
 
 **Filters:** Year · Employee · Leave type.
 
@@ -2531,11 +2689,10 @@ take now* did not exist at all, which is why §1.4 was the module's most confusi
 **Recalculate** with no employee chosen refuses: *Choose an employee — Recalculation runs for one
 employee at a time.*
 
-⚠ **There is now a tenant-wide recalculation, and it is not on this screen.**
-`POST /api/Leaves/balances/recalculate-all?year=&leaveTypeId=` walks every balance in the company —
-**admin tier**, a step above the button beside it, because this one is heavy and organisation-wide.
-It is what gives a correction a route to reach nine hundred people instead of one, which the module
-did not have. Three things about it are worth saying if it comes up:
+**Recalculate everybody** walks every balance in the company for the chosen year — **admin tier**, a
+step above the button beside it, because it is heavy and organisation-wide. It is what gives a
+correction a route to reach nine hundred people instead of one. Three things about it are worth
+saying if it comes up:
 
 - **it has no dry run, and does not need one.** It *derives* its counters from requests and
   adjustments that already exist, never invents a figure, and never touches entitled or carried-over
@@ -2545,6 +2702,41 @@ did not have. Three things about it are worth saying if it comes up:
 - **one employee's failure does not abandon the other 899.** It is counted, noted, and the pass
   continues — a correction that stops halfway leaves the company worse off than one that never ran,
   because nobody can tell which half is current.
+
+**🔧 Repair entitlements** is the newest control on this screen and the only one that **overwrites**
+rather than derives. It re-runs the entitlement precedence from §1.2 against every stored balance
+and reports where the two disagree.
+
+⚠ **It always previews first, and the preview is the decision.** Pressing it runs a dry run and
+opens a dialog listing **every row it would change, with both figures**:
+
+```
+Examined 97 balance(s) for 2026: 53 disagreed with the rulebook,
+44 were already correct. NOTHING WAS WRITTEN - this was a dry run.
+
+    Ama Mensah (TDC/00412) · Annual Leave: 21 → 15
+    Kofi Asante (TDC/00097) · Annual Leave: 21 → 30
+    …
+```
+
+Only then is **Apply** offered, and it is disabled when nothing disagrees.
+
+> **Say this, because it is the whole argument for the control:**
+>
+> "Entitlement is worked out once, when the balance is first created, and then it is stored. That is
+> right — you do not want somebody's entitlement drifting under them. But it means a correction to
+> the rulebook in March does not reach a balance opened in January, and until now **nothing in the
+> product could bring the two back into line.**
+>
+> So there is a button, it is an administrator's, and it shows you every row it is going to touch
+> before it touches one. A confirmation that says *'this will correct some entitlements'* is asking
+> you to authorise a change you cannot see."
+
+⚠ **Two things it deliberately does not do.** It never runs as a side effect of an ordinary
+recalculation — re-deriving on every write would restate history the moment somebody back-dated an
+allocation. And **it does not revisit a carry-over already run for the year**: those days were
+carried on the old figure, and the result counts those rows separately and says so rather than
+quietly correcting them. Re-running carry-over is a decision of its own.
 
 ### ▶ Walk it
 
@@ -2590,15 +2782,20 @@ did not have. Three things about it are worth saying if it comes up:
 | The table | `GET /api/Leaves/balances?year=&employeeId=&leaveTypeId=` | `HR.Leave.Read` |
 | Export | `GET /api/Leaves/balances/export` *(same filters)* | `HR.Leave.Read` |
 | Recalculate | `POST /api/Leaves/balances/recalculate` | `HR.Leave.Write` |
+| Recalculate everybody | `POST /api/Leaves/balances/recalculate-all?year=&leaveTypeId=` | **`HR.Leave.Admin`** |
+| Repair entitlements | `POST /api/Leaves/balances/repair-entitlements?year=&leaveTypeId=&employeeId=&dryRun=` | **`HR.Leave.Admin`** |
 
 **Accrual is computed live on every read**, never stored. **Both availability figures come from one
 server-side definition**, which the create check also calls.
 
 ### ⚠ Known gaps
 
-| | |
-|---|---|
-| **L-19 is closed at the API and not on the screen.** The organisation-wide recalculation exists, is admin-gated and is tested; there is **no button**. A policy correction across 900 people is now possible, by somebody who can call an endpoint | |
+**None on this screen.** L-19 is closed on the screen as well as at the API, and the entitlement
+column now has a way to be corrected.
+
+⚠ **But read §2.3b before you demonstrate this screen.** The demonstration database's Entitled
+figures were loaded before that correction existed, and this is the chapter that asks you to read
+them aloud.
 
 ---
 
@@ -2889,13 +3086,12 @@ cannot open, and the only one that changes hundreds of records at once.
 
 **An amber warning panel** at the top, spelling out what each run does.
 
-**Two cards**, each with a year selector, an optional **Employee** picker to scope the run, and a
-button — **Run carry-over** and **Run forfeiture** *(red)*.
+**Two cards**, each with a year selector, an optional **Employee** picker to scope the run, and
+**two** buttons — **Preview**, and then **Run carry-over** / **Run forfeiture** *(red)*.
 
-⚠ **And there is a preview neither card offers.** Adding `?dryRun=true` to either endpoint computes
-the whole run, reports exactly what it would have done — *"…NOTHING WAS WRITTEN - this was a dry
-run."* — and writes nothing. It is tested and it works; **there is no toggle on this screen**. Two
-things about it are worth knowing:
+**Preview** computes the whole run, reports exactly what it would have done — ending
+*"…NOTHING WAS WRITTEN - this was a dry run."* — and writes nothing. Two things about it are worth
+knowing:
 
 - **it runs past every guard rather than short-circuiting**, or the preview would count balances the
   real run would skip;
@@ -2947,8 +3143,19 @@ confirmation aloud, confirm.
 > deliberately left, and those three numbers add up in front of you.
 >
 > This is how you would do it for real. Run it for one person, check the number against what you
-> expected, then run it for everybody. And if you want to know what it would do to everybody without
-> doing it — there is a preview, it is an endpoint, and it is not on this screen."
+> expected, then run it for everybody."
+
+**2b — Press *Preview* on the carry-over card, unscoped.**
+
+It reports what the run *would* do across the whole company and ends with **NOTHING WAS WRITTEN -
+this was a dry run.**
+
+> "And before you run it for everybody, you can ask what it *would* do. Same arithmetic, same
+> guards, every balance examined — and not one row written.
+>
+> That matters more here than anywhere else in the module, because these two runs are the only ones
+> with no undo. A misconfigured leave type is something you want to find in a preview, not in nine
+> hundred balances."
 
 **3 — Do not run forfeiture. Say why.**
 
@@ -3317,8 +3524,9 @@ Do this after the room empties. Everything below is reversible; nothing needs a 
 | 12 | **Policy settings saved**, if you did *(ch. 4b)* | Window C → the same screen → put the value back → **Save**. ⚠ It does **not** restate anything already paid — each payout stores the sentence that produced it |
 | 13 | **Recall** *(ch. 7, LW 10)* | ⚠ **There is no un-recall, on any screen.** The end date stays where the recall put it. If you need the record clean, **Cancel the whole request** (item 1) — which is also the honest answer to *"can this be reversed?"*: the interruption happened, and a system that could quietly erase it would be worse |
 | 14 | **Sick leave requests** raised in chapter 7b *(LW 11, and the two in step 5)* | Cancel each, reason `Demonstration`. ⚠ **Cancel, do not close** — a closed request still counts as *taken*, so the cumulative total stays over the board threshold and the next person to raise sick leave here is sent to a board |
-| 15 | **Medical board** *(ch. 7b, LW 12)* | ⚠ **A concluded board cannot be un-concluded** — that is the ratchet, on purpose. Its **Cancel** is an endpoint with no button, so on the screen there is nothing to press. Leave it: a demonstration board with a finding on it is harmless, and it is a good record to show next time |
+| 15 | **Medical board** *(ch. 7b, LW 12)* | ⚠ **A concluded board cannot be un-concluded** — that is the ratchet, on purpose, and **Cancel the board** is offered only *until* it reports. So once you have walked chapter 7b to the end there is nothing to press. Leave it: a demonstration board with a finding on it is harmless, and it is a good record to show next time |
 | 16 | **`advance-in-progress` called** *(§2.6b)* | **Nothing to undo and nothing you can undo.** Those requests are genuinely in progress; the nightly sweep would have done it anyway |
+| 17 | **Entitlements repaired** *(§2.3b)* | ⚠ **Do not undo this.** It replaced a wrong figure with the one the rulebook resolves, and putting it back would mean restoring a defect. It is recorded here because it is a real write, not because it should be reversed. If you must: the old value was the leave type's default for every row |
 
 **The one thing that cannot be put back** is the **request number**. `LV2026000013` is spent. The
 counter only moves forward, by design — the same rule as staff numbers and requisition numbers. The
@@ -3440,6 +3648,21 @@ nobody promises a stakeholder a button.
 | # | Where | Finding | Severity |
 |---|---|---|---|
 | **L-30** | §4.4.2 | `LeaveType.IsPaid` produces no deduction. ⚠ **Payroll's, not HR's.** HR records the absence, the days and the fact that the type is unpaid; what that is worth is payroll's arithmetic, and it is handed off in writing | medium *(not ours)* |
+
+### ⚠ And nine more, found after this walk, in a plan of their own
+
+**None of them came from this book.** They came from asking the finished module a question it had
+never been asked — *"how does leave work for somebody who just joined?"* — and reading the
+entitlement engine rather than the guide. Three were defects, five were policy answers the product
+gave silently with no setting behind them, and one is the calendar-year assumption itself.
+
+**Six are now closed** (chapter 13's repair control, the one-active-accrual-policy rule,
+`ProRateOnJoin`, `PerPayPeriod`, and the two register gaps behind them). **Three remain and are
+scoped**: the carry-over basis, first-year pro-rating, and accrual by staff level.
+
+⚠ **Read [`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) § 2.3
+before promising a client an anniversary leave year or half-day leave.** Neither is available, both
+are written up rather than hand-waved, and the plan says what each would cost.
 
 ### ⚠ Closed at the API, with no button — was four, now one
 
@@ -3573,6 +3796,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 | **Year-end runs** *(and their dry run)* | — | — | **`HR.Leave.Admin`** |
 | **Reminder engine — all six endpoints** | — | — | **`HR.Leave.Admin`** |
 | **Tenant-wide balance recalculation** | — | — | **`HR.Leave.Admin`** |
+| **Repair entitlements** *(and its preview)* | — | — | **`HR.Leave.Admin`** |
 | **Medical boards** | `HR.Medical.Read` | `HR.Medical.Write` | — |
 | **HR Policy Settings** *(ch. 4b)* | HR reads it | — | **`SuperAdmin` / `TenantAdmin` save only** |
 
@@ -3582,6 +3806,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 
 | Document | For |
 |---|---|
+| [`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) | **The third build.** The entitlement engine, accrual, and the assumption that a leave year is a calendar year. ⚠ **§ 2.3 is the answer to "can it do an anniversary leave year, or half-days?"** and § 3 records which decisions are still open |
 | [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) | **The second build, G1–G5** — recall, the configuration turn, the evidence gate, the medical board, and the eight deferred findings. Read its § 0 for what was built and what each slice found |
 | [`HR-LEAVE-CLOSURE-PLAN.md`](HR-LEAVE-CLOSURE-PLAN.md) | **§ 0 is the first build's state of the module.** The gap register and the eleven decisions |
 | [`../HR-CONFIGURATION-REGISTER.md`](../HR-CONFIGURATION-REGISTER.md) | **every assumed value in HR, with its enforcement status.** The answer to *"does this switch actually do anything?"* — all 46 tenant settings and all 26 leave-type settings are in it |
