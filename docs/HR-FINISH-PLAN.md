@@ -125,6 +125,15 @@ that framing is superseded** — an item waiting on one client's policy answer i
 two items wait on the payroll developer. **What remains of that plan is G6 only** — the settings
 survey for HR beyond leave.
 
+▶ **And a NEW plan opened 2026-09-18: `HR/HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`.** Answering
+*"how does leave work for somebody who just joined?"* against the entitlement engine turned up nine
+items — three defects, five silent policy answers with no setting behind them, and the calendar-year
+assumption itself. ⚠ **Nothing is built and no decision is taken**, which is why it is filed here as
+owed rather than as progress. ⚠ **One of the three defects is live on the demonstration database:**
+every leave balance was opened by posting an adjustment, and that path records the leave type's
+DEFAULT days rather than the employee's staff-level allocation — so Juniors read 21 where the
+rulebook says 15, and nothing in the product can repair a stored entitlement.
+
 ⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
 `GET /api/JobAnalysis/descriptions/{id}/details` returned 500 for every one of the tenant's 46 job
 descriptions** — a 30-second SQL command timeout. Thirteen sibling collections hang off a job
