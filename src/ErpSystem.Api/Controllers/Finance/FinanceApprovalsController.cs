@@ -167,6 +167,10 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
         var canApproveBookTransitions = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookTransitions)).Succeeded;
+        var canApproveBookPeriods = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookPeriods)).Succeeded;
+        var canApproveBookInitialization = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookInitialization)).Succeeded;
 
         var currentRoles = roleSet.ToArray();
         var pageRows = await QueryPendingApprovals(tenantId)
@@ -273,6 +277,98 @@ public class FinanceApprovalsController : ControllerBase
                     Metadata = new Dictionary<string, string>
                     {
                         ["Target state"] = book.PendingLifecycleStatus!.Value.ToString()
+                    }
+                });
+                continue;
+            }
+
+            if (IsAccountingBookPeriodLifecycle(entityType))
+            {
+                // Period decisions must revalidate the tenant calendar and book-specific
+                // authority through AccountingBookPeriodService, not the generic inbox action.
+                if (!canApproveBookPeriods || instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var period = await _db.AccountingBookPeriods.AsNoTracking()
+                    .Include(item => item.AccountingBook).Include(item => item.FiscalPeriod)
+                    .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted &&
+                        item.Id == instance.EntityId && item.WorkflowInstanceId == instance.Id &&
+                        item.PendingStatus.HasValue && item.RequestedByUserId.HasValue &&
+                        item.RequestedByUserId != currentUserId.Value, cancellationToken);
+                if (period?.AccountingBook == null || period.FiscalPeriod == null ||
+                    !await _workflowService.CanUserApproveAsync(
+                        "AccountingBookPeriodLifecycle", period.Id, currentUserId.Value))
+                    continue;
+
+                results.Add(new FinanceApprovalQueueItemDto
+                {
+                    ApprovalId = approval.Id,
+                    EntityId = period.Id,
+                    EntityType = "AccountingBookPeriodLifecycle",
+                    Reference = $"{period.AccountingBook.Code}/{period.FiscalPeriod.PeriodCode}",
+                    Title = $"{period.AccountingBook.Name}: {period.FiscalPeriod.PeriodCode} {period.PeriodStatus} to {period.PendingStatus}",
+                    DetailHref = $"/finance/settings/accounting-books/{period.AccountingBookId:D}/readiness",
+                    DocumentType = "Accounting Book Period",
+                    Module = "Finance Settings",
+                    CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
+                    StatusLabel = "Pending period transition",
+                    SubmittedAt = period.RequestedAtUtc ?? instance.StartedDate ?? instance.CreatedDate,
+                    SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
+                        new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
+                            .Where(value => !string.IsNullOrWhiteSpace(value))),
+                    ApproverRole = approval.ApproverRole,
+                    WorkflowName = instance.WorkflowDefinition?.Name,
+                    DecisionOnDetailPage = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Book"] = period.AccountingBook.Code,
+                        ["Target state"] = period.PendingStatus!.Value.ToString()
+                    }
+                });
+                continue;
+            }
+
+            if (IsAccountingBookInitialization(entityType))
+            {
+                // The initialization service verifies current immutable opening evidence
+                // and maker/checker separation before accepting a decision.
+                if (!canApproveBookInitialization || instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var initialization = await _db.AccountingBookInitializations.AsNoTracking()
+                    .Include(item => item.AccountingBook)
+                    .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted &&
+                        item.Id == instance.EntityId && item.WorkflowInstanceId == instance.Id &&
+                        item.InitializationStatus == AccountingBookInitializationStatus.PendingApproval &&
+                        item.PreparedByUserId != currentUserId.Value, cancellationToken);
+                if (initialization?.AccountingBook == null ||
+                    !await _workflowService.CanUserApproveAsync(
+                        "AccountingBookInitialization", initialization.Id, currentUserId.Value))
+                    continue;
+
+                results.Add(new FinanceApprovalQueueItemDto
+                {
+                    ApprovalId = approval.Id,
+                    EntityId = initialization.Id,
+                    EntityType = "AccountingBookInitialization",
+                    Reference = $"{initialization.AccountingBook.Code}/V{initialization.Version}",
+                    Title = $"{initialization.AccountingBook.Name}: opening evidence at {initialization.CutoffDate:yyyy-MM-dd}",
+                    DetailHref = $"/finance/settings/accounting-books/{initialization.AccountingBookId:D}/readiness",
+                    DocumentType = "Accounting Book Initialization",
+                    Module = "Finance Settings",
+                    CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
+                    StatusLabel = "Pending initialization approval",
+                    SubmittedAt = instance.StartedDate ?? instance.CreatedDate,
+                    SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
+                        new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
+                            .Where(value => !string.IsNullOrWhiteSpace(value))),
+                    ApproverRole = approval.ApproverRole,
+                    WorkflowName = instance.WorkflowDefinition?.Name,
+                    DecisionOnDetailPage = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Book"] = initialization.AccountingBook.Code,
+                        ["Version"] = initialization.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)
                     }
                 });
                 continue;
@@ -2721,10 +2817,17 @@ public class FinanceApprovalsController : ControllerBase
         => FinanceWorkflowEntityKeys.Contains(Normalize(entityType));
 
     internal static bool IsFinanceQueueEntity(string? entityType)
-        => IsFinanceEntity(entityType) || IsAccountingBookLifecycle(entityType);
+        => IsFinanceEntity(entityType) || IsAccountingBookLifecycle(entityType) ||
+           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType);
 
     private static bool IsAccountingBookLifecycle(string? entityType)
         => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
+
+    private static bool IsAccountingBookPeriodLifecycle(string? entityType)
+        => Normalize(entityType) == "ACCOUNTINGBOOKPERIODLIFECYCLE";
+
+    private static bool IsAccountingBookInitialization(string? entityType)
+        => Normalize(entityType) == "ACCOUNTINGBOOKINITIALIZATION";
 
     internal static string ResolveDetailHref(string? entityType, Guid entityId, string? displayUrl)
     {

@@ -129,7 +129,7 @@ const allFinanceWorkflowDefinition: ApprovalQueueDefinition = {
     id: FINANCE_APPROVAL_QUEUE_IDS.financeWorkflows,
     title: 'Finance Workflow Approvals',
     documentLabel: 'Finance Items',
-    description: 'Finance documents and accounting-book transitions awaiting your current workflow step.',
+    description: 'Finance documents and accounting-book approvals awaiting your current workflow step.',
     emptyMessage: 'No finance items are awaiting your approval.',
     accessDeniedMessage: 'You need a finance approver role to review finance workflow approvals.',
     icon: ClipboardCheck,
