@@ -24,13 +24,33 @@ export const LEAVE_ELIGIBILITY_TYPE_OPTIONS: { value: LeaveEligibilityType; labe
   { value: 'Position', label: 'Position' },
 ];
 
+/**
+ * ⚠ **`PerPayPeriod` is deliberately NOT offered** (entitlement plan B5, decision D-6).
+ *
+ * The accrual engine maps it to twelve periods a year and counts elapsed *months* for it, so it was
+ * a synonym for `Monthly` wearing a more specific label — and on a fortnightly or weekly payroll
+ * the label was a claim the product could not honour. The API refuses it too, so this is not a
+ * client-side-only rule.
+ *
+ * ⚠ The type keeps the value, because rows already carrying it still read and still accrue. What is
+ * retired is choosing it anew. Accruing on a real pay cycle needs the pay calendar, which payroll
+ * owns — it is a cross-module contract, not an HR setting.
+ */
 export const ACCRUAL_FREQUENCY_OPTIONS: { value: AccrualFrequency; label: string }[] = [
   { value: 'None', label: 'None' },
   { value: 'Monthly', label: 'Monthly' },
   { value: 'Quarterly', label: 'Quarterly' },
   { value: 'SemiAnnual', label: 'Semi-annual' },
   { value: 'Annual', label: 'Annual' },
-  { value: 'PerPayPeriod', label: 'Per pay period' },
+];
+
+/**
+ * For DISPLAY only — the picker's options plus the retired value, so a policy that still carries
+ * `PerPayPeriod` reads as words in a table rather than as a raw enum name.
+ */
+export const ACCRUAL_FREQUENCY_DISPLAY: { value: AccrualFrequency; label: string }[] = [
+  ...ACCRUAL_FREQUENCY_OPTIONS,
+  { value: 'PerPayPeriod', label: 'Per pay period (retired — accrues monthly)' },
 ];
 
 export const ACCRUAL_MODE_OPTIONS: { value: AccrualMode; label: string }[] = [

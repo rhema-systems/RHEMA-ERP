@@ -523,10 +523,39 @@ public class LeaveTypeService : ILeaveTypeService
                 + "would make the accrued figure depend on which row the database returned first.)");
     }
 
+    /// <summary>
+    /// ⚠ <b><c>PerPayPeriod</c> is retired</b> (entitlement plan B5, decision D-6).
+    /// </summary>
+    /// <remarks>
+    /// <para>The accrual engine maps it to <b>twelve periods a year</b> and counts elapsed
+    /// <i>months</i> for it — so on a fortnightly or weekly payroll it is simply wrong, while its
+    /// name is an active claim that it is not. It was a synonym for <c>Monthly</c> wearing a more
+    /// specific label.</para>
+    ///
+    /// <para><b>Retired rather than implemented, on purpose.</b> How often a tenant pays is
+    /// <b>payroll's fact</b>, and modelling it here would create a second rulebook for something
+    /// another module owns — the shape <c>HR-PAYROLL-BOUNDARY.md</c> exists to prevent. If a client
+    /// needs real pay-period accrual, it is a cross-module contract, not an HR setting.</para>
+    ///
+    /// <para>⚠ <b>The enum value stays.</b> Rows already carrying it still read and still accrue
+    /// exactly as they did; what is refused is choosing it anew. Deleting the value would break
+    /// stored data to tidy a picker.</para>
+    /// </remarks>
+    private static void RefusePerPayPeriod(AccrualFrequency frequency)
+    {
+        if (frequency == AccrualFrequency.PerPayPeriod)
+            throw new InvalidOperationException(
+                "Accrual per pay period is not available. It was only ever a synonym for Monthly — the "
+                + "engine credits one period a month whatever the payroll cycle is — so choose Monthly "
+                + "if that is what you mean. Accruing on a real fortnightly or weekly cycle needs the "
+                + "pay calendar, which payroll owns.");
+    }
+
     public async Task<LeaveAccrualPolicyDto> CreateAccrualPolicyAsync(CreateLeaveAccrualPolicyDto dto)
     {
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
+        RefusePerPayPeriod(dto.Frequency);
         await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId);
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
@@ -542,6 +571,11 @@ public class LeaveTypeService : ILeaveTypeService
         var entity = await GetOwnedAccrualPolicyAsync(id);
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = entity.TenantId;
+
+        // ⚠ Only when the edit CHANGES it: a row already carrying PerPayPeriod must stay editable,
+        // or retiring the option would strand the policies that have it — which is the opposite of
+        // what "the enum value stays" is for.
+        if (dto.Frequency != entity.Frequency) RefusePerPayPeriod(dto.Frequency);
 
         // ⚠ The payload carries a leave type, so an edit can MOVE a policy onto a type that already
         // has one. Same rule as create, excluding this row from its own check.

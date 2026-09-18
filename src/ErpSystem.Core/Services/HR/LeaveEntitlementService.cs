@@ -174,9 +174,31 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             return annual;
 
         // AccrueIncrementally: credit AccrualRate per completed period from the accrual start.
-        var accrualStart = Max(yearStart, eligibilityDate);
-        if (policy.ProRateOnJoin && dateEmployed is DateOnly hired && hired > accrualStart && hired <= yearEnd)
-            accrualStart = hired;
+        //
+        // ⚠ Entitlement plan B1 / decision D-1. `ProRateOnJoin` decides where the accrual WINDOW
+        // opens, and until this it decided nothing at all: the guard read
+        // `hired > Max(yearStart, eligibilityDate)`, and since `eligibilityDate` is `hired` plus a
+        // non-negative number of months, that compares the hire date with something that is never
+        // earlier than the hire date. Unsatisfiable, for every employee and every policy. The
+        // pro-rating happened regardless — the eligibility date had already anchored the window to
+        // the hire date — so the switch could not be turned OFF, which is the half that was missing.
+        //
+        //   ON  — the window opens when the employee became eligible, so a mid-year joiner earns
+        //         only the part of the year they were here for. Identical to the behaviour before
+        //         this change: ⚠ deliberately so, because every existing row's value was arbitrary
+        //         while the field was inert, and an accrual figure must not move under a tenant
+        //         that never chose anything.
+        //
+        //   OFF — the window opens with the LEAVE YEAR. Once somebody qualifies at all, they accrue
+        //         on the company's calendar like everybody else. This is the reading the field name
+        //         promises and the one no client could previously have.
+        //
+        // ⚠ The service gate is a separate thing and still binds either way: the early return above
+        // gives 0 before `eligibilityDate`, so OFF cannot credit somebody for a year in which they
+        // were never eligible. What it does is stop docking them for the months before they arrived.
+        var accrualStart = policy.ProRateOnJoin
+            ? Max(yearStart, eligibilityDate)
+            : yearStart;
 
         var periodsPerYear = PeriodsPerYear(policy.Frequency);
         var ratePerPeriod = policy.AccrualRate > 0 ? policy.AccrualRate : annual / periodsPerYear;

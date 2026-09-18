@@ -7,6 +7,7 @@ import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions
 import { leaveTypeService } from '@/services/hr/leave-type.service';
 import {
   ACCRUAL_FREQUENCY_OPTIONS,
+  ACCRUAL_FREQUENCY_DISPLAY,
   ACCRUAL_MODE_OPTIONS,
   type LeaveAccrualPolicy,
 } from '@/types/hr/leave';
@@ -72,7 +73,7 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
       allowRemove={canAdminister}
       remove={(_id, policyId) => leaveTypeService.removeAccrualPolicy(policyId)}
       columns={[
-        { header: 'Frequency', cell: (p) => label(ACCRUAL_FREQUENCY_OPTIONS, p.frequency) },
+        { header: 'Frequency', cell: (p) => label(ACCRUAL_FREQUENCY_DISPLAY, p.frequency) },
         { header: 'Mode', cell: (p) => label(ACCRUAL_MODE_OPTIONS, p.mode) },
         { header: 'Rate', cell: (p) => p.accrualRate },
         { header: 'Min service (months)', cell: (p) => p.minServiceMonths ?? '—' },
@@ -102,12 +103,22 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
       renderFields={(form) => (
         <>
           <FieldRow>
+            {/*
+              ⚠ `PerPayPeriod` is retired (decision D-6) and is not offered — but a policy that
+              already carries it must stay editable, or retiring the option would strand it: the
+              select would render blank and every save would be refused. So the retired value is
+              added back for exactly the row that has it, and for no other.
+            */}
             <SelectField
               form={form}
               name="frequency"
               label="Frequency"
               required
-              options={ACCRUAL_FREQUENCY_OPTIONS}
+              options={
+                form.watch('frequency') === 'PerPayPeriod'
+                  ? ACCRUAL_FREQUENCY_DISPLAY
+                  : ACCRUAL_FREQUENCY_OPTIONS
+              }
             />
             <SelectField
               form={form}
@@ -133,7 +144,7 @@ export function LeaveAccrualPoliciesTab({ leaveTypeId }: { leaveTypeId: string }
               form={form}
               name="proRateOnJoin"
               label="Pro-rate on join"
-              description="Part-period entitlement in the year of joining."
+              description="On: a joiner accrues only from the date they qualified, so a mid-year start earns part of the year. Off: once they qualify at all, they accrue on the company's leave year like everybody else."
             />
             <SwitchField
               form={form}

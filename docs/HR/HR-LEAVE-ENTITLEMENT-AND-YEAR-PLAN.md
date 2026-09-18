@@ -1,10 +1,9 @@
 # HR Leave — Entitlement, Accrual and the Leave Year
 
-**Status:** 2026-09-18 — **WAVE 1 BUILT AND VERIFIED.** `dev-harness/hr-leave` slice 10, **27
-assertions, green twice**; the whole suite re-run green afterwards, **454 across ten slices**. Waves
-2 and 3 are untouched and every decision they need (§ 3) is still a recommendation awaiting the
-module owner, which is the difference between this plan and the two before it. **D-3 was taken as
-recommended** and W1 was built on it.
+**Status:** 2026-09-18 — **WAVE 1 COMPLETE. WAVE 2 HALF COMPLETE** (W2a and W2e; W2b/c/d wait on a
+migration). `dev-harness/hr-leave` slices 10 and 11, **27 + 18 assertions, each green twice**; the
+whole suite green twice afterwards, **472 across eleven slices**. **D-1, D-3 and D-6 taken as
+recommended**; D-2, D-4 and D-5 are still open, and each blocks exactly one remaining slice.
 
 **Read [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) § 0 first** — it
 describes the code as it stands after G1–G5. This plan does not revisit anything that one closed.
@@ -81,10 +80,39 @@ allocations:
 ⚠ **Preview first and read the count** — 53 is the number to expect, and anything else means
 something about that database differs from this reading.
 
-### Waves 2 and 3 — not started
+### Wave 2 — W2a and W2e BUILT AND VERIFIED 2026-09-18
 
-⚠ **Do not start W2a without D-1.** It is the slice whose whole content is deciding what
-`ProRateOnJoin = false` should mean.
+**D-1 taken as recommended:** `ProRateOnJoin = false` opens the accrual window with the **leave
+year**, so somebody who qualifies at all accrues on the company's calendar. **ON is byte-for-byte
+today's behaviour** — deliberately, because every existing row's value was arbitrary while the field
+was inert, and an accrual figure must not move under a tenant that never chose anything.
+
+**D-6 taken as recommended:** `PerPayPeriod` retired from the picker and refused by the API.
+
+No migration. Neither slice needed one.
+
+| Slice | What shipped |
+|---|---|
+| **W2a** | One condition in `LeaveEntitlementService`. ⚠ The service gate is untouched and still binds either way, so OFF cannot credit somebody for a year they never qualified in |
+| **W2e** | Refused on create, and on an edit that **changes to** it. ⚠ A row already carrying it stays editable — the picker adds the retired value back for exactly that row — or retiring the option would strand it: blank select, every save refused |
+
+**⚠ The data was checked before the meaning changed**, because this is a semantic migration in
+disguise. On the UAT database `ANN` already has the switch **on** and `SICK` is a full grant, where
+it never applied — so making it bind **changes nothing on the demonstration database**. Any other
+tenant with an incremental policy and the switch off will see accrued figures go **up**, never down,
+and no client can have been relying on the old behaviour because there was none to rely on.
+
+**⚠ Slice 11 nearly shipped vacuously green, and that is the finding worth keeping.** Its first
+draft pinned eligibility to 01 October against a 12-month gate; run in September the employee was
+not yet eligible, **both positions returned 0**, and *"the two positions disagree"* would have passed
+on two zeroes. The exact failure the slice exists to prevent, inside the slice. It now derives both
+figures from today's date and **aborts before May** rather than report a green it cannot justify.
+
+### Wave 3 — not started
+
+⚠ **W2b, W2c and W2d each need a scaffolded migration and an open decision** — D-2, D-4 and D-5
+respectively. W2c must not be built before W2b: pro-rating the grant is the other way to fix the
+carry-over basis, and a client turning both on must not have the reduction applied twice.
 
 ---
 
