@@ -147,6 +147,12 @@ public class LeaveTypeService : ILeaveTypeService
             MinServiceMonthsToAccess = entity.MinServiceMonthsToAccess,
             CarryOverExpiryMonths = entity.CarryOverExpiryMonths,
             ForfeitUnusedAfterMonths = entity.ForfeitUnusedAfterMonths,
+            // ⚠ This projection is hand-written and is the THIRD place a LeaveType field has to be
+            // listed (entity, mapper, here). Harness finding 13 was exactly this shape: the column,
+            // the entity, the enum, the DTO and the parameter were all correct and the MAPPER was
+            // missed, so the value read back as its default however it was set.
+            YearEndBasis = entity.YearEndBasis,
+            ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
             MandatoryAnnualLeave = entity.MandatoryAnnualLeave,
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
@@ -223,6 +229,11 @@ public class LeaveTypeService : ILeaveTypeService
         entity.MinServiceMonthsToAccess = dto.MinServiceMonthsToAccess;
         entity.CarryOverExpiryMonths = dto.CarryOverExpiryMonths;
         entity.ForfeitUnusedAfterMonths = dto.ForfeitUnusedAfterMonths;
+        entity.YearEndBasis = dto.YearEndBasis;
+        // ⚠ The other door: pro-rating switched on for a type that already accrues incrementally.
+        await RefuseProrationWithIncrementalAccrualAsync(
+            id, tenantId, dto.ProRateFirstYearEntitlement);
+        entity.ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement;
         entity.MandatoryAnnualLeave = dto.MandatoryAnnualLeave;
         entity.EncashmentRateBasis = dto.EncashmentRateBasis;
         entity.EncashmentRatePerDay = dto.EncashmentRatePerDay;
@@ -551,12 +562,53 @@ public class LeaveTypeService : ILeaveTypeService
                 + "pay calendar, which payroll owns.");
     }
 
+    /// <summary>
+    /// ⚠ <b>First-year pro-rating and incremental accrual cannot both be on</b> (entitlement plan
+    /// B3). Refused at both doors, because either one can be switched on second.
+    /// </summary>
+    /// <remarks>
+    /// <para>Incremental accrual already limits a joiner to the part of the year they were present
+    /// for — it opens the accrual window at their hire date. Scaling the entitlement as well deducts
+    /// for the same months a second time, and because the derived per-period rate is
+    /// <i>entitlement ÷ periods</i>, a third. A joiner on 1 October entitled to 12 days would end
+    /// the year with <b>0.75</b> days instead of 3.</para>
+    ///
+    /// <para><b>Refused rather than silently ignored</b>, which is this plan's whole premise: a
+    /// setting that saves and does not bind is worse than one that was never offered.</para>
+    /// </remarks>
+    private async Task RefuseProrationWithIncrementalAccrualAsync(
+        Guid leaveTypeId, Guid tenantId, bool proRateFirstYear,
+        AccrualMode? incomingMode = null, Guid? ignorePolicyId = null)
+    {
+        if (!proRateFirstYear) return;
+
+        var hasIncremental = incomingMode == AccrualMode.AccrueIncrementally
+            || await _accrualPolicyRepository
+                .GetQueryable()
+                .AnyAsync(a => a.TenantId == tenantId
+                            && a.LeaveTypeId == leaveTypeId
+                            && a.IsActive
+                            && a.Frequency != AccrualFrequency.None
+                            && a.Mode == AccrualMode.AccrueIncrementally
+                            && (ignorePolicyId == null || a.Id != ignorePolicyId));
+
+        if (hasIncremental)
+            throw new InvalidOperationException(
+                "First-year pro-rating cannot be combined with incremental accrual. Accrual already "
+                + "limits a joiner to the part of the year they were here for, so scaling the "
+                + "entitlement as well would deduct for the same months twice over. Use one or the "
+                + "other: pro-rating for leave that is granted, accrual for leave that is earned.");
+    }
+
     public async Task<LeaveAccrualPolicyDto> CreateAccrualPolicyAsync(CreateLeaveAccrualPolicyDto dto)
     {
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
         RefusePerPayPeriod(dto.Frequency);
         await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId);
+        var owner = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        await RefuseProrationWithIncrementalAccrualAsync(
+            dto.LeaveTypeId, tenantId, owner.ProRateFirstYearEntitlement, dto.Mode);
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         await _accrualPolicyRepository.AddAsync(entity);
@@ -580,6 +632,10 @@ public class LeaveTypeService : ILeaveTypeService
         // ⚠ The payload carries a leave type, so an edit can MOVE a policy onto a type that already
         // has one. Same rule as create, excluding this row from its own check.
         await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId, id);
+
+        var target = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        await RefuseProrationWithIncrementalAccrualAsync(
+            dto.LeaveTypeId, tenantId, target.ProRateFirstYearEntitlement, dto.Mode, id);
 
         entity.LeaveTypeId = dto.LeaveTypeId;
         entity.Frequency = dto.Frequency;

@@ -16,7 +16,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import { ENCASHMENT_RATE_BASIS_OPTIONS } from '@/types/hr/leave';
+import { ENCASHMENT_RATE_BASIS_OPTIONS, LEAVE_YEAR_END_BASIS_OPTIONS } from '@/types/hr/leave';
 import {
   ColorField,
   hexColorSchema,
@@ -46,6 +46,8 @@ export const leaveTypeSchema = z
     maxCarryOverDays: z.string().optional().or(z.literal('')),
     carryOverExpiryMonths: z.string().optional().or(z.literal('')),
     forfeitUnusedAfterMonths: z.string().optional().or(z.literal('')),
+    yearEndBasis: z.enum(['Granted', 'Earned']),
+    proRateFirstYearEntitlement: z.boolean(),
     countWeekendsAsLeave: z.boolean(),
     countHolidaysAsLeave: z.boolean(),
     allowCashConversion: z.boolean(),
@@ -88,6 +90,8 @@ export const emptyLeaveType: LeaveTypeFormValues = {
   maxCarryOverDays: '',
   carryOverExpiryMonths: '',
   forfeitUnusedAfterMonths: '',
+  yearEndBasis: 'Granted' as const,
+  proRateFirstYearEntitlement: false,
   countWeekendsAsLeave: false,
   countHolidaysAsLeave: false,
   allowCashConversion: false,
@@ -276,6 +280,47 @@ export function LeaveTypeForm({
               name="forfeitUnusedAfterMonths"
               label="Forfeit unused after (months)"
             />
+
+            {/*
+              ⚠ Entitlement plan B2. This governs BOTH year-end runs, which is why it sits here
+              under Carry-over rather than beside one of them, and why its label says so.
+            */}
+            <SelectField
+              form={form}
+              name="yearEndBasis"
+              label="Carry-over and forfeiture count"
+              required
+              options={LEAVE_YEAR_END_BASIS_OPTIONS}
+            />
+            <p className="text-sm text-muted-foreground">
+              {form.watch('yearEndBasis') === 'Earned' ? (
+                <>
+                  A mid-year joiner carries <strong>what they built up</strong>. Somebody who
+                  accrued 3.5 days and took none carries 3.5, not the full cap. Forfeiture follows
+                  the same reading, so the days they never accrued are simply not forfeited —
+                  they were never theirs to lose.
+                </>
+              ) : (
+                <>
+                  A mid-year joiner carries <strong>what the year owed them</strong>, up to the cap
+                  above — so somebody who accrued 3.5 days and took none still carries the full
+                  five. ⚠ This is what both runs did before the setting existed, which is why it is
+                  the default.
+                </>
+              )}
+            </p>
+
+            {/*
+              ⚠ Refused by the API alongside an incremental accrual policy. The switch is shown
+              regardless, and the refusal explains why, rather than the control vanishing for
+              reasons a user cannot see.
+            */}
+            <SwitchField
+              form={form}
+              name="proRateFirstYearEntitlement"
+              label="Pro-rate the first year's entitlement"
+              description="Scales a joiner's first year to the months they were here — 15 days becomes 3.75 for an October start. ⚠ Cannot be combined with incremental accrual, which already does this; the save will be refused and say so. Use it for leave that is GRANTED rather than earned."
+            />
           </section>
 
           <section className="space-y-4">
@@ -423,6 +468,8 @@ export function leaveTypeFormToRequest(v: LeaveTypeFormValues) {
     minServiceMonthsToAccess: num(v.minServiceMonthsToAccess),
     carryOverExpiryMonths: num(v.carryOverExpiryMonths),
     forfeitUnusedAfterMonths: num(v.forfeitUnusedAfterMonths),
+    yearEndBasis: v.yearEndBasis,
+    proRateFirstYearEntitlement: v.proRateFirstYearEntitlement,
     mandatoryAnnualLeave: v.mandatoryAnnualLeave,
     requiresMedicalCertificate: v.requiresMedicalCertificate,
     selfCertificationDays: Number(v.selfCertificationDays || 0),

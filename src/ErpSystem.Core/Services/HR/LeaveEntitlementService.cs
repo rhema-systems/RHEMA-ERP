@@ -70,12 +70,21 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         var tenantId = GetTenantId();
         var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
 
+        // ⚠ Read once, applied to whichever arm of the precedence answers — a joiner's first year is
+        // scaled the same way whether the figure came from a sub-type cap, an allocation or the
+        // default. Fetched here so the three return paths below cannot disagree about it.
+        var hiredOn = await _employeeRepository
+            .GetQueryable()
+            .Where(e => e.TenantId == tenantId && e.Id == employeeId)
+            .Select(e => e.DateEmployed)
+            .FirstOrDefaultAsync(ct);
+
         // 1) Sub-type cap takes precedence when set.
         if (leaveSubTypeId.HasValue)
         {
             var subType = await _leaveSubTypeRepository.GetByIdAsync(leaveSubTypeId.Value);
             if (subType?.TenantId == tenantId && subType.MaxDaysAllowed is int cap)
-                return ApplyCeiling(leaveType, cap);
+                return ApplyFirstYearProration(leaveType, ApplyCeiling(leaveType, cap), hiredOn, year);
         }
 
         // 2) Effective-dated allocation for the employee's staff level.
@@ -97,11 +106,42 @@ public class LeaveEntitlementService : ILeaveEntitlementService
                 .FirstOrDefaultAsync(ct);
 
             if (allocation != null)
-                return ApplyCeiling(leaveType, allocation.AllocationDays);
+                return ApplyFirstYearProration(
+                    leaveType, ApplyCeiling(leaveType, allocation.AllocationDays), hiredOn, year);
         }
 
         // 3) Fall back to the leave type default.
-        return ApplyCeiling(leaveType, leaveType.DefaultDaysPerYear);
+        return ApplyFirstYearProration(
+            leaveType, ApplyCeiling(leaveType, leaveType.DefaultDaysPerYear), hiredOn, year);
+    }
+
+    /// <summary>
+    /// Scales a resolved entitlement to the part of <paramref name="year"/> the employee was here
+    /// for, when the leave type asks for it (entitlement plan B3, decision D-4).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>Only in the year they were hired.</b> In every later year they were present
+    /// throughout and there is nothing to scale.</para>
+    ///
+    /// <para><b>Whole months from the hire month to December, over twelve.</b> Somebody who starts
+    /// on the 1st and somebody who starts on the 28th of the same month are treated alike, which is
+    /// the ordinary reading of "you joined in October, so you get a quarter of the year" and avoids
+    /// inventing a day-level rule nobody asked for.</para>
+    ///
+    /// <para>⚠ <b>It cannot combine with incremental accrual</b> — <c>LeaveTypeService</c> refuses
+    /// that pairing at the door. If it ever reached here, the same months would be deducted three
+    /// times: once by the accrual window opening at the hire date, once by this scaling, and once
+    /// more through the derived per-period rate, which is <i>this scaled figure</i> divided by the
+    /// periods in a year.</para>
+    /// </remarks>
+    private static decimal ApplyFirstYearProration(
+        LeaveType leaveType, decimal entitled, DateOnly? dateEmployed, int year)
+    {
+        if (!leaveType.ProRateFirstYearEntitlement) return entitled;
+        if (dateEmployed is not DateOnly hired || hired.Year != year) return entitled;
+
+        var monthsPresent = 12 - hired.Month + 1;
+        return Math.Round(entitled * monthsPresent / 12m, 2, MidpointRounding.AwayFromZero);
     }
 
     /// <summary>

@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
@@ -61,6 +62,47 @@ public class LeaveYearEndService : ILeaveYearEndService
         return tenantId;
     }
 
+    /// <summary>
+    /// The days a year-end run treats as unused, per the leave type's <c>YearEndBasis</c>
+    /// (entitlement plan B2, decision D-2).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>Granted</b> — the default, and what both runs did before this existed — reads
+    /// <c>LeaveBalance.AvailableDays</c>, which is built on the whole year's <c>EntitledDays</c>. A
+    /// mid-year joiner who accrued 3.5 days and took none therefore carries the full cap.</para>
+    ///
+    /// <para><b>Earned</b> substitutes accrued-to-date, through the same definition the create check
+    /// and every balance read use — so "what you may carry" and "what you could have booked" cannot
+    /// disagree.</para>
+    ///
+    /// <para>⚠ <b>Accrual is asked as at the END of the year being closed</b>, not as at today. A
+    /// carry-over run in February for the year just gone must not credit somebody with two months of
+    /// the year they are now in, and a run for the CURRENT year must not count months that have not
+    /// happened. Passing the year end and letting the engine clamp does both.</para>
+    /// </remarks>
+    private async Task<decimal> UnusedDaysAsync(
+        LeaveBalance balance, LeaveType leaveType, int year, CancellationToken ct)
+    {
+        if (leaveType.YearEndBasis != LeaveYearEndBasis.Earned)
+            return balance.AvailableDays;
+
+        // ⚠ The EARLIER of the year end and today. The engine clamps a later date down to the year
+        // end, so a completed year asks as at 31 December — but it does NOT clamp to today, and
+        // passing the year end for the CURRENT year would credit months that have not happened yet.
+        // Under Earned that would carry days nobody has earned, which is the one thing the setting
+        // exists to prevent.
+        var yearEnd = new DateOnly(year, 12, 31);
+        var today = _clock.TodayUtc;
+        var asOf = today < yearEnd ? today : yearEnd;
+
+        var snapshot = await _entitlementService.GetSnapshotAsync(
+            balance.EmployeeId, balance.LeaveTypeId, balance.LeaveSubTypeId, year, asOf, ct);
+
+        return snapshot.AvailableFrom(
+            balance.EntitledDays, balance.CarriedOverDays, balance.AdjustmentDays,
+            balance.UsedDays, balance.PendingDays, balance.EncashedDays);
+    }
+
     public async Task<LeaveYearEndResult> ProcessCarryOverAsync(
         int fromYear, Guid? employeeId = null, bool dryRun = false, CancellationToken ct = default)
     {
@@ -78,7 +120,7 @@ public class LeaveYearEndService : ILeaveYearEndService
             if (leaveType is null || leaveType.TenantId != tenantId || !leaveType.AllowCarryOver)
                 continue;
 
-            var remaining = balance.AvailableDays;
+            var remaining = await UnusedDaysAsync(balance, leaveType, fromYear, ct);
             if (remaining <= 0)
                 continue;
 
@@ -186,7 +228,12 @@ public class LeaveYearEndService : ILeaveYearEndService
                     .GetQueryable()
                     .AnyAsync(a => a.TenantId == tenantId && a.LeaveBalanceId == balance.Id && a.Reason == ForfeitureReason, ct);
 
-                var unused = balance.AvailableDays;
+                // ⚠ Forfeiture follows the SAME basis, which is why the setting is not called
+                // "carry-over basis". Under Earned it removes what the employee earned and did not
+                // take; the part of the grant they never accrued is simply not forfeited, because
+                // it was never theirs to lose. That reads oddly against "use it or lose it" until
+                // you notice the alternative is forfeiting days the employee could not have taken.
+                var unused = await UnusedDaysAsync(balance, leaveType, year, ct);
                 if (!alreadyForfeited && unused > 0)
                 {
                     // ⚠ Dry run: compute, count, write nothing.

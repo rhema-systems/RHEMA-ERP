@@ -73,6 +73,47 @@ public class LeaveType : TenantEntity
     public int? ForfeitUnusedAfterMonths { get; set; }
 
     /// <summary>
+    /// ⚠ <b>What the year-end runs COUNT as unused</b> — the days the year granted, or the days the
+    /// employee actually earned (entitlement plan B2, decision D-2).
+    /// </summary>
+    /// <remarks>
+    /// <para><b>It governs BOTH year-end acts</b>, carry-over and forfeiture, which is why it is not
+    /// called <c>CarryOverBasis</c>: a name that covers half of what a setting does is the kind of
+    /// thing this plan exists to stop.</para>
+    ///
+    /// <para><b>Why it is a choice and not a fix.</b> Both readings are ordinary employer policy.
+    /// Under <see cref="LeaveYearEndBasis.Granted"/> — the default, and the behaviour before this
+    /// existed — carry-over is computed from <c>LeaveBalance.AvailableDays</c>, which is built on the
+    /// whole year's <c>EntitledDays</c>. So somebody who joined in October, accrued 3.5 days and took
+    /// none carries the full cap. Under <see cref="LeaveYearEndBasis.Earned"/> they carry 3.5.</para>
+    ///
+    /// <para>⚠ <b>The default is Granted deliberately.</b> It is today's behaviour, and the year-end
+    /// runs have no undo — a default that silently reduced people's carried days on the next run
+    /// would be worse than the inconsistency it corrects. The same reasoning gave
+    /// <c>AllowInServiceEncashment</c> its conservative default.</para>
+    /// </remarks>
+    public LeaveYearEndBasis YearEndBasis { get; set; } = LeaveYearEndBasis.Granted;
+
+    /// <summary>
+    /// ⚠ <b>Scales the first year's entitlement to the part of the year the employee was here for</b>
+    /// (entitlement plan B3, decision D-4). Default <c>false</c> — today's behaviour, where a
+    /// December joiner's <c>EntitledDays</c> reads the full annual figure.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>It cannot be combined with incremental accrual, and the service refuses the
+    /// combination rather than ignoring one of them.</b> Incremental accrual already limits a joiner
+    /// to the part of the year they were present for — it opens the accrual window at their hire
+    /// date. Scaling the entitlement as well deducts for the same months twice, and because the
+    /// derived per-period rate is itself <c>entitlement ÷ periods</c>, it would deduct a third time
+    /// through the rate.</para>
+    ///
+    /// <para>So this is for leave types that <b>grant</b> rather than accrue: no accrual policy, or
+    /// one set to full-grant-on-eligibility. That is the mirror of <c>ProRateOnExit</c>, which
+    /// applies to incremental accrual <i>only</i>.</para>
+    /// </remarks>
+    public bool ProRateFirstYearEntitlement { get; set; }
+
+    /// <summary>
     /// Marks the leave type as mandatory-to-take within the year (force leave). Surfaced to HR
     /// and used by the forfeiture routine.
     /// </summary>

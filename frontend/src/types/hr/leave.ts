@@ -12,6 +12,20 @@ export type LeaveEligibilityType = 'Gender' | 'OrganizationLevel' | 'Organizatio
 export type AccrualFrequency = 'None' | 'Monthly' | 'Annual' | 'PerPayPeriod' | 'Quarterly' | 'SemiAnnual';
 export type AccrualMode = 'AccrueIncrementally' | 'FullGrantOnEligibility';
 
+/**
+ * What the year-end runs count as a person's unused days (entitlement plan B2).
+ *
+ * ⚠ It governs **both** carry-over and forfeiture, which is why it is not called a carry-over
+ * basis. Both readings are ordinary employer policy; the product answered the question silently as
+ * `Granted` until 2026-09-18.
+ */
+export type LeaveYearEndBasis = 'Granted' | 'Earned';
+
+export const LEAVE_YEAR_END_BASIS_OPTIONS: { value: LeaveYearEndBasis; label: string }[] = [
+  { value: 'Granted', label: 'What the year granted them' },
+  { value: 'Earned', label: 'What they actually earned' },
+];
+
 export const ENCASHMENT_RATE_BASIS_OPTIONS: { value: EncashmentRateBasis; label: string }[] = [
   { value: 'DerivedFromEmoluments', label: 'Derived from emoluments' },
   { value: 'Manual', label: 'Manual rate' },
@@ -81,6 +95,18 @@ export interface LeaveType {
   minServiceMonthsToAccess?: number | null;
   carryOverExpiryMonths?: number | null;
   forfeitUnusedAfterMonths?: number | null;
+
+  /**
+   * ⚠ Governs **both** year-end runs, carry-over and forfeiture (entitlement plan B2).
+   * `Granted` is the default and is what both did before the setting existed.
+   */
+  yearEndBasis: LeaveYearEndBasis;
+  /**
+   * Scales a joiner's first-year entitlement to the months they were present.
+   * ⚠ The API refuses it alongside an incremental accrual policy — the two deduct for the same
+   * months, and the derived per-period rate would deduct for them a third time.
+   */
+  proRateFirstYearEntitlement: boolean;
   mandatoryAnnualLeave: boolean;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;
@@ -127,6 +153,18 @@ export interface CreateLeaveTypeRequest {
   minServiceMonthsToAccess?: number | null;
   carryOverExpiryMonths?: number | null;
   forfeitUnusedAfterMonths?: number | null;
+
+  /**
+   * ⚠ Governs **both** year-end runs, carry-over and forfeiture (entitlement plan B2).
+   * `Granted` is the default and is what both did before the setting existed.
+   */
+  yearEndBasis: LeaveYearEndBasis;
+  /**
+   * Scales a joiner's first-year entitlement to the months they were present.
+   * ⚠ The API refuses it alongside an incremental accrual policy — the two deduct for the same
+   * months, and the derived per-period rate would deduct for them a third time.
+   */
+  proRateFirstYearEntitlement: boolean;
   mandatoryAnnualLeave: boolean;
   encashmentRateBasis: EncashmentRateBasis;
   encashmentRatePerDay?: number | null;

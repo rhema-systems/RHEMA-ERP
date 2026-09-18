@@ -27,6 +27,12 @@ public class LeaveTypeDto
     public int? MinServiceMonthsToAccess { get; set; }
     public int? CarryOverExpiryMonths { get; set; }
     public int? ForfeitUnusedAfterMonths { get; set; }
+
+    /// <summary>⚠ Governs BOTH year-end acts — carry-over and forfeiture. Default <c>Granted</c>.</summary>
+    public LeaveYearEndBasis YearEndBasis { get; set; }
+
+    /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
+    public bool ProRateFirstYearEntitlement { get; set; }
     public bool MandatoryAnnualLeave { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; }
     public decimal? EncashmentRatePerDay { get; set; }
@@ -67,6 +73,12 @@ public class CreateLeaveTypeDto
     public int? MinServiceMonthsToAccess { get; set; }
     public int? CarryOverExpiryMonths { get; set; }
     public int? ForfeitUnusedAfterMonths { get; set; }
+
+    /// <summary>⚠ Governs BOTH year-end acts — carry-over and forfeiture. Default <c>Granted</c>.</summary>
+    public LeaveYearEndBasis YearEndBasis { get; set; }
+
+    /// <summary>⚠ Refused together with an incremental accrual policy — the two deduct for the same months.</summary>
+    public bool ProRateFirstYearEntitlement { get; set; }
     public bool MandatoryAnnualLeave { get; set; }
     public EncashmentRateBasis EncashmentRateBasis { get; set; } = EncashmentRateBasis.DerivedFromEmoluments;
     public decimal? EncashmentRatePerDay { get; set; }

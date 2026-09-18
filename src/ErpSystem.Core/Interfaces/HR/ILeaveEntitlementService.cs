@@ -19,6 +19,29 @@ public class LeaveEntitlementSnapshot
 
     /// <summary>The date from which the employee may first apply for this leave type (service gate), if known.</summary>
     public DateOnly? AccessibleFrom { get; set; }
+
+    /// <summary>
+    /// ⚠ <b>The one definition of "days this person can actually use right now".</b> Accrued-to-date
+    /// (or the full entitlement for a leave type that does not accrue) plus carry-over and
+    /// adjustments, less what is used, pending or encashed.
+    /// </summary>
+    /// <remarks>
+    /// <para>It lives here, on the snapshot, because <b>three</b> callers need it and a formula
+    /// copied three times is a formula that drifts twice: the create check (what it refuses on),
+    /// every balance read (the <i>Can take now</i> column), and — since the entitlement plan's W2b —
+    /// the year-end runs when a leave type counts <c>Earned</c> rather than <c>Granted</c>.</para>
+    ///
+    /// <para>The <c>HasAccrualPolicy</c> test is the part worth not re-deriving: a leave type with no
+    /// accrual policy hands over its whole entitlement immediately, so for those the accrued figure
+    /// is the entitlement and substituting it would read as zero.</para>
+    /// </remarks>
+    public decimal AvailableFrom(
+        decimal entitled, decimal carried, decimal adjustments,
+        decimal used, decimal pending, decimal encashed)
+    {
+        var effectiveAccrued = HasAccrualPolicy ? AccruedToDateDays : entitled;
+        return effectiveAccrued + carried + adjustments - used - pending - encashed;
+    }
 }
 
 /// <summary>

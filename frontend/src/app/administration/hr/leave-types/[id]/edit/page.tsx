@@ -84,6 +84,11 @@ export default function EditLeaveTypePage() {
             maxCarryOverDays: str(leaveType.maxCarryOverDays),
             carryOverExpiryMonths: str(leaveType.carryOverExpiryMonths),
             forfeitUnusedAfterMonths: str(leaveType.forfeitUnusedAfterMonths),
+            // ⚠ Seeded from the record, like every other field here. Omitting them would send
+            // the form's defaults on every save and silently reset both settings — the L-13
+            // shape, where a replace-set payload destroyed what it did not mention.
+            yearEndBasis: leaveType.yearEndBasis ?? 'Granted',
+            proRateFirstYearEntitlement: leaveType.proRateFirstYearEntitlement ?? false,
             countWeekendsAsLeave: leaveType.countWeekendsAsLeave,
             countHolidaysAsLeave: leaveType.countHolidaysAsLeave,
             allowCashConversion: leaveType.allowCashConversion,

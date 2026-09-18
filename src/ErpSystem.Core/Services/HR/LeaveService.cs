@@ -1508,18 +1508,17 @@ public class LeaveService : ILeaveService
     }
 
     /// <summary>
-    /// The one definition of "days you can actually take right now": accrued-to-date (or the full
-    /// entitlement for a leave type that does not accrue) plus carry-over and adjustments, less what
-    /// is used, pending or encashed. Shared by the create check and by every balance read so the two
-    /// cannot drift.
+    /// The one definition of "days you can actually take right now".
     /// </summary>
+    /// <remarks>
+    /// ⚠ The arithmetic moved onto <see cref="LeaveEntitlementSnapshot.AvailableFrom"/> when the
+    /// year-end runs became a third caller (entitlement plan W2b). This stays as the name the rest
+    /// of this file reads by; it must not grow a body of its own again.
+    /// </remarks>
     private static decimal EnforcedAvailableDays(
         LeaveEntitlementSnapshot snapshot, decimal entitled, decimal carried, decimal adjust,
         decimal used, decimal pending, decimal encashed)
-    {
-        var effectiveAccrued = snapshot.HasAccrualPolicy ? snapshot.AccruedToDateDays : entitled;
-        return effectiveAccrued + carried + adjust - used - pending - encashed;
-    }
+        => snapshot.AvailableFrom(entitled, carried, adjust, used, pending, encashed);
 
     public async Task<HrBulkActionResultDto> BulkDecideAsync(
         BulkLeaveDecisionDto dto, bool approve, CancellationToken ct = default)

@@ -1046,6 +1046,29 @@ public enum AccrualFrequency
 }
 
 /// <summary>
+/// What the year-end runs count as a person's unused days (entitlement plan B2, decision D-2).
+/// </summary>
+/// <remarks>
+/// ⚠ Both readings are ordinary employer policy, which is why this is a setting and not a fix. The
+/// product answered the question silently — as <see cref="Granted"/> — until 2026-09-18.
+/// </remarks>
+public enum LeaveYearEndBasis
+{
+    /// <summary>
+    /// What the YEAR OWED them: entitlement + carry-over + adjustments, less taken, pending and
+    /// encashed. ⚠ The default, because it is the behaviour that predates the setting and the
+    /// year-end runs have no undo.
+    /// </summary>
+    Granted = 0,
+
+    /// <summary>
+    /// What they actually EARNED: the same sum with accrued-to-date in place of entitlement. A
+    /// mid-year joiner carries what they built up, not what the full year would have given them.
+    /// </summary>
+    Earned = 1
+}
+
+/// <summary>
 /// How an accrual policy releases the annual entitlement over the leave year.
 /// </summary>
 public enum AccrualMode

@@ -1,11 +1,15 @@
 # HR Leave — Entitlement, Accrual and the Leave Year
 
-**Status:** 2026-09-18 — **WAVE 1 COMPLETE. WAVE 2: W2a, W2d and W2e done; W2b and W2c wait on a
-scaffolded migration.** `dev-harness/hr-leave` slices 10 and 11, **27 + 27 assertions, each green
-twice**; the whole suite green twice afterwards, **481 across eleven slices**.
+**Status:** 2026-09-18 — **WAVES 1 AND 2 COMPLETE.** Migration
+`20260918032031_AddLeaveYearEndBasisAndFirstYearProration` applied. `dev-harness/hr-leave` slices
+10, 11 and 12 — **27 + 27 + 20 assertions, each green twice**; the whole suite green twice
+afterwards, **501 across twelve slices**.
 
-**⚠ All eight decisions are now taken, all as recommended.** D-5's answer changed the work rather
-than authorising it — see § 2.2 B4.
+**⚠ All eight decisions are taken, all as recommended.** D-5's answer changed the work rather than
+authorising it — see § 2.2 B4.
+
+**What remains is Wave 3 only** — the leave year (§ 2.3 C1), which is unstarted and whose decision
+D-7 says to build the fiscal mode and leave the anniversary mode until a client asks.
 
 **Read [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) § 0 first** — it
 describes the code as it stands after G1–G5. This plan does not revisit anything that one closed.
@@ -121,7 +125,66 @@ directions.
 says so and says which way the figures will move: a Junior's accrued goes **down**, a Manager's
 **up**, and both are corrections.
 
-### Still to build — W2b and W2c, then Wave 3
+### W2b / W2c — the model is in, awaiting one migration
+
+**Two columns on `LeaveType`**, scaffolded together at the module owner's preference:
+
+| Column | Default | Governs |
+|---|---|---|
+| `YearEndBasis` *(enum)* | **`Granted`** | what carry-over **and forfeiture** count as unused |
+| `ProRateFirstYearEntitlement` *(bool)* | **`false`** | whether a joiner's first-year entitlement is scaled |
+
+**Three decisions taken while writing the model**, recorded here rather than left implicit:
+
+1. ⚠ **Renamed from the decision's wording.** D-2 called it *"carry-over basis"*; it is
+   `YearEndBasis`, because it governs **both** year-end acts. A name that covers half of what a
+   setting does is the thing this plan exists to stop.
+2. ⚠ **`ProRateFirstYearEntitlement` will be REFUSED alongside an incremental accrual policy**,
+   not silently ignored. Incremental accrual already limits a joiner to the part of the year they
+   were present for, and because the derived per-period rate is *entitlement ÷ periods*, combining
+   them would deduct for the same months **three times** — once through the accrual window, once
+   through the scaled entitlement, and once through the rate that entitlement produces. So it is for
+   leave types that **grant** rather than accrue: the mirror of `ProRateOnExit`, which applies to
+   incremental accrual only.
+3. **No third column for the pro-ration basis.** The encashment precedent stamps a basis onto a
+   derived money figure; entitlement is recomputable from the hire date and the switch, the repair
+   pass's notes already state both figures, and a column that exists to explain another column earns
+   its place only when the inputs can move underneath it. ⚠ Recorded as a **choice**, so nobody
+   later reads its absence as an oversight.
+
+⚠ **A fourth projection nearly ate this.** `GetLeaveTypeDetailAsync` builds `LeaveTypeDetailDto`
+field by field — a third place every `LeaveType` column must be listed, after the entity and the
+mapper. Both new fields were added there deliberately; missing it is **exactly** harness finding 13,
+where a column, entity, enum, DTO and parameter were all correct and the mapper was not, so the
+value read back as its default however it was set.
+
+### W2b and W2c — BUILT AND VERIFIED 2026-09-18
+
+Both settings bind, both defaults preserve today's behaviour, and the refusal that keeps them apart
+is enforced at both doors.
+
+**⚠ One thing the harness changed about the implementation.** Writing slice 12 meant re-reading
+`UnusedDaysAsync` against its own comment, which said *"a run for the CURRENT year must not count
+months that have not happened"* — **and the code did exactly that.** The engine clamps a supplied
+as-of date down to the year end but never to today, so asking for 31 December of the current year
+projected the whole year's accrual. Under `Earned` that would carry days nobody had earned, which is
+the one thing the setting exists to prevent. It now asks as at the **earlier of the year end and
+today**.
+
+**⚠ And one thing the harness changed about itself, which is the more useful lesson.** Slice 12
+first asserted the carry-over preview's **total**. That endpoint is scoped by *employee*, not by
+leave type, so the total sums every carry-over-eligible balance the fixture employee has
+accumulated. It passed on the first run and reported **50 and 40** on the second.
+
+> ⚠ **Green then red on unchanged code is the tell.** The product was right both times.
+
+The slice now asserts the **difference** between the two positions, which isolates the variable under
+test — and that single number proves the carry-over cap as well, because an unbound cap would make
+the difference 14 rather than 10. Recorded as README finding 22, the **third** instance of one
+shape: *never assert an exact figure read through an aggregate over a scope other fixtures can grow
+into.*
+
+### Still to build — Wave 3
 
 ⚠ **Each needs a scaffolded migration**, which is why they are the two left. **D-2 and D-4 are
 taken** — both per-leave-type settings whose defaults preserve today's behaviour exactly.
