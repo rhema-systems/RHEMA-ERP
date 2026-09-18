@@ -76,6 +76,7 @@ public static class CompanyHrPolicyMappingExtensions
             LeaveUndecidedChaseDays               = entity.LeaveUndecidedChaseDays,
             MandatoryLeaveChaseFromMonth          = entity.MandatoryLeaveChaseFromMonth,
             LeaveCarryOverExpiryReminderDays      = entity.LeaveCarryOverExpiryReminderDays,
+            LeaveYearStartMonth                   = entity.LeaveYearStartMonth,
         };
     }
 
@@ -142,5 +143,6 @@ public static class CompanyHrPolicyMappingExtensions
         entity.LeaveUndecidedChaseDays            = dto.LeaveUndecidedChaseDays;
         entity.MandatoryLeaveChaseFromMonth       = dto.MandatoryLeaveChaseFromMonth;
         entity.LeaveCarryOverExpiryReminderDays   = dto.LeaveCarryOverExpiryReminderDays;
+        entity.LeaveYearStartMonth                = dto.LeaveYearStartMonth;
     }
 }

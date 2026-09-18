@@ -99,6 +99,7 @@ const schema = z
     leaveUndecidedChaseDays: z.coerce.number().int().min(0).max(180),
     mandatoryLeaveChaseFromMonth: z.coerce.number().int().min(1).max(12),
     leaveCarryOverExpiryReminderDays: z.coerce.number().int().min(0).max(365),
+    leaveYearStartMonth: z.string(),
 
     budgetEnforcementMode: z.string(),
     establishmentEnforcementMode: z.string(),
@@ -214,6 +215,7 @@ export default function PolicySettingsPage() {
       leaveUndecidedChaseDays: data.leaveUndecidedChaseDays,
       mandatoryLeaveChaseFromMonth: data.mandatoryLeaveChaseFromMonth,
       leaveCarryOverExpiryReminderDays: data.leaveCarryOverExpiryReminderDays,
+      leaveYearStartMonth: String(data.leaveYearStartMonth ?? 1),
     });
   }, [data, form]);
 
@@ -304,6 +306,7 @@ export default function PolicySettingsPage() {
         leaveUndecidedChaseDays: Number(v.leaveUndecidedChaseDays),
         mandatoryLeaveChaseFromMonth: Number(v.mandatoryLeaveChaseFromMonth),
         leaveCarryOverExpiryReminderDays: Number(v.leaveCarryOverExpiryReminderDays),
+        leaveYearStartMonth: Number(v.leaveYearStartMonth),
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['hr', 'policy-settings'] });
@@ -726,6 +729,49 @@ export default function PolicySettingsPage() {
                 deliberately configurable apart. What matters is that it is a choice: every
                 encashment and every settlement records the basis that produced it, so changing
                 either number never rewrites an amount already paid.
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/*
+          ⚠ Its own card, ABOVE the encashment and reminder ones, because it is the setting the
+          other two are measured against — carry-over expiry and the forfeiture cut-off are both
+          counted from the start of this year, not from January (entitlement plan C1).
+        */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Leave — the leave year</CardTitle>
+            <CardDescription>
+              When this organisation&apos;s leave year begins. Everything else in leave is measured
+              from it.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <SelectField
+              form={form}
+              name="leaveYearStartMonth"
+              label="Leave year starts"
+              options={FISCAL_YEAR_MONTHS}
+              required
+            />
+            <p className="text-sm text-muted-foreground">
+              A leave year is <strong>named after the calendar year it starts in</strong> — with an
+              April start, March 2028 belongs to leave year 2027. Entitlement, carry-over expiry and
+              the forfeiture cut-off are all counted from this month.
+            </p>
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+              <p className="font-medium">⚠ Set this during setup. It cannot be changed later.</p>
+              <p className="mt-1">
+                Once any leave has been recorded, the save is refused — and not out of caution.
+                Moving the boundary changes which leave year some dates fall in while the records
+                already written keep their current labels. Most figures could be re-derived;{' '}
+                <strong>a carry-over that has already run could not</strong>, because it was
+                computed against boundaries that would no longer exist.
+              </p>
+              <p className="mt-1">
+                ⚠ This is <strong>not</strong> the fiscal year above. Plenty of organisations run
+                the two apart, so they are separate settings on purpose.
               </p>
             </div>
           </CardContent>

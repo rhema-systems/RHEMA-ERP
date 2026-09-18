@@ -116,6 +116,9 @@ public class CompanyHrPolicySettingsDto : BaseDto
     public int LeaveUndecidedChaseDays { get; set; }
     public int MandatoryLeaveChaseFromMonth { get; set; }
     public int LeaveCarryOverExpiryReminderDays { get; set; }
+
+    /// <summary>⚠ The month the LEAVE year begins. 1 = January. Change-once-at-setup (D-9).</summary>
+    public int LeaveYearStartMonth { get; set; }
 }
 
 /// <summary>
@@ -225,4 +228,7 @@ public class UpdateCompanyHrPolicySettingsDto
     [Range(0, 180)] public int LeaveUndecidedChaseDays { get; set; } = 5;
     [Range(1, 12)]  public int MandatoryLeaveChaseFromMonth { get; set; } = 9;
     [Range(0, 365)] public int LeaveCarryOverExpiryReminderDays { get; set; } = 30;
+
+    /// <summary>⚠ The month the LEAVE year begins. Refused once the tenant holds leave data (D-9).</summary>
+    [Range(1, 12)] public int LeaveYearStartMonth { get; set; } = 1;
 }

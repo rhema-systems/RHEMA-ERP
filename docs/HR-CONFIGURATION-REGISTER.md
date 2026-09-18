@@ -3,8 +3,8 @@
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
 2026-09-18 (entitlement plan W1c).
 
-**Surveyed: all of `CompanyHrPolicySettings` (46), all of `LeaveType` (26), and all four of leave's
-CHILD tables (38).** Three ghosts found, all in the first — **and one setting that is none of the
+**Surveyed: all of `CompanyHrPolicySettings` (46), all of `LeaveType` (26 + 2 added 2026-09-18), and
+all four of leave's CHILD tables (38).** Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
 appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
 expected to cost.
@@ -197,6 +197,32 @@ and the rules would be decorative.
 
 ⚠ **The gate is asserted on the auto-approving path too** (`RequiresApproval = false`), which is the
 branch where a miss approves sick leave with nobody asked.
+
+### The year-end basis and first-year pro-rating (entitlement plan B2/B3) — added 2026-09-18
+
+Both on the leave type, and both introduced **because the product was already answering their
+question silently**. Neither is a correction: both readings are ordinary employer policy.
+
+| Setting | Default | Status | Proof — slice 12, both positions |
+|---|---|---|---|
+| `YearEndBasis` | **`Granted`** | **Enforced** | carry-over preview, same fixture, two positions: switching to `Earned` carries **exactly 10 fewer days** — `min(entitled 24, cap 20)` against `min(accrued 10, cap 20)` |
+| `ProRateFirstYearEntitlement` | **`false`** | **Enforced** | an April joiner entitled to 24 is re-derived to **18** (9/12) by the repair pass, which names both figures |
+
+⚠ **`YearEndBasis` governs BOTH year-end acts**, carry-over and forfeiture, which is why it is not
+called a carry-over basis. A name covering half of what a setting does is the kind of thing this
+register exists to catch.
+
+⚠ **`ProRateFirstYearEntitlement` is REFUSED alongside an incremental accrual policy**, at both
+doors, rather than silently ignored — the distinction § 0's rule turns on. Accrual already limits a
+joiner to the months they were present; scaling the entitlement too would deduct for them twice, and
+a third time through the derived per-period rate. Slice 12 asserts the refusal from each side **and**
+asserts that a full-grant policy is still allowed, so the rule is about the accrual *mode* rather
+than about accrual existing.
+
+⚠ **Both defaults are the behaviour that predates them, deliberately.** The year-end runs have no
+undo, so a default that silently moved people's carried days on the next run would be worse than the
+inconsistency it corrects — the same reasoning that gave `AllowInServiceEncashment` its conservative
+default.
 
 ### The rest of `LeaveType`
 

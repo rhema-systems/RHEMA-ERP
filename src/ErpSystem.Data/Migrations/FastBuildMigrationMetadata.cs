@@ -333,3 +333,4 @@ namespace ErpSystem.Data.Migrations;
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917213834_AddLeaveMedicalEvidence")] partial class AddLeaveMedicalEvidence { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260917223219_AddMedicalBoards")] partial class AddMedicalBoards { }
 [DbContext(typeof(ApplicationDbContext)), Migration("20260918032031_AddLeaveYearEndBasisAndFirstYearProration")] partial class AddLeaveYearEndBasisAndFirstYearProration { }
+[DbContext(typeof(ApplicationDbContext)), Migration("20260918042423_AddLeaveYearStartMonth")] partial class AddLeaveYearStartMonth { }

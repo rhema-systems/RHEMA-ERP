@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -23,6 +24,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     private readonly IGenericRepository<LeaveCategoryAllocation> _allocationRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IDateTimeProvider _clock;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveEntitlementService> _logger;
 
     public LeaveEntitlementService(
@@ -32,6 +34,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         IGenericRepository<LeaveCategoryAllocation> allocationRepository,
         ICurrentUserProvider currentUserProvider,
         IDateTimeProvider clock,
+        ILeaveYearContext leaveYear,
         ILogger<LeaveEntitlementService> logger)
     {
         _employeeRepository = employeeRepository;
@@ -40,6 +43,7 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         _allocationRepository = allocationRepository;
         _currentUserProvider = currentUserProvider;
         _clock = clock;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -70,6 +74,11 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         var tenantId = GetTenantId();
         var leaveType = await GetOwnedLeaveTypeAsync(leaveTypeId);
 
+        // ⚠ The tenant's leave year, resolved ONCE for this method. Every arm of the precedence
+        // below and the pro-rating helper all need the same answer, and the context caches it for
+        // the request in any case (entitlement plan C1).
+        var startMonth = await _leaveYear.StartMonthAsync(ct);
+
         // ⚠ Read once, applied to whichever arm of the precedence answers — a joiner's first year is
         // scaled the same way whether the figure came from a sub-type cap, an allocation or the
         // default. Fetched here so the three return paths below cannot disagree about it.
@@ -84,15 +93,15 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         {
             var subType = await _leaveSubTypeRepository.GetByIdAsync(leaveSubTypeId.Value);
             if (subType?.TenantId == tenantId && subType.MaxDaysAllowed is int cap)
-                return ApplyFirstYearProration(leaveType, ApplyCeiling(leaveType, cap), hiredOn, year);
+                return ApplyFirstYearProration(leaveType, ApplyCeiling(leaveType, cap), hiredOn, year, startMonth);
         }
 
         // 2) Effective-dated allocation for the employee's staff level.
         var staffLevelId = await GetEmployeeStaffLevelIdAsync(employeeId, tenantId, ct);
         if (staffLevelId.HasValue)
         {
-            var yearStart = new DateOnly(year, 1, 1);
-            var yearEnd = new DateOnly(year, 12, 31);
+            var yearStart = LeaveYear.StartOf(year, startMonth);
+            var yearEnd = LeaveYear.EndOf(year, startMonth);
 
             var allocation = await _allocationRepository
                 .GetQueryable()
@@ -107,12 +116,12 @@ public class LeaveEntitlementService : ILeaveEntitlementService
 
             if (allocation != null)
                 return ApplyFirstYearProration(
-                    leaveType, ApplyCeiling(leaveType, allocation.AllocationDays), hiredOn, year);
+                    leaveType, ApplyCeiling(leaveType, allocation.AllocationDays), hiredOn, year, startMonth);
         }
 
         // 3) Fall back to the leave type default.
         return ApplyFirstYearProration(
-            leaveType, ApplyCeiling(leaveType, leaveType.DefaultDaysPerYear), hiredOn, year);
+            leaveType, ApplyCeiling(leaveType, leaveType.DefaultDaysPerYear), hiredOn, year, startMonth);
     }
 
     /// <summary>
@@ -135,10 +144,13 @@ public class LeaveEntitlementService : ILeaveEntitlementService
     /// periods in a year.</para>
     /// </remarks>
     private static decimal ApplyFirstYearProration(
-        LeaveType leaveType, decimal entitled, DateOnly? dateEmployed, int year)
+        LeaveType leaveType, decimal entitled, DateOnly? dateEmployed, int year, int startMonth)
     {
         if (!leaveType.ProRateFirstYearEntitlement) return entitled;
-        if (dateEmployed is not DateOnly hired || hired.Year != year) return entitled;
+        // ⚠ The leave year the hire date falls in, not its calendar year. Under an April start
+        // somebody hired in February 2026 joined during leave year 2025, and comparing
+        // calendar years would have silently skipped their pro-rating.
+        if (dateEmployed is not DateOnly hired || LeaveYear.For(hired, startMonth) != year) return entitled;
 
         var monthsPresent = 12 - hired.Month + 1;
         return Math.Round(entitled * monthsPresent / 12m, 2, MidpointRounding.AwayFromZero);
@@ -183,8 +195,8 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             ? DateOnly.FromDateTime(left)
             : (DateOnly?)null;
 
-        var yearStart = new DateOnly(year, 1, 1);
-        var yearEnd = new DateOnly(year, 12, 31);
+        var yearStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
+        var yearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
 
         // Clamp the as-of date into the target year for within-year accrual.
         var effectiveAsOf = asOf ?? _clock.TodayUtc;

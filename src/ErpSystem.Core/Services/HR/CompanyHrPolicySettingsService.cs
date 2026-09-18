@@ -1,5 +1,6 @@
 ﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
@@ -20,6 +21,10 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
     // The salary-structure rules read the live structure: a switch to two-tier has to know whether
     // any grade actually holds more than one level.
     private readonly IGenericRepository<SalaryGrade> _salaryGrades;
+    // Same reasoning as the salary structure above: the leave-year rule has to know whether the
+    // tenant already holds leave data that is labelled under the current year (decision D-9).
+    private readonly IGenericRepository<LeaveRequest> _leaveRequests;
+    private readonly IGenericRepository<LeaveBalance> _leaveBalances;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<CompanyHrPolicySettingsService> _logger;
@@ -27,12 +32,16 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
     public CompanyHrPolicySettingsService(
         IGenericRepository<CompanyHrPolicySettings> repository,
         IGenericRepository<SalaryGrade> salaryGrades,
+        IGenericRepository<LeaveRequest> leaveRequests,
+        IGenericRepository<LeaveBalance> leaveBalances,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUser,
         ILogger<CompanyHrPolicySettingsService> logger)
     {
         _repository = repository;
         _salaryGrades = salaryGrades;
+        _leaveRequests = leaveRequests;
+        _leaveBalances = leaveBalances;
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
         _logger = logger;
@@ -78,6 +87,49 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
         return new CompanyHrPolicySettings { TenantId = tenantId }.ToDto();
     }
 
+    /// <summary>
+    /// ⚠ <b>The leave year start month is change-once-at-setup</b> (entitlement plan C1,
+    /// decision D-9).
+    /// </summary>
+    /// <remarks>
+    /// <para>Moving the boundary changes <b>which leave year some dates fall in</b>, while every
+    /// stored row keeps the label it was written with. A request dated 10 February 2026 sits in
+    /// leave year 2026 under a January start and in 2025 under an April one — but the balance it
+    /// fed still says 2026.</para>
+    ///
+    /// <para><b>⚠ And one figure cannot be repaired afterwards, which is why this is a refusal
+    /// rather than a warning.</b> Used, pending, adjustment and encashed days all re-derive.
+    /// Entitlement became repairable in W1a. <c>CarriedOverDays</c> did not: it was computed by a
+    /// year-end run against boundaries that no longer exist, and nothing can reconstruct what it
+    /// should have been. A change that half-corrects the ledger is worse than one that is refused.
+    /// </para>
+    ///
+    /// <para>Freely settable while the tenant holds no leave data, which is the case during setup —
+    /// the only time anybody should be choosing it.</para>
+    /// </remarks>
+    private async Task ValidateLeaveYearStartMonthAsync(
+        Guid tenantId, CompanyHrPolicySettings? existing,
+        UpdateCompanyHrPolicySettingsDto dto, CancellationToken ct)
+    {
+        // Nothing stored yet, or nothing changing: there is no boundary to move.
+        if (existing is null || existing.LeaveYearStartMonth == dto.LeaveYearStartMonth) return;
+
+        var requests = await _leaveRequests.GetQueryable()
+            .CountAsync(r => r.TenantId == tenantId && !r.IsDeleted, ct);
+        var balances = await _leaveBalances.GetQueryable()
+            .CountAsync(b => b.TenantId == tenantId && !b.IsDeleted, ct);
+
+        if (requests == 0 && balances == 0) return;
+
+        throw new InvalidOperationException(
+            $"The leave year cannot be moved once leave data exists. This company already holds "
+            + $"{requests} leave request(s) and {balances} leave balance(s), all labelled under a "
+            + $"leave year starting in month {existing.LeaveYearStartMonth}. Moving the start month "
+            + "would change which leave year some dates fall in while those records keep their "
+            + "current labels, and a carry-over already run cannot be recomputed against the new "
+            + "boundaries. Set it during setup, before any leave is recorded.");
+    }
+
     public async Task<CompanyHrPolicySettingsDto> UpdateAsync(UpdateCompanyHrPolicySettingsDto dto, CancellationToken cancellationToken = default)
     {
         ValidateRetirementAges(dto);
@@ -88,6 +140,8 @@ public class CompanyHrPolicySettingsService : ICompanyHrPolicySettingsService
         var entity = await _repository.GetQueryable()
             .Where(s => !s.IsDeleted && s.TenantId == tenantId)
             .FirstOrDefaultAsync(cancellationToken);
+
+        await ValidateLeaveYearStartMonthAsync(tenantId, entity, dto, cancellationToken);
 
         if (entity is null)
         {

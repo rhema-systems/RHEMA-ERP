@@ -414,9 +414,24 @@ accrual starts, and which day of the month accrual ticks over.
 | **Carry-over expiry and the forfeiture cut-off** | measured from **1 January**, so *"expires after 3 months"* means 31 March for every employee |
 | **A July–June leave year** | not available. The tenant does have a `FiscalYearStartMonth`, and **leave ignores it completely** — only recruitment's budget check reads it |
 
-⚠ **And entitlement is never pro-rated.** A December joiner's Entitled column reads the **full**
-annual figure. Accrual limits what they can *book*, which imitates pro-rating from the employee's
-side — but the ledger says the whole year, and the year-end carry-over reads the ledger.
+⚠ **Entitlement is not pro-rated by default** — a December joiner's Entitled column reads the
+**full** annual figure. Accrual limits what they can *book*, which imitates pro-rating from the
+employee's side, but the ledger says the whole year and the year-end carry-over reads the ledger.
+
+**Since 2026-09-18 that is a setting rather than a fact.** *Pro-rate the first year's entitlement*,
+on the leave type, scales a joiner's first year to the months they were here: 15 days becomes
+**3.75** for an October start, and the figure is stored, so every screen and the year-end run agree
+about it.
+
+> ⚠ **It cannot be combined with incremental accrual, and the save is refused rather than
+> quietly ignored.** Accrual already limits a joiner to the part of the year they were present for —
+> it opens the accrual window at their hire date. Scaling the entitlement as well deducts for the
+> same months a second time, and because the derived per-period rate is *entitlement ÷ periods*
+> (§1.3b's note on rate 0), a third. A joiner on 1 October entitled to 12 days would finish the year
+> with **0.75** days instead of 3.
+>
+> So it is for leave that is **granted** — no accrual policy, or one set to full grant. That is the
+> mirror of *Pro-rate on exit*, which applies to incremental accrual only.
 
 > **The honest sentence, if a client asks for an anniversary leave year:**
 >
@@ -1131,6 +1146,34 @@ more, and the form owns the value rather than asking each page to remember to ec
 ⚠ **Retired sub-types no longer appear in the pickers.** The rulebook tab still shows them, with an
 *Inactive* badge, because that is what the Status column is for.
 
+### 👁 On the page — the two year-end settings *(new)*
+
+Both live in the form's **Carry-over** section, because both change what the year-end runs do.
+
+**Carry-over and forfeiture count** — *What the year granted them* (the default) or *What they
+actually earned*. The form explains the consequence in whichever position you are in:
+
+> *A mid-year joiner carries **what the year owed them**, up to the cap above — so somebody who
+> accrued 3.5 days and took none still carries the full five.* ⚠ *This is what both runs did before
+> the setting existed, which is why it is the default.*
+
+⚠ **It governs BOTH year-end acts**, which is why it is not called a carry-over basis. Under
+*Earned*, forfeiture removes what the employee earned and did not take; the part of the grant they
+never accrued is simply not forfeited, because it was never theirs to lose. Against a "use it or
+lose it" label that reads oddly until you notice the alternative is forfeiting days they could not
+have taken.
+
+**Pro-rate the first year's entitlement** — a switch, default off. §1.3b explains it and the
+refusal that keeps it away from incremental accrual.
+
+> **Say this if a room asks why there is a choice at all rather than a right answer:**
+>
+> "Because both are ordinary employer policy. Some organisations say your carry-over is what the
+> year owed you; others say it is what you earned and did not take. The product used to answer that
+> question silently, by picking one — and the only clue was in the arithmetic. Now it is a field,
+> with the old behaviour as the default, because changing what people carry without anybody choosing
+> it would be the worse mistake."
+
 ⚠ **A leave type may have exactly ONE active accrual policy, and adding a second is refused** with a
 message saying so. It used not to be: a second policy was accepted and the accrued figure then
 depended on which row the database returned first — the same balance could read differently between
@@ -1214,6 +1257,8 @@ of leave is worth in cash. §4.4.6 lists those, and chapter 4b is the screen the
 | **Leave type → Active** | the **service** now refuses a retired type, not just the picker. Moving a draft onto a retired type is refused as well |
 | **Accrual → Pro-rate on exit** | a leaver stops accruing on their last day. ⚠ Incremental accrual only — see §1.3 |
 | **Accrual → Pro-rate on join** *(2026-09-18)* | ⚠ **It was read on every accrual calculation and could not change the answer**, because its condition could never be true. ON is what always happened; **OFF is new** and accrues on the company's leave year instead. §1.3 |
+| **Leave type → Carry-over and forfeiture count** *(2026-09-18)* | both year-end runs read it. *Granted* is the behaviour that predates it; *Earned* substitutes accrued-to-date through the same definition the create check uses |
+| **Leave type → Pro-rate the first year** *(2026-09-18)* | scales a joiner's first-year entitlement, and is **refused** alongside incremental accrual rather than ignored |
 | **Calendar colour** | real, because a calendar exists. It colours the bands in chapter 9, and a type with no colour set falls back to a generated palette rather than showing nothing |
 | **Holiday → Observance type** | *Mandatory* and *Substitute Day* close the office; ***Optional* is a working day**, so leave taken on it is chargeable |
 | **Holiday → Active** | an inactive holiday no longer suppresses a leave day |
@@ -3214,6 +3259,17 @@ this was a dry run.**
 
 **Carry-over is set-not-stacked** and capped at the leave type's `MaxCarryOverDays`. **Forfeiture
 posts a named negative adjustment** and is idempotent.
+
+⚠ **What each run counts as *unused* is now the leave type's choice** — *Carry-over and forfeiture
+count*, chapter 4. On the default, *Granted*, both read the whole year's entitlement, so a mid-year
+joiner who accrued 3.5 days and took none carries the full cap. On *Earned* they carry 3.5.
+
+⚠ **The cap still binds on top of the basis.** The basis decides what is unused; `MaxCarryOverDays`
+decides how much of it may travel. Nothing about the setting lets anybody exceed the cap.
+
+⚠ **Accrual is asked as at the end of the year being closed — or today, whichever is earlier.** A
+carry-over run in February for the year just gone must not credit somebody with two months of the
+year they are now in, and a run for the *current* year must not count months that have not happened.
 
 **`PerformedBy` on a forfeiture is stamped from the token.** It used to be `Guid.Empty`, which no
 employee has — so the forfeiture endpoint had never once succeeded, and its only test evidence was

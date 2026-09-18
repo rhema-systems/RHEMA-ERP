@@ -4371,6 +4371,10 @@ private void ConfigureHREntities(ModelBuilder builder)
                 LeaveUndecidedChaseDays        = 5,
                 MandatoryLeaveChaseFromMonth   = 9,
                 LeaveCarryOverExpiryReminderDays = 30,
+                // ⚠ Entitlement plan C1. January, which is what every tenant had before the
+                // setting existed — and every property must appear in this seed block or the
+                // DbContext will not build at design time.
+                LeaveYearStartMonth            = 1,
                 CreatedAt                      = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc),
                 UpdatedAt                      = (DateTime?)null,
                 CreatedBy                      = "System",

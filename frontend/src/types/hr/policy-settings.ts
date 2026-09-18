@@ -107,6 +107,13 @@ export interface CompanyHrPolicySettings {
   leaveUndecidedChaseDays: number;
   mandatoryLeaveChaseFromMonth: number;
   leaveCarryOverExpiryReminderDays: number;
+  /**
+   * ⚠ The month the LEAVE year begins. 1 = January, and not the same field as
+   * `fiscalYearStartMonth` — the finance year and the leave year are different facts.
+   *
+   * ⚠ Change-once-at-setup: the API refuses it once the tenant holds any leave data (D-9).
+   */
+  leaveYearStartMonth: number;
 
   createdAt: string;
   createdBy: string | null;

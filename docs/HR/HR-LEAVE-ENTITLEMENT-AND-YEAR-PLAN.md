@@ -8,8 +8,9 @@ afterwards, **501 across twelve slices**.
 **⚠ All eight decisions are taken, all as recommended.** D-5's answer changed the work rather than
 authorising it — see § 2.2 B4.
 
-**What remains is Wave 3 only** — the leave year (§ 2.3 C1), which is unstarted and whose decision
-D-7 says to build the fiscal mode and leave the anniversary mode until a client asks.
+**ALL THREE WAVES ARE COMPLETE.** `dev-harness/hr-leave` — **515 assertions across thirteen slices,
+green twice.** What remains of this plan is the deliberately-unbuilt: the anniversary leave year
+(D-7) and half-day leave (D-8), both recorded as not-yet-asked-for rather than forgotten.
 
 **Read [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) § 0 first** — it
 describes the code as it stands after G1–G5. This plan does not revisit anything that one closed.
@@ -184,7 +185,60 @@ the difference 14 rather than 10. Recorded as README finding 22, the **third** i
 shape: *never assert an exact figure read through an aggregate over a scope other fixtures can grow
 into.*
 
-### Still to build — Wave 3
+### Wave 3, half one — BUILT AND VERIFIED 2026-09-18
+
+**A pure refactor. No migration, no setting, no behaviour change** — and that was the point: the risk
+in C1 is the call sites, not the setting, so the sites moved first while the right answer was still
+known. `dev-harness/hr-leave` **501 assertions, green twice, unchanged**. Had anything gone red,
+half one was wrong; there was no new behaviour to hide behind.
+
+**`LeaveYear`** (beside `HrFiscalYear`) answers three questions in one place: which leave year a date
+falls in, and where a leave year starts and ends. Every caller passes `LeaveYear.CalendarStartMonth`,
+for which all three reduce exactly to the arithmetic they replaced.
+
+⚠ **Five EF queries had to be HOISTED, and one of them would not have warned anybody.**
+`r.StartDate.Year == request.StartDate.Year` — the right-hand side is a captured local, so it reads
+as a perfectly translatable member access. A `LeaveYear` call there would have thrown at runtime, not
+at compile time. Those now resolve the year in C# and ask the database for a **range**, which is also
+the only form an index can use: `YEAR(column) = x` cannot.
+
+### Wave 3, half two — BUILT AND VERIFIED 2026-09-18
+
+**D-9 taken: change-once-at-setup.** Migration `20260918042423_AddLeaveYearStartMonth`.
+
+| | |
+|---|---|
+| `LeaveYearStartMonth` on `CompanyHrPolicySettings` | default **1**, so nothing moved for anybody |
+| **`ILeaveYearContext`** | one **scoped** owner of the value, read once per request. ⚠ The provider does not cache, so reading it per site would have put a query inside loops walking hundreds of balances — and caching it in five services is where the fifth copy drifts |
+| The D-9 guard | refuses the change once the tenant holds leave data, **naming what exists** |
+| The screen | its own card above encashment and reminders, because it is the setting those are measured against |
+
+⚠ **The background sweeps deliberately do NOT use the context.** They loop every tenant inside one
+scope, so a per-scope cache would hand the second tenant the first tenant's leave year.
+`LeaveReminderService` reads `LeaveYearStartMonth` from the per-tenant settings it already loads.
+
+**⚠ Why the refusal is a refusal and not a warning**, recorded because it is the whole of D-9: of
+the figures a moved boundary disturbs, **only `CarriedOverDays` cannot be re-derived.** Used,
+pending, adjustment and encashed days recompute; entitlement became repairable in W1a. Carry-over
+was computed by a year-end run against boundaries that would no longer exist. A change that
+half-corrects the ledger is worse than one that is refused.
+
+### ⚠ Slice 13 is the only thing that could prove Wave 3
+
+The other twelve slices run on a January tenant — which is every tenant that exists. A green suite
+proved half one **changed nothing**, and structurally could not prove the sites would follow a
+*different* answer. Slice 13 moves the boundary and asks:
+
+- a plan dated **10 February** files under leave year **2025** with an April start and **2026** with
+  January — the same date, two answers;
+- an allocation dated **April–March** is matched by the entitlement engine, which January–December
+  bounds would miss, falling through to the leave type's default.
+
+⚠ **It sets the month by SQL, because the API refuses it** — that refusal is the feature, and is
+asserted in the same slice. It restores the setting in a `finally` and deletes the plans it raises,
+because every slice here is run twice.
+
+### Still to build — after Wave 3
 
 ⚠ **Each needs a scaffolded migration**, which is why they are the two left. **D-2 and D-4 are
 taken** — both per-leave-type settings whose defaults preserve today's behaviour exactly.
@@ -414,11 +468,29 @@ either.
 
 | Surface | Count |
 |---|---|
-| Year-keyed sites in the seven leave services | **49** (`LeaveService` 28 · recalculation 5 · entitlement 4 · year-end 3 · encashment 3 · plans 3 · reminders 3) |
+| Year-keyed sites in the seven leave services | ⚠ **49 by raw grep, 30 in reality** — corrected 2026-09-18, see below |
 | HR screens carrying a year selector | **7** |
 | Portal screens carrying a year | **3** |
 | Harness slices that would need re-running | **9** (427 assertions) |
 | Unique index that encodes the assumption | `(EmployeeId, LeaveTypeId, LeaveSubTypeId, Year)` on `LeaveBalances` |
+
+### ⚠ The 49 was wrong, and the correction is the useful part
+
+A raw grep for year-keyed expressions counts **two different things**, and only one of them is work:
+
+| Shape | Count | Is it affected by where the year starts? |
+|---|---|---|
+| `lb.Year == year` on a balance, adjustment, encashment or plan | ~17 | **No.** That is a stored `int` **LABEL** on a row, not a date |
+| `new DateOnly(year, 1, 1)` / `(year, 12, 31)` boundaries | 7 | Yes |
+| a **date** mapped to a year — `StartDate.Year` | 25 | Yes |
+
+⚠ **That distinction is why `LeaveBalance.Year` can stay an `int` through this whole wave**, and
+treating all 49 alike would have broken it. A leave year is labelled by the calendar year it starts
+in, so the label survives; what changes is which dates map to which label.
+
+**Two more sites lived outside the services and this inventory missed them**:
+`LeaveMappingExtensions` (a plan's year follows its dates) and
+`LeaveRepository.GetEmployeeLeaveHistoryAsync`. **32 in total.**
 
 ⚠ **Two modes, and they are not the same job.**
 

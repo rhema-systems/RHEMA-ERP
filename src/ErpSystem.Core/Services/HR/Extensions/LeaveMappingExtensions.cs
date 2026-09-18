@@ -1,5 +1,8 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+// ⚠ This file sits in ErpSystem.Application.Extensions, NOT under Services.HR, so LeaveYear
+// needs an explicit using — namespace lookup does not walk into an unrelated tree.
+using ErpSystem.Core.Services.HR;
 
 namespace ErpSystem.Application.Extensions
 {
@@ -243,8 +246,11 @@ namespace ErpSystem.Application.Extensions
             SecondRelieverId = dto.SecondRelieverId,
             Notes = dto.Notes,
             // PlannedBy is stamped by the service from the token (finish-plan lane 4).
-            // Year follows the dates, never the caller (L-17).
-            Year = dto.StartDate.Year
+            // ⚠ Year is NOT set here. It follows the dates (L-17), but WHICH year a date falls in
+            // depends on the tenant's leave year, and a static mapper cannot read settings. The
+            // service sets it on both the create and the update path — one owner rather than two
+            // that can disagree (entitlement plan C1).
+            Year = 0
         };
 
         public static List<LeavePlanDto> ToDtoList(this IEnumerable<LeavePlan> entities)

@@ -2,6 +2,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -21,6 +22,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
     private readonly ILeaveEntitlementService _entitlementService;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveBalanceRecalculationService> _logger;
 
     public LeaveBalanceRecalculationService(
@@ -32,6 +34,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         ILeaveEntitlementService entitlementService,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        ILeaveYearContext leaveYear,
         ILogger<LeaveBalanceRecalculationService> logger)
     {
         _leaveBalanceRepository = leaveBalanceRepository;
@@ -42,6 +45,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         _entitlementService = entitlementService;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -64,6 +68,16 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
         var leaveType = await _leaveTypeRepository.GetByIdAsync(leaveTypeId);
         if (leaveType == null || leaveType.TenantId != tenantId)
             throw new ArgumentException($"Leave type '{leaveTypeId}' not found.");
+
+        // ⚠ Entitlement plan C1. A request belongs to the leave year its START DATE falls in, and
+        // these bounds are how that is asked of the database. `r.StartDate.Year == year` could not
+        // survive a leave year that does not start in January — and as a bonus this form is
+        // sargable, where the old one wrapped the column in YEAR() and could not use an index.
+        //
+        // ⚠ The ADJUSTMENT query below deliberately keeps `a.Year == year`: that is a stored int
+        // LABEL on the row, not a date, and it is unaffected by where the year begins.
+        var yearStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
+        var yearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
 
         var balance = await _leaveBalanceRepository
             .GetQueryable()
@@ -122,7 +136,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
                 r.TenantId == tenantId &&
                 r.EmployeeId  == employeeId &&
                 r.LeaveTypeId == leaveTypeId &&
-                r.StartDate.Year == year &&
+                r.StartDate >= yearStart && r.StartDate <= yearEnd &&
                 (r.Status == LeaveStatus.Approved ||
                  r.Status == LeaveStatus.InProgress ||
                  r.Status == LeaveStatus.Completed))
@@ -139,7 +153,7 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
                 r.TenantId == tenantId &&
                 r.EmployeeId  == employeeId &&
                 r.LeaveTypeId == leaveTypeId &&
-                r.StartDate.Year == year &&
+                r.StartDate >= yearStart && r.StartDate <= yearEnd &&
                 r.Status == LeaveStatus.Pending)
             .SumAsync(r => (decimal?)r.TotalDays) ?? 0m;
 

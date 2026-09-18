@@ -3,6 +3,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -25,6 +26,7 @@ public class LeaveYearEndService : ILeaveYearEndService
     private readonly ICurrentUserService _currentUserService;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IDateTimeProvider _clock;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveYearEndService> _logger;
 
     public LeaveYearEndService(
@@ -37,6 +39,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         ICurrentUserService currentUserService,
         IUnitOfWork unitOfWork,
         IDateTimeProvider clock,
+        ILeaveYearContext leaveYear,
         ILogger<LeaveYearEndService> logger)
     {
         _balanceRepository = balanceRepository;
@@ -48,6 +51,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         _currentUserService = currentUserService;
         _unitOfWork = unitOfWork;
         _clock = clock;
+        _leaveYear = leaveYear;
         _logger = logger;
     }
 
@@ -91,7 +95,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         // passing the year end for the CURRENT year would credit months that have not happened yet.
         // Under Earned that would carry days nobody has earned, which is the one thing the setting
         // exists to prevent.
-        var yearEnd = new DateOnly(year, 12, 31);
+        var yearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
         var today = _clock.TodayUtc;
         var asOf = today < yearEnd ? today : yearEnd;
 
@@ -189,7 +193,7 @@ public class LeaveYearEndService : ILeaveYearEndService
         var tenantId = GetTenantId();
         var result = new LeaveYearEndResult();
         var effectiveAsOf = asOf ?? _clock.TodayUtc;
-        var yearStart = new DateOnly(year, 1, 1);
+        var yearStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
 
         var balances = await LoadBalancesAsync(year, employeeId, ct);
 

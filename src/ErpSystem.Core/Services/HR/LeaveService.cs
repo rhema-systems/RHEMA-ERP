@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffAttendance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.Common;
 using Microsoft.Extensions.Logging;
@@ -50,6 +51,7 @@ public class LeaveService : ILeaveService
     private readonly IEmployeeRepository _employeeRepository;
     private readonly ILeaveTypeService _leaveTypeService;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeaveService> _logger;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -82,7 +84,8 @@ public class LeaveService : ILeaveService
             IGenericRepository<MedicalBoard> medicalBoardRepository,
             IEmployeeRepository employeeRepository,
             ILeaveTypeService leaveTypeService,
-            ILogger<LeaveService> logger,
+            ILeaveYearContext leaveYear,
+        ILogger<LeaveService> logger,
             IUnitOfWork unitOfWork,
             IWorkflowIntegrationService workflowIntegrationService,
             IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
@@ -108,6 +111,7 @@ public class LeaveService : ILeaveService
         _medicalBoardRepository = medicalBoardRepository;
         _employeeRepository = employeeRepository;
         _leaveTypeService = leaveTypeService;
+        _leaveYear = leaveYear;
         _logger = logger;
         _unitOfWork = unitOfWork;
         _workflowIntegrationService = workflowIntegrationService;
@@ -316,7 +320,7 @@ public class LeaveService : ILeaveService
         // Validate against the ACCRUED balance (you cannot take more than has accrued to date).
         // We do NOT persist the balance here — the recalculation service (called inside the
         // transaction below) creates and populates it.
-        var currentYear = dto.StartDate.Year;
+        var currentYear = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
         var tenantId = GetTenantId();
         var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
             lb => lb.TenantId == tenantId &&
@@ -451,7 +455,7 @@ public class LeaveService : ILeaveService
         // employee still has their full entitlement; the recalculation service persists it later.
         if (needsBalanceRecalc)
         {
-            var currentYear = dto.StartDate.Year;
+            var currentYear = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
             var tenantId = GetTenantId();
             var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
                 lb => lb.TenantId == tenantId &&
@@ -476,7 +480,7 @@ public class LeaveService : ILeaveService
 
         // Store the old type/year so we can recalculate the previously-affected balance too.
         var oldLeaveTypeId = request.LeaveTypeId;
-        var oldYear        = request.StartDate.Year;
+        var oldYear        = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
 
         // Apply all mutable fields.
         request.LeaveTypeId        = dto.LeaveTypeId;
@@ -496,7 +500,7 @@ public class LeaveService : ILeaveService
 
             if (needsBalanceRecalc)
             {
-                var newYear = dto.StartDate.Year;
+                var newYear = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
                 // Recalculate the new balance bucket.
                 await _recalculationService.RecalculateAsync(request.EmployeeId, dto.LeaveTypeId, newYear);
                 // If the leave type or year changed, also fix up the old bucket.
@@ -539,7 +543,7 @@ public class LeaveService : ILeaveService
             {
                 await _leaveRepository.UpdateAsync(request);
                 await _unitOfWork.SaveChangesAsync(ct);
-                await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+                await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
             });
 
             // Approved is approved, however it got there: a leave type that skips the workflow still
@@ -642,13 +646,20 @@ public class LeaveService : ILeaveService
         // ⚠ The request itself is excluded from the query and added separately: it may already be
         // Pending (submit is reachable from Pending as well as Draft), and counting it twice would
         // send somebody to a board at half the real threshold.
+        // ⚠ Entitlement plan C1: the leave year the request falls in, resolved once and asked of
+        // the database as a RANGE. `r.StartDate.Year == request.StartDate.Year` could not survive a
+        // leave year that starts anywhere but January.
+        var boardYear = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
+        var boardYearStart = LeaveYear.StartOf(boardYear, await _leaveYear.StartMonthAsync());
+        var boardYearEnd = LeaveYear.EndOf(boardYear, await _leaveYear.StartMonthAsync());
+
         var takenThisYear = await _leaveRepository
             .GetQueryable()
             .Where(r => r.TenantId == tenantId
                      && r.EmployeeId == request.EmployeeId
                      && r.LeaveTypeId == request.LeaveTypeId
                      && r.Id != request.Id
-                     && r.StartDate.Year == request.StartDate.Year
+                     && r.StartDate >= boardYearStart && r.StartDate <= boardYearEnd
                      && (r.Status == LeaveStatus.Approved
                       || r.Status == LeaveStatus.InProgress
                       || r.Status == LeaveStatus.Completed))
@@ -683,7 +694,7 @@ public class LeaveService : ILeaveService
         if (!hasReport)
         {
             throw new InvalidOperationException(
-                $"This would take {leaveType.Name} to {cumulative:0.##} day(s) in {request.StartDate.Year}, "
+                $"This would take {leaveType.Name} to {cumulative:0.##} day(s) in {boardYear}, "
                 + $"past the {boardThreshold}-day point at which a medical board must sit. Link a concluded "
                 + "medical board, or attach its recommendation, before submitting.");
         }
@@ -726,7 +737,7 @@ public class LeaveService : ILeaveService
             await _leaveRepository.UpdateAsync(request);
             await _unitOfWork.SaveChangesAsync(ct);
             // Recalculate balance from source data after approval outcome
-            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
         });
 
         // One call for both directions. On a two-stage definition the first approval leaves the
@@ -807,7 +818,7 @@ public class LeaveService : ILeaveService
         {
             await _leaveRepository.UpdateAsync(request);
             await _unitOfWork.SaveChangesAsync(ct);
-            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
         });
 
         _logger.LogInformation("Leave request {number} sent back with suggested dates by {userId}",
@@ -871,7 +882,7 @@ public class LeaveService : ILeaveService
         {
             await _leaveRepository.UpdateAsync(request);
             await _unitOfWork.SaveChangesAsync(ct);
-            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
         });
 
         _logger.LogInformation("Leave request {number} re-submitted after a suggestion ({mode})",
@@ -909,7 +920,7 @@ public class LeaveService : ILeaveService
             request.OriginalEndDate = request.EndDate;
         }
 
-        var leftYear = request.StartDate.Year;
+        var leftYear = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
 
         request.StartDate = dto.StartDate;
         request.EndDate = dto.EndDate;
@@ -943,10 +954,10 @@ public class LeaveService : ILeaveService
         {
             await _leaveRepository.UpdateAsync(request);
             await _unitOfWork.SaveChangesAsync(ct);
-            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
             // The move can cross a year boundary; the year it LEFT has to be re-derived too, or the
             // old year keeps counting days nobody is taking.
-            if (leftYear != request.StartDate.Year)
+            if (leftYear != LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()))
                 await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, leftYear);
         });
 
@@ -1051,7 +1062,7 @@ public class LeaveService : ILeaveService
         {
             await _leaveRepository.UpdateAsync(request);
             await _unitOfWork.SaveChangesAsync(ct);
-            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
         });
 
         // ⚠ This is the call that makes the truncation real on the attendance register, and it only
@@ -1161,7 +1172,7 @@ public class LeaveService : ILeaveService
             throw new InvalidOperationException("The employee already has leave booked over those dates.");
 
         var newDays = await CalculateLeaveDaysAsync(newStart, newEnd, leaveType);
-        var year = newStart.Year;
+        var year = LeaveYear.For(newStart, await _leaveYear.StartMonthAsync());
         var tenantId = GetTenantId();
 
         var balance = await _leaveBalanceRepository.FirstOrDefaultAsync(
@@ -1175,7 +1186,7 @@ public class LeaveService : ILeaveService
 
         // The days this request already holds in that year are its own and come back to it; without
         // adding them a request could fail to move onto dates it is itself the only claimant of.
-        var headroom = available + (request.StartDate.Year == year ? request.TotalDays : 0m);
+        var headroom = available + (LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()) == year ? request.TotalDays : 0m);
 
         if (headroom < newDays)
             throw new InvalidOperationException(
@@ -1210,7 +1221,7 @@ public class LeaveService : ILeaveService
             await _leaveRepository.UpdateAsync(request);
             await _unitOfWork.SaveChangesAsync(ct);
             // Recalculate balance from source data after rejection
-            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, request.StartDate.Year);
+            await _recalculationService.RecalculateAsync(request.EmployeeId, request.LeaveTypeId, LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync()));
         });
 
         _logger.LogInformation("Leave request rejected: {requestNumber}", request.RequestNumber);
@@ -1309,12 +1320,16 @@ public class LeaveService : ILeaveService
         Guid employeeId, int year, int pageNumber, int pageSize, LeaveStatus? status = null)
     {
         var tenantId = GetTenantId();
+        // ⚠ Entitlement plan C1 — one employee's requests for a leave YEAR, as a date range.
+        var historyStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
+        var historyEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
         var query = _leaveRepository
             .GetQueryable()
             .Include(la => la.LeaveType)
             .Include(la => la.RelieverEmployee)
             .Include(la => la.SecondRelieverEmployee)
-            .Where(la => la.TenantId == tenantId && la.EmployeeId == employeeId && la.StartDate.Year == year);
+            .Where(la => la.TenantId == tenantId && la.EmployeeId == employeeId
+                      && la.StartDate >= historyStart && la.StartDate <= historyEnd);
 
         if (status.HasValue)
             query = query.Where(la => la.Status == status.Value);
@@ -1967,6 +1982,10 @@ public class LeaveService : ILeaveService
 
         if (balance == null) return null;
 
+        // ⚠ Entitlement plan C1 — the balance's stored Year is a LABEL; these are its date bounds.
+        var detailYearStart = LeaveYear.StartOf(balance.Year, await _leaveYear.StartMonthAsync());
+        var detailYearEnd = LeaveYear.EndOf(balance.Year, await _leaveYear.StartMonthAsync());
+
         var requests = await _leaveRepository
             .GetQueryable()
             .Include(r => r.LeaveType)
@@ -1975,7 +1994,7 @@ public class LeaveService : ILeaveService
             .Where(r => r.TenantId == tenantId
                      && r.EmployeeId == balance.EmployeeId
                      && r.LeaveTypeId == balance.LeaveTypeId
-                     && r.StartDate.Year == balance.Year)
+                     && r.StartDate >= detailYearStart && r.StartDate <= detailYearEnd)
             .OrderByDescending(r => r.RequestDate)
             .ToListAsync();
 
@@ -2045,7 +2064,7 @@ public class LeaveService : ILeaveService
 
         var employeeId   = request.EmployeeId;
         var leaveTypeId  = request.LeaveTypeId;
-        var year         = request.StartDate.Year;
+        var year         = LeaveYear.For(request.StartDate, await _leaveYear.StartMonthAsync());
 
         request.Status = LeaveStatus.Cancelled;
         request.CancellationDate = _clock.UtcNow;
@@ -2454,12 +2473,17 @@ public class LeaveService : ILeaveService
         if (subType == null || subType.TenantId != tenantId || subType.MaxDaysAllowed is not int cap || cap <= 0)
             return;
 
+        // ⚠ Entitlement plan C1 — the sub-type cap is an ANNUAL cap, so it needs the leave year's
+        // bounds rather than a calendar-year comparison.
+        var capYearStart = LeaveYear.StartOf(year, await _leaveYear.StartMonthAsync());
+        var capYearEnd = LeaveYear.EndOf(year, await _leaveYear.StartMonthAsync());
+
         var alreadyTaken = await _leaveRepository
             .GetQueryable()
             .Where(r => r.TenantId == tenantId
                      && r.EmployeeId == employeeId
                      && r.LeaveSubTypeId == leaveSubTypeId
-                     && r.StartDate.Year == year
+                     && r.StartDate >= capYearStart && r.StartDate <= capYearEnd
                      && r.Status != LeaveStatus.Cancelled
                      && r.Status != LeaveStatus.Rejected
                      && r.Status != LeaveStatus.Draft
@@ -2551,6 +2575,14 @@ public class LeaveService : ILeaveService
     /// </remarks>
     private async Task<string> GenerateRequestNumberAsync()
     {
+        // ⚠ The CALENDAR year, deliberately, and not the leave year (entitlement plan C1).
+        //
+        // `LV2026000001` is an identifier, not an entitlement period. Tying it to a leave year that
+        // starts in April would mean a request raised in March 2026 is numbered LV2025…, which reads
+        // as a filing error to everybody who handles it — and the number sequence is keyed on this
+        // value, so the counter would restart in April rather than in January.
+        //
+        // Numbering follows the calendar because people do. Left as it is on purpose.
         var year = _clock.UtcNow.Year;
         var prefix = $"LV{year}";
         var tenantId = GetTenantId();

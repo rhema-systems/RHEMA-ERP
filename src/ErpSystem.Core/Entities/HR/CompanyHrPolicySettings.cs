@@ -472,4 +472,28 @@ public class CompanyHrPolicySettings : TenantEntity
     /// <summary>Days before carry-over expires that the employee is warned.</summary>
     [Range(0, 365)]
     public int LeaveCarryOverExpiryReminderDays { get; set; } = 30;
+
+    /// <summary>
+    /// ⚠ <b>The month the tenant's LEAVE YEAR begins</b> (entitlement plan C1). <c>1</c> = January,
+    /// the calendar year, and the behaviour of every tenant before this existed.
+    /// </summary>
+    /// <remarks>
+    /// <para>A leave year is <b>labelled by the calendar year it starts in</b>: with an April start,
+    /// 15 March 2028 falls in leave year 2027 (April 2027 – March 2028). That matches
+    /// <c>HrFiscalYear</c>, and it is the only convention under which <c>LeaveBalance.Year</c> can
+    /// stay an <c>int</c>.</para>
+    ///
+    /// <para>⚠ <b>Deliberately NOT the same field as <c>FiscalYearStartMonth</c>.</b> The finance
+    /// year and the leave year are different facts and plenty of organisations run them apart.
+    /// Coupling them is invisible until a client wants a July leave year on a January fiscal year,
+    /// and by then two modules read the field.</para>
+    ///
+    /// <para>⚠ <b>Change-once-at-setup (decision D-9).</b> The service refuses a change once the
+    /// tenant holds any leave request or balance. Moving the boundary re-labels which leave year
+    /// some dates fall in while stored rows keep their old labels, and of the figures involved only
+    /// <c>CarriedOverDays</c> cannot be re-derived — it was computed by a year-end run against
+    /// boundaries that no longer exist, and no repair pass can reconstruct it. So the change is
+    /// refused rather than half-corrected.</para>
+    /// </remarks>
+    public int LeaveYearStartMonth { get; set; } = 1;
 }

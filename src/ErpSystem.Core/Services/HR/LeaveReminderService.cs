@@ -425,8 +425,8 @@ public class LeaveReminderService : ILeaveReminderService
         // a quarter of the year left to act.
         if (today.Month >= policy.MandatoryLeaveChaseFromMonth)
         {
-            var year = today.Year;
-            var yearEnd = new DateOnly(year, 12, 31);
+            var year = LeaveYear.For(today, policy.LeaveYearStartMonth);
+            var yearEnd = LeaveYear.EndOf(year, policy.LeaveYearStartMonth);
 
             var mandatory = await _unitOfWork.Repository<LeaveBalance>()
                 .GetQueryable(b => b.TenantId == tenantId && !b.IsDeleted
@@ -460,9 +460,13 @@ public class LeaveReminderService : ILeaveReminderService
         //
         // ⚠ This only WARNS. The balance is moved by LeaveYearEndService, which is deliberately not
         // scheduled — see this class's remarks.
+        // ⚠ The leave year we are IN, which is not today's calendar year once a tenant starts
+        // its leave year anywhere but January.
+        var currentLeaveYear = LeaveYear.For(today, policy.LeaveYearStartMonth);
+
         var carryOver = await _unitOfWork.Repository<LeaveBalance>()
             .GetQueryable(b => b.TenantId == tenantId && !b.IsDeleted
-                            && b.Year == today.Year
+                            && b.Year == currentLeaveYear
                             && b.CarriedOverDays > 0
                             && b.LeaveType!.AllowCarryOver
                             && b.LeaveType.CarryOverExpiryMonths != null)
@@ -476,8 +480,11 @@ public class LeaveReminderService : ILeaveReminderService
 
         foreach (var b in carryOver)
         {
-            // "Usable only in Jan–Mar" for ExpiryMonths = 3 means it lapses at the END of month 3.
-            var expiry = new DateOnly(today.Year, 1, 1).AddMonths(b.ExpiryMonths).AddDays(-1);
+            // "Usable only in the first three months" for ExpiryMonths = 3 means it lapses at the
+            // END of the third month OF THE LEAVE YEAR — which is March only when the leave year
+            // starts in January.
+            var expiry = LeaveYear.StartOf(currentLeaveYear, policy.LeaveYearStartMonth)
+                .AddMonths(b.ExpiryMonths).AddDays(-1);
             var days = expiry.DayNumber - today.DayNumber;
             if (days > policy.LeaveCarryOverExpiryReminderDays || days < -BacklogHorizonDays) continue;
 

@@ -451,6 +451,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEffectiveAppraisalConfigurationService, EffectiveAppraisalConfigurationService>();
         services.AddScoped<IAppraisalSettingsService, AppraisalSettingsService>();
         services.AddScoped<ICompanyHrPolicyProvider, CompanyHrPolicyProvider>();
+        // ⚠ SCOPED is the contract, not a preference: the leave-year start month is cached for
+        // one request and no longer. See ILeaveYearContext (entitlement plan C1).
+        services.AddScoped<ILeaveYearContext, LeaveYearContext>();
         services.AddScoped<ICompanyHrPolicySettingsService, CompanyHrPolicySettingsService>();
         services.AddScoped<IProbationLetterService, ProbationLetterService>();
         services.AddScoped<ICompanyProfileProvider, CompanyProfileProvider>();

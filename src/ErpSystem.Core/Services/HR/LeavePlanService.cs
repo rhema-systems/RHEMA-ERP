@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -16,6 +17,7 @@ public class LeavePlanService : ILeavePlanService
 
     private readonly ILeavePlanRepository _leavePlanRepository;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ILeaveYearContext _leaveYear;
     private readonly ILogger<LeavePlanService> _logger;
     private readonly IWorkflowIntegrationService _workflowIntegrationService;
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
@@ -25,6 +27,7 @@ public class LeavePlanService : ILeavePlanService
     public LeavePlanService(
         ILeavePlanRepository leavePlanRepository,
         IUnitOfWork unitOfWork,
+        ILeaveYearContext leaveYear,
         ILogger<LeavePlanService> logger,
         IWorkflowIntegrationService workflowIntegrationService,
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
@@ -33,6 +36,7 @@ public class LeavePlanService : ILeavePlanService
     {
         _leavePlanRepository = leavePlanRepository;
         _unitOfWork = unitOfWork;
+        _leaveYear = leaveYear;
         _logger = logger;
         _workflowIntegrationService = workflowIntegrationService;
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
@@ -158,6 +162,9 @@ public class LeavePlanService : ILeavePlanService
         var entity = dto.ToEntity();
         entity.TenantId = GetTenantId();
         entity.PlannedBy = RequireActingEmployeeId();
+        // ⚠ The mapper leaves Year at 0 on purpose — it cannot read the tenant's leave year. Set
+        // here and on the update path, so both agree (entitlement plan C1).
+        entity.Year = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
         await _leavePlanRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync();
         _logger.LogInformation("Leave plan created for employee {employeeId}", dto.EmployeeId);
@@ -190,7 +197,7 @@ public class LeavePlanService : ILeavePlanService
         entity.Notes = dto.Notes;
         // PlannedBy is who raised the plan; an edit does not re-author it.
         // Year follows the dates — moving a plan into January moves its year with it (L-17).
-        entity.Year = dto.StartDate.Year;
+        entity.Year = LeaveYear.For(dto.StartDate, await _leaveYear.StartMonthAsync());
 
         await _leavePlanRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -375,7 +382,7 @@ public class LeavePlanService : ILeavePlanService
 
         entity.StartDate = newStart;
         entity.EndDate = newEnd;
-        entity.Year = newStart.Year;
+        entity.Year = LeaveYear.For(newStart, await _leaveYear.StartMonthAsync());
         if (!string.IsNullOrWhiteSpace(dto.Notes))
             entity.Notes = dto.Notes;
 
