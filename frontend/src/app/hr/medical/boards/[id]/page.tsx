@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useParams } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarPlus, Gavel, Loader2, Trash2, UserPlus, Users } from 'lucide-react';
+import { Ban, CalendarPlus, Gavel, Loader2, Trash2, UserPlus, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -55,7 +55,7 @@ export default function MedicalBoardDetailPage() {
   const queryClient = useQueryClient();
 
   const [busy, setBusy] = useState(false);
-  const [dialog, setDialog] = useState<null | 'member' | 'sitting' | 'conclude'>(null);
+  const [dialog, setDialog] = useState<null | 'member' | 'sitting' | 'conclude' | 'cancel'>(null);
 
   // member form
   const [memberMode, setMemberMode] = useState<'employee' | 'external'>('external');
@@ -68,6 +68,9 @@ export default function MedicalBoardDetailPage() {
   const [sittingDate, setSittingDate] = useState(new Date().toISOString().slice(0, 10));
   const [venue, setVenue] = useState('');
   const [notes, setNotes] = useState('');
+
+  // cancel form — the server refuses a blank reason, so the button waits for one
+  const [cancelReason, setCancelReason] = useState('');
 
   // conclude form
   const [outcome, setOutcome] = useState<MedicalBoardOutcome>('Fit');
@@ -149,6 +152,16 @@ export default function MedicalBoardDetailPage() {
                 <Gavel className="mr-2 h-4 w-4" /> Report
               </Button>
             )}
+            {/*
+              ⚠ Cancel is available until the board reports and not after — the same ratchet as
+              everything else here. It sits last and destructive because it ends the board; it is
+              not an undo, and there is no un-cancel either.
+            */}
+            {open && (
+              <Button variant="destructive" onClick={() => setDialog('cancel')}>
+                <Ban className="mr-2 h-4 w-4" /> Cancel the board
+              </Button>
+            )}
           </div>
         }
       />
@@ -162,6 +175,25 @@ export default function MedicalBoardDetailPage() {
             recommendation means, and leave or separation may already rest on it.{' '}
             <strong>A finding that needs revisiting is a new board</strong> — which is also how it
             works on paper.
+          </p>
+        </div>
+      )}
+
+      {/*
+        ⚠ The reason was being WRITTEN and read by nothing. `CancelAsync` insists on one — it
+        refuses a blank — and until this panel existed the only sign a board had been cancelled was
+        a grey badge, with the explanation sitting in a column no screen displayed. A required field
+        that nothing shows is a question nobody answers twice.
+      */}
+      {board.status === 'Cancelled' && (
+        <div className="rounded-md border border-red-300/60 bg-red-50 p-4 text-sm dark:border-red-900/60 dark:bg-red-950/40">
+          <p className="font-medium">This board was cancelled before it reported.</p>
+          {board.cancellationReason && (
+            <p className="mt-1 whitespace-pre-wrap">“{board.cancellationReason}”</p>
+          )}
+          <p className="mt-2 text-muted-foreground">
+            It never reached a finding, so it satisfies no evidence rule and justifies no medical
+            retirement. <strong>A board that still needs to sit is a new board.</strong>
           </p>
         </div>
       )}
@@ -509,6 +541,69 @@ export default function MedicalBoardDetailPage() {
               }
             >
               Report
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/*
+        ⚠ The reason is REQUIRED by the service, which refuses a blank one, so the button waits
+        for it rather than letting the server say no. It is required because a cancelled board is
+        the one state that looks like an administrative accident from the outside — the panel never
+        met, or met and was stood down, and only the reason distinguishes them.
+      */}
+      <Dialog open={dialog === 'cancel'} onOpenChange={(o) => setDialog(o ? 'cancel' : null)}>
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>Cancel this board?</DialogTitle>
+            <DialogDescription>
+              ⚠ There is no un-cancel. A board that still needs to sit is a new board — which is
+              also how it works on paper.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="cancel-reason">Why is it being cancelled?</Label>
+              <Textarea
+                id="cancel-reason"
+                rows={3}
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                placeholder="e.g. the employee resigned before the board could sit"
+              />
+            </div>
+
+            {/*
+              ⚠ Said here rather than discovered later. Cancelling does not unlink anything: a
+              leave request that names this board goes on naming it. What changes is that the board
+              stops SATISFYING the evidence rule, which only a concluded board ever did — so a
+              request still waiting to be submitted will be refused until it names another board or
+              attaches a report. One already approved on this board stays approved, the same
+              ratchet that applies when a board reports.
+            */}
+            <p className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-xs dark:border-amber-900/60 dark:bg-amber-950/40">
+              If a leave request already points at this board, cancelling does <strong>not</strong>{' '}
+              unlink it — but a cancelled board satisfies no evidence rule, so that request will be
+              refused at submission until it names another board or attaches a recommendation. Leave
+              already approved on it stays approved.
+            </p>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)} disabled={busy}>
+              Keep the board
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busy || !cancelReason.trim()}
+              onClick={() =>
+                run('Board cancelled', () =>
+                  medicalBoardService.cancel(id, cancelReason.trim()),
+                )
+              }
+            >
+              Cancel the board
             </Button>
           </DialogFooter>
         </DialogContent>

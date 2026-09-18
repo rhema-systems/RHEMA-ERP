@@ -30,6 +30,7 @@ import {
   RecallPanel,
 } from '@/components/hr/leave/LeaveDateChangeDialogs';
 import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
+import { MedicalBoardLinkPanel } from '@/components/hr/leave/MedicalBoardLinkPanel';
 
 function InfoRow({ label, value }: { label: string; value?: React.ReactNode }) {
   return (
@@ -301,6 +302,16 @@ export default function LeaveRequestDetailPage() {
           <SuggestedDatesPanel request={r} />
           <RescheduleTrailPanel request={r} />
           <RecallPanel request={r} />
+          {/*
+            ⚠ The board arm of the evidence gate (G4/R-15b). The link endpoint went in first and I
+            recorded the gate as closed while nothing in the product could call it — so a leave type
+            with a board threshold could only be satisfied by attaching a paper report, and the
+            board half of the rule was unreachable. This panel is what makes it reachable.
+
+            It hides itself on leave types that neither name a board nor have a threshold, so it
+            costs annual leave nothing.
+          */}
+          <MedicalBoardLinkPanel request={r} canEdit={canWrite} onChanged={refresh} />
 
           <InfoCard title="Leave">
             <InfoRow label="Leave type" value={r.leaveTypeName} />

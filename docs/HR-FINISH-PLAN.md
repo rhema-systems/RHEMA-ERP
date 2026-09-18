@@ -117,10 +117,13 @@ module verified by reading and by clean builds is not a verified module.
 the Finance register — Medical first, it has a live pay path; **Leave is done**).
 **One decision is owed: D-13.**
 
-▶ **Leave's own follow-ons, recorded but not started:** **R-14** recall from leave (an employee
-called back before their end date — there is no correct action today) and **R-15** excuse duty plus
-a medical board recommendation. Both in the closure plan § 3.3b; R-15's rules are TDC's, logged as
-**L-D10**.
+▶ **Leave's own follow-ons: DONE 2026-09-17/18.** **R-14** recall from leave and **R-15** excuse
+duty plus the medical board were both built, in `HR/HR-LEAVE-RESIDUE-CLOSURE-PLAN.md` (G1–G5, 427
+assertions across nine slices, green twice). ⚠ **R-15's rules were logged here as TDC's (L-D10) and
+that framing is superseded** — an item waiting on one client's policy answer is not blocked, it is
+**unconfigured**, and it shipped with defaults a client can change. Nothing in leave waits on TDC;
+two items wait on the payroll developer. **What remains of that plan is G6 only** — the settings
+survey for HR beyond leave.
 
 ⚠ **FOUND 2026-09-01 while running regression, NOT part of lane 3b:
 `GET /api/JobAnalysis/descriptions/{id}/details` returned 500 for every one of the tenant's 46 job

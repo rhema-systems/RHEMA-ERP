@@ -488,9 +488,39 @@ export interface ProcessLeaveEncashmentRequest {
 
 // ── Year-end ────────────────────────────────────────────────────────────────────
 
+/** What a tenant-wide recalculation did (L-19). */
+export interface LeaveBulkRecalculationResult {
+  year: number;
+  leaveTypeId?: string | null;
+  /** Employees whose balances were recomputed. */
+  employeesProcessed: number;
+  /**
+   * ⚠ Employees the run could not finish. Non-zero is a BUG SIGNAL, not routine — the whole
+   * point of a derived figure is that deriving it cannot fail.
+   */
+  employeesFailed: number;
+  notes: string[];
+}
+
 export interface LeaveYearEndResult {
+  /**
+   * How many balances the run LOOKED AT. ⚠ Not how many it changed.
+   *
+   * The name reads as "did something to", which is finding L-26: a run that examined 900 and
+   * changed 12 reported "900 processed". `balancesSkipped` sits beside it so the two cannot be
+   * confused.
+   */
   balancesProcessed: number;
   balancesAffected: number;
+  /** Examined and left alone. Always `balancesProcessed - balancesAffected`. */
+  balancesSkipped: number;
+
+  /**
+   * ⚠ True when NOTHING WAS WRITTEN — the run computed exactly what it would have done and rolled
+   * nothing into the database (L-24). A preview must never be mistaken for a run.
+   */
+  isDryRun: boolean;
+
   totalDaysCarriedOver: number;
   totalDaysForfeited: number;
   notes: string[];

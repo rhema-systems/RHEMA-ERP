@@ -33,6 +33,7 @@ import type {
   CreateLeaveEncashmentRequest,
   ProcessLeaveEncashmentRequest,
   LeaveYearEndResult,
+  LeaveBulkRecalculationResult,
 } from '@/types/hr/leave-request';
 
 /**
@@ -133,6 +134,45 @@ class LeaveService {
    */
   recall(id: string, data: RecallLeaveRequest): Promise<LeaveRequest> {
     return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/recall`, data);
+  }
+
+  /**
+   * Point this request at the medical board that ruled on the absence, or unlink it (G4).
+   *
+   * ⚠ Leave READS the board; it never writes one. This records WHICH board a request rests on,
+   * and the evidence gate then checks it.
+   *
+   * ⚠ A board that is only Requested or Convened CAN be linked — a board is usually asked for
+   * before it sits, and the request should be able to say which one it is waiting on. The gate is
+   * what insists on Concluded. Linking records intent; the gate enforces the rule.
+   *
+   * ⚠ Unlink passes `null`, and `apiService.put` DROPS a null body rather than serialising it
+   * — so the wire request is a PUT with no body at all. The endpoint binds the parameter with
+   * `EmptyBodyBehavior.Allow` for exactly that reason; without it the Unlink button would take a
+   * 400 from model binding — "A non-empty request body is required" — while the same call from curl
+   * worked. Do not "tidy" either half without the other.
+   */
+  linkMedicalBoard(id: string, medicalBoardId: string | null): Promise<LeaveRequest> {
+    return apiService.put<LeaveRequest>(`${this.baseUrl}/${id}/medical-board`, medicalBoardId);
+  }
+
+  /**
+   * Recalculate EVERY balance in the tenant for a year, optionally one leave type.
+   *
+   * ⚠ Admin tier, and heavy — it walks the whole tenant. Finding L-19's complaint was that a
+   * policy correction reaching 900 people had NO ROUTE THROUGH THE UI; an endpoint alone did not
+   * answer that, which is why this client and the button that calls it exist.
+   *
+   * Safe to run and safe to re-run: it DERIVES the counters from requests and adjustments that
+   * already exist, never invents a figure, and never touches entitled or carried-over days. That
+   * is why it has no dry run, unlike the year-end jobs.
+   */
+  recalculateAllBalances(year: number, leaveTypeId?: string): Promise<LeaveBulkRecalculationResult> {
+    const params = new URLSearchParams({ year: String(year) });
+    if (leaveTypeId) params.set('leaveTypeId', leaveTypeId);
+    return apiService.post<LeaveBulkRecalculationResult>(
+      `${this.baseUrl}/balances/recalculate-all?${params.toString()}`,
+    );
   }
 
   /**
@@ -455,16 +495,39 @@ class LeaveEncashmentService {
 class LeaveYearEndService {
   private readonly baseUrl = '/hr/leave-year-end';
 
-  processCarryOver(fromYear: number, employeeId?: string): Promise<LeaveYearEndResult> {
+  /**
+   * ⚠ `dryRun` computes and reports, writing NOTHING.
+   *
+   * Both these jobs move people's balances in bulk and neither has an undo, so a preview is the
+   * difference between catching a misconfigured leave type before the run and catching it in nine
+   * hundred balances afterwards (finding L-24). The result carries `isDryRun`, so a preview cannot
+   * be mistaken for a run.
+   */
+  processCarryOver(
+    fromYear: number,
+    employeeId?: string,
+    dryRun = false,
+  ): Promise<LeaveYearEndResult> {
     const params = new URLSearchParams({ fromYear: String(fromYear) });
     if (employeeId) params.set('employeeId', employeeId);
+    if (dryRun) params.set('dryRun', 'true');
     return apiService.post<LeaveYearEndResult>(`${this.baseUrl}/carry-over?${params.toString()}`);
   }
 
-  processForfeiture(year: number, asOf?: string, employeeId?: string): Promise<LeaveYearEndResult> {
+  /**
+   * ⚠ A dry run still demands an employee-linked actor, exactly as the real run does — a
+   * preview that succeeds where the real run would fail is a false assurance, not a preview.
+   */
+  processForfeiture(
+    year: number,
+    asOf?: string,
+    employeeId?: string,
+    dryRun = false,
+  ): Promise<LeaveYearEndResult> {
     const params = new URLSearchParams({ year: String(year) });
     if (asOf) params.set('asOf', asOf);
     if (employeeId) params.set('employeeId', employeeId);
+    if (dryRun) params.set('dryRun', 'true');
     return apiService.post<LeaveYearEndResult>(`${this.baseUrl}/forfeiture?${params.toString()}`);
   }
 }

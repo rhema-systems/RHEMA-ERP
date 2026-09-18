@@ -1,8 +1,9 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-18 — **G1–G5 BUILT and verified. G6 started: the two settings entities that
-govern leave are surveyed and a reusable instrument exists; the per-module settings for the rest
-of HR remain. G7 was done incrementally.**
+**Status:** 2026-09-18 — **G1–G5 BUILT and verified, including G5c (the four endpoints that no
+screen could reach) and G5d (the fifth, in the Medical module). G6 started: the two settings entities that govern leave are surveyed and a
+reusable instrument exists; the per-module settings for the rest of HR remain. G7 was done
+incrementally.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it
@@ -293,6 +294,128 @@ the head who has to release people, not HR one name at a time.
 ⚠ **The L-22 assertions first SKIPPED**, because the demo tenant has no mandatory leave type with a
 balance — so the two checks that matter never ran while the suite reported them as present. The slice
 now plants its own fixture. **Two assertions that never execute are worse than none.**
+
+### G5c — the four endpoints no screen could reach: BUILT 2026-09-18
+
+**No migration. One controller change.** Frontend only otherwise.
+
+#### The pattern, stated plainly
+
+Across G4 and G5 I repeatedly wrote an endpoint, recorded the finding as closed, and never built the
+control that reaches it — **including on findings whose whole complaint was that the UI could not do
+the thing.** In the same breath I described that shape as travel's T-23 defect. Four instances:
+
+| What existed | What could reach it | Finding it was supposed to close |
+|---|---|---|
+| `PUT /api/Leaves/{id}/medical-board` | **nothing at all** — not even a client method | R-15b, the board arm of the evidence gate |
+| `dryRun` on both year-end jobs | nothing — the client dropped the parameter | L-24, "a bulk job with no undo and no preview" |
+| `POST /api/Leaves/balances/recalculate-all` | nothing | L-19, "a policy correction reaching 900 people has **no route through the UI**" |
+| `rateBasis` on an encashment | the HR desk register only | L-20, "anybody disputing the figure has nothing to read" — and the likeliest disputant is the employee, on the one screen I had not touched |
+
+**An endpoint is not a feature until something a person can press reaches it.** A harness proves the
+endpoint; it cannot prove the product, and every one of these was green in the harness.
+
+#### What was built
+
+1. **The board panel** — `components/hr/leave/MedicalBoardLinkPanel.tsx`, on the request detail
+   overview. Picks a board from the ones held **on that employee** (the server refuses anybody
+   else's, so offering one would be offering a 400), shows the linked board with its status,
+   outcome, recommendation and restrictions, and links out to the Medical module. It **hides itself**
+   on leave types that neither name a board nor set a threshold, so annual leave pays nothing for it.
+   ⚠ It says in as many words whether the board *satisfies* the rule, because **linked and satisfied
+   are different states** — a submission refused after somebody has linked a board reads as a bug
+   unless the screen has already said the board has not reported. It also names the case where a
+   board is linked but unreadable (a reader with leave rights and not medical ones) rather than
+   rendering an empty panel, which reads exactly like "no board".
+2. **Preview on both year-end jobs**, with the result panel turning amber and saying *preview only,
+   nothing was written*. The counts changed from "processed / affected" to **examined / changed /
+   left alone**, because the old labels counted every balance the loop looked at.
+3. **"Recalculate everybody"** on the balances screen, behind a confirm that says why it is safe to
+   re-run (it derives; it never invents a figure) and why it still asks (it is heavy).
+4. **The basis on the employee's own encashment**, spelled out in full rather than in a `title`
+   tooltip the way the desk register can afford — a tooltip is unreachable on a phone, and the
+   portal is the page most likely to be read on one.
+
+#### ⚠ The defect this uncovered: the Unlink button would never have worked
+
+The frontend's shared `apiService.put` **drops a `null` body** rather than serialising it, so Unlink
+sends a PUT with no body at all. `[FromBody] Guid?` bound strictly refuses that with a **400 from
+model binding** — *"A non-empty request body is required"*, which was measured rather than assumed:
+the same bodiless PUT against a deliberately strict sibling (`medical-boards/{id}/cancel`) returns
+400, and against this endpoint reaches the handler.
+
+The harness would not have caught it. Its own `put(path, null)` serialises the four bytes `null`,
+so **the harness and the browser were not sending the same request** — the endpoint would have
+stayed green while the button did nothing.
+
+Fixed at both ends and recorded at both ends: `EmptyBodyBehavior.Allow` on the parameter (a nullable
+parameter and an absent body ought to mean the same thing), a comment on the client saying the two
+halves are load-bearing together, and **two assertions in slice 8 — one per wire form**.
+
+**A harness that only sends what it finds natural proves the endpoint, not the product.**
+
+#### Verification
+
+**Slice 8 is now 68 assertions; the suite is 416 across nine slices, green twice** against the
+rebuilt API in Staging. The leave slice type-checks clean on `tsconfig.leave-slice.json`.
+
+⚠ **The empty-body assertion was measured, not assumed.** A bodiless PUT against a deliberately
+strict sibling (`PUT /api/hr/medical-boards/{id}/cancel`, `[FromBody] string`) returns **400**
+— *"A non-empty request body is required"* — while the same request against the board link reaches
+the handler. Without that control the new assertion would have been green for a reason nobody had
+checked, which is the shape of a decorative test.
+
+⚠ **No screen was rendered.** There is no browser automation here, so "reachable" means a control
+exists in the source and type-checks — not that it was clicked. That is the same limit every other
+slice of this build carries, and it is why the reachability sweep had to be done by reading.
+
+### G5d — the fifth one, in the Medical module: BUILT 2026-09-18
+
+**Frontend only. No controller change.**
+
+G5c cleared the four leave items and left one on the guide's API-only list: **cancelling a medical
+board** had an endpoint and no control, on the board detail screen. It was left out of G5c
+deliberately — a Medical-module screen, not a leave one — and then taken on the user's word.
+
+**Cancel the board**, available until it reports and not after, asking for a reason and refusing to
+proceed without one. That matches the service, which refuses a blank.
+
+#### ⚠ It carried a second half of the same fault, and that is the part worth keeping
+
+`CancelAsync` **demands a reason** — and **no screen displayed it**. The only sign a board had been
+stood down was a grey badge, with the explanation sitting in a column nothing read. So the product
+asked somebody to justify an irreversible act and then threw the justification into a drawer.
+
+**A required field that nothing shows is a question nobody answers twice** — the same family as
+this plan's own rule that *a setting read by nothing is worse than a hardcoded constant*. Both
+halves were fixed together: the button writes the reason, a red panel on a cancelled board reads it.
+
+#### What the dialog says, and why it is on the screen rather than in a runbook
+
+Cancelling **does not unlink anything**. A leave request naming this board goes on naming it; what
+changes is that the board stops *satisfying* the evidence rule, which only a `Concluded` board ever
+did. A request still waiting to be submitted is refused until it names another board or attaches a
+recommendation — and one **already approved** on it stays approved, the same ratchet that applies
+when a board reports. Somebody cancelling a board is entitled to know that before they press, not
+after a submission is refused.
+
+#### Verification
+
+**Slice 8 is now 79 assertions** (68 → 79); the suite is **427 across nine slices, green twice**. The
+happy path had never been asserted — only the refusal *"a board that has reported cannot be
+cancelled"* — so the new section cancels an open board, refuses a blank reason, refuses a second
+cancellation, **reads the reason back** from both the response and a re-read, and proves a
+**convened** board can still be stood down (the ratchet closes at `Concluded`, not before).
+
+⚠ **The read-back assertion is the point.** A field written correctly at every layer and
+displayed by nothing is exactly the G3 `EvidenceKind` defect, which no amount of code reading found
+and two lines of assertion did.
+
+#### ⚠ Still not reachable, and now recorded where it will be seen
+
+`EmployeeSeparation.MedicalBoardId` is a column with **no DTO field and no endpoint** — nothing can
+set it. It is not on the guide's API-only list because it is not reachable at the API either; the
+guide's chapter 7b names it on the spot. Separation's own closure owns it.
 
 ### G6–G7 — outstanding
 

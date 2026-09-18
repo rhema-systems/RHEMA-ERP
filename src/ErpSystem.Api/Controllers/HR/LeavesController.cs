@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using ErpSystem.Api.Services.HR;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.DTOs.Common;
@@ -1069,13 +1070,24 @@ namespace ErpSystem.Api.Controllers.HR
         /// gate enforces the rule.</para>
         ///
         /// <para>⚠ The board must be about the same employee.</para>
+        ///
+        /// <para>⚠ <b>An empty body means unlink</b>, and that is not decoration. The frontend's
+        /// shared <c>apiService.put</c> drops a <c>null</c> body rather than serialising it, so the
+        /// Unlink button sends a PUT with no body at all. Bound strictly that is a <b>400</b> from
+        /// model binding — <i>"A non-empty request body is required"</i>, measured against a
+        /// deliberately strict sibling endpoint — and the button does nothing. The endpoint would
+        /// work from curl and fail in the product, which is precisely the class of defect this slice
+        /// was fixing. <c>EmptyBodyBehavior.Allow</c> makes
+        /// "no board named" and "no body sent" the same request, which is also what a nullable
+        /// parameter ought to mean.</para>
         /// </remarks>
         [HttpPut("{id}/medical-board")]
         [ProducesResponseType(typeof(LeaveRequestDto), StatusCodes.Status200OK)]
         [ProducesResponseType(StatusCodes.Status400BadRequest)]
         [ProducesResponseType(StatusCodes.Status403Forbidden)]
         public async Task<ActionResult<LeaveRequestDto>> LinkMedicalBoard(
-            Guid id, [FromBody] Guid? medicalBoardId)
+            Guid id,
+            [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] Guid? medicalBoardId)
         {
             try
             {

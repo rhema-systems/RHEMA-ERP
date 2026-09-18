@@ -37,9 +37,11 @@ database will not show what the code can do, that is said in the step rather tha
 >
 > **What is still NOT proved**, so you do not over-claim: no screen has been rendered by any test —
 > there is no browser automation here, and frontend checking is type-checking. The reminder engine
-> in chapter 18 is proved through its run-now endpoints, not on its 24-hour timer. And four
-> capabilities are proved at the **API** and have **no screen control at all** — they are listed
+> in chapter 18 is proved through its run-now endpoints, not on its 24-hour timer. And **one**
+> capability is proved at the **API** and has **no screen control at all** — they are listed
 > together in § 23 under *API-only*, and every chapter that touches one says so on the spot.
+> ⚠ **That list said four until 2026-09-18** — all four got their screens — and it had also
+> under-counted, the reminder engine sitting in the route table and not in the list. Both corrected.
 
 **Scope:** the whole **Leave Management** group of the HR sidebar, the **Leave Types** rulebook and
 the **HR Policy Settings** screen under Administration, the **Medical Boards** register that leave's
@@ -95,8 +97,11 @@ Three chapters carry an extra part the others do not:
   question about a switch.
 - **§7.6 — the conversation.** The **six** things that can happen to a submitted request, in one
   place, because the request screen now does considerably more than approve and reject.
-- **§23 — the findings ledger**, which is also where the four **API-only** capabilities are
-  listed together. Read that list before you promise a stakeholder a button.
+- **§23 — the findings ledger**, which is also where the remaining **API-only** capability is
+  named. ⚠ **That list said four until 2026-09-18 and now says one** — all four got their
+  screens (closure plan G5c and G5d), and the reminder engine was added to it, having been disclosed
+  in the route table but missing from the list that claims to be the list. Read it before you
+  promise a stakeholder a button, and do not trust an older copy of this book on the point.
 
 Two more markers appear inside the walks:
 
@@ -658,11 +663,14 @@ Year-end is `HR.Leave.Admin`, which `hr.head` does not hold. Two choices:
 ⚠ **Never run an unscoped forfeiture on the demo database.** It posts a negative adjustment against
 **every balance in the tenant**, and there is no undo short of a rebuild.
 
-⚠ **Both runs now take a dry run — and it has no button.** `?dryRun=true` on either endpoint
-computes exactly what the run would do, reports it, and **writes nothing**. The *screen* has no
-toggle for it, so on the screen the only safety is still scoping to one employee. If you are asked
-"what would this do to everybody?", the honest answer is *"there is an endpoint that will tell you
-without touching anything, and it is not on this screen yet"* — see §23's API-only list.
+⚠ **Both runs take a dry run, and since 2026-09-18 it has a button.** Each job has a
+**Preview** beside its run control: it goes through the same path with the same guards, reports
+exactly what the run would do, and **writes nothing**. The result panel turns amber and says
+*preview only, nothing was written*, so a preview cannot be mistaken for a run.
+
+Its counts read **examined / changed / left alone** rather than "processed / affected" — the old
+labels counted every balance the loop looked at, so a run that examined 900 and changed 12 reported
+"900 processed" (L-26). Preview first, every time: neither job has an undo.
 
 ### 2.6a Optional — prime the reminder engine so chapter 18 has something to show
 
@@ -1736,7 +1744,7 @@ any screen** — chapter 21 item 13.
 | Move dates | `PUT /api/Leaves/{id}/reschedule` | self-or-`HR.Leave.Write` |
 | Still going | `PUT /api/Leaves/{id}/confirm-observance` | self-or-`HR.Leave.Write` |
 | **Recall** | `PUT /api/Leaves/{id}/recall` | **`HR.Leave.Write` outright** — not self-or-HR, and the subject is refused again inside the service |
-| **Link a medical board** | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write`. ⚠ **API-only — no screen calls it.** See chapter 7b |
+| **Link a medical board** | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write`. **The Medical board panel on the request overview** — link, change, unlink. See chapter 7b |
 | Attachments | `POST /api/Leaves/{id}/attachments?evidenceKind=` | self-or-`HR.Leave.Write` |
 | Close / Cancel | `PUT /api/Leaves/{id}/close` · `/cancel` | `HR.Leave.Write` / self-or-write |
 
@@ -1991,9 +1999,17 @@ It goes through.
 > convened and not yet sat, satisfies nothing — otherwise an absence would go through on the
 > strength of a meeting somebody had put in a diary."
 
-⚠ **That second route has no button.** The endpoint exists and is tested; no screen calls it yet.
-Say *"the request can be pointed at the board record itself, and that is an API today"* rather than
-hunting for a control. §23's API-only list.
+**That second route got its screen on 2026-09-18** (closure plan G5c). The request's **Overview**
+tab carries a **Medical board** panel: it lists the boards held on that employee — only that
+employee, because the server refuses anybody else's — and links, changes or unlinks one. The panel
+hides itself on leave types that neither name a board nor set a threshold, so you will not see it on
+annual leave.
+
+⚠ **Show what the panel SAYS, not just that it links.** It states in as many words whether the
+board satisfies the rule: green once the board has concluded, amber while it has only been requested
+or convened, and a plain refusal for a cancelled one. **Linked and satisfied are different states**
+— that is the whole point of the split, and a submission refused after somebody has linked a board
+reads as a bug unless the screen has already said the board has not reported.
 
 ### ⚙ Behind the page
 
@@ -2002,7 +2018,7 @@ hunting for a control. §23's API-only list.
 | The register | `GET /api/hr/medical-boards?status=&search=` | `HR.Medical.Read` |
 | One board | `GET /api/hr/medical-boards/{id}` | `HR.Medical.Read` |
 | Request · members · convene · sittings · report · cancel | `POST` / `PUT` on `/api/hr/medical-boards/…` | `HR.Medical.Write` |
-| Point a leave request at a board | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write` — **API-only** |
+| Point a leave request at a board | `PUT /api/Leaves/{id}/medical-board` | self-or-`HR.Leave.Write` — **the Medical board panel**, chapter 7 |
 
 ⚠ **"Gated on `HR.Medical.*`" does not mean HR is shut out.** The HR role is granted
 `ViewMedicalRecords` and `MaintainMedicalRecords` deliberately, because HR **administers** this
@@ -2019,9 +2035,22 @@ object graphs, where an ordinary save in either module could modify it.
 only *Requested* or *Convened* — a board is usually asked for before it sits, and the request should
 be able to say which one it is waiting on. **The evidence gate is what insists on *Concluded*.**
 
-⚠ **Two limits worth knowing before somebody finds them in front of you.** The board's **Cancel**
-is an endpoint with no button on the detail screen; and the **separation** side of the bridge is a
-column with no screen and no field on its API yet. Neither affects this walk.
+**Cancelling a board has a button** since 2026-09-18: **Cancel the board**, on the detail screen,
+available until the board reports and not after. It asks for a reason and **will not proceed without
+one** — a cancelled board is the one state that looks like an administrative accident from outside,
+and only the reason distinguishes *the panel was stood down* from *somebody clicked the wrong thing*.
+A cancelled board then carries a red panel with that reason on it.
+
+⚠ **What the dialog warns, and it is worth saying aloud on the walk:** cancelling does **not**
+unlink anything. A leave request naming this board goes on naming it — what changes is that the
+board stops *satisfying* the evidence rule, which only a concluded board ever did. So a request
+still waiting to be submitted is refused until it names another board or attaches a recommendation;
+one already approved on it **stays approved**, the same ratchet that applies when a board reports.
+
+⚠ **One limit is left.** The **separation** side of the bridge is a column with no screen and no
+field on its API — `EmployeeSeparation.MedicalBoardId` exists and **nothing can set it**. It does
+not affect this walk, and it is not on §23's API-only list because it is not reachable at the API
+either.
 
 ---
 
@@ -3391,10 +3420,11 @@ nobody promises a stakeholder a button.
 | **L-12** | ch. 4 | Leave-type allowances — which decide what a day of encashed leave is **worth** — had no control on any screen, so every type paid on basic alone | a checkbox list in the leave type's Encashment section |
 | **L-13** | ch. 4 | ⚠ **Silent data loss.** A leave-type save that omitted the allowances deleted every one of them, changing what an encashment pays with no trace | the collection is now *omit = don't touch, `[]` = remove all*. ⚠ Fixing it exposed an older bug: a removed allowance could never be re-added — §4.4.4 |
 | **L-15** | ch. 6 | No attachment while raising a request — the sick-note case | ⚠ **not what the finding said.** The upload needs a record to attach to; what was missing was the **warning before Submit**, now on both forms |
-| **L-19** | ch. 13 | Recalculate was one employee at a time | a tenant-wide pass, admin-gated. **API-only** |
-| **L-20** | ch. 15 | An encashment row showed an amount and nothing to check it against | **How it was worked out**, stored on the payout in words |
+| **L-19** | ch. 13 | Recalculate was one employee at a time | a tenant-wide pass, admin-gated — and since 2026-09-18 a **Recalculate everybody** button behind a confirm, which is what the finding actually asked for |
+| **L-20** | ch. 15 | An encashment row showed an amount and nothing to check it against | **How it was worked out**, stored on the payout in words — on the desk register, and since 2026-09-18 on the employee's own portal row too, spelled out in full rather than in a tooltip. The likeliest disputant is the person being paid |
 | **L-22** | ch. 16 | Compliance was read-only apart from the export | unit and status filters, staff number and unit on the row and in the CSV, a link to the person, and **Book leave** |
-| **L-24** | ch. 17 | No dry run on either year-end job | `?dryRun=true` on both. **API-only** |
+| **L-24** | ch. 17 | No dry run on either year-end job | `?dryRun=true` on both, and since 2026-09-18 a **Preview** button on each, with an amber panel saying nothing was written |
+| **7b limit** | ch. 7b | A medical board could be cancelled only from the API, and the reason the service demanded was displayed nowhere | **Cancel the board** on the detail screen, reason required, and a red panel that shows it |
 | **L-26** | ch. 17 | Carry-over reported *processed* for balances it skipped | *Examined 900: carried over 48 days across 12, left 888 alone.* The counts were right; the word was wrong |
 
 **And three the second build found for itself**, none of which anybody had reported:
@@ -3411,17 +3441,49 @@ nobody promises a stakeholder a button.
 |---|---|---|---|
 | **L-30** | §4.4.2 | `LeaveType.IsPaid` produces no deduction. ⚠ **Payroll's, not HR's.** HR records the absence, the days and the fact that the type is unpaid; what that is worth is payroll's arithmetic, and it is handed off in writing | medium *(not ours)* |
 
-### ⚠ Closed at the API, with no button — say this rather than hunting for a control
-
-None of these blocks a demonstration, and every one of them is tested. They are listed together
-because the failure mode is a demonstrator clicking around for something that is not there.
+### ⚠ Closed at the API, with no button — was four, now one
 
 | Capability | Chapter | Where it is |
 |---|---|---|
-| **The year-end dry run** | 17 | `?dryRun=true` on carry-over and forfeiture. The screen has no toggle |
-| **The tenant-wide balance recalculation** | 13 | `POST /api/Leaves/balances/recalculate-all`, admin |
-| **Pointing a leave request at a medical board** | 7b | `PUT /api/Leaves/{id}/medical-board`. The *other* way to satisfy the board rule — attaching the recommendation — works from the screen |
-| **Cancelling a medical board** | 7b | an endpoint; the detail screen shows no Cancel |
+| **The reminder engine's six endpoints** | 18 | `api/hr/leave/reminders/*`, admin. Nothing in the frontend calls them — **not even a client method**. The engine runs on its own timer, so what is missing is an *operator* control (force a sweep, read the dispatch log), not a feature |
+
+⚠ **And one thing that is not on this list because it is not reachable at the API either:**
+`EmployeeSeparation.MedicalBoardId` is a column with no DTO field and no endpoint — **nothing can
+set it**. Chapter 7b says so on the spot. A list of *API-only* capabilities would flatter it by
+inclusion.
+
+⚠ **The second row is new to this list on 2026-09-18 and was not new to the product.** It sat in
+the route table marked *(API only, no screen)* while the list that claims to gather them all said
+four. A list that is the single place to look has to actually be that, or the next person promises a
+button in good faith. Checked by grep rather than memory: nothing under `frontend/src` mentions
+`leave/reminders`.
+
+#### ⚠ All four that left this list, and why it is worth reading how
+
+On 2026-09-18 the year-end dry run, the tenant-wide recalculation, the board link and then the
+board's **Cancel** all got the controls they were missing (closure plan G5c and G5d). What is worth
+carrying away is **how they came to be on this list at all**: each endpoint was written to close a finding, the finding was recorded as
+closed, and no screen was built — **including for findings whose complaint was precisely that the
+UI could not do the thing.** L-19 said in as many words that a policy correction reaching 900 people
+had *no route through the UI*, and it was closed with an endpoint.
+
+**An endpoint is not a feature until something a person can press reaches it.** The harness was
+green on all four throughout, because a harness proves the server and says nothing about whether a
+person can get there.
+
+⚠ **The board's Cancel carried a second half of the same fault.** `CancelAsync` **refuses a
+blank reason** — and no screen displayed the reason it insisted on. The only sign a board had been
+stood down was a grey badge, with the explanation sitting in a column nothing read. **A required
+field that nothing shows is a question nobody answers twice.** Both halves fixed together, and the
+reason now has a read-back assertion, which is the only thing that catches this shape (it is the G3
+`EvidenceKind` defect again).
+
+⚠ **And one of the three did not work.** Wiring the board panel's Unlink button showed that the
+frontend's shared `apiService.put` *drops* a null body, so Unlink sent a PUT with no body — which
+model binding refuses with a 400, *"A non-empty request body is required"*. The harness would never
+have caught it: its own helper serialises the four bytes `null`, so **the harness and the browser
+were not sending the same request**. Fixed on the parameter, noted on the client, and asserted in
+both wire forms.
 
 ✅ **The one genuine hole this list used to carry is closed.** The employee portal's attachment
 upload could not say what the document was, so an employee warned that she needed excuse duty could
@@ -3503,7 +3565,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 | Reschedule · confirm · answer a suggestion | *(self or `HR.Leave.Write`)* | | |
 | **Recall from leave** | — | **`HR.Leave.Write` outright — never the subject, even an HR user recalling themselves** | — |
 | **Attach evidence / choose its kind** | *(self or `HR.Leave.Write`)* | | |
-| **Link a request to a medical board** | *(self or `HR.Leave.Write`)* — **API-only** | | |
+| **Link a request to a medical board** | *(self or `HR.Leave.Write`)* — the Medical board panel on the request overview | | |
 | Plans | `HR.Leave.Read` | `HR.Leave.Write` | — |
 | Balances · Adjustments | `HR.Leave.Read` | `HR.Leave.Write` | **delete an adjustment** |
 | Encashments | `HR.Leave.Read` | `HR.Leave.Write` | — |
@@ -3533,11 +3595,12 @@ module enforces one of them. That second one is a question of fact, not of polic
 
 ---
 
-**End of the leave guide.** The harness has run — 411 assertions across nine slices, green twice —
-so if something in this book turns out to be wrong, the most likely reason is that **a screen
-changed after the chapter that describes it**, not that the behaviour underneath is unproved. The
-second most likely is that you are looking for a control that is genuinely an **API only**: §23 has
-that list, and it is four items long.
+**End of the leave guide.** The harness has run — **427 assertions** across nine slices, green
+twice — so if something in this book turns out to be wrong, the most likely reason is that **a
+screen changed after the chapter that describes it**, not that the behaviour underneath is unproved.
+The second most likely is that you are looking for a control that is genuinely an **API only**:
+§23 has that list, and it is **one** item long — it said four until 2026-09-18, when all four were
+given screens and the reminder engine, which had been missing from it, was added.
 
 Correct the book from the harness and the source rather than from memory, and say so here when you
 do.

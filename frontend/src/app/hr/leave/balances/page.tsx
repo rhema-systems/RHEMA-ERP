@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Download, Loader2, RefreshCw, Scale } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
   Select,
@@ -51,6 +52,8 @@ export default function LeaveBalancesPage() {
   const [leaveTypeId, setLeaveTypeId] = useState<string>(ALL);
   const [year, setYear] = useState<string>(String(currentYear));
   const [recalculating, setRecalculating] = useState(false);
+  const [recalculatingAll, setRecalculatingAll] = useState(false);
+  const [confirmAll, setConfirmAll] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   // The CSV comes from the SAME server read the table uses, so it carries the live accrued and
@@ -119,6 +122,50 @@ export default function LeaveBalancesPage() {
     }
   };
 
+  /**
+   * ⚠ Every balance in the tenant for the chosen year (finding L-19).
+   *
+   * The per-employee call above is right for the ordinary case — it runs after every approval,
+   * cancellation and adjustment. But a policy correction reaches everybody, and L-19's complaint
+   * was precisely that such a correction "has NO ROUTE THROUGH THE UI". An endpoint alone did not
+   * answer that; this button is the answer.
+   *
+   * Safe to run and safe to re-run: it DERIVES the counters from requests and adjustments that
+   * already exist, never invents a figure, and never touches entitled or carried-over days. That
+   * is why it needs no preview, unlike the year-end jobs, which MOVE balances.
+   */
+  const recalculateAll = async () => {
+    setRecalculatingAll(true);
+    try {
+      const res = await leaveService.recalculateAllBalances(
+        Number(year),
+        leaveTypeId === ALL ? undefined : leaveTypeId,
+      );
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-balances'] });
+
+      // ⚠ A failure count is a BUG SIGNAL, not routine — the whole point of a derived figure is
+      // that deriving it cannot fail. Said loudly rather than folded into a success message.
+      toast({
+        title: res.employeesFailed > 0 ? 'Finished with failures' : 'Recalculated',
+        description:
+          `${res.employeesProcessed} employee(s) rebuilt for ${year}.` +
+          (res.employeesFailed > 0
+            ? ` ⚠ ${res.employeesFailed} could not be finished — see the server log.`
+            : ''),
+        variant: res.employeesFailed > 0 ? 'destructive' : undefined,
+      });
+    } catch (e: any) {
+      toast({
+        title: 'Error',
+        description: e?.message || 'The tenant-wide recalculation failed.',
+        variant: 'destructive',
+      });
+    } finally {
+      setRecalculatingAll(false);
+      setConfirmAll(false);
+    }
+  };
+
   const rows = data ?? [];
 
   return (
@@ -144,8 +191,36 @@ export default function LeaveBalancesPage() {
             )}
             Recalculate
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setConfirmAll(true)}
+            disabled={recalculatingAll}
+          >
+            {recalculatingAll ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <RefreshCw className="mr-2 h-4 w-4" />
+            )}
+            Recalculate everybody
+          </Button>
           </>
         }
+      />
+
+      {/* Heavy, and it touches everybody — so it asks first. */}
+      <ConfirmationDialog
+        open={confirmAll}
+        onOpenChange={setConfirmAll}
+        title={`Recalculate every balance for ${year}?`}
+        description={
+          'This rebuilds UsedDays, PendingDays and AdjustmentDays for every employee who has a '
+          + 'balance in this year, from the requests and adjustments already on record. It never '
+          + 'touches entitled or carried-over days, and running it twice gives the same answer as '
+          + 'running it once — so there is nothing to undo. It is simply heavy.'
+        }
+        confirmText="Recalculate everybody"
+        isLoading={recalculatingAll}
+        onConfirm={() => recalculateAll()}
       />
 
       <Card>
