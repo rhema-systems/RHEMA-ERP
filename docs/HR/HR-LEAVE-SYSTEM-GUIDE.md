@@ -31,8 +31,8 @@ show what the code can do, that is said in the step rather than smoothed over.
 
 > ### ✅ Verified — and what the verification changed
 >
-> This guide was written from the source, and **`dev-harness/hr-leave` has since run it: 411
-> assertions across nine slices, 0 failures, green twice.** The things this note used to tell you to
+> This guide was written from the source, and **`dev-harness/hr-leave` has since run it: 515
+> assertions across thirteen slices, 0 failures, green twice.** The things this note used to tell you to
 > be sceptical of — two-stage approval, the attendance days written on approval, the "waiting on
 > you" queue — are now the best-tested paths in the module, and recall, the evidence gate, the
 > medical board and every new setting were written with their assertions beside them.
@@ -703,8 +703,9 @@ answers most configuration questions on the spot:
 a switch actually does anything:**
 [`../HR-CONFIGURATION-REGISTER.md`](../HR-CONFIGURATION-REGISTER.md) records every assumed value in
 HR, its default, and — the only column that matters — whether it is **Enforced**, **Advisory**,
-**Client-side** or a **Ghost**. All 46 tenant settings and all 26 leave-type settings are surveyed
-in it. §4.4 of this book is the leave-shaped view of the same question.
+**Client-side**, a **Ghost** — or **Unreachable**, a status leave's own child tables added. All
+**47** tenant settings, all **28** on the leave type, and all **38** on its four child tables
+(sub-types, allocations, eligibility, accrual) are surveyed in it. §4.4 of this book is the leave-shaped view of the same question.
 
 ---
 ## 2. Before the room fills — the prep
@@ -773,65 +774,32 @@ legacy system on go-live day, and chapter 14 makes a virtue of it.
 ⚠ **And expect *Can take now* to be lower than *Available*.** That is §1.4, it is correct, and it
 is one of the better small moments in the book. Do not "fix" it.
 
-### 2.3b ⚠ Repair the Entitled column before you quote it
+### 2.3b Check the Entitled column — it should need nothing
 
-**Measured on the demonstration database 2026-09-18: 53 of its 97 annual leave balances carry the
-wrong entitlement.** Not a rounding difference — the leave type's **default** where the rulebook
-says the employee's **staff-level allocation**:
+**On a database built by `New-UatDatabase.ps1` on or after 2026-09-18 this is a thirty-second check,
+not a repair.** Filter the Balances screen to Annual Leave and read three rows:
 
-| Grade | People | Entitled reads | The rulebook says |
-|---|---|---|---|
-| Junior | **39** | 21 | **15** |
-| Senior | 44 | 21 | 21 *(right by coincidence)* |
-| Management | **14** | 21 | **30** |
+| Grade | Entitled should read |
+|---|---|
+| Junior | **15** |
+| Senior | **21** |
+| Management | **30** |
 
-**Why:** every opening balance was loaded by posting an adjustment, and until 2026-09-18 that
-particular path recorded the type default instead of resolving the allocation. The demo seeder also
-opens the balances *before* it creates the allocations, so even the corrected code would resolve to
-the default at that moment. Both halves are fixed; the **rows already loaded are not, until somebody
-presses the button.**
+If they all read **21**, you are on an older database and the fix is one press —
+**🔧 Repair entitlements** (chapter 13, as admin): preview, read the count, apply.
 
-**Five minutes, as admin, in Window C:**
+> ⚠ **This used to be a mandatory five-minute repair, and the story behind it is worth one sentence
+> if a room asks why entitlement can be repaired at all.** Every opening balance is loaded by posting
+> an adjustment — which is what a real tenant does on go-live day — and that ran before the
+> staff-level allocations existed, so the engine had nothing to resolve and fell back to the leave
+> type's default. 21 for everybody: right for seniors by coincidence, six days too many for every
+> junior, nine too few for every manager. **The seed now runs the repair itself once the allocations
+> are in**, which is also the honest demonstration of the feature.
 
-1. `/hr/leave/balances` → set the **Year** → **🔧 Repair entitlements**.
-2. Read the preview. **Expect 53.** ⚠ A different number means that database differs from this
-   reading — stop and find out why rather than applying it.
-3. **Apply.**
-4. Spot-check: filter to a Junior and confirm Entitled now reads **15**.
-
-⚠ **Do this even if you are cutting chapter 13**, because §2.3 has you write those figures down and
-chapter 6's balance strip quotes the same arithmetic. And ⚠ **it is a real write** — chapter 21
-item 17.
-
-#### And while you are there — the accrual rate
-
-**Same cause, second symptom.** Annual leave's accrual policy on this database carries a flat rate
-of **1.75 a day per month**, set before the staff-level allocations existed. It overrides the
-per-employee derivation described in §1.3b, and it is wrong in both directions at once:
-
-| Grade | Entitled | At 1.75 flat | What should happen |
-|---|---|---|---|
-| Junior | 15 | reaches the cap in **September** and stops | 1.25 a month, reaching 15 in December |
-| Management | 30 | **never exceeds 21** — 1.75 × 12 | 2.5 a month, reaching 30 in December |
-
-**One field, as `hr.head`:** `/administration/hr/leave-types` → **Annual Leave** → **Accrual** tab →
-edit the policy → set **Accrual rate** to **0** → Save. The form will tell you what 0 means before
-you save it.
-
-⚠ **Expect the Accrued and *Can take now* columns to MOVE**, and know which way before somebody
-asks. A Junior's accrued figure goes **down** (they were accruing faster than their entitlement
-justified); a Manager's goes **up**. Both are corrections, and the balances screen will show the new
-arithmetic immediately because accrual is computed on every read and never stored.
-
-⚠ **Fresh databases do not need this** — the seeder was corrected on 2026-09-18. It is only the
-databases built before then.
-
-> **If somebody asks about it in the room, the honest answer is a good one:**
->
-> "Entitlement is resolved once and stored, deliberately. That means a rulebook change does not
-> reach balances that already exist — and until recently nothing in the product could bring them
-> back into line. Now there is an administrator's control that shows you every row it would change
-> before it changes one. What you are looking at is the *after*."
+⚠ **Also worth one glance:** Annual Leave's accrual rate should read **0**, not 1.75. Zero is not
+"accrues nothing" — it means the rate is derived from each employee's own entitlement, so a junior on
+15 days earns 1.25 a month and a manager on 30 earns 2.5. A flat rate defeats that in both
+directions (§1.3b).
 
 ### 2.4 Rehearse the two-stage approval, once, tonight
 
@@ -903,10 +871,18 @@ It returns a count: how many approved requests whose dates contain today were ad
 count here is entirely routine** — it is simply how many people started their leave today. It is
 safe to repeat, and nothing moves back.
 
-⚠ **If it returns 0, you have nobody on leave today**, and recall will have nothing to act on.
-Either raise a request that *starts today or earlier and ends later*, approve it twice, and run the
-sweep again — or demonstrate recall against an **Approved** future request instead, which is
-allowed and is very nearly as good a story. The recall dialog behaves the same either way.
+⚠ **On a freshly built demo database it WILL return 0, and that is correct.** Every seeded request
+is future-dated — leave cannot be raised in the past, and the seeder respects the minimum-notice
+rule — so on the day you rebuild there is nothing in progress to advance. Verified on the 2026-09-18
+rebuild: twelve requests, the earliest starting three days out, `{"advanced":0}`.
+
+**So demonstrate recall against an *Approved* request**, which is allowed and very nearly as good a
+story — the dialog, the orange panel and the days returned are identical. The demo database has
+**four** approved requests to choose from.
+
+**If you want the stronger version** — calling somebody back from leave they are actually on — raise
+a request that starts today and ends next week, approve it twice, then run the sweep again. That is
+five minutes and it is the only way to get an *In progress* record on a fresh database.
 
 ### 2.6c **Required if you are demonstrating excuse duty or the board** — switch it on
 
@@ -970,12 +946,12 @@ People away in the current month (calendar)       : ____________
 [ ] 2.1  TWO-STAGE definitions confirmed active — the single most important check
 [ ] 2.2  anchor employee, manager and reliever written down
 [ ] 2.3  the seven balance figures read off and written in
-[ ] 2.3b Entitled repaired as admin — the preview said 53, and a Junior now reads 15
-[ ] 2.3b Annual Leave's accrual rate set to 0, and the Accrued column moved as expected
+[ ] 2.3b Entitled CHECKED — Junior 15, Senior 21, Management 30 (repair only if all read 21)
+[ ] 2.3b Annual Leave's accrual rate reads 0 (derived), not a flat 1.75
 [ ] 2.4  the two-stage approval rehearsed, attendance days seen, rehearsal cancelled
 [ ] 2.5  Window C (admin) open on /hr/leave/year-end, or chapter 17 cut
 [ ] 2.6a one reminder sweep run, so chapter 18 has a log to show
-[ ] 2.6b advance-in-progress called, and its count is NOT zero  ← recall depends on this
+[ ] 2.6b advance-in-progress called — ⚠ zero is EXPECTED on a fresh build; recall then uses an Approved request
 [ ] 2.6c Sick Leave configured for excuse duty (3 / 10), and a PDF is on the desktop
 [ ] 2.7  every screen pre-opened in the right window — calendar twice
 [ ] 2.8  the numbers written in
@@ -3673,7 +3649,8 @@ Do this after the room empties. Everything below is reversible; nothing needs a 
 | 14 | **Sick leave requests** raised in chapter 7b *(LW 11, and the two in step 5)* | Cancel each, reason `Demonstration`. ⚠ **Cancel, do not close** — a closed request still counts as *taken*, so the cumulative total stays over the board threshold and the next person to raise sick leave here is sent to a board |
 | 15 | **Medical board** *(ch. 7b, LW 12)* | ⚠ **A concluded board cannot be un-concluded** — that is the ratchet, on purpose, and **Cancel the board** is offered only *until* it reports. So once you have walked chapter 7b to the end there is nothing to press. Leave it: a demonstration board with a finding on it is harmless, and it is a good record to show next time |
 | 16 | **`advance-in-progress` called** *(§2.6b)* | **Nothing to undo and nothing you can undo.** Those requests are genuinely in progress; the nightly sweep would have done it anyway |
-| 17 | **Entitlements repaired** *(§2.3b)* | ⚠ **Do not undo this.** It replaced a wrong figure with the one the rulebook resolves, and putting it back would mean restoring a defect. It is recorded here because it is a real write, not because it should be reversed. If you must: the old value was the leave type's default for every row |
+| 17 | **Entitlements repaired** *(§2.3b)* — only if you had to run it | ⚠ **Do not undo this.** It replaced a wrong figure with the one the rulebook resolves, and putting it back would mean restoring a defect. On a database built after 2026-09-18 the seed has already done it and there is nothing here to undo |
+| 18 | **Sick Leave configured for excuse duty** *(§2.6c)* | The same as item 11 — switch **Requires excuse duty** back off if you want the database as it was seeded. ⚠ Leaving it on is harmless and saves the setup next time |
 
 **The one thing that cannot be put back** is the **request number**. `LV2026000013` is spent. The
 counter only moves forward, by design — the same rule as staff numbers and requisition numbers. The
@@ -3970,7 +3947,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 | [`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) | **The third build.** The entitlement engine, accrual, and the assumption that a leave year is a calendar year. ⚠ **§ 2.3 is the answer to "can it do an anniversary leave year, or half-days?"** and § 3 records which decisions are still open |
 | [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) | **The second build, G1–G5** — recall, the configuration turn, the evidence gate, the medical board, and the eight deferred findings. Read its § 0 for what was built and what each slice found |
 | [`HR-LEAVE-CLOSURE-PLAN.md`](HR-LEAVE-CLOSURE-PLAN.md) | **§ 0 is the first build's state of the module.** The gap register and the eleven decisions |
-| [`../HR-CONFIGURATION-REGISTER.md`](../HR-CONFIGURATION-REGISTER.md) | **every assumed value in HR, with its enforcement status.** The answer to *"does this switch actually do anything?"* — all 46 tenant settings and all 26 leave-type settings are in it |
+| [`../HR-CONFIGURATION-REGISTER.md`](../HR-CONFIGURATION-REGISTER.md) | **every assumed value in HR, with its enforcement status.** The answer to *"does this switch actually do anything?"* — 47 tenant settings, 28 on the leave type and **38 on its four child tables** (§ 3.2b) are in it |
 | [`HR-WORKFLOW-ENGINE-INTEGRATION.md`](HR-WORKFLOW-ENGINE-INTEGRATION.md) | the two-stage definition, and the traps behind it — including why `PreventInitiatorApproval` is the wrong control here |
 | [`HR-ATTENDANCE-TIME-SYSTEM-GUIDE.md`](HR-ATTENDANCE-TIME-SYSTEM-GUIDE.md) | the other end of chapter 20's join. ⚠ **Its chapters predate the leave→attendance write** |
 | [`HR-REPORTS-CATALOGUE.md`](HR-REPORTS-CATALOGUE.md) § 3.3 | the leave reports, three of which are now delivered |
@@ -3981,7 +3958,7 @@ module enforces one of them. That second one is a question of fact, not of polic
 
 ---
 
-**End of the leave guide.** The harness has run — **427 assertions** across nine slices, green
+**End of the leave guide.** The harness has run — **515 assertions** across thirteen slices, green
 twice — so if something in this book turns out to be wrong, the most likely reason is that **a
 screen changed after the chapter that describes it**, not that the behaviour underneath is unproved.
 The second most likely is that you are looking for a control that is genuinely an **API only**:
