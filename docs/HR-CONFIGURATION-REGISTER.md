@@ -1,8 +1,10 @@
 # HR — Configuration Register
 
-**Started 2026-09-17** (leave residue plan, slices G2 and G3). **Partial: leave only** — encashment,
-the reminder cadence, and the medical-evidence rules. Everything else in HR is still to be surveyed
-— see § 4.
+**Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6).
+
+**Surveyed: all of `CompanyHrPolicySettings` (46) and all of `LeaveType` (26).** Three ghosts found,
+all in the first. The per-module settings for attendance, travel, appraisal, company schedule and
+the rest are still to do — see § 4, which now says what each one is expected to cost.
 
 ---
 
@@ -164,12 +166,77 @@ and the rules would be decorative.
 ⚠ **The gate is asserted on the auto-approving path too** (`RequiresApproval = false`), which is the
 branch where a miss approves sick leave with nobody asked.
 
-### The rest of `LeaveType` — not surveyed
+### The rest of `LeaveType`
 
-⚠ The leave guide's § 4.4 traced **11 ghosts** among them; that list has not been re-checked since
-the closure build, so its status is **unknown**, not clean.
+Surveyed 2026-09-18 and clean — see § 3.2, which also explains why the leave guide's claim of
+**11 ghosts** no longer holds.
 
 ---
+
+## 3.1 ⚠ The rest of `CompanyHrPolicySettings` — SURVEYED
+
+**46 properties. Three are ghosts.** Verified mechanically, not asserted: run
+
+```
+python scripts/hr-coverage/05_settings_consumption.py \
+    src/ErpSystem.Core/Entities/HR/CompanyHrPolicySettings.cs CompanyHrPolicySettings \
+    "CompanyHrPolicySettingsDTOs.cs,CompanyHrPolicyMappingExtensions.cs,\
+     CompanyHrPolicySettingsService.cs,CompanyHrPolicySettingsController.cs,\
+     ApplicationDbContext.HR.cs,policy-settings.ts,settings/policy"
+```
+
+| Ghost | What somebody would reasonably believe it does | What it does |
+|---|---|---|
+| `MinimumWorkingAge` | refuses a hire below the age | **nothing.** No service reads it. It reads like a safeguard and is not one |
+| `VoluntaryRetirementAge` | drives a voluntary-retirement date the way `CompulsoryRetirementAge` drives the compulsory one | **nothing** beyond a form rule that it must not exceed the compulsory age. `HrPolicyCalculations` reads the compulsory age and its gender-specific overrides; the voluntary age is read by no code at all |
+| `ReviewDueLeadDays` | how far ahead a review is announced | **nothing.** No sweep reads it. The other eleven lead-time settings beside it all have a reminder service that does |
+
+The other 43 are referenced by at least one service. ⚠ **That is not the same as enforced** — see
+the note on the tool below.
+
+### Why these three are worth more than a row each
+
+`MinimumWorkingAge` is the one to fix first. The other two are conveniences nobody is relying on;
+this one is a **compliance control that does not control anything**, and its presence on a settings
+page is an active claim that it does. Either wire it into the hire and candidate paths or take it
+off the page — leaving it is the worst of the three options, which is the rule this register exists
+to police.
+
+`VoluntaryRetirementAge` is the most misleading. It sits directly beside a setting that **is**
+enforced, is validated against it, and does nothing — so the pair reads as one working feature.
+
+## 3.2 `LeaveType` — SURVEYED, and the guide's claim is now stale
+
+**26 settings, zero ghosts.** Every one has a real consumer.
+
+⚠ The leave guide's § 4.4 recorded **11 ghost settings** on leave types, and this register
+carried that forward as *"status unknown, not clean"*. **It is now clean.** The closure build's
+waves A–E wired them — L-31/L-32 alone took the holiday settings from decorative to load-bearing —
+and G2 and G3 added five more that were enforced on the day they landed.
+
+**The guide was right when written and is wrong now.** That is the ordinary fate of a findings
+document whose findings get fixed, and it is why this register exists separately: a guide records
+what was true on a date, a register records what is true and says how it was checked.
+
+## 3.3 What the tool proves, and what it does not
+
+`scripts/hr-coverage/05_settings_consumption.py` reads every `.cs`/`.ts`/`.tsx` under `src/` and
+`frontend/src` once and reports, per property, which files mention it — discarding the files that
+merely CARRY the value: the entity, its DTOs, its mapper, its service, its controller, the
+DbContext, the TS type, **and the setting's own edit screen**.
+
+| Result | Means |
+|---|---|
+| **Zero references** | a **ghost**, definitively. Nothing can be consuming it |
+| **One or more services** | it is **referenced**. ⚠ NOT proof that it is enforced |
+
+⚠ **Telling Enforced from Advisory from Client-side still needs a human read**, which is what the
+appraisal audit did by hand for its 50 fields. Use the tool to find the dead ones cheaply; classify
+the survivors by reading them. A count is evidence of life, not of correctness.
+
+⚠ **Passing the edit screen as plumbing is not optional.** Without it every setting looks
+consumed, because that screen mentions all of them — and mentioning is not consuming. The first run
+of this survey reported **zero** ghosts for exactly that reason.
 
 ## 4. Not yet surveyed
 
@@ -178,7 +245,7 @@ owed a pass, most cheaply as part of that module's own closure plan.
 
 | Area | Known starting point |
 |---|---|
-| **Appraisal settings** | `HR-APPRAISAL-SETTINGS-AUDIT.md` — 50 fields already classified. ⚠ **14 do not enforce what they say.** Fold that audit in wholesale |
+| **Appraisal settings** | `HR-APPRAISAL-SETTINGS-AUDIT.md` — 50 fields already classified **by hand**, which is the harder half the tool cannot do. ⚠ **14 do not enforce what they say.** Fold that audit in wholesale rather than re-deriving it |
 | Attendance & time | 35 settings noted in the attendance guide; `LateGracePeriodMinutes` is read by **nothing in the solution** (A-1) |
 | Travel | the policy rule register is read-only by decision (T-4); caps bind only when a policy is approved (T-1) |
 | Company schedule | `MaxBookingDurationHours`, `AdvanceBookingDays` — both ghosts (C-4) |

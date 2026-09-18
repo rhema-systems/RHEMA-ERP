@@ -1,7 +1,8 @@
 # HR Leave — Residue Closure Plan
 
-**Status:** 2026-09-17 — **G1–G5 BUILT and verified. G6's survey of HR beyond leave is all that
-remains; G7 was done incrementally.**
+**Status:** 2026-09-18 — **G1–G5 BUILT and verified. G6 started: the two settings entities that
+govern leave are surveyed and a reusable instrument exists; the per-module settings for the rest
+of HR remain. G7 was done incrementally.**
 
 **Read `HR-LEAVE-CLOSURE-PLAN.md` § 0 first** — it describes the code as it stands after the six-wave
 closure build of 2026-09-17. This plan picks up what that one deliberately left, plus two things it

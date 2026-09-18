@@ -25,6 +25,14 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
 import {
@@ -44,6 +52,10 @@ import {
 } from 'lucide-react';
 import { useAuth } from '@/hooks/use-auth';
 import { leaveService } from '@/services/hr/leave.service';
+import {
+  LEAVE_EVIDENCE_KIND_LABEL,
+  type LeaveEvidenceKind,
+} from '@/types/hr/leave-request';
 import { LEAVE_STATUS_BADGE } from '@/components/me/leave/leave-status';
 import {
   RespondToSuggestionDialog,
@@ -90,6 +102,18 @@ export default function MyLeaveRequestDetailPage({
   const [cancelOpen, setCancelOpen] = useState(false);
   const [dateDialog, setDateDialog] = useState<null | 'respond' | 'reschedule'>(null);
   const [cancelReason, setCancelReason] = useState('');
+  /*
+   * ⚠ What the document IS, chosen before the file is picked. The evidence gate refuses a
+   * submission until a document of the required kind is attached, and it cannot read a file name
+   * to decide — `scan.pdf` is a medical certificate or a holiday photograph with equal
+   * probability. Without this control an employee told on the request form that she needs excuse
+   * duty could attach it here and still be refused at Submit, because everything this screen
+   * uploaded was filed as a plain supporting document.
+   *
+   * Defaults to `Other`, like the desk's panel: guessing the kind from the leave type would put
+   * the gate back where it started.
+   */
+  const [evidenceKind, setEvidenceKind] = useState<LeaveEvidenceKind>('Other');
 
   const { data: request, isLoading } = useQuery({
     queryKey: ['me', 'leave-request', id],
@@ -201,9 +225,13 @@ export default function MyLeaveRequestDetailPage({
   });
 
   const uploadMutation = useMutation({
-    mutationFn: (file: File) => leaveService.uploadAttachment(id, file),
-    onSuccess: async () => {
-      toast({ title: 'Attached', description: 'The document was uploaded.' });
+    mutationFn: ({ file, kind }: { file: File; kind: LeaveEvidenceKind }) =>
+      leaveService.uploadAttachment(id, file, kind),
+    onSuccess: async (_data, { kind }) => {
+      toast({
+        title: 'Attached',
+        description: `Uploaded as ${LEAVE_EVIDENCE_KIND_LABEL[kind].toLowerCase()}.`,
+      });
       await queryClient.invalidateQueries({ queryKey: ['me', 'leave-request', id, 'attachments'] });
     },
     onError: (e: any) =>
@@ -366,19 +394,43 @@ export default function MyLeaveRequestDetailPage({
       </Card>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between space-y-0">
+        <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Paperclip className="h-4 w-4" /> Attachments
           </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
           {canAttach && (
-            <>
+            <div className="space-y-2 rounded-md border bg-muted/30 p-3">
+              <Label htmlFor="evidence-kind">What is this document?</Label>
+              <Select
+                value={evidenceKind}
+                onValueChange={(v) => setEvidenceKind(v as LeaveEvidenceKind)}
+              >
+                <SelectTrigger id="evidence-kind" className="sm:max-w-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(LEAVE_EVIDENCE_KIND_LABEL) as LeaveEvidenceKind[]).map((k) => (
+                    <SelectItem key={k} value={k}>
+                      {LEAVE_EVIDENCE_KIND_LABEL[k]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Choose this before you pick the file. If your leave needs excuse duty — a medical
+                certificate — it has to be attached <strong>as that kind</strong> before the request
+                can be submitted. Anything else is a supporting document.
+              </p>
+
               <input
                 ref={fileInputRef}
                 type="file"
                 className="hidden"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (file) uploadMutation.mutate(file);
+                  if (file) uploadMutation.mutate({ file, kind: evidenceKind });
                   e.target.value = '';
                 }}
               />
@@ -395,10 +447,9 @@ export default function MyLeaveRequestDetailPage({
                 )}
                 Attach a document
               </Button>
-            </>
+            </div>
           )}
-        </CardHeader>
-        <CardContent>
+
           {attachments?.length ? (
             <ul className="space-y-2">
               {attachments.map((a) => (
@@ -406,11 +457,21 @@ export default function MyLeaveRequestDetailPage({
                   key={a.id}
                   className="flex items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
                 >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    <span className="truncate font-medium">{a.fileName}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
-                      {fmtSize(a.fileSizeBytes)}
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      <span className="truncate font-medium">{a.fileName}</span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {fmtSize(a.fileSizeBytes)}
+                      </span>
+                    </span>
+                    {/*
+                      ⚠ Shown because it is what the evidence gate READS. Without it an employee
+                      refused at Submit for missing a certificate cannot tell that the file she
+                      attached was filed as something else.
+                    */}
+                    <span className="pl-6 text-xs text-muted-foreground">
+                      {LEAVE_EVIDENCE_KIND_LABEL[a.evidenceKind] ?? a.evidenceKind}
                     </span>
                   </span>
                   <span className="flex shrink-0 items-center gap-1">

@@ -16,6 +16,7 @@ import type {
   UpdateLeaveAdjustmentRequest,
   MandatoryLeaveCompliance,
   LeaveRequestAttachment,
+  LeaveEvidenceKind,
   LeavePlan,
   CreateLeavePlanRequest,
   SuggestLeavePlanChangesRequest,
@@ -310,10 +311,26 @@ class LeaveService {
     return apiService.get<LeaveRequestAttachment[]>(`${this.baseUrl}/${id}/attachments`);
   }
 
-  /** Multipart upload through the scanning gate; rejections arrive as 422 { code, message }. */
-  uploadAttachment(id: string, file: File): Promise<LeaveRequestAttachment> {
+  /**
+   * Multipart upload through the scanning gate; rejections arrive as 422 { code, message }.
+   *
+   * ⚠ `evidenceKind` says WHAT the document is, and the R-15a evidence gate reads it — a leave
+   * type requiring excuse duty refuses a submission until a document of that kind is attached.
+   * It rides the query string because the controller binds it `[FromQuery]`, the same way the
+   * desk's `LeaveAttachmentsPanel` sends it.
+   *
+   * ⚠ It defaults to `Other` rather than guessing from the leave type. A mis-typed document is
+   * worse than an untyped one: the whole point of typing evidence is that `scan.pdf` cannot be
+   * checked by its name, and a default that silently claimed a file was a medical certificate
+   * would put the gate back where it started.
+   */
+  uploadAttachment(
+    id: string,
+    file: File,
+    evidenceKind: LeaveEvidenceKind = 'Other',
+  ): Promise<LeaveRequestAttachment> {
     return hrDocumentService.upload<LeaveRequestAttachment>(
-      `${this.baseUrl}/${id}/attachments`,
+      `${this.baseUrl}/${id}/attachments?evidenceKind=${encodeURIComponent(evidenceKind)}`,
       file,
     );
   }
