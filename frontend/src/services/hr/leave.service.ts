@@ -34,6 +34,7 @@ import type {
   ProcessLeaveEncashmentRequest,
   LeaveYearEndResult,
   LeaveBulkRecalculationResult,
+  LeaveEntitlementRepairResult,
 } from '@/types/hr/leave-request';
 
 /**
@@ -172,6 +173,30 @@ class LeaveService {
     if (leaveTypeId) params.set('leaveTypeId', leaveTypeId);
     return apiService.post<LeaveBulkRecalculationResult>(
       `${this.baseUrl}/balances/recalculate-all?${params.toString()}`,
+    );
+  }
+
+  /**
+   * Re-derive stored entitlements from the rulebook, or preview what that would change (A3).
+   *
+   * ⚠ **Always call this with `dryRun: true` first and show the result.** Unlike the recalculation
+   * above, this OVERWRITES `EntitledDays` — a figure that is written once when a balance is created
+   * and never refreshed, so the row may have been born before the allocation that should govern it.
+   * The preview names every row and both figures; that list is the thing a person decides on.
+   *
+   * ⚠ Admin tier, like the year-end jobs and for the same reason: it changes what people are owed,
+   * in bulk.
+   */
+  repairEntitlements(
+    year: number,
+    opts: { leaveTypeId?: string; employeeId?: string; dryRun?: boolean } = {},
+  ): Promise<LeaveEntitlementRepairResult> {
+    const params = new URLSearchParams({ year: String(year) });
+    if (opts.leaveTypeId) params.set('leaveTypeId', opts.leaveTypeId);
+    if (opts.employeeId) params.set('employeeId', opts.employeeId);
+    if (opts.dryRun) params.set('dryRun', 'true');
+    return apiService.post<LeaveEntitlementRepairResult>(
+      `${this.baseUrl}/balances/repair-entitlements?${params.toString()}`,
     );
   }
 

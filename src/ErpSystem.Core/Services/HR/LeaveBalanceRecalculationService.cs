@@ -250,4 +250,118 @@ public class LeaveBalanceRecalculationService : ILeaveBalanceRecalculationServic
 
         return result;
     }
+
+    /// <inheritdoc />
+    public async Task<LeaveEntitlementRepairResult> RepairEntitlementsAsync(
+        int year, Guid? leaveTypeId = null, Guid? employeeId = null, bool dryRun = false,
+        CancellationToken ct = default)
+    {
+        var tenantId = GetTenantId();
+        var result = new LeaveEntitlementRepairResult { Year = year, IsDryRun = dryRun };
+
+        // Driven off the balances that exist, like the recalculation above and for the same reason:
+        // this pass CORRECTS stored rows. Minting a balance for somebody who never had one is a
+        // different operation and not what a repair is for.
+        var balances = await _leaveBalanceRepository
+            .GetQueryable()
+            .Include(lb => lb.Employee)
+            .Include(lb => lb.LeaveType)
+            .Where(lb => lb.TenantId == tenantId
+                      && lb.Year == year
+                      && (leaveTypeId == null || lb.LeaveTypeId == leaveTypeId)
+                      && (employeeId == null || lb.EmployeeId == employeeId))
+            .OrderBy(lb => lb.EmployeeId)
+            .ToListAsync(ct);
+
+        // One query for the whole pass rather than one per changed row: which of these balances
+        // already carried days into next year, and therefore has a carry-over computed from the
+        // figure this pass is about to replace.
+        var carriedForward = await _leaveBalanceRepository
+            .GetQueryable()
+            .Where(lb => lb.TenantId == tenantId && lb.Year == year + 1 && lb.CarriedOverDays > 0)
+            .Select(lb => new { lb.EmployeeId, lb.LeaveTypeId })
+            .ToListAsync(ct);
+        var carriedKeys = carriedForward
+            .Select(c => (c.EmployeeId, c.LeaveTypeId))
+            .ToHashSet();
+
+        foreach (var balance in balances)
+        {
+            ct.ThrowIfCancellationRequested();
+            result.BalancesExamined++;
+
+            decimal resolved;
+            try
+            {
+                resolved = await _entitlementService.ResolveAnnualEntitlementAsync(
+                    balance.EmployeeId, balance.LeaveTypeId, balance.LeaveSubTypeId, year, ct);
+            }
+            catch (Exception ex)
+            {
+                // ⚠ One unresolvable row must not abandon the rest — the same rule the bulk
+                // recalculation follows. A half-finished correction is worse than none, because
+                // nobody can tell which half is current.
+                result.BalancesFailed++;
+                result.Notes.Add($"{Describe(balance)}: could not resolve entitlement — {ex.Message}");
+                _logger.LogError(ex,
+                    "Entitlement repair could not resolve employee {EmployeeId} type {LeaveTypeId} for {Year}",
+                    balance.EmployeeId, balance.LeaveTypeId, year);
+                continue;
+            }
+
+            if (resolved == balance.EntitledDays)
+            {
+                result.BalancesAlreadyCorrect++;
+                continue;
+            }
+
+            var carryRun = carriedKeys.Contains((balance.EmployeeId, balance.LeaveTypeId));
+            if (carryRun) result.ChangedWithCarryOverAlreadyRun++;
+
+            result.Notes.Add(
+                $"{Describe(balance)}: {balance.EntitledDays:0.##} → {resolved:0.##}"
+                + (carryRun ? " ⚠ carry-over into the next year was already computed from the old figure." : string.Empty));
+
+            if (!dryRun)
+            {
+                await _unitOfWork.ExecuteInTransactionAsync(async innerCt =>
+                {
+                    balance.EntitledDays = resolved;
+                    await _leaveBalanceRepository.UpdateAsync(balance);
+                    await _unitOfWork.SaveChangesAsync(innerCt);
+                }, ct);
+            }
+
+            result.BalancesChanged++;
+        }
+
+        result.Notes.Insert(0,
+            $"Examined {result.BalancesExamined} balance(s) for {year}: "
+            + $"{result.BalancesChanged} disagreed with the rulebook, "
+            + $"{result.BalancesAlreadyCorrect} were already correct"
+            + (result.BalancesFailed > 0 ? $", {result.BalancesFailed} could not be resolved" : string.Empty)
+            + "."
+            + (result.ChangedWithCarryOverAlreadyRun > 0
+                ? $" ⚠ {result.ChangedWithCarryOverAlreadyRun} of the changed rows have a carry-over into {year + 1}"
+                  + " that was computed from the old figure and is NOT revisited here."
+                : string.Empty)
+            + (dryRun ? " NOTHING WAS WRITTEN - this was a dry run." : string.Empty));
+
+        _logger.LogInformation(
+            "Entitlement repair {Mode} for {Year}: {Changed} of {Examined} balance(s) changed, {Failed} failed",
+            dryRun ? "previewed" : "applied", year,
+            result.BalancesChanged, result.BalancesExamined, result.BalancesFailed);
+
+        return result;
+    }
+
+    /// <summary>A balance in words, for the notes a person reads before deciding to overwrite.</summary>
+    private static string Describe(LeaveBalance balance)
+    {
+        var who = balance.Employee is { } e
+            ? $"{e.FirstName} {e.LastName} ({e.EmployeeNumber})"
+            : balance.EmployeeId.ToString();
+        var what = balance.LeaveType?.Name ?? balance.LeaveTypeId.ToString();
+        return $"{who} · {what}";
+    }
 }

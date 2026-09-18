@@ -284,6 +284,12 @@ public class LeaveTypesController : ControllerBase
         {
             return StatusCode(201, await _service.CreateAccrualPolicyAsync(dto));
         }
+        // ⚠ A leave type may have ONE active accrual policy (entitlement plan A2), and the service
+        // refuses a second with a sentence naming what to do instead. Without this arm that refusal
+        // came back as a 500 and a generic string — the caller lost both the status code and the
+        // only part of the message worth reading.
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating accrual policy");
@@ -301,6 +307,9 @@ public class LeaveTypesController : ControllerBase
         {
             return Ok(await _service.UpdateAccrualPolicyAsync(id, dto));
         }
+        // Same rule on the edit path: the payload carries a leave type, so an update can MOVE a
+        // policy onto a type that already has one.
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
         catch (Exception ex)
         {

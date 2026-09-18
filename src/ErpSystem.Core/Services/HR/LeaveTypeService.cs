@@ -489,10 +489,45 @@ public class LeaveTypeService : ILeaveTypeService
         return items.ToDtoList();
     }
 
+    /// <summary>
+    /// ⚠ <b>A leave type may have ONE active accrual policy, and this is what enforces it.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>Entitlement plan A2. <c>LeaveEntitlementService</c> selects the policy with
+    /// <c>FirstOrDefault</c> over the active ones — so a second policy did not produce an error, it
+    /// produced a <b>non-deterministic accrual figure</b> that could differ between two reads of the
+    /// same balance.</para>
+    ///
+    /// <para>⚠ <b>The natural thing an administrator wants here is a different rate per staff
+    /// level</b>, and the natural thing to try is a second policy. Until that is built (plan B4) the
+    /// honest answer is a refusal that says so, rather than silently accepting a row that makes the
+    /// answer depend on row order.</para>
+    /// </remarks>
+    private async Task RefuseSecondActiveAccrualPolicyAsync(
+        Guid leaveTypeId, Guid tenantId, Guid? exceptId = null)
+    {
+        var existing = await _accrualPolicyRepository
+            .GetQueryable()
+            .Where(a => a.TenantId == tenantId
+                     && a.LeaveTypeId == leaveTypeId
+                     && a.IsActive
+                     && (exceptId == null || a.Id != exceptId))
+            .Select(a => a.Id)
+            .FirstOrDefaultAsync();
+
+        if (existing != Guid.Empty)
+            throw new InvalidOperationException(
+                "This leave type already has an active accrual policy, and a leave type may only have one. "
+                + "Edit the existing policy, or remove it first. "
+                + "(An accrual rate that varies by staff level is not supported yet — a second policy "
+                + "would make the accrued figure depend on which row the database returned first.)");
+    }
+
     public async Task<LeaveAccrualPolicyDto> CreateAccrualPolicyAsync(CreateLeaveAccrualPolicyDto dto)
     {
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
+        await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId);
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         await _accrualPolicyRepository.AddAsync(entity);
@@ -507,6 +542,10 @@ public class LeaveTypeService : ILeaveTypeService
         var entity = await GetOwnedAccrualPolicyAsync(id);
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = entity.TenantId;
+
+        // ⚠ The payload carries a leave type, so an edit can MOVE a policy onto a type that already
+        // has one. Same rule as create, excluding this row from its own check.
+        await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId, id);
 
         entity.LeaveTypeId = dto.LeaveTypeId;
         entity.Frequency = dto.Frequency;

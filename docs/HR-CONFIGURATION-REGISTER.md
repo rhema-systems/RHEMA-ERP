@@ -1,10 +1,13 @@
 # HR — Configuration Register
 
-**Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6).
+**Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
+2026-09-18 (entitlement plan W1c).
 
-**Surveyed: all of `CompanyHrPolicySettings` (46) and all of `LeaveType` (26).** Three ghosts found,
-all in the first. The per-module settings for attendance, travel, appraisal, company schedule and
-the rest are still to do — see § 4, which now says what each one is expected to cost.
+**Surveyed: all of `CompanyHrPolicySettings` (46), all of `LeaveType` (26), and all four of leave's
+CHILD tables (38).** Three ghosts found, all in the first — **and one setting that is none of the
+four statuses**, which is why there are now five. The per-module settings for attendance, travel,
+appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
+expected to cost.
 
 ---
 
@@ -45,10 +48,39 @@ believe it binds, and discover months later that it never did. This is not hypot
 | **Advisory** | Read and displayed, but nothing refuses on it |
 | **Client-side** | The UI honours it; the API does not, so any other caller ignores it |
 | **Ghost** | Saved and read by nothing. ⚠ Either wire it or delete it — leaving it is the worst option |
+| **Unreachable** | **Read, in a branch that cannot be entered.** ⚠ Added 2026-09-18 — see below |
 
 ⚠ **"Enforced" requires the two-position test.** Asserting a setting at its default proves nothing:
 a hardcoded value passes that test perfectly. The assertion must change the value, observe the
 behaviour change, and change it back.
+
+⚠ **And the two positions must produce different OBSERVABLE OUTCOMES, with both figures stated.**
+Not *"the number changed"* — `14.00` and then `15.75`. A test that sets a value both ways and checks
+only that the code read it is green in both positions and proves nothing. That is precisely how an
+**Unreachable** setting passes for Enforced.
+
+### ⚠ Why **Unreachable** had to be added, and why a tool will never find one
+
+`LeaveAccrualPolicy.ProRateOnJoin` is read by `LeaveEntitlementService` on every accrual
+calculation. The survey tool reports it as **referenced**, with the same count and the same
+consuming file as `ProRateOnExit` beside it — which genuinely works. They are indistinguishable to
+anything mechanical.
+
+The guard it sits in cannot be satisfied:
+
+```
+eligibilityDate = hireDate + (MinServiceMonths ?? 0)     // ≥ hireDate, always
+accrualStart    = Max(yearStart, eligibilityDate)        // ≥ eligibilityDate, always
+if (ProRateOnJoin && hireDate > accrualStart && ...)     // ⚠ hireDate > something ≥ hireDate
+```
+
+So the switch changes nothing **in either direction**. The pro-rating it claims to control happens
+anyway, because the eligibility date already anchors the accrual window to the hire date — which
+means an organisation that wants it OFF cannot have it off.
+
+**A Ghost is honest by comparison:** nothing reads it, and a tool says so. An Unreachable setting
+reads, surveys clean, and lies. **Only a human read finds one**, which is the argument for reading
+the survivors rather than counting them.
 
 ---
 
@@ -207,7 +239,9 @@ enforced, is validated against it, and does nothing — so the pair reads as one
 
 ## 3.2 `LeaveType` — SURVEYED, and the guide's claim is now stale
 
-**26 settings, zero ghosts.** Every one has a real consumer.
+**26 settings, zero ghosts.** Every one has a real consumer. ⚠ **That covers the leave type itself
+and not its child tables** — those are § 3.2b, added later, and one of them holds this register's
+first **Unreachable** entry.
 
 ⚠ The leave guide's § 4.4 recorded **11 ghost settings** on leave types, and this register
 carried that forward as *"status unknown, not clean"*. **It is now clean.** The closure build's
@@ -217,6 +251,59 @@ and G2 and G3 added five more that were enforced on the day they landed.
 **The guide was right when written and is wrong now.** That is the ordinary fate of a findings
 document whose findings get fixed, and it is why this register exists separately: a guide records
 what was true on a date, a register records what is true and says how it was checked.
+
+## 3.2b `LeaveType`'s four child tables — SURVEYED 2026-09-18
+
+**⚠ These had no entry at all, while § 3.2 above read as though leave were finished.** They are
+where the rulebook's per-type rules actually live — the sub-type caps, the staff-level allocations,
+the eligibility rules and the accrual policy — and they hold **38 settings** between them.
+
+```
+for c in LeaveAccrualPolicy LeaveSubType LeaveCategoryAllocation LeaveTypeEligibility; do
+  python scripts/hr-coverage/05_settings_consumption.py \
+      src/ErpSystem.Core/Entities/HR/LeaveEntities.cs $c \
+      "LeaveDTOs.cs,LeaveMappingExtensions.cs,LeaveTypesController.cs,ApplicationDbContext.HR.cs,\
+       types/hr/leave.ts,types/hr/leave-request.ts,leave-type.service.ts,\
+       administration/hr/leave-types,LeaveAccrualPoliciesTab.tsx,LeaveSubTypesTab.tsx,\
+       LeaveAllocationsTab.tsx,LeaveEligibilityTab.tsx,LeaveTypeForm.tsx"
+done
+```
+
+⚠ **`LeaveTypeService.cs` is deliberately NOT in that plumbing list.** See the trap below.
+
+| Table | Settings | Result |
+|---|---|---|
+| `LeaveAccrualPolicy` | 9 | **8 enforced, 1 Unreachable** — `ProRateOnJoin`. `Frequency`, `Mode`, `AccrualRate`, `MinServiceMonths`, `ProRateOnExit` and `IsActive` all bind in `LeaveEntitlementService` |
+| `LeaveSubType` | 10 | **enforced.** `MaxDaysAllowed` is the annual cap (`LeaveService`), `IsActive` filters the pickers **and** is refused by the service |
+| `LeaveCategoryAllocation` | 9 | **enforced.** `AllocationDays` with `EffectiveFrom`/`EffectiveTo` is step 2 of the entitlement engine's precedence |
+| `LeaveTypeEligibility` | 10 | **enforced.** `EligibilityType` drives the four-arm switch in `LeaveTypeService.MatchesRule`, and `Gender` ANDs onto an org-scoped rule |
+
+**One real ghost, and it is harmless:** `LeaveSubType.LeavePlans`, a navigation collection nothing
+reads. A dead navigation is not a dead setting — nobody can set it and nobody believes it does
+anything. Recorded so the next survey does not re-derive it.
+
+### ⚠ A second methodological trap, found here and not previously written down
+
+The tool's own documentation warns that **passing the setting's edit screen as plumbing is not
+optional**, or everything looks consumed. This survey found the mirror of that, and it fails in the
+more dangerous direction:
+
+> ⚠ **Passing a SERVICE as plumbing hides any enforcement that lives in that same service.**
+
+The first run of this survey passed `LeaveTypeService.cs` as plumbing, because for
+`CompanyHrPolicySettings` the equivalent service genuinely is plumbing — it reads and writes the
+record and nothing else. `LeaveTypeService` is not: it carries the CRUD **and** contains
+`MatchesRule`, the eligibility evaluator. So `EligibilityType` was reported as a **GHOST**, and it is
+one of the best-enforced settings in the module.
+
+| Trap | Direction | Consequence |
+|---|---|---|
+| Forgetting the **edit screen** | everything looks consumed | ghosts hide. **False negatives** |
+| Excluding a **service that also enforces** | a live setting looks dead | **False positives** — you wire something already wired, or worse, delete it |
+
+**The rule:** a file goes in the plumbing list only if it *carries* the value and never *acts* on
+it. When in doubt, leave it out and read the extra hits — an inflated count costs a minute; a false
+ghost costs a change.
 
 ## 3.3 What the tool proves, and what it does not
 

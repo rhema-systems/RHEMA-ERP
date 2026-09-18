@@ -1267,6 +1267,54 @@ namespace ErpSystem.Api.Controllers.HR
             }
         }
 
+        /// <summary>
+        /// Re-derive stored entitlements from the rulebook, or preview what that would change
+        /// </summary>
+        /// <remarks>
+        /// <para>Entitlement plan A3. <c>EntitledDays</c> is written when a balance row is created
+        /// and never refreshed, so an allocation corrected mid-year does not reach the balances that
+        /// already exist — and a balance opened by posting an adjustment used to record the leave
+        /// type's DEFAULT days rather than the employee's staff-level allocation (A1). Fixing the
+        /// creation site helps nobody who is already wrong; this is the pass that does.</para>
+        ///
+        /// <para>⚠ <b>Unlike the recalculation beside it, this OVERWRITES a stored figure</b> from
+        /// configuration that may have moved since. That is why it has a dry run and that one does
+        /// not: the preview names every row and both figures, so a person decides.</para>
+        ///
+        /// <para>⚠ <b>It does not revisit a carry-over already run for the year</b> — that was
+        /// computed from the old entitlement. The result counts those rows separately rather than
+        /// silently correcting them, because re-running carry-over is a decision of its own.</para>
+        ///
+        /// <para><b>Admin tier</b>, like the year-end jobs and for the same reason: it changes what
+        /// people are owed, in bulk.</para>
+        /// </remarks>
+        /// <param name="dryRun">⚠ Compute and report, write nothing.</param>
+        /// <response code="200">What changed, or what would have</response>
+        [HttpPost("balances/repair-entitlements")]
+        [Authorize(Policy = HrPermissions.LeaveAdminPolicy)]
+        [ProducesResponseType(typeof(LeaveEntitlementRepairResult), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status400BadRequest)]
+        public async Task<ActionResult<LeaveEntitlementRepairResult>> RepairEntitlements(
+            [FromQuery] int year,
+            [FromQuery] Guid? leaveTypeId = null,
+            [FromQuery] Guid? employeeId = null,
+            [FromQuery] bool dryRun = false,
+            CancellationToken ct = default)
+        {
+            if (year < 2000)
+                return BadRequest(new { message = "A valid year is required." });
+
+            try
+            {
+                return Ok(await _recalculationService.RepairEntitlementsAsync(
+                    year, leaveTypeId, employeeId, dryRun, ct));
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
         [HttpPost("balances/recalculate")]
         [Authorize(Policy = HrPermissions.LeaveWritePolicy)]
         [ProducesResponseType(StatusCodes.Status200OK)]

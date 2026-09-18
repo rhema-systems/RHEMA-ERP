@@ -117,11 +117,19 @@ public class LeaveEntitlementService : ILeaveEntitlementService
         var tenantId = GetTenantId();
         var annual = await ResolveAnnualEntitlementAsync(employeeId, leaveTypeId, leaveSubTypeId, year, ct);
 
+        // ⚠ Entitlement plan A2. This used to be a bare FirstOrDefault over the active policies,
+        // with no ordering — so a leave type carrying two of them accrued at whichever rate the
+        // database happened to return first, and the same balance could read differently between
+        // two calls. `LeaveTypeService` now refuses a second active policy at the door; this
+        // ordering is for the rows that predate that guard, so at least the wrong answer is the
+        // SAME wrong answer every time and a repair pass can be reasoned about.
         var policy = await _leaveTypeRepository
             .GetQueryable()
             .Where(lt => lt.TenantId == tenantId && lt.Id == leaveTypeId)
             .SelectMany(lt => lt.AccrualPolicies)
             .Where(p => p.IsActive && p.Frequency != AccrualFrequency.None)
+            .OrderBy(p => p.CreatedAt)
+            .ThenBy(p => p.Id)
             .FirstOrDefaultAsync(ct);
 
         // No active accrual policy → the full entitlement is available immediately (legacy behavior).

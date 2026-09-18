@@ -2725,7 +2725,9 @@ public class LeaveService : ILeaveService
 
     public async Task<LeaveAdjustmentDto> CreateStandaloneAdjustmentAsync(CreateLeaveAdjustmentStandaloneDto dto)
     {
-        var leaveType = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        // Kept for its side effect: it refuses a leave type belonging to another tenant, before
+        // anything is read or written. The entitlement engine resolves the days below.
+        _ = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
 
         var balance = await _leaveBalanceRepository
@@ -2738,6 +2740,21 @@ public class LeaveService : ILeaveService
 
         if (balance == null)
         {
+            // ⚠ Entitlement plan A1. This used to be `leaveType.DefaultDaysPerYear`, which skipped
+            // the entitlement engine entirely — so a balance opened by posting an adjustment
+            // recorded the leave TYPE's default instead of the EMPLOYEE's staff-level allocation.
+            // The other two creation sites (LeaveBalanceRecalculationService and
+            // LeaveYearEndService) always resolved it properly, so the same employee got a
+            // different entitlement depending on which event happened to create their row first.
+            //
+            // ⚠ It mattered more than a wrong column suggests, because nothing refreshes
+            // EntitledDays afterwards: the figure a row is born with is the figure it keeps. And
+            // opening balances are loaded exactly this way — by adjustment — which is how a whole
+            // tenant ends up on the default. RepairEntitlementsAsync is the pass that puts existing
+            // rows right; this stops new ones being born wrong.
+            var entitled = await _entitlementService.ResolveAnnualEntitlementAsync(
+                dto.EmployeeId, dto.LeaveTypeId, dto.LeaveSubTypeId, dto.Year);
+
             balance = new LeaveBalance
             {
                 TenantId        = tenantId,
@@ -2745,7 +2762,7 @@ public class LeaveService : ILeaveService
                 LeaveTypeId     = dto.LeaveTypeId,
                 LeaveSubTypeId  = dto.LeaveSubTypeId,
                 Year            = dto.Year,
-                EntitledDays    = leaveType.DefaultDaysPerYear,
+                EntitledDays    = entitled,
                 CarriedOverDays = 0,
                 UsedDays        = 0,
                 PendingDays     = 0,

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Download, Loader2, RefreshCw, Scale } from 'lucide-react';
+import { Download, Loader2, RefreshCw, Scale, Wrench } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -28,6 +28,8 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { leaveService } from '@/services/hr/leave.service';
 import { leaveTypeService } from '@/services/hr/leave-type.service';
+import { useLeavePermissions } from '@/components/hr/leave/use-leave-permissions';
+import type { LeaveEntitlementRepairResult } from '@/types/hr/leave-request';
 
 /** Saves a blob the browser already has, rather than navigating to a URL that carries no token. */
 function saveBlob(blob: Blob, filename: string) {
@@ -55,6 +57,15 @@ export default function LeaveBalancesPage() {
   const [recalculatingAll, setRecalculatingAll] = useState(false);
   const [confirmAll, setConfirmAll] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // The repair pass is always previewed before it is applied, so it needs somewhere to hold the
+  // preview between the two calls.
+  const [previewing, setPreviewing] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const [repairPreview, setRepairPreview] = useState<LeaveEntitlementRepairResult | null>(null);
+
+  // Both bulk passes are Admin, which the HR role does not hold. Hidden rather than offered and
+  // refused — the rule the closure build applied to the rulebook's delete controls (L-11).
+  const { canAdminister } = useLeavePermissions();
 
   // The CSV comes from the SAME server read the table uses, so it carries the live accrued and
   // "can take now" figures rather than a second derivation that would quietly disagree (L-18).
@@ -166,6 +177,67 @@ export default function LeaveBalancesPage() {
     }
   };
 
+  /**
+   * ⚠ Entitlement repair (plan A3), and it is deliberately TWO calls.
+   *
+   * `EntitledDays` is written once, when a balance row is created, and no path has ever refreshed
+   * it — so an allocation corrected mid-year never reaches the rows that already exist, and a
+   * balance opened by posting an adjustment used to record the leave type's DEFAULT days rather
+   * than the employee's staff-level allocation (A1).
+   *
+   * Unlike "Recalculate everybody", this OVERWRITES a stored figure from configuration that may
+   * have moved since. So the button previews, the dialog shows every row and both figures, and a
+   * person presses Apply. Nothing about this pass is safe to run blind.
+   */
+  const previewRepair = async () => {
+    setPreviewing(true);
+    try {
+      const res = await leaveService.repairEntitlements(Number(year), {
+        leaveTypeId: leaveTypeId === ALL ? undefined : leaveTypeId,
+        employeeId: employeeId ?? undefined,
+        dryRun: true,
+      });
+      setRepairPreview(res);
+    } catch (e: any) {
+      toast({
+        title: 'Could not preview',
+        description: e?.message || 'The entitlement repair could not be previewed.',
+        variant: 'destructive',
+      });
+    } finally {
+      setPreviewing(false);
+    }
+  };
+
+  const applyRepair = async () => {
+    setApplying(true);
+    try {
+      const res = await leaveService.repairEntitlements(Number(year), {
+        leaveTypeId: leaveTypeId === ALL ? undefined : leaveTypeId,
+        employeeId: employeeId ?? undefined,
+      });
+      await queryClient.invalidateQueries({ queryKey: ['hr', 'leave-balances'] });
+      toast({
+        title: 'Entitlements repaired',
+        description:
+          `${res.balancesChanged} of ${res.balancesExamined} balance(s) brought into line for ${year}.` +
+          (res.changedWithCarryOverAlreadyRun > 0
+            ? ` ⚠ ${res.changedWithCarryOverAlreadyRun} already carried days into ${Number(year) + 1}` +
+              ' from the old figure — that carry-over was not revisited.'
+            : ''),
+      });
+      setRepairPreview(null);
+    } catch (e: any) {
+      toast({
+        title: 'Error',
+        description: e?.message || 'The entitlement repair failed.',
+        variant: 'destructive',
+      });
+    } finally {
+      setApplying(false);
+    }
+  };
+
   const rows = data ?? [];
 
   return (
@@ -191,20 +263,92 @@ export default function LeaveBalancesPage() {
             )}
             Recalculate
           </Button>
-          <Button
-            variant="outline"
-            onClick={() => setConfirmAll(true)}
-            disabled={recalculatingAll}
-          >
-            {recalculatingAll ? (
-              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            ) : (
-              <RefreshCw className="mr-2 h-4 w-4" />
-            )}
-            Recalculate everybody
-          </Button>
+          {canAdminister && (
+            <Button
+              variant="outline"
+              onClick={() => setConfirmAll(true)}
+              disabled={recalculatingAll}
+            >
+              {recalculatingAll ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Recalculate everybody
+            </Button>
+          )}
+          {canAdminister && (
+            <Button variant="outline" onClick={previewRepair} disabled={previewing}>
+              {previewing ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Wrench className="mr-2 h-4 w-4" />
+              )}
+              Repair entitlements
+            </Button>
+          )}
           </>
         }
+      />
+
+      {/*
+        The preview IS the decision. It names every row and both figures, because the alternative —
+        a confirmation that says "this will correct some entitlements" — asks somebody to authorise
+        a change they cannot see.
+      */}
+      <ConfirmationDialog
+        open={!!repairPreview}
+        onOpenChange={(open) => !open && setRepairPreview(null)}
+        title={`Repair entitlements for ${year}?`}
+        maxWidth="sm:max-w-2xl"
+        description={
+          repairPreview ? (
+            <span className="block space-y-3">
+              <span className="block">{repairPreview.notes[0]}</span>
+
+              {repairPreview.balancesChanged === 0 ? (
+                <span className="block font-medium">
+                  Every entitlement already matches the rulebook. There is nothing to apply.
+                </span>
+              ) : (
+                <>
+                  <span className="block">
+                    Each line is a stored entitlement that disagrees with what the rulebook resolves
+                    today — the sub-type cap, then the effective-dated allocation for that
+                    employee&apos;s staff level, then the leave type&apos;s default.
+                  </span>
+                  <span className="block max-h-64 overflow-y-auto rounded-md border p-3 text-xs">
+                    {repairPreview.notes.slice(1).map((n, i) => (
+                      <span key={i} className="block py-0.5">
+                        {n}
+                      </span>
+                    ))}
+                  </span>
+                </>
+              )}
+
+              {repairPreview.changedWithCarryOverAlreadyRun > 0 && (
+                <span className="block font-medium text-amber-700 dark:text-amber-300">
+                  ⚠ {repairPreview.changedWithCarryOverAlreadyRun} of these already carried days into{' '}
+                  {Number(year) + 1}, computed from the figure being replaced. This pass does not
+                  revisit a carry-over — re-running it is a decision of its own.
+                </span>
+              )}
+
+              {repairPreview.balancesFailed > 0 && (
+                <span className="block font-medium text-destructive">
+                  ⚠ {repairPreview.balancesFailed} balance(s) could not be resolved at all — usually
+                  an employee with no position, and therefore no staff level. They are listed above
+                  and will be skipped.
+                </span>
+              )}
+            </span>
+          ) : null
+        }
+        confirmText={`Apply to ${repairPreview?.balancesChanged ?? 0} balance(s)`}
+        confirmDisabled={!repairPreview || repairPreview.balancesChanged === 0}
+        isLoading={applying}
+        onConfirm={() => applyRepair()}
       />
 
       {/* Heavy, and it touches everybody — so it asks first. */}

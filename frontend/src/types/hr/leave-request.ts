@@ -502,6 +502,33 @@ export interface LeaveBulkRecalculationResult {
   notes: string[];
 }
 
+/**
+ * What an entitlement repair pass found, and what it changed (entitlement plan A3).
+ *
+ * ⚠ **Not the same kind of operation as the recalculation above**, which DERIVES counters from rows
+ * that exist and cannot restate anything. This one OVERWRITES a stored figure from configuration
+ * that may have moved since — which is why it has a dry run and that one does not.
+ */
+export interface LeaveEntitlementRepairResult {
+  year: number;
+  /** ⚠ True when NOTHING WAS WRITTEN. */
+  isDryRun: boolean;
+  /** Balances looked at. ⚠ Not the number changed. */
+  balancesExamined: number;
+  /** Balances whose stored entitlement disagreed with the rulebook. */
+  balancesChanged: number;
+  balancesAlreadyCorrect: number;
+  /** ⚠ Could not be resolved — a missing leave type, or an employee with no staff level. */
+  balancesFailed: number;
+  /**
+   * ⚠ Of the changed rows, how many already carried days into the next year. Those carry-overs came
+   * from the OLD figure and this pass does not revisit them.
+   */
+  changedWithCarryOverAlreadyRun: number;
+  /** A summary first, then one line per row it changed, naming both figures. */
+  notes: string[];
+}
+
 export interface LeaveYearEndResult {
   /**
    * How many balances the run LOOKED AT. ⚠ Not how many it changed.

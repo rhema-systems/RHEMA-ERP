@@ -1,8 +1,10 @@
 # HR Leave — Entitlement, Accrual and the Leave Year
 
-**Status:** 2026-09-18 — **NOTHING BUILT. No decision taken.** Every decision in § 3 is a
-recommendation awaiting the module owner, which is the difference between this plan and the two
-before it.
+**Status:** 2026-09-18 — **WAVE 1 BUILT AND VERIFIED.** `dev-harness/hr-leave` slice 10, **27
+assertions, green twice**; the whole suite re-run green afterwards, **454 across ten slices**. Waves
+2 and 3 are untouched and every decision they need (§ 3) is still a recommendation awaiting the
+module owner, which is the difference between this plan and the two before it. **D-3 was taken as
+recommended** and W1 was built on it.
 
 **Read [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) § 0 first** — it
 describes the code as it stands after G1–G5. This plan does not revisit anything that one closed.
@@ -11,8 +13,78 @@ describes the code as it stands after G1–G5. This plan does not revisit anythi
 
 ## 0. Progress
 
-Nothing. This section exists so that the slices in § 5 have somewhere to report, in the shape the
-two previous plans used.
+### Wave 1 — BUILT AND VERIFIED 2026-09-18
+
+**D-3 taken as recommended:** a stored entitlement may be re-derived, but only by an explicit pass,
+never as a side effect of the ordinary recalculation.
+
+No migration — every change is behaviour on columns that already exist.
+
+| Slice | What shipped |
+|---|---|
+| **W1a** | `CreateStandaloneAdjustmentAsync` resolves the entitlement engine instead of taking `DefaultDaysPerYear`. **`RepairEntitlementsAsync`** re-derives stored entitlements with a dry run, `POST /api/Leaves/balances/repair-entitlements`, Admin tier, and a **preview-then-apply** control on the balances screen |
+| **W1b** | `LeaveTypeService` refuses a second active accrual policy on create **and** on an edit that would move one; `LeaveEntitlementService` orders its policy selection deterministically for rows that predate the guard |
+| **W1c** | The register gained the **Unreachable** status, § 3.2b surveying leave's four child tables (38 settings), and a second methodological trap |
+
+**⚠ The preview is the decision, and that shaped the UI.** The repair dialog lists every row and both
+figures rather than asking somebody to authorise *"this will correct some entitlements"*. A
+confirmation for a change you cannot see is not a confirmation.
+
+**⚠ W1a did not need the seed reorder after all.** § 2.1 proposed swapping scenarios `020` and `021`
+so the allocations exist before the balances are opened. The repair pass makes that unnecessary and
+is better: the seeder can open balances in any order and put them right afterwards, which is also
+what a real tenant does on go-live day. **The demo database still needs one repair run** — see below.
+
+### What the harness found, and what it did not
+
+**Slice 10's three defects were all in the slice, not the product** — the kind only a machine
+driving the API finds:
+
+| | What was wrong |
+|---|---|
+| the fixture query | the table is **`EmployeePositions`**, not `Positions`. A table is named after its `DbSet<>` property, and `Position`'s is not its own name |
+| the actor | ⚠ **`admin` cannot post a leave adjustment.** `PerformedBy` is a required Employee foreign key stamped from the token and the admin account is not linked to an employee record, so it is refused by design. The HR desk is the right actor and is who loads opening balances in practice |
+| ⚠ the refusal's status | **A2's guard returned 500, not 400.** Neither accrual-policy endpoint caught `InvalidOperationException`, so the refusal — whose whole value is the sentence naming what to do instead — arrived as *"Something went wrong"*. Found by reading the controller **before** the run rather than after, and fixed in the same build |
+
+**⚠ The last one is the lesson.** A guard in a service is not a refusal until the controller has an
+arm for it. The service was right, the harness would have failed, and the product would have shipped
+a 500 where it meant to explain itself.
+
+### ⚠ What Wave 1 does NOT do, stated so nobody assumes it
+
+- **The demonstration database is still wrong, and it is now measured.** See below.
+- **A carry-over already run for a year is not revisited.** The pass counts those rows separately
+  and says so; re-running carry-over afterwards is a decision of its own.
+
+### ⚠ The demonstration database — 53 of 97 annual leave balances are wrong
+
+Verified 2026-09-18 by dry run and by direct query. ⚠ **The demo database is `ErpSystemDB_UAT`**, not
+the `ErpSystemDB` the harness drives — which is why the first dry run reported *0 of 142 to change*
+and briefly looked like good news. That database holds no demo leave data at all; every balance on it
+is a harness fixture.
+
+On the UAT database **every one of the 97 annual leave balances stores 21**, the leave type's
+default, because scenario `020` opened them by adjustment before scenario `021` created the
+allocations:
+
+| Staff level | Employees | Stored | The rulebook says | |
+|---|---|---|---|---|
+| Junior | **39** | 21 | **15** | ⚠ overstated by 6 days each |
+| Senior | 44 | 21 | 21 | correct by coincidence |
+| Management | **14** | 21 | **30** | ⚠ understated by 9 days each |
+
+**53 wrong, 44 right.** The leave guide instructs a demonstrator to read that figure aloud
+(chapter 13, step 2).
+
+**Fixing it is one press, on a database nothing here has touched:** point the API at
+`ErpSystemDB_UAT`, then Balances → **Repair entitlements** → preview → apply, as admin, per year.
+⚠ **Preview first and read the count** — 53 is the number to expect, and anything else means
+something about that database differs from this reading.
+
+### Waves 2 and 3 — not started
+
+⚠ **Do not start W2a without D-1.** It is the slice whose whole content is deciding what
+`ProRateOnJoin = false` should mean.
 
 ---
 
