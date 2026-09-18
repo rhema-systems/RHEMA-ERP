@@ -94,7 +94,7 @@ describe('accounting book settings', () => {
         expect(await screen.findByText('IFRS — IFRS Primary')).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'New accounting book' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Request transition' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Request lifecycle change' })).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'View details' }));
         await waitFor(() => expect(financeDataService.getAccountingBook).toHaveBeenCalledWith('book-primary'));
@@ -102,7 +102,7 @@ describe('accounting book settings', () => {
         expect(screen.getByText('Yes — structure locked')).toBeInTheDocument();
     });
 
-    it('separates manage and transition permissions and shows current C4 readiness', async () => {
+    it('directs an initializing book with incomplete evidence to readiness', async () => {
         permissions.add('Finance.AccountingBooks.Manage');
         permissions.add('Finance.AccountingBooks.Transitions.Request');
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([initializingBook]);
@@ -110,10 +110,23 @@ describe('accounting book settings', () => {
         render(<AccountingBooksSettingsPage />);
         expect(await screen.findByRole('button', { name: 'New accounting book' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Edit' })).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Request transition' }));
-        expect(await screen.findByText('Activation readiness required')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
+        expect(screen.getByText('About book activation')).toBeInTheDocument();
+        expect(screen.queryByText('Parallel posting remains disabled')).not.toBeInTheDocument();
+        expect(screen.getByRole('link', { name: 'Complete activation readiness' })).toHaveAttribute('href', '/finance/settings/accounting-books/book-local/readiness');
+        expect(screen.queryByRole('button', { name: 'Request Active' })).not.toBeInTheDocument();
         expect(financeDataService.requestAccountingBookTransition).not.toHaveBeenCalled();
+    });
+
+    it('names the next transition once activation evidence is ready', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Request');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook, activationReady: true, readinessMessage: 'Ready for activation.',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Request Active' }));
+        expect(screen.getByRole('combobox', { name: 'Target lifecycle state' })).toHaveTextContent('Active');
+        expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
     });
 
     it('creates a canonical full-book request without exposing lifecycle shortcuts', async () => {
@@ -200,7 +213,7 @@ describe('accounting book settings', () => {
         });
 
         render(<AccountingBooksSettingsPage />);
-        fireEvent.click(await screen.findByRole('button', { name: 'Request transition' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Request lifecycle change' }));
         fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Begin governed setup' } });
         fireEvent.click(screen.getByRole('button', { name: 'Submit for approval' }));
 
@@ -228,7 +241,7 @@ describe('accounting book settings', () => {
         expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
-        expect(screen.queryByRole('button', { name: 'Request transition' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Request Active' })).not.toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
         fireEvent.change(screen.getByLabelText('Checker reason'), { target: { value: 'Independent evidence reviewed' } });
