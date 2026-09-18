@@ -3,7 +3,7 @@
 **Status:** rewritten 2026-09-17 after waves A–E of
 [`HR-LEAVE-CLOSURE-PLAN.md`](HR-LEAVE-CLOSURE-PLAN.md); brought up to date 2026-09-18 after G1–G5 of
 [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md); **and again the same day
-after Wave 1 and Wave 2a/2e of
+after ALL THREE WAVES of
 [`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md).** It describes the
 module as it now stands, not as it was on any of those mornings. Where the demo database will not
 show what the code can do, that is said in the step rather than smoothed over.
@@ -15,7 +15,8 @@ show what the code can do, that is said in the step rather than smoothed over.
 > asks you to read that column aloud. Repairing it is five minutes, as admin, and it is now a button.
 >
 > The rest of what that build added is explained where it lives: **§1.3b** answers *"how does leave
-> work for somebody who just joined?"*, which this book could not answer before.
+> work for somebody who just joined?"*, which this book could not answer before — and, since Wave 3,
+> *"can our leave year run April to March?"*, which is now one setting in chapter 4b.
 
 > ### What the second build added, in one paragraph
 >
@@ -406,13 +407,23 @@ accrual policy per leave type rather than one per grade.
 It anchors **three** things and nothing else: when somebody may first take a leave type, when
 accrual starts, and which day of the month accrual ticks over.
 
-**It does not give anybody their own leave year.** There is no anniversary-based entitlement here:
+**It does not give anybody their own leave year**, and that is still true — there is no
+anniversary-based entitlement here. What changed on 2026-09-18 is that the *company's* leave year no
+longer has to be the calendar year:
 
 | | |
 |---|---|
-| **The leave year is the calendar year** | 1 January to 31 December, for everybody |
-| **Carry-over expiry and the forfeiture cut-off** | measured from **1 January**, so *"expires after 3 months"* means 31 March for every employee |
-| **A July–June leave year** | not available. The tenant does have a `FiscalYearStartMonth`, and **leave ignores it completely** — only recruitment's budget check reads it |
+| **The leave year starts where the company says** | one setting, chapter 4b. **January by default**, which is what every tenant has |
+| **It is named after the calendar year it STARTS in** | with an April start, March 2028 belongs to leave year **2027** |
+| **Carry-over expiry and the forfeiture cut-off** | measured from the **start of the leave year**, so *"expires after 3 months"* means the end of the third month of that year — 31 March only when the year starts in January |
+| **A July–June leave year** | ✅ available. ⚠ It is **not** the tenant's `FiscalYearStartMonth` — the finance year and the leave year are separate settings, because plenty of organisations run them apart |
+| **An anniversary leave year** — each employee on their own | ⬜ still not available, and deliberately so |
+
+> ⚠ **The one that trips people: changing it is a setup-time decision.** Once the company holds any
+> leave, the settings screen refuses to move it and says what already exists. Moving the boundary
+> changes which leave year some dates fall in while the records already written keep their labels —
+> and of the figures that disturbs, **carry-over already run is the one nothing can recompute**,
+> because it was worked out against boundaries that would no longer exist.
 
 ⚠ **Entitlement is not pro-rated by default** — a December joiner's Entitled column reads the
 **full** annual figure. Accrual limits what they can *book*, which imitates pro-rating from the
@@ -433,14 +444,24 @@ about it.
 > So it is for leave that is **granted** — no accrual policy, or one set to full grant. That is the
 > mirror of *Pro-rate on exit*, which applies to incremental accrual only.
 
-> **The honest sentence, if a client asks for an anniversary leave year:**
+> **The honest sentence, if a client asks for a July–June leave year:**
 >
-> "Not today. Everything that depends on *when you joined* — when you qualify, when you start
-> earning — is already there. What runs on the calendar is the **year itself**, and moving that is a
-> change to what a leave year means, not a setting. It is written up rather than hand-waved."
+> "Yes — it is one setting, and we would set it when we set your company up. What it changes is
+> where the year turns: entitlement, carry-over expiry and the forfeiture cut-off all count from
+> that month rather than from January."
 
-Both limits, and what it would cost to lift them, are in
-[`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) § 2.3.
+> **And if they ask for an ANNIVERSARY leave year — everybody on their own hire date:**
+>
+> "Not today, and I would rather say so than imply it. Everything that depends on *when you joined*
+> — when you qualify, when you start earning — is already there. What we have made configurable is
+> where the **company's** year turns, one year for everybody. Giving each person their own is a
+> change to what a leave year IS rather than a setting on top of it, and it is written up with what
+> it would cost rather than hand-waved."
+
+⚠ **Half-day leave is the other thing that is not available** — a leave day is a whole day, and the
+count of chargeable dates is what a request costs. Both that and the anniversary year are in
+[`HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md`](HR-LEAVE-ENTITLEMENT-AND-YEAR-PLAN.md) § 2.3, with what
+each would cost.
 
 ### 1.4 ⚠ The two availability figures — and why you can now see both
 
@@ -667,7 +688,7 @@ answers most configuration questions on the spot:
 
 | Level | Holds | Screen |
 |---|---|---|
-| **The tenant** — `CompanyHrPolicySettings` | in-service encashment on or off, the encashment divisor, the five reminder windows, the settlement divisor | **chapter 4b**, admin only |
+| **The tenant** — `CompanyHrPolicySettings` | **when the leave year begins**, in-service encashment on or off, the encashment divisor, the five reminder windows, the settlement divisor | **chapter 4b**, admin only |
 | **The leave type** — `LeaveTypes` | days a year, notice, carry-over, weekends and holidays, the encashment rate and its allowances, **excuse duty and the board threshold** | chapter 4 |
 | **The sub-type and the allocation** | the annual cap for one variant; days per staff level, effective-dated | chapter 4's tabs |
 
@@ -1392,13 +1413,31 @@ Three of its cards belong to leave, and they are the reason this chapter exists.
 > until this build, most of what is on this screen was not a screen at all. It was numbers in the
 > source code."
 
-### 👁 On the page — the three cards that belong to leave
+### 👁 On the page — the four cards that belong to leave
 
-**1 — Disciplinary & settlement clocks → *Final settlement — days per year*.** Default **365**.
+**1 — Leave — the leave year → *Leave year starts*.** Default **January**.
+
+This one comes first because the other leave settings are measured from it. A leave year is
+**named after the calendar year it starts in** — with an April start, March 2028 belongs to leave
+year 2027 — and entitlement, carry-over expiry and the forfeiture cut-off all count from this month.
+
+> ⚠ **Set it during setup. It cannot be changed later**, and the screen says so in amber. Once the
+> company holds any leave, the save is refused and names what already exists — *"…already holds 42
+> leave request(s) and 97 leave balance(s)"*.
+>
+> Not out of caution: moving the boundary changes which leave year some dates fall in while the
+> records already written keep their labels. Most figures re-derive; **a carry-over that has already
+> run does not**, because it was computed against boundaries that would no longer exist.
+
+⚠ **It is not the *Fiscal year starts* field further down the same screen.** The finance year and
+the leave year are separate settings on purpose — plenty of organisations run them apart, and
+coupling them is invisible until somebody wants a July leave year on a January fiscal year.
+
+**2 — Disciplinary & settlement clocks → *Final settlement — days per year*.** Default **365**.
 
 > *This one moves money. A daily rate is monthly pay × 12 ÷ this.*
 
-**2 — Leave — encashment.** A switch and a number, and a worked example between them:
+**3 — Leave — encashment.** A switch and a number, and a worked example between them:
 
 | Control | Default | What it does |
 |---|---|---|
@@ -1416,7 +1455,7 @@ On a salary of 6,000.00 a month, the two bases in force right now:
 The same day of leave is worth 38% more under one basis than the other.
 ```
 
-**3 — Leave — reminder cadence.** The five windows chapter 18 sweeps on:
+**4 — Leave — reminder cadence.** The five windows chapter 18 sweeps on:
 
 | Field | Default |
 |---|---|
@@ -1431,7 +1470,18 @@ value is in force on the next reminder run, the next payout and the next confirm
 
 ### ▶ Walk it
 
-**1 — Land on it and scroll to *Leave — encashment*. Read the worked example aloud.**
+**1 — Start at the top card, *Leave — the leave year*.**
+
+> "Before anything else on this screen: when does your leave year begin? For most of our clients
+> that is January, and that is what this database has. For a client whose leave year runs April to
+> March, it is this one field — and everything else in leave follows it. Carry-over that expires
+> after three months expires at the end of June, not the end of March.
+>
+> Notice the warning. This is a setup-time decision, and the system enforces that rather than
+> trusting anybody to remember: once there is leave on record, it refuses to move and tells you what
+> is already filed under the current year."
+
+**2 — Scroll to *Leave — encashment*. Read the worked example aloud.**
 
 > "Two numbers, on one screen, on the same salary. A day of unused leave cashed in while you work
 > here is worth two hundred and seventy-three cedis. A day of the same leave paid out when you
@@ -1443,19 +1493,19 @@ value is in force on the next reminder run, the next payout and the next confirm
 > screens in different modules, so **no client could see the gap until it turned up in somebody's
 > payout**. Now you meet it here, before anybody is paid."
 
-**2 — Change *working days per month* from 22 to 30. Do not save.** The example recomputes:
+**3 — Change *working days per month* from 22 to 30. Do not save.** The example recomputes:
 `200.00`, and the gap sentence shrinks to `1%`.
 
 > "And at thirty days a month the two agree almost exactly. If that is your policy, this is where
 > you say so — one field, no release, and every future payout follows it."
 
-**3 — Set it back to 22. Still do not save.**
+**4 — Set it back to 22. Still do not save.**
 
 ⚠ **CAREFUL — if you do save, that is a real change to a real setting** and it affects every
 encashment computed afterwards. It does **not** rewrite anything already paid: each payout stores
 the sentence that produced it, which chapter 15 shows. Chapter 21 item 12 puts it back.
 
-**4 — Point at the in-service switch and tell the truth about it.**
+**5 — Point at the in-service switch and tell the truth about it.**
 
 > "Here is a requirements conflict, settled. The specification says leave is encashed *only on
 > exit, no other route*. The product shipped an in-service encashment screen anyway, and the seed
@@ -1467,7 +1517,7 @@ the sentence that produced it, which chapter 15 shows. Chapter 21 item 12 puts i
 > screen and it would be strange to make it vanish. Either way it is now a decision somebody took,
 > rather than an accident of which code path ran."
 
-**5 — Scroll to *Leave — reminder cadence* and say the sentence that justifies the whole card.**
+**6 — Scroll to *Leave — reminder cadence* and say the sentence that justifies the whole card.**
 
 > "Seven days, two days, five days, thirty days, September. Those five numbers decide how
 > persistently this system chases people about their leave — and until this build every one of them
@@ -3271,6 +3321,10 @@ decides how much of it may travel. Nothing about the setting lets anybody exceed
 carry-over run in February for the year just gone must not credit somebody with two months of the
 year they are now in, and a run for the *current* year must not count months that have not happened.
 
+⚠ **Both cut-offs are counted from the START OF THE LEAVE YEAR, not from 1 January.** Carry-over
+expiry of *3 months* means the end of the third month of that leave year, and the forfeiture cut-off
+the same. On a January leave year those are the same thing; on an April one they are 30 June.
+
 **`PerformedBy` on a forfeiture is stamped from the token.** It used to be `Guid.Empty`, which no
 employee has — so the forfeiture endpoint had never once succeeded, and its only test evidence was
 a 403 check, so the insert had never run.
@@ -3741,6 +3795,20 @@ nobody promises a stakeholder a button.
 | # | Where | Finding | Severity |
 |---|---|---|---|
 | **L-30** | §4.4.2 | `LeaveType.IsPaid` produces no deduction. ⚠ **Payroll's, not HR's.** HR records the absence, the days and the fact that the type is unpaid; what that is worth is payroll's arithmetic, and it is handed off in writing | medium *(not ours)* |
+
+### ✅ Wave 3 — the leave year, added 2026-09-18
+
+**The calendar year was the last assumption in the module**, and it is now a setting: *Leave year
+starts*, chapter 4b, January by default. Entitlement, carry-over expiry and the forfeiture cut-off
+all count from it.
+
+⚠ **Two things about it are worth having ready**, because both come up in the same conversation:
+
+- **changing it is a setup-time decision**, enforced rather than advised — once the company holds
+  leave, the save is refused and names what exists. A carry-over already run cannot be recomputed
+  against boundaries that no longer exist, so the alternative to refusing is a half-corrected ledger;
+- **an ANNIVERSARY leave year is still not available** — one year for the company, not one per
+  employee. §1.3b has the sentence to say.
 
 ### ⚠ And nine more, found after this walk, in a plan of their own
 

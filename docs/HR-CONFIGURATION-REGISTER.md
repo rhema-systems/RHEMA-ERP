@@ -3,7 +3,7 @@
 **Started 2026-09-17** (leave residue plan, slices G2/G3), extended 2026-09-18 (G6), extended again
 2026-09-18 (entitlement plan W1c).
 
-**Surveyed: all of `CompanyHrPolicySettings` (46), all of `LeaveType` (26 + 2 added 2026-09-18), and
+**Surveyed: all of `CompanyHrPolicySettings` (46 + 1 added 2026-09-18), all of `LeaveType` (26 + 2), and
 all four of leave's CHILD tables (38).** Three ghosts found, all in the first — **and one setting that is none of the
 four statuses**, which is why there are now five. The per-module settings for attendance, travel,
 appraisal, company schedule and the rest are still to do — see § 4, which now says what each one is
@@ -131,6 +131,30 @@ never be restored. Both fixed in G5a and asserted in slice 9. Recorded here beca
 is about what decides money, and these rows do — they are just not spelled as a setting.
 
 ---
+
+## 1.5 Leave — the leave year `CompanyHrPolicySettings`
+
+**Added 2026-09-18** (entitlement plan C1). The last assumption in the module to become a setting.
+
+| Setting | Default | Status | Proof — slice 13, both positions |
+|---|---|---|---|
+| `LeaveYearStartMonth` | **1** (January) | **Enforced** | a plan dated **10 February** files under leave year **2025** with an April start and **2026** with January. The same date, two answers |
+
+⚠ **The two-position test is the ONLY thing that could have proved this one.** Thirty-eight sites
+were routed through a `LeaveYear` helper while it still answered "January", and the whole suite
+staying green proved the refactor changed nothing — it could not prove the sites would follow a
+different answer. Slice 13 moves the boundary and asks. A survey tool would have called the setting
+*referenced* from the moment the helper read it, which is exactly the **Unreachable** trap in § 0
+wearing different clothes.
+
+⚠ **Change-once-at-setup, and the refusal is enforced** (decision D-9): once the tenant holds any
+leave request or balance, the save is refused and names what exists. Of the figures a moved boundary
+disturbs, only `CarriedOverDays` cannot be re-derived — it was computed by a year-end run against
+boundaries that would no longer exist.
+
+⚠ **It is NOT `FiscalYearStartMonth`.** Separate settings on purpose: plenty of organisations run
+the finance year and the leave year apart, and the coupling would be invisible until one of them
+did.
 
 ## 2. Leave — reminder cadence `CompanyHrPolicySettings`
 
