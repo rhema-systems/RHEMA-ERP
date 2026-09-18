@@ -1,9 +1,11 @@
 # HR Leave — Entitlement, Accrual and the Leave Year
 
-**Status:** 2026-09-18 — **WAVE 1 COMPLETE. WAVE 2 HALF COMPLETE** (W2a and W2e; W2b/c/d wait on a
-migration). `dev-harness/hr-leave` slices 10 and 11, **27 + 18 assertions, each green twice**; the
-whole suite green twice afterwards, **472 across eleven slices**. **D-1, D-3 and D-6 taken as
-recommended**; D-2, D-4 and D-5 are still open, and each blocks exactly one remaining slice.
+**Status:** 2026-09-18 — **WAVE 1 COMPLETE. WAVE 2: W2a, W2d and W2e done; W2b and W2c wait on a
+scaffolded migration.** `dev-harness/hr-leave` slices 10 and 11, **27 + 27 assertions, each green
+twice**; the whole suite green twice afterwards, **481 across eleven slices**.
+
+**⚠ All eight decisions are now taken, all as recommended.** D-5's answer changed the work rather
+than authorising it — see § 2.2 B4.
 
 **Read [`HR-LEAVE-RESIDUE-CLOSURE-PLAN.md`](HR-LEAVE-RESIDUE-CLOSURE-PLAN.md) § 0 first** — it
 describes the code as it stands after G1–G5. This plan does not revisit anything that one closed.
@@ -108,11 +110,25 @@ not yet eligible, **both positions returned 0**, and *"the two positions disagre
 on two zeroes. The exact failure the slice exists to prevent, inside the slice. It now derives both
 figures from today's date and **aborts before May** rather than report a green it cannot justify.
 
-### Wave 3 — not started
+### W2d — BUILT AND VERIFIED 2026-09-18
 
-⚠ **W2b, W2c and W2d each need a scaffolded migration and an open decision** — D-2, D-4 and D-5
-respectively. W2c must not be built before W2b: pro-rating the grant is the other way to fix the
-carry-over basis, and a client turning both on must not have the reduction applied twice.
+**D-5 taken as rescoped.** No migration. Slice 11 gained nine assertions proving the derived rate
+varies by staff level from one policy, **and** that setting an explicit rate defeats it in both
+directions.
+
+⚠ **The demo seed is corrected for FRESH databases only.** `ErpSystemDB_UAT` still carries the flat
+1.75 and needs one field changed by hand — Annual Leave → Accrual → rate `0`. The guide's § 2.3b
+says so and says which way the figures will move: a Junior's accrued goes **down**, a Manager's
+**up**, and both are corrections.
+
+### Still to build — W2b and W2c, then Wave 3
+
+⚠ **Each needs a scaffolded migration**, which is why they are the two left. **D-2 and D-4 are
+taken** — both per-leave-type settings whose defaults preserve today's behaviour exactly.
+
+⚠ **W2c must not be built before W2b.** Pro-rating the grant is the other way to fix the carry-over
+basis, and a client turning both on must not have the reduction applied twice — the guard for that
+belongs in W2c, where both settings exist.
 
 ---
 
@@ -278,13 +294,36 @@ An employer whose rule is *"first-year entitlement is days × remaining months �
 that anywhere. They can approximate the *effect* with accrual and still have the wrong number in the
 Entitled column, on the balances screen, in the CSV export and in the carry-over run.
 
-#### B4 — the accrual rate cannot vary by staff level
+#### B4 — ⚠ the accrual rate CAN vary by staff level, and nothing said so
 
-One accrual policy per leave type (A2), and it carries a flat `AccrualRate`. But
-`LeaveCategoryAllocation` **already varies days per year by `StaffLevelId`, with effective dating**.
-So the product can say *"managers get 30 days and juniors 15"* and cannot say *"managers accrue 2.5 a
-month and juniors 1.25"* — which is the same policy expressed the other way round, and the second
-half of what an organisation that configured the first half will expect.
+**This entry was wrong when written, and the correction is the most useful thing in this plan.**
+
+The original reading was that a flat `AccrualRate` made one rate serve every grade. It does — *when
+it is set*. The line that matters is the fallback:
+
+```
+ratePerPeriod = AccrualRate > 0 ? AccrualRate : annual / periodsPerYear
+```
+
+`annual` is the entitlement engine's answer **for that employee**, which is their staff-level
+allocation. So **a rate of zero derives the rate per person**: a junior on 15 days accrues 1.25 a
+month and a manager on 30 accrues 2.5, from one policy.
+
+**Proved 2026-09-18** against two employees on different levels, one policy, rate 0:
+
+| Staff level | Entitled | Accrued to date |
+|---|---|---|
+| lower | 12 | **8** — eight months at 12 ÷ 12 |
+| higher | 36 | **24** — eight months at 36 ÷ 12 |
+
+⚠ **So the defect was never the model. It was that nothing told anybody**, and the trigger is the
+digit `0`, which reads as *"accrues nothing"* — the opposite of what it does. Nobody discovers that
+by looking at the form.
+
+⚠ **And the demo seed had it wrong**, which is the proof that it is undiscoverable: `accrualRate:
+1.75`, flat, set before the staff-level allocations existed and never revisited. A junior entitled
+to 15 reached their cap in September; a manager entitled to 30 could never pass 21, because
+1.75 × 12 is 21. **Wrong in both directions at once, and nothing errored.**
 
 #### B5 — `AccrualFrequency.PerPayPeriod` is treated as monthly
 
@@ -378,7 +417,7 @@ accept, reject or replace. **No slice in § 5 should start before the decision i
 | **D-2** | Carry-over and forfeiture: granted or earned? | **A per-leave-type setting, defaulting to GRANTED** | Granted is today's behaviour. A default that silently reduces people's carried days on the next year-end run is worse than an explicit setting — the same reasoning that gave `AllowInServiceEncashment` the conservative default and the demo tenant an explicit seed line |
 | **D-3** | May a stored `EntitledDays` be re-derived? | **Yes, but only on an explicit repair pass** — a new admin action, never as a side effect of the ordinary recalculation | Re-deriving on every recalculation would restate history the moment somebody edits an allocation with a retrospective effective date. An explicit pass is auditable and can be previewed |
 | **D-4** | First-year entitlement pro-rating | **A per-leave-type setting, defaulting to OFF** (no pro-rating), with the pro-rated figure stored on the balance and the basis stated on screen | Off is today's behaviour. ⚠ It interacts with D-2: pro-rating the grant is the other way to fix B2, and a client that turns both on must not have the reduction applied twice |
-| **D-5** | Accrual by staff level | **`StaffLevelId` on `LeaveAccrualPolicy`, nullable, most-specific wins** | Mirrors `LeaveCategoryAllocation` exactly, which is the control an administrator will already have used. A null level is the fallback policy |
+| **D-5** | Accrual by staff level | ⚠ **Rescoped by the finding above, then taken: surface the existing behaviour and fix the demo seed.** No column, no migration | A second mechanism for a rule the product already expresses is how two mechanisms drift. What was missing was that anybody could tell |
 | **D-6** | `PerPayPeriod` | **Remove it from the picker and refuse it at the API**, leaving the enum value in place for stored rows | The pay cycle is payroll's fact. Implementing it here creates a second rulebook; leaving it visible is a claim the product cannot honour |
 | **D-7** | Leave year | **Build the fiscal mode. Do not build the anniversary mode until a client asks**, and record that in the register rather than leaving it unwritten | § 2.3 — they are different data models. Building the second speculatively would change what `Year` means for every existing tenant |
 | **D-8** | Half-day leave | **Defer.** Record it as a known limit in the guide and the register | It is a data-model change, not a setting, and no client has asked. ⚠ It should not be smuggled in as part of any slice below |
@@ -435,7 +474,7 @@ demonstrator is instructed to read that number aloud.
 | **W2a** | **B1 — make `ProRateOnJoin` bind.** ⚠ The acceptance test is Rule 2's sharpened form: the same fixture, two positions, **two stated accrual figures** | **S** | needs D-1. No migration |
 | **W2b** | **B2 — the carry-over basis**, per leave type, defaulting to granted. Both year-end jobs read it; the dry run states which basis it used | **M** | needs D-2. Migration |
 | **W2c** | **B3 — first-year entitlement pro-rating**, per leave type. ⚠ Must not double-count with W2b | **M** | needs D-4 **and** D-2. Migration |
-| **W2d** | **B4 — accrual by staff level.** Depends on W1b, or it adds rows to a selection that is still arbitrary | **M** | needs D-5. Migration |
+| **W2d** | **B4 — surface the derived rate.** ⚠ **Rescoped from "add a column" to "say what the field does"**: the table reads *derived from entitlement* instead of `0`, the form explains the consequence in both positions, and the demo seed's flat 1.75 becomes 0. **DONE 2026-09-18** | **S** | no migration |
 | **W2e** | **B5 — retire `PerPayPeriod`** from the picker and the API | **S** | needs D-6. No migration |
 
 ### Wave 3 — the leave year

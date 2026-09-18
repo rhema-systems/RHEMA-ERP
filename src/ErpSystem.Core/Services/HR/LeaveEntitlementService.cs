@@ -201,6 +201,20 @@ public class LeaveEntitlementService : ILeaveEntitlementService
             : yearStart;
 
         var periodsPerYear = PeriodsPerYear(policy.Frequency);
+
+        // ⚠ Entitlement plan B4, and it is the least discoverable useful behaviour in this service.
+        //
+        // A rate of ZERO does not mean "accrues nothing". It means the rate is DERIVED from this
+        // employee's own annual entitlement — which came from the staff-level allocation — so one
+        // policy makes a junior on 15 days accrue 1.25 a month and a manager on 30 accrue 2.5.
+        // **That is how an accrual rate varies by staff level**, and nothing said so anywhere until
+        // the tab was made to explain it.
+        //
+        // ⚠ Setting an explicit rate DEFEATS it, and the failure is quiet in both directions:
+        // somebody entitled to less than the rate accumulates to reaches their cap early (the
+        // Math.Min below), and somebody entitled to more never reaches their full entitlement at
+        // all. The demo seed carried a flat 1.75 against allocations of 15, 21 and 30 for exactly
+        // that reason — it predated the allocations.
         var ratePerPeriod = policy.AccrualRate > 0 ? policy.AccrualRate : annual / periodsPerYear;
 
         var completedPeriods = CompletedPeriods(accrualStart, effectiveAsOf, policy.Frequency);

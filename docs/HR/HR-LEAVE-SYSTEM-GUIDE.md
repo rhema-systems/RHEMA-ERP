@@ -379,7 +379,20 @@ Junior grade, hired **1 May**, on the demo configuration:
 | **Day one** | cannot request it. Refused on service until 1 May next year, and **accrues nothing** | **all 12 days**, immediately — full grant, no service bar | **the full entitlement**, immediately |
 | **Month 6** | still nothing | unchanged | unchanged |
 | **1 May, year two** | the gate opens and accrual starts | | |
-| **31 December, year two** | **14 days accrued** of 15 — eight completed months at 1.75 | | |
+| **31 December, year two** | **10 days accrued** of 15 — eight completed months at 1.25 | | |
+
+⚠ **Where 1.25 comes from is worth one sentence, because it is the least obvious useful thing in
+the module.** The annual leave policy carries an accrual rate of **0** — which does *not* mean
+nothing accrues. It means the rate is **derived from each employee's own entitlement**: 15 days over
+twelve months is 1.25 a month for a Junior, and a Manager entitled to 30 accrues 2.5 from the very
+same policy. **That is how an accrual rate varies by staff level**, and it is why there is one
+accrual policy per leave type rather than one per grade.
+
+> ⚠ **Setting an explicit rate switches that off, and it fails quietly both ways.** This database
+> carried a flat **1.75** until 2026-09-18 — left over from before the staff-level allocations
+> existed. A Junior entitled to 15 reached their cap by September; a Manager entitled to 30 could
+> never get past 21, because 1.75 × 12 is 21. Nothing errored. The figures were simply wrong in
+> opposite directions, and the screen showed the accrual working.
 
 > **Say this if somebody asks why sick leave is different:**
 >
@@ -754,6 +767,29 @@ presses the button.**
 chapter 6's balance strip quotes the same arithmetic. And ⚠ **it is a real write** — chapter 21
 item 17.
 
+#### And while you are there — the accrual rate
+
+**Same cause, second symptom.** Annual leave's accrual policy on this database carries a flat rate
+of **1.75 a day per month**, set before the staff-level allocations existed. It overrides the
+per-employee derivation described in §1.3b, and it is wrong in both directions at once:
+
+| Grade | Entitled | At 1.75 flat | What should happen |
+|---|---|---|---|
+| Junior | 15 | reaches the cap in **September** and stops | 1.25 a month, reaching 15 in December |
+| Management | 30 | **never exceeds 21** — 1.75 × 12 | 2.5 a month, reaching 30 in December |
+
+**One field, as `hr.head`:** `/administration/hr/leave-types` → **Annual Leave** → **Accrual** tab →
+edit the policy → set **Accrual rate** to **0** → Save. The form will tell you what 0 means before
+you save it.
+
+⚠ **Expect the Accrued and *Can take now* columns to MOVE**, and know which way before somebody
+asks. A Junior's accrued figure goes **down** (they were accruing faster than their entitlement
+justified); a Manager's goes **up**. Both are corrections, and the balances screen will show the new
+arithmetic immediately because accrual is computed on every read and never stored.
+
+⚠ **Fresh databases do not need this** — the seeder was corrected on 2026-09-18. It is only the
+databases built before then.
+
 > **If somebody asks about it in the room, the honest answer is a good one:**
 >
 > "Entitlement is resolved once and stored, deliberately. That means a rulebook change does not
@@ -899,6 +935,7 @@ People away in the current month (calendar)       : ____________
 [ ] 2.2  anchor employee, manager and reliever written down
 [ ] 2.3  the seven balance figures read off and written in
 [ ] 2.3b Entitled repaired as admin — the preview said 53, and a Junior now reads 15
+[ ] 2.3b Annual Leave's accrual rate set to 0, and the Accrued column moved as expected
 [ ] 2.4  the two-stage approval rehearsed, attendance days seen, rehearsal cancelled
 [ ] 2.5  Window C (admin) open on /hr/leave/year-end, or chapter 17 cut
 [ ] 2.6a one reminder sweep run, so chapter 18 has a log to show
@@ -1047,7 +1084,7 @@ button, and a row menu with **Edit** and **Remove**:
 | **Sub-types** | named variants | **Max days** — now an *annual* cap, enforced per request |
 | **Allocations** | days per staff level | **Effective from / to** — this is how a policy change is dated rather than overwritten |
 | **Eligibility** | who may take it | the **gender qualifier**, which ANDs onto an org-scoped rule |
-| **Accrual** | how entitlement builds | **Frequency**, **Mode**, and the two pro-rate switches. ⚠ **One active policy per leave type**, enforced — see below |
+| **Accrual** | how entitlement builds | **Frequency**, **Mode**, the two pro-rate switches, and **Rate** — where **0 means *derive it from each employee's entitlement***. ⚠ **One active policy per leave type**, enforced — see below |
 
 ⚠ **Remove is `HR.Leave.Admin` on all four tabs and is hidden from `hr.head`.** Add and Edit are
 `HR.Leave.Write` and are available. So an HR officer can add and correct configuration but cannot
