@@ -228,10 +228,10 @@ export interface AccountingBookInitialization {
     sourceAccountingBookId?: string | null; sourceAccountingBookCode?: string | null;
     idempotencyKey: string; reason: string; totalDebits: number; totalCredits: number;
     requiredAccountCount: number; coveredAccountCount: number; isBalanced: boolean; isCoverageComplete: boolean;
-    evidenceFingerprint: string; reconciliationFingerprint: string; preparedByUserId: string; preparedAtUtc: string;
-    approvedByUserId?: string | null; approvedAtUtc?: string | null; rowVersion: string;
-    rejectedByUserId?: string | null; rejectedAtUtc?: string | null;
-    decidedByUserId?: string | null; decidedAtUtc?: string | null; decisionReason?: string | null;
+    evidenceFingerprint: string; reconciliationFingerprint: string; preparedByUserId: string; preparedByName?: string | null; preparedAtUtc: string;
+    approvedByUserId?: string | null; approvedByName?: string | null; approvedAtUtc?: string | null; rowVersion: string;
+    rejectedByUserId?: string | null; rejectedByName?: string | null; rejectedAtUtc?: string | null;
+    decidedByUserId?: string | null; decidedByName?: string | null; decidedAtUtc?: string | null; decisionReason?: string | null;
     lines: AccountingBookInitializationLine[];
 }
 export interface AccountingBookInitializationPreparationLine {

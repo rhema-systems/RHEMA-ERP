@@ -256,6 +256,34 @@ public sealed class AccountingBookPeriodInitializationC4Tests
     }
 
     [Fact]
+    public async Task Initialization_DecisionDtoResolvesTenantUserDisplayNames()
+    {
+        await using var db = Context();
+        var state = Seed(db);
+        var maker = Guid.NewGuid();
+        var checker = Guid.NewGuid();
+        db.Users.AddRange(
+            new ApplicationUser { Id = maker, TenantId = state.TenantId, UserName = "opening.maker", NormalizedUserName = "OPENING.MAKER", FirstName = "Kwame", LastName = "Mensah" },
+            new ApplicationUser { Id = checker, TenantId = state.TenantId, UserName = "financial.controller", NormalizedUserName = "FINANCIAL.CONTROLLER", FirstName = "Abena", LastName = "Dapaah" });
+        await db.SaveChangesAsync();
+
+        var makerService = InitializationService(db, state.TenantId, maker);
+        await makerService.ConfigureAsync(state.Book.Id, Independent(state, "named-decision", 0m));
+        await makerService.SubmitAsync(state.Book.Id);
+        var entity = db.AccountingBookInitializations.Single();
+        entity.RowVersion = [8];
+        await db.SaveChangesAsync();
+
+        var checkerService = InitializationService(db, state.TenantId, checker);
+        var approved = await checkerService.ApproveAsync(state.Book.Id,
+            new DecideAccountingBookInitializationDto { Reason = "Evidence independently reviewed", RowVersion = Convert.ToBase64String([8]) });
+
+        approved.DecidedByName.Should().Be("Abena Dapaah");
+        approved.ApprovedByName.Should().Be("Abena Dapaah");
+        (await checkerService.GetAsync(state.Book.Id))!.DecidedByName.Should().Be("Abena Dapaah");
+    }
+
+    [Fact]
     public async Task ActivationReadiness_RequiresApprovedInitializationAndExactFirstPostingPeriod()
     {
         await using var db = Context();

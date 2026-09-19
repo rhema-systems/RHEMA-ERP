@@ -160,11 +160,14 @@ describe('accounting book C4 readiness', () => {
             reason: 'reason', totalDebits: 0, totalCredits: 0, requiredAccountCount: 1, coveredAccountCount: 1,
             isBalanced: true, isCoverageComplete: true, evidenceFingerprint: 'A'.repeat(64),
             reconciliationFingerprint: 'B'.repeat(64), preparedByUserId: 'maker', preparedAtUtc: '2026-01-01',
-            rejectedByUserId: 'checker', rejectedAtUtc: '2026-01-02', decidedByUserId: 'checker',
+            rejectedByUserId: 'checker', rejectedByName: 'Abena Dapaah', rejectedAtUtc: '2026-01-02', decidedByUserId: 'checker',
+            decidedByName: 'Abena Dapaah',
             decidedAtUtc: '2026-01-02', decisionReason: 'Opening evidence did not reconcile', rowVersion: 'AQ==', lines: [],
         });
         render(<AccountingBookReadinessPage />);
-        expect(await screen.findByText(/Rejected by checker — Opening evidence did not reconcile/)).toBeInTheDocument();
-        expect(screen.queryByText(/Approved by checker/)).not.toBeInTheDocument();
+        expect(await screen.findByText(/Rejected by Abena Dapaah/)).toBeInTheDocument();
+        expect(screen.getByText('Reason: Opening evidence did not reconcile')).toBeInTheDocument();
+        expect(screen.queryByText(/Approved by Abena Dapaah/)).not.toBeInTheDocument();
+        expect(screen.getByText(/A system-generated SHA-256 checksum/)).toBeInTheDocument();
     });
 });

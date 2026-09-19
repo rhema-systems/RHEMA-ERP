@@ -95,12 +95,16 @@ public sealed class AccountingBookInitializationDto
     public string EvidenceFingerprint { get; set; } = string.Empty;
     public string ReconciliationFingerprint { get; set; } = string.Empty;
     public Guid PreparedByUserId { get; set; }
+    public string? PreparedByName { get; set; }
     public DateTime PreparedAtUtc { get; set; }
     public Guid? ApprovedByUserId { get; set; }
+    public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }
     public Guid? RejectedByUserId { get; set; }
+    public string? RejectedByName { get; set; }
     public DateTime? RejectedAtUtc { get; set; }
     public Guid? DecidedByUserId { get; set; }
+    public string? DecidedByName { get; set; }
     public DateTime? DecidedAtUtc { get; set; }
     public string? DecisionReason { get; set; }
     public string RowVersion { get; set; } = string.Empty;

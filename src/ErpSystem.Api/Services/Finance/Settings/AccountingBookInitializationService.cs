@@ -34,7 +34,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         await RequireBookAsync(accountingBookId, cancellationToken);
         var entity = await Query().AsNoTracking().Where(item => item.AccountingBookId == accountingBookId)
             .OrderByDescending(item => item.Version).FirstOrDefaultAsync(cancellationToken);
-        return entity == null ? null : Map(entity);
+        return entity == null ? null : await MapAsync(entity, cancellationToken);
     }
 
     public async Task<AccountingBookInitializationPreparationDto> PrepareAsync(Guid accountingBookId, string mode, DateTime cutoffDate,
@@ -99,7 +99,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             {
                 if (byKey.AccountingBookId != book.Id || byKey.EvidenceFingerprint != prepared.EvidenceFingerprint || byKey.ReconciliationFingerprint != prepared.ReconciliationFingerprint)
                     throw new InvalidOperationException("INITIALIZATION_IDEMPOTENCY_CONFLICT: The key was already used with different opening or authority evidence.");
-                return Map(byKey);
+                return await MapAsync(byKey, cancellationToken);
             }
             var latest = await Query().Where(item => item.AccountingBookId == book.Id).OrderByDescending(item => item.Version).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken);
             var existing = latest?.InitializationStatus == AccountingBookInitializationStatus.Draft ? latest : null;
@@ -141,14 +141,14 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             book.InitializationStartedAtUtc ??= DateTime.UtcNow;
             await _db.SaveChangesAsync(cancellationToken);
             await AuditAsync(FinanceAuditEvents.AccountingBookInitializationConfigured, entity, request.Reason, cancellationToken);
-            return Map(await Query().AsNoTracking().SingleAsync(item => item.Id == entity.Id, cancellationToken));
+            return await MapAsync(await Query().AsNoTracking().SingleAsync(item => item.Id == entity.Id, cancellationToken), cancellationToken);
         }, cancellationToken);
 
     public Task<AccountingBookInitializationDto> SubmitAsync(Guid accountingBookId, CancellationToken cancellationToken = default) => AtomicAsync(async () =>
     {
         var entity = await Query().Where(item => item.AccountingBookId == accountingBookId).OrderByDescending(item => item.Version).ThenByDescending(item => item.Id).FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException("Book initialization has not been configured.");
-        if (entity.InitializationStatus == AccountingBookInitializationStatus.PendingApproval) return Map(entity);
+        if (entity.InitializationStatus == AccountingBookInitializationStatus.PendingApproval) return await MapAsync(entity, cancellationToken);
         if (entity.InitializationStatus != AccountingBookInitializationStatus.Draft) throw new InvalidOperationException("Only Draft initialization evidence can be submitted.");
         await EnsureEvidenceUnchangedAsync(entity, cancellationToken);
         if (!await _workflow.HasActiveApprovalWorkflowAsync(WorkflowEntityType)) throw new InvalidOperationException("A published AccountingBookInitialization approval workflow is required.");
@@ -157,7 +157,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         entity.WorkflowInstanceId = result.WorkflowInstanceId; entity.InitializationStatus = AccountingBookInitializationStatus.PendingApproval;
         await _db.SaveChangesAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.AccountingBookInitializationSubmitted, entity, entity.Reason, cancellationToken);
-        return Map(entity);
+        return await MapAsync(entity, cancellationToken);
     }, cancellationToken);
 
     public Task<AccountingBookInitializationDto> ApproveAsync(Guid accountingBookId, DecideAccountingBookInitializationDto request, CancellationToken cancellationToken = default) =>
@@ -188,7 +188,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         var auditType = !completed ? FinanceAuditEvents.AccountingBookInitializationApprovalStepCompleted
             : approve ? FinanceAuditEvents.AccountingBookInitializationApproved : FinanceAuditEvents.AccountingBookInitializationRejected;
         await AuditAsync(auditType, entity, request.Reason, ct);
-        return Map(entity);
+        return await MapAsync(entity, ct);
     }, ct);
 
     public async Task<AccountingBookActivationReadinessDto> GetReadinessAsync(Guid accountingBookId, CancellationToken cancellationToken = default)
@@ -395,6 +395,28 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         RejectedByUserId = item.RejectedByUserId, RejectedAtUtc = item.RejectedAtUtc,
         DecidedByUserId = item.DecidedByUserId, DecidedAtUtc = item.DecidedAtUtc, DecisionReason = item.DecisionReason,
         RowVersion = item.RowVersion.Length == 0 ? string.Empty : Convert.ToBase64String(item.RowVersion), Lines = item.Lines.OrderBy(line => line.AccountId).Select(MapLine).ToList() };
+    private async Task<AccountingBookInitializationDto> MapAsync(AccountingBookInitialization item, CancellationToken ct)
+    {
+        var dto = Map(item);
+        var actorIds = new[] { item.PreparedByUserId, item.ApprovedByUserId, item.RejectedByUserId, item.DecidedByUserId }
+            .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+        if (actorIds.Length == 0) return dto;
+
+        var actors = await _db.Users.AsNoTracking()
+            .Where(user => user.TenantId == TenantId && actorIds.Contains(user.Id))
+            .Select(user => new { user.Id, user.FirstName, user.LastName, user.UserName })
+            .ToListAsync(ct);
+        var names = actors.ToDictionary(user => user.Id, user =>
+        {
+            var fullName = $"{user.FirstName} {user.LastName}".Trim();
+            return string.IsNullOrWhiteSpace(fullName) ? user.UserName ?? "Unknown user" : fullName;
+        });
+        dto.PreparedByName = names.GetValueOrDefault(item.PreparedByUserId);
+        dto.ApprovedByName = item.ApprovedByUserId.HasValue ? names.GetValueOrDefault(item.ApprovedByUserId.Value) : null;
+        dto.RejectedByName = item.RejectedByUserId.HasValue ? names.GetValueOrDefault(item.RejectedByUserId.Value) : null;
+        dto.DecidedByName = item.DecidedByUserId.HasValue ? names.GetValueOrDefault(item.DecidedByUserId.Value) : null;
+        return dto;
+    }
     private async Task AuditAsync(string type, AccountingBookInitialization entity, string reason, CancellationToken ct) => await _audit.RecordAsync(new FinanceAuditEventDto
     { TenantId = TenantId, EventType = type, SourceModule = "GL", SourceDocumentType = WorkflowEntityType, SourceDocumentId = entity.Id,
         WorkflowInstanceId = entity.WorkflowInstanceId, Resource = "Finance.AccountingBookInitialization", ResourceId = entity.Id.ToString(), AfterValues = new
