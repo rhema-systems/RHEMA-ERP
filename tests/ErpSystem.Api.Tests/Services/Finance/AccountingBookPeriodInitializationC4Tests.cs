@@ -201,6 +201,7 @@ public sealed class AccountingBookPeriodInitializationC4Tests
         var result = await InitializationService(db, state.TenantId, Guid.NewGuid()).ConfigureAsync(state.Book.Id, request);
         result.SourceAccountingBookId.Should().Be(source.Id);
         result.IsBalanced.Should().BeTrue();
+        result.Lines.Should().Contain(line => line.AccountNumber == "1000" && line.AccountName == "1000" && line.AccountType == "Asset");
     }
 
     [Fact]

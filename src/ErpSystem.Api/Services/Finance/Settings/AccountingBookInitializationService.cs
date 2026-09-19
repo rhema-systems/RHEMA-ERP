@@ -373,10 +373,14 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
         && !PseudoBookCodes.Contains(value) && char.IsAsciiLetter(value[0])
         && value.All(character => char.IsAsciiLetterUpper(character) || char.IsAsciiDigit(character) || character == '_');
     private IQueryable<AccountingBookInitialization> Query() => _db.AccountingBookInitializations.Include(item => item.AccountingBook)
-        .Include(item => item.SourceAccountingBook).Include(item => item.CutoffFiscalPeriod).Include(item => item.Lines).Where(item => item.TenantId == TenantId && !item.IsDeleted);
+        .Include(item => item.SourceAccountingBook).Include(item => item.CutoffFiscalPeriod)
+        .Include(item => item.Lines).ThenInclude(line => line.Account)
+        .Where(item => item.TenantId == TenantId && !item.IsDeleted);
     private async Task<AccountingBook> RequireBookAsync(Guid id, CancellationToken ct) => await _db.AccountingBooks.SingleOrDefaultAsync(item => item.Id == id && item.TenantId == TenantId && !item.IsDeleted, ct)
         ?? throw new KeyNotFoundException("Accounting book was not found.");
-    private static AccountingBookInitializationLineDto MapLine(AccountingBookInitializationLine line) => new() { AccountId = line.AccountId, CurrencyCode = line.CurrencyCode,
+    private static AccountingBookInitializationLineDto MapLine(AccountingBookInitializationLine line) => new() { AccountId = line.AccountId,
+        AccountNumber = line.Account?.AccountNumber ?? line.AccountId.ToString(), AccountName = line.Account?.AccountName ?? "Account name unavailable",
+        AccountType = line.Account?.AccountType.ToString() ?? string.Empty, CurrencyCode = line.CurrencyCode,
         OpeningDebit = line.OpeningDebit, OpeningCredit = line.OpeningCredit, BaseBookSignedBalance = line.BaseBookSignedBalance, OpeningAdjustment = line.OpeningAdjustment };
     private AccountingBookInitializationLine NewLine(AccountingBookInitializationLineDto line) => new() { TenantId = TenantId, AccountId = line.AccountId,
         CurrencyCode = line.CurrencyCode, OpeningDebit = line.OpeningDebit, OpeningCredit = line.OpeningCredit,

@@ -128,6 +128,36 @@ describe('accounting book C4 readiness', () => {
         await waitFor(() => expect(financeDataService.decideAccountingBookInitialization).toHaveBeenCalledWith('book-1', 'approve', 'Evidence independently reconciled', 'AQ=='));
     });
 
+    it('gives the checker a source-to-opening reconciliation pack', async () => {
+        permissions.add('Finance.AccountingBooks.Initialization.Approve');
+        vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue({
+            id: 'init', accountingBookId: 'book-1', version: 1, accountingBookCode: 'LOCAL',
+            mode: 'BaseBalancesWithOpeningAdjustments', status: 'PendingApproval', cutoffDate: '2025-12-31',
+            cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2025-12', sourceAccountingBookId: 'ifrs',
+            sourceAccountingBookCode: 'IFRS', idempotencyKey: 'LOCAL-INIT-2025-12-31-V1',
+            reason: 'Initialize the statutory book from approved IFRS balances', totalDebits: 1225, totalCredits: 1225,
+            requiredAccountCount: 2, coveredAccountCount: 2, isBalanced: true, isCoverageComplete: true,
+            evidenceFingerprint: 'A'.repeat(64), reconciliationFingerprint: 'B'.repeat(64), preparedByUserId: 'maker',
+            preparedByName: 'System Administrator', preparedAtUtc: '2026-09-19T10:00:00Z', rowVersion: 'AQ==',
+            lines: [
+                { accountId: 'cash', accountNumber: '1000', accountName: 'Cash', accountType: 'Asset', currencyCode: 'GHS', openingDebit: 1225, openingCredit: 0, baseBookSignedBalance: 1200, openingAdjustment: 25 },
+                { accountId: 'equity', accountNumber: '3000', accountName: 'Equity', accountType: 'Equity', currencyCode: 'GHS', openingDebit: 0, openingCredit: 1225, baseBookSignedBalance: -1200, openingAdjustment: -25 },
+            ],
+        });
+
+        render(<AccountingBookReadinessPage />);
+
+        expect(await screen.findByText('IFRS accounting book')).toBeInTheDocument();
+        expect(screen.getByText('System Administrator')).toBeInTheDocument();
+        expect(screen.getByText('Initialize the statutory book from approved IFRS balances')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Adjustments (2)' })).toBeInTheDocument();
+        expect(screen.getByText('1000')).toBeInTheDocument();
+        expect(screen.getByText('Cash')).toBeInTheDocument();
+        expect(screen.getAllByText('1,225.00').length).toBeGreaterThan(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Exceptions (0)' }));
+        expect(screen.getByText('No evidence lines match this view.')).toBeInTheDocument();
+    });
+
     it('hides period and initialization decisions from their maker despite approval grants', async () => {
         authUserId = 'MAKER';
         permissions.add('Finance.AccountingBooks.Periods.Approve');

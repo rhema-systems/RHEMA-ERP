@@ -218,7 +218,7 @@ export interface AccountingBookPeriod {
 export type AccountingBookInitializationMode = 'IndependentOpeningBalances' | 'BaseBookCopyAtCutoff' | 'BaseBalancesWithOpeningAdjustments';
 export type AccountingBookInitializationStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'Rejected';
 export interface AccountingBookInitializationLine {
-    accountId: string; currencyCode: string; openingDebit: number; openingCredit: number;
+    accountId: string; accountNumber?: string; accountName?: string; accountType?: string; currencyCode: string; openingDebit: number; openingCredit: number;
     baseBookSignedBalance: number; openingAdjustment: number;
 }
 export interface AccountingBookInitialization {

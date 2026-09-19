@@ -49,6 +49,9 @@ public sealed class DecideAccountingBookPeriodTransitionDto
 public sealed class AccountingBookInitializationLineDto
 {
     public Guid AccountId { get; set; }
+    public string AccountNumber { get; set; } = string.Empty;
+    public string AccountName { get; set; } = string.Empty;
+    public string AccountType { get; set; } = string.Empty;
     public string CurrencyCode { get; set; } = string.Empty;
     public decimal OpeningDebit { get; set; }
     public decimal OpeningCredit { get; set; }
