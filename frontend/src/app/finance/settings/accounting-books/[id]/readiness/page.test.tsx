@@ -75,11 +75,31 @@ describe('accounting book C4 readiness', () => {
         permissions.add('Finance.AccountingBooks.Periods.Manage');
         vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([period] as never);
         render(<AccountingBookReadinessPage />);
-        fireEvent.click(await screen.findByRole('button', { name: 'Request Open' }));
-        expect(screen.getByRole('button', { name: 'Submit governed action' })).toBeDisabled();
+        fireEvent.click(await screen.findByRole('button', { name: 'Request Open…' }));
+        expect(screen.getByRole('button', { name: 'Submit Open request' })).toBeDisabled();
         fireEvent.change(screen.getByLabelText('Reason to request Open'), { target: { value: 'Open after close checks' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Submit governed action' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Submit Open request' }));
         await waitFor(() => expect(financeDataService.requestAccountingBookPeriodTransition).toHaveBeenCalledWith('book-1', 'bp-1', 'Open', 'Open after close checks', 'AQ=='));
+    });
+
+    it('makes period approval a clear confirmation and does not clear a repeated selection', async () => {
+        permissions.add('Finance.AccountingBooks.Periods.Approve');
+        vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([{
+            ...period, pendingStatus: 'Open', requestedByUserId: 'maker',
+        }] as never);
+        vi.mocked(financeDataService.decideAccountingBookPeriodTransition).mockResolvedValue(period as never);
+        render(<AccountingBookReadinessPage />);
+
+        const selectApproval = await screen.findByRole('button', { name: 'Approve period…' });
+        fireEvent.click(selectApproval);
+        fireEvent.change(screen.getByLabelText('Reason for approval'), { target: { value: 'Calendar and posting controls reviewed' } });
+        fireEvent.click(selectApproval);
+        expect(screen.getByLabelText('Reason for approval')).toHaveValue('Calendar and posting controls reviewed');
+        expect(financeDataService.decideAccountingBookPeriodTransition).not.toHaveBeenCalled();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm period approval' }));
+        await waitFor(() => expect(financeDataService.decideAccountingBookPeriodTransition).toHaveBeenCalledWith(
+            'book-1', 'bp-1', 'approve', 'Calendar and posting controls reviewed', 'AQ=='));
     });
 
     it('loads governed preparation and submits exact mapped-account evidence', async () => {
@@ -99,9 +119,9 @@ describe('accounting book C4 readiness', () => {
         permissions.add('Finance.AccountingBooks.Initialization.Approve');
         vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue({ id: 'init', accountingBookId: 'book-1', version: 1, accountingBookCode: 'LOCAL', mode: 'IndependentOpeningBalances', status: 'PendingApproval', cutoffDate: '2026-01-01', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', idempotencyKey: 'key', reason: 'reason', totalDebits: 0, totalCredits: 0, requiredAccountCount: 1, coveredAccountCount: 1, isBalanced: true, isCoverageComplete: true, evidenceFingerprint: 'A'.repeat(64), reconciliationFingerprint: 'B'.repeat(64), preparedByUserId: 'maker', preparedAtUtc: '2026-01-01', rowVersion: 'AQ==', lines: [] });
         render(<AccountingBookReadinessPage />);
-        fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
-        fireEvent.change(screen.getByLabelText('Independent checker reason'), { target: { value: 'Evidence independently reconciled' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm approve' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Approve initialization…' }));
+        fireEvent.change(screen.getByLabelText('Reason for approval'), { target: { value: 'Evidence independently reconciled' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm initialization approval' }));
         await waitFor(() => expect(financeDataService.decideAccountingBookInitialization).toHaveBeenCalledWith('book-1', 'approve', 'Evidence independently reconciled', 'AQ=='));
     });
 
@@ -125,8 +145,10 @@ describe('accounting book C4 readiness', () => {
         render(<AccountingBookReadinessPage />);
         expect(await screen.findByText('Pending Open')).toBeInTheDocument();
         expect(screen.getAllByText('Awaiting a different authorized checker.')).toHaveLength(2);
-        expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Approve period…' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Reject period…' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Approve initialization…' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Reject initialization…' })).not.toBeInTheDocument();
         expect(financeDataService.decideAccountingBookInitialization).not.toHaveBeenCalled();
     });
 
