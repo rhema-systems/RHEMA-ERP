@@ -48,6 +48,8 @@ type EstateHandoffState = {
 type EstateHandoffDraft = {
   salesReference: string;
   agreedAmount: string;
+  salesAmountPaid: string;
+  salesPaymentReference: string;
   currency: string;
   salesCompletedAt: string;
   notes: string;
@@ -62,6 +64,8 @@ function PropertyEnquiries() {
   const [handoffDraft, setHandoffDraft] = useState<EstateHandoffDraft>({
     salesReference: '',
     agreedAmount: '',
+    salesAmountPaid: '',
+    salesPaymentReference: '',
     currency: '',
     salesCompletedAt: '',
     notes: '',
@@ -129,6 +133,11 @@ function PropertyEnquiries() {
         body: JSON.stringify({
           salesReference: handoffDraft.salesReference.trim(),
           agreedAmount: Number(handoffDraft.agreedAmount),
+          salesAmountPaid: handoffDraft.salesAmountPaid
+            ? Number(handoffDraft.salesAmountPaid)
+            : 0,
+          salesPaymentReference:
+            handoffDraft.salesPaymentReference.trim() || null,
           currency: handoffDraft.currency.trim().toUpperCase(),
           salesCompletedAt: handoffDraft.salesCompletedAt || null,
           notes: handoffDraft.notes.trim() || null,
@@ -185,6 +194,11 @@ function PropertyEnquiries() {
       handoffDraft.salesReference.trim() &&
       Number.isFinite(Number(handoffDraft.agreedAmount)) &&
       Number(handoffDraft.agreedAmount) > 0 &&
+      (!handoffDraft.salesAmountPaid ||
+        (Number.isFinite(Number(handoffDraft.salesAmountPaid)) &&
+          Number(handoffDraft.salesAmountPaid) >= 0 &&
+          Number(handoffDraft.salesAmountPaid) <=
+            Number(handoffDraft.agreedAmount))) &&
       /^[A-Za-z]{3}$/.test(handoffDraft.currency.trim())
   );
   return (
@@ -228,6 +242,8 @@ function PropertyEnquiries() {
                 setHandoffDraft({
                   salesReference: '',
                   agreedAmount: '',
+                  salesAmountPaid: '',
+                  salesPaymentReference: '',
                   currency: '',
                   salesCompletedAt: '',
                   notes: '',
@@ -399,6 +415,43 @@ function PropertyEnquiries() {
                             setHandoffDraft((value) => ({
                               ...value,
                               currency: event.target.value.toUpperCase(),
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="estate-sales-paid">
+                          Amount paid in Sales
+                        </Label>
+                        <Input
+                          id="estate-sales-paid"
+                          type="number"
+                          min="0"
+                          max={handoffDraft.agreedAmount || undefined}
+                          step="0.01"
+                          value={handoffDraft.salesAmountPaid}
+                          placeholder="0.00"
+                          onChange={(event) =>
+                            setHandoffDraft((value) => ({
+                              ...value,
+                              salesAmountPaid: event.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="estate-sales-payment-reference">
+                          Sales payment reference
+                        </Label>
+                        <Input
+                          id="estate-sales-payment-reference"
+                          value={handoffDraft.salesPaymentReference}
+                          maxLength={200}
+                          placeholder="Receipt or collection reference"
+                          onChange={(event) =>
+                            setHandoffDraft((value) => ({
+                              ...value,
+                              salesPaymentReference: event.target.value,
                             }))
                           }
                         />

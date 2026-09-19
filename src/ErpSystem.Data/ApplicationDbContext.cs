@@ -9509,6 +9509,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(item => item.WorkflowDefinitionId);
             entity.HasIndex(item => item.WorkflowInstanceId);
             entity.HasIndex(item => item.WorkflowStepId);
+            entity.HasIndex(item => item.OrganizationLevelId);
+            entity.HasIndex(item => new { item.TenantId, item.OrganizationUnitId });
+
+            entity.HasOne(item => item.OrganizationLevel)
+                .WithMany()
+                .HasForeignKey(item => item.OrganizationLevelId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(item => item.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(item => item.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(item => item.Fields)
                 .WithOne(item => item.ProcedureCase)

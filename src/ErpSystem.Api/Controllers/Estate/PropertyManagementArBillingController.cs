@@ -453,7 +453,9 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
         if (!Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
             throw new InvalidOperationException("The sale request is not linked to a Finance AR customer.");
-        var purchasePrice = ResolveSalePayableAmount(fields);
+        var salePayable = ResolveSalePayable(fields);
+        if (salePayable.EstateBalance <= 0m)
+            throw new InvalidOperationException("Sales has already recorded the full sale amount. No Estate balance remains to invoice.");
 
         var revenueAccount = await _db.Accounts
             .AsNoTracking()
@@ -486,7 +488,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                     GLAccountId = revenueAccount.Id,
                     Description = $"Property sale: {propertyUnit}",
                     Quantity = 1m,
-                    UnitPrice = purchasePrice,
+                    UnitPrice = salePayable.EstateBalance,
                     DiscountPercentage = 0m
                 }
             ]
@@ -499,9 +501,10 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Sale invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
         UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", $"Awaiting full payment; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {purchasePrice:N2}.", now);
+        UpsertCaseField(sourceCase, fields, "estateRemainingAmount", "Balance for Estate processing", salePayable.EstateBalance.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSalePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice.PaidAmount, invoice.BalanceAmount), now);
         UpsertCaseField(sourceCase, fields, "salePaymentStatus", "Sale payment status", "Pending full payment", now);
-        UpsertCaseField(sourceCase, fields, "ownershipTransferStatus", "Ownership transfer status", "Blocked - full payment and Legal conveyance required", now);
+        UpsertCaseField(sourceCase, fields, "ownershipTransferStatus", "Ownership transfer status", "Blocked - Estate balance and Legal conveyance required", now);
         sourceCase.UpdatedAt = now;
         await _db.SaveChangesAsync(cancellationToken);
 
@@ -532,18 +535,23 @@ public sealed class PropertyManagementArBillingController : ControllerBase
     {
         var sourceCase = await LoadSaleProcedureCaseAsync(procedureCaseId, cancellationToken);
         var fields = CaseFields(sourceCase);
-        if (!Guid.TryParse(FieldValue(fields, "saleInvoiceId"), out var invoiceId))
-            throw new InvalidOperationException("Create and complete the Finance AR sale invoice first.");
-        var invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
-            ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
-        var payableAmount = ResolveSalePayableAmount(fields);
-        var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
-        var paidInFull = invoiceAmountMatches
-            && invoice.PaidAmount >= payableAmount
-            && invoice.BalanceAmount <= 0m
-            && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
-        if (!paidInFull)
-            throw new InvalidOperationException($"Invoice {invoice.InvoiceNumber} must match the approved sale amount and be fully paid before ownership transfer.");
+        var salePayable = ResolveSalePayable(fields);
+        var payableAmount = salePayable.EstateBalance;
+        InvoiceDto? invoice = null;
+        if (payableAmount > 0m)
+        {
+            if (!Guid.TryParse(FieldValue(fields, "saleInvoiceId"), out var invoiceId))
+                throw new InvalidOperationException("Create and complete the Finance AR sale invoice for the Estate balance first.");
+            invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
+                ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
+            var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
+            var paidInFull = invoiceAmountMatches
+                && invoice.PaidAmount >= payableAmount
+                && invoice.BalanceAmount <= 0m
+                && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
+            if (!paidInFull)
+                throw new InvalidOperationException($"Invoice {invoice.InvoiceNumber} must match the Estate balance and be fully paid before ownership transfer.");
+        }
         if (!string.Equals(FieldValue(fields, "legalConveyanceStatus"), "Completed by Legal", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Legal must complete conveyance and registration before ownership transfer.");
         if (!Guid.TryParse(FieldValue(fields, "sourceReference"), out var customerId))
@@ -580,11 +588,12 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         asset.UpdatedAt = now;
         asset.UpdatedBy = User.Identity?.Name ?? "System";
         asset.LastModifiedById = GetUserId();
-        UpsertCaseField(sourceCase, fields, "saleInvoiceStatus", "Sale invoice status", "Paid", now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Sale invoice amount", invoice.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", invoice.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", invoice.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture), now);
-        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", $"Paid in full; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}.", now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceStatus", "Sale invoice status", invoice?.Status ?? "Not required", now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceAmount", "Sale invoice amount", (invoice?.TotalAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoicePaidAmount", "Sale invoice paid amount", (invoice?.PaidAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "saleInvoiceBalance", "Sale invoice balance", (invoice?.BalanceAmount ?? 0m).ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "estateRemainingAmount", "Balance for Estate processing", salePayable.EstateBalance.ToString("0.00", CultureInfo.InvariantCulture), now);
+        UpsertCaseField(sourceCase, fields, "salePaymentCheckStatus", "Sale payment check", BuildSalePaymentCheckMessage(FieldValue(fields, "currency") ?? invoice?.CurrencyCode ?? "GHS", salePayable, invoice?.PaidAmount ?? 0m, invoice?.BalanceAmount ?? 0m), now);
         UpsertCaseField(sourceCase, fields, "salePaymentStatus", "Sale payment status", "Paid in full", now);
         UpsertCaseField(sourceCase, fields, "ownershipTransferStatus", "Ownership transfer status", "Completed - purchaser recorded as owner", now);
         UpsertCaseField(sourceCase, fields, "applicationStatus", "Request status", "Sale completed", now);
@@ -610,8 +619,8 @@ public sealed class PropertyManagementArBillingController : ControllerBase
                         Metadata = new Dictionary<string, object>
                         {
                             ["assetId"] = asset.Id,
-                            ["invoiceId"] = invoice.Id,
-                            ["invoiceNumber"] = invoice.InvoiceNumber,
+                            ["invoiceId"] = invoice?.Id ?? Guid.Empty,
+                            ["invoiceNumber"] = invoice?.InvoiceNumber ?? FieldValue(fields, "salesPaymentReference") ?? string.Empty,
                             ["agreementReference"] = asset.PropertyFileReference ?? string.Empty
                         }
                     },
@@ -628,8 +637,8 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             asset.Id,
             asset.AssetCode,
             customerId,
-            invoice.Id,
-            invoice.InvoiceNumber,
+            invoice?.Id,
+            invoice?.InvoiceNumber,
             "Ownership transfer completed. The property is sold and removed from portal listings."));
     }
 
@@ -974,13 +983,30 @@ public sealed class PropertyManagementArBillingController : ControllerBase
         IDictionary<string, ProcedureCaseField> fields,
         CancellationToken cancellationToken)
     {
+        var salePayable = ResolveSalePayable(fields);
+        if (salePayable.EstateBalance <= 0m)
+        {
+            return new EstateSalePaymentStatusResult(
+                null,
+                FieldValue(fields, "salesPaymentReference"),
+                "Not required",
+                0m,
+                0m,
+                0m,
+                "Paid in full",
+                string.Equals(FieldValue(fields, "legalConveyanceStatus"), "Completed by Legal", StringComparison.OrdinalIgnoreCase)
+                    ? "Ready for ownership transfer"
+                    : "Blocked - Legal conveyance and registration pending",
+                BuildSalePaymentCheckMessage(FieldValue(fields, "currency") ?? "GHS", salePayable, 0m, 0m));
+        }
+
         if (!Guid.TryParse(FieldValue(fields, "saleInvoiceId"), out var invoiceId))
-            throw new InvalidOperationException("Create the Finance AR sale invoice before syncing payment status.");
+            throw new InvalidOperationException("Create the Finance AR sale invoice for the Estate balance before syncing payment status.");
 
         var invoice = await _invoiceService.GetByIdAsync(invoiceId, cancellationToken)
             ?? throw new InvalidOperationException("The linked Finance AR sale invoice was not found.");
 
-        var payableAmount = ResolveSalePayableAmount(fields);
+        var payableAmount = salePayable.EstateBalance;
         var invoiceAmountMatches = AmountsMatch(invoice.TotalAmount, payableAmount);
         var paidInFull = invoiceAmountMatches
             && invoice.PaidAmount >= payableAmount
@@ -988,10 +1014,8 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             && string.Equals(invoice.Status, "Paid", StringComparison.OrdinalIgnoreCase);
         var paymentStatus = paidInFull ? "Paid in full" : "Pending full payment";
         var paymentCheckStatus = invoiceAmountMatches
-            ? paidInFull
-                ? $"Paid in full; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}."
-                : $"Awaiting full payment; paid {invoice.CurrencyCode} {invoice.PaidAmount:N2} of {invoice.CurrencyCode} {payableAmount:N2}; balance {invoice.CurrencyCode} {invoice.BalanceAmount:N2}."
-            : $"Invoice total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match approved sale amount {invoice.CurrencyCode} {payableAmount:N2}.";
+            ? BuildSalePaymentCheckMessage(invoice.CurrencyCode, salePayable, invoice.PaidAmount, invoice.BalanceAmount)
+            : $"Invoice total {invoice.CurrencyCode} {invoice.TotalAmount:N2} does not match Estate balance {invoice.CurrencyCode} {payableAmount:N2}. Sales already recorded {invoice.CurrencyCode} {salePayable.SalesAmountPaid:N2} against approved amount {invoice.CurrencyCode} {salePayable.ApprovedAmount:N2}.";
         var legalCompleted = string.Equals(
             FieldValue(fields, "legalConveyanceStatus"),
             "Completed by Legal",
@@ -1028,6 +1052,7 @@ public sealed class PropertyManagementArBillingController : ControllerBase
             new SalePaymentFieldUpdate("saleInvoiceAmount", "Sale invoice amount", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("saleInvoicePaidAmount", "Sale invoice paid amount", result.PaidAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("saleInvoiceBalance", "Sale invoice balance", result.BalanceAmount.ToString("0.00", CultureInfo.InvariantCulture)),
+            new SalePaymentFieldUpdate("estateRemainingAmount", "Balance for Estate processing", result.TotalAmount.ToString("0.00", CultureInfo.InvariantCulture)),
             new SalePaymentFieldUpdate("salePaymentCheckStatus", "Sale payment check", result.Message),
             new SalePaymentFieldUpdate("salePaymentStatus", "Sale payment status", result.PaymentStatus),
             new SalePaymentFieldUpdate("ownershipTransferStatus", "Ownership transfer status", result.OwnershipTransferStatus)
@@ -1079,15 +1104,54 @@ public sealed class PropertyManagementArBillingController : ControllerBase
 
     private sealed record SalePaymentFieldUpdate(string Key, string Label, string? Value);
 
-    private static decimal ResolveSalePayableAmount(IDictionary<string, ProcedureCaseField> fields)
+    private static SalePayableSnapshot ResolveSalePayable(IDictionary<string, ProcedureCaseField> fields)
     {
         var amountText = FieldValue(fields, "offerAmount") ?? FieldValue(fields, "listingPrice");
         if (!decimal.TryParse(amountText, NumberStyles.Number, CultureInfo.InvariantCulture, out var purchasePrice)
             || purchasePrice <= 0m)
             throw new InvalidOperationException("Record an approved purchase price before creating or completing the sale invoice.");
 
-        return purchasePrice;
+        var salesAmountPaid = ParseOptionalMoney(FieldValue(fields, "salesAmountPaid"));
+        if (salesAmountPaid < 0m)
+            throw new InvalidOperationException("Amount paid in Sales cannot be negative.");
+        if (salesAmountPaid > purchasePrice)
+            throw new InvalidOperationException("Amount paid in Sales cannot be greater than the approved purchase price.");
+
+        return new SalePayableSnapshot(
+            purchasePrice,
+            salesAmountPaid,
+            decimal.Round(purchasePrice - salesAmountPaid, 2, MidpointRounding.AwayFromZero));
     }
+
+    private static decimal ResolveSalePayableAmount(IDictionary<string, ProcedureCaseField> fields)
+        => ResolveSalePayable(fields).EstateBalance;
+
+    private static decimal ParseOptionalMoney(string? value)
+        => string.IsNullOrWhiteSpace(value)
+            ? 0m
+            : decimal.TryParse(value, NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed)
+                ? parsed
+                : throw new InvalidOperationException("Amount paid in Sales must be a valid number.");
+
+    private static string BuildSalePaymentCheckMessage(
+        string currency,
+        SalePayableSnapshot salePayable,
+        decimal estatePaidAmount,
+        decimal estateBalanceAmount)
+    {
+        var totalPaid = salePayable.SalesAmountPaid + estatePaidAmount;
+        if (estateBalanceAmount <= 0m)
+        {
+            return $"Paid in full; Sales paid {currency} {salePayable.SalesAmountPaid:N2}, Estate paid {currency} {estatePaidAmount:N2}, total paid {currency} {totalPaid:N2} of {currency} {salePayable.ApprovedAmount:N2}.";
+        }
+
+        return $"Awaiting Estate balance; Sales paid {currency} {salePayable.SalesAmountPaid:N2}, Estate paid {currency} {estatePaidAmount:N2}, total paid {currency} {totalPaid:N2} of {currency} {salePayable.ApprovedAmount:N2}; Estate balance {currency} {estateBalanceAmount:N2}.";
+    }
+
+    private sealed record SalePayableSnapshot(
+        decimal ApprovedAmount,
+        decimal SalesAmountPaid,
+        decimal EstateBalance);
 
     private static bool AmountsMatch(decimal left, decimal right)
         => Math.Abs(left - right) < 0.01m;
@@ -1190,8 +1254,8 @@ public sealed record EstateSaleInvoiceResult(
     string Message);
 
 public sealed record EstateSalePaymentStatusResult(
-    Guid InvoiceId,
-    string InvoiceNumber,
+    Guid? InvoiceId,
+    string? InvoiceNumber,
     string InvoiceStatus,
     decimal TotalAmount,
     decimal PaidAmount,
@@ -1204,8 +1268,8 @@ public sealed record EstateSaleCompletionResult(
     Guid AssetId,
     string AssetCode,
     Guid PurchaserCustomerId,
-    Guid InvoiceId,
-    string InvoiceNumber,
+    Guid? InvoiceId,
+    string? InvoiceNumber,
     string Message);
 
 public sealed record UpdateEstateRentPenaltyTermsRequest(

@@ -65,14 +65,14 @@ export interface EstateSaleCompletionResult {
   assetId: string;
   assetCode: string;
   purchaserCustomerId: string;
-  invoiceId: string;
-  invoiceNumber: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
   message: string;
 }
 
 export interface EstateSalePaymentStatusResult {
-  invoiceId: string;
-  invoiceNumber: string;
+  invoiceId: string | null;
+  invoiceNumber: string | null;
   invoiceStatus: string;
   totalAmount: number;
   paidAmount: number;

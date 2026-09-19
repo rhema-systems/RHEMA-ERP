@@ -292,6 +292,8 @@ export default function EstateProcedureWorkspacePage() {
         entityType={procedure.entityType}
         defaultTitle={procedure.title}
         workspaceType={procedure.workspaceType}
+        registerOnly
+        caseBasePath={`/estate/${encodeURIComponent(procedure.entityType)}`}
       />
     </div>
   );

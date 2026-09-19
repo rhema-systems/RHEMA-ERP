@@ -110,13 +110,15 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "page.tsx");
 
         procedureService.Should().Contain("EnsureExternalListingApprovalIsReady(procedureCase);");
+        procedureService.Should().Contain("Sales - Estate Enquiry");
+        approvalGuard.Should().Contain("IsPropertyListingApplication(procedureCase)");
         approvalGuard.Should().Contain("generatedAgreementReference");
         approvalGuard.Should().Contain("legalAgreementReviewStatus");
         approvalGuard.Should().Contain("Legal must approve the generated agreement before completing final approval.");
         approvalGuard.Should().Contain("moveInDate");
         approvalGuard.Should().Contain("IsRentalListingApplication(procedureCase)");
         frontend.Should().Contain("missingLegalAgreementReview");
-        frontend.Should().Contain("Legal must approve the generated agreement before completing final approval.");
+        frontend.Should().Contain("Legal must approve the generated agreement before the customer can sign.");
         customerDecision.Should().Contain("The approved agreement must be generated before you can accept this request.");
         customerDecision.Should().Contain("Property Management must set the approved move-in date");
         signedUpload.Should().NotContain("[FromForm] string? moveInDate");
@@ -1028,7 +1030,7 @@ public sealed class EstateWorkflowIntegrationRegressionTests
     }
 
     [Fact]
-    public void PropertySaleCompletion_RequiresPaidFinanceInvoiceAndLegalConveyance()
+    public void PropertySaleCompletion_UsesSalesHandoffBalanceBeforeRequiringEstatePayment()
     {
         var controller = ReadSource(
             "src", "ErpSystem.Api", "Controllers", "Estate", "PropertyManagementArBillingController.cs");
@@ -1037,6 +1039,9 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "public async Task<ActionResult<EstateSaleCompletionResult>> CompleteSaleOwnership",
             "[HttpPost(\"invoices\")]");
 
+        completion.Should().Contain("var payableAmount = salePayable.EstateBalance;");
+        completion.Should().Contain("if (payableAmount > 0m)");
+        completion.Should().Contain("Create and complete the Finance AR sale invoice for the Estate balance first.");
         completion.Should().Contain("invoice.BalanceAmount <= 0m");
         completion.Should().Contain("invoice.Status, \"Paid\"");
         completion.Should().Contain("legalConveyanceStatus");
@@ -1044,6 +1049,24 @@ public sealed class EstateWorkflowIntegrationRegressionTests
         completion.Should().Contain("asset.Status = EstateManagedAssetStatus.Sold;");
         completion.Should().Contain("asset.IsPublishedToExternalPortal = false;");
         completion.Should().Contain("estate.property.sale-completed");
+
+        var billing = Slice(
+            controller,
+            "public async Task<ActionResult<EstateSaleInvoiceResult>> CreateSaleInvoice",
+            "private static string BuildSaleInvoiceReference");
+        billing.Should().Contain("Sales has already recorded the full sale amount. No Estate balance remains to invoice.");
+        billing.Should().Contain("UnitPrice = salePayable.EstateBalance");
+
+        var frontend = ReadSource(
+            "frontend",
+            "src",
+            "app",
+            "estate",
+            "property-management",
+            "[entityType]",
+            "ListingApplicationWorkspace.tsx");
+        frontend.Should().Contain("saleFullyPaidInSales");
+        frontend.Should().Contain("No Estate invoice required");
     }
 
     [Fact]

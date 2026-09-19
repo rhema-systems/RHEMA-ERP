@@ -19,13 +19,37 @@ public sealed class PropertyManagementProcedureCatalogService : IPropertyManagem
                 "Commercial review outcome is recorded"
             ]),
         new("Estate decision and agreement", "Estate Manager / Property Manager",
-            "Estate records the management decision and completes the required agreement controls.",
+            "Estate records the management decision and generates the agreement for Legal review.",
             [
                 "Management decision is recorded",
-                "Required agreement and approval references are recorded"
+                "Agreement is generated for the approved request"
+            ]),
+        new("Legal agreement review", "Legal Officer / Head of Legal",
+            "Legal reviews the generated sale, lease, or tenancy agreement before customer execution.",
+            [
+                "Generated agreement is lodged with Legal",
+                "Legal approval is recorded on the Estate case"
+            ]),
+        new("Customer agreement execution", "Estate Manager / Property Manager",
+            "The approved agreement is sent to the customer, signed by the customer, approved internally, and digitally signed.",
+            [
+                "Customer signed agreement is received",
+                "Internal approval and digital signature are complete"
+            ]),
+        new("Payment, billing and Finance check", "Estate / Finance",
+            "Estate and Finance confirm the Sales amount paid, any remaining Estate balance, rent billing readiness, and invoice/payment outcome.",
+            [
+                "Sales payment and Estate balance are checked",
+                "Finance invoice, payment, or rent billing readiness is recorded"
+            ]),
+        new("Legal conveyance or lease follow-up", "Legal / Estate",
+            "Sale cases complete Legal conveyance and registration; rental cases confirm lease execution and move-in readiness.",
+            [
+                "Sale conveyance and registration is completed where applicable",
+                "Rental move-in and billing readiness is confirmed where applicable"
             ]),
         new("Estate completion", "Estate Manager / Property Manager",
-            "Estate records the customer outcome and closes the application after the handoff work is complete.",
+            "Estate closes the application only after agreement, payment, Legal, records, and customer outcome controls are complete.",
             [
                 "Customer outcome is recorded",
                 "Estate application closeout is complete"
@@ -40,12 +64,21 @@ public sealed class PropertyManagementProcedureCatalogService : IPropertyManagem
         new("customerAccountReference", "Customer account reference", "text"),
         new("customerName", "Customer / company name", "text"),
         new("propertyUnit", "Property / unit", "text"),
+        new("listingId", "Listing ID", "text"),
+        new("listingRecordType", "Listing record type", "text"),
         new("listingReference", "Listing reference", "text"),
         new("listingType", "Published listing type", "text"),
         new("requestType", "Request type", "text"),
         new("listingPrice", "Published price / rent", "text"),
         new("offerAmount", "Purchase offer amount", "text"),
         new("currency", "Currency", "text"),
+        new("salesAmountPaid", "Amount paid in Sales", "text"),
+        new("salesPaymentReference", "Sales payment reference", "text"),
+        new("estateRemainingAmount", "Balance for Estate processing", "text"),
+        new("premiumChargeRequired", "Premium charge required", "select", ["No", "Yes"]),
+        new("premiumChargeAmount", "Premium charge amount", "text"),
+        new("premiumChargeInvoiceReference", "Premium charge invoice reference", "text"),
+        new("premiumChargePaymentStatus", "Premium charge payment status", "select", ["Not required", "Pending invoice", "Invoiced", "Payment pending", "Paid", "Waived"]),
         new("requestedLeaseTerm", "Requested lease term", "text"),
         new("requestMessage", "Customer message", "textarea"),
         new("customerValidationStatus", "Customer validation status", "select", ["Pending", "Validated", "Failed"]),

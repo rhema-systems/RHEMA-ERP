@@ -411,6 +411,8 @@ public sealed class EstateManagedAssetsController : ControllerBase
                 request.SalesOpportunityId ?? Guid.Empty,
                 request.SalesReference ?? string.Empty,
                 request.AgreedAmount,
+                request.SalesAmountPaid,
+                request.SalesPaymentReference,
                 request.Currency,
                 request.SalesCompletedAt,
                 request.Notes), cancellationToken);
@@ -818,6 +820,8 @@ public sealed record CreateEstateSalesListingApplicationHandoffDto(
     Guid? SalesOpportunityId,
     string? SalesReference,
     decimal? AgreedAmount,
+    decimal? SalesAmountPaid,
+    string? SalesPaymentReference,
     string? Currency,
     DateTime? SalesCompletedAt,
     string? Notes);

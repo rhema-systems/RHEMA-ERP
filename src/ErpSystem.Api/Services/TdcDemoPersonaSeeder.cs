@@ -72,9 +72,10 @@ public class TdcDemoPersonaSeeder
 
     private static string[] Post(params string[] titles) => titles;
 
-    // The cast. Every role name here is a Constants.Roles member so a rename cannot strand a persona
-    // with a role that no longer exists. Employee is on all of them: the self-service portal is
-    // gated on it, and even the Managing Director has a payslip.
+    // The cast. Shared platform roles use Constants.Roles so a rename cannot strand a persona with
+    // a role that no longer exists. Module-specific roles still use their seeded display names.
+    // Employee is on all of them: the self-service portal is gated on it, and even the Managing
+    // Director has a payslip.
     /// <summary>
     /// Roles a persona used to carry and must no longer hold. The role loop below only ADDS, so a
     /// persona re-cast on an existing demo database keeps its old roles unless they are listed
@@ -115,6 +116,38 @@ public class TdcDemoPersonaSeeder
         new("gm.ops", Post("General Manager - Operations"),
             "Directorate-level approver above Development, Estates and Development Control",
             Constants.Roles.Manager, Constants.Roles.Employee),
+
+        new("head.estate", Post("Head of Estates"),
+            "Owns Estate approvals, property oversight, and Estate-side workflow closeout",
+            "Head of Estate", "Estate Manager", "Property Manager", Constants.Roles.Manager, Constants.Roles.Employee),
+
+        new("property.manager", Post("Estates Manager - Housing", "Estates Manager - Lands"),
+            "Manages property listing applications, agreement checks, occupancy, and Estate balance decisions",
+            "Property Manager", "Estate Manager", Constants.Roles.Manager, Constants.Roles.Employee),
+
+        new("property.officer", Post("Estates Officer - Housing", "Estates Officer - Lands"),
+            "Works property listing applications, availability checks, and Estate balance follow-up",
+            "Property Officer", "Estate Officer", Constants.Roles.Employee),
+
+        new("records.officer", Post("Records Officer"),
+            "Handles Estate records, Central DMS indexing, dispatch, and property record closeout",
+            "Records Officer", "Document Control Officer", "Estate Officer", Constants.Roles.Employee),
+
+        new("authorised.signatory", Post("Head of Estates"),
+            "Signs approved Estate agreements and controlled DMS documents",
+            "Authorised Signatory", "Executive Approver", Constants.Roles.Manager, Constants.Roles.Employee),
+
+        new("sales.manager", Post("Head of Sales & Marketing", "Sales & Marketing Officer"),
+            "Owns the Sales side of public property enquiries and completes Estate handoffs",
+            "Sales User", "Sales Manager", "Marketing User", Constants.Roles.Manager, Constants.Roles.Employee),
+
+        new("sales.officer", Post("Sales & Marketing Officer", "Sales & Marketing Assistant"),
+            "Works public property enquiries, follows up with customers, and prepares closed-won handoffs",
+            "Sales User", "Sales Officer", "Marketing User", Constants.Roles.Employee),
+
+        new("marketing.officer", Post("Sales & Marketing Assistant", "Sales & Marketing Officer"),
+            "Receives marketing-side property enquiry notifications and supports customer follow-up",
+            "Marketing User", "Sales User", Constants.Roles.Employee),
 
         new("head.dev", Post("Head of Development"),
             "A working line manager: approvals, team appraisals, direct reports, nominations",
@@ -186,8 +219,8 @@ public class TdcDemoPersonaSeeder
                 user = new ApplicationUser
                 {
                     UserName = persona.Username,
-                    // Identity requires a unique email; an employee may have none since 2026-09-03.
-                    Email = employee.EmailAddress ?? $"{persona.Username}@demo.tdc.local",
+                    // Identity requires a unique email, and multiple demo personas can map to one senior post.
+                    Email = $"{persona.Username}@demo.tdc.local",
                     EmailConfirmed = true,
                     FirstName = employee.FirstName,
                     LastName = employee.LastName,

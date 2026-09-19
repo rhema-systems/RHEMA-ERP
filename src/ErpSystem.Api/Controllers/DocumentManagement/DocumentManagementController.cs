@@ -987,8 +987,15 @@ public sealed class DocumentManagementController : ControllerBase
                 UpsertPropertyAgreementField(procedureCase, fields, "internalSignatureStatus", "Internal digital signature status", "select", $"Digitally signed by {actor}", actorId, now);
                 UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementReference", "Final signed agreement reference", "text", record.DocumentReference, actorId, now);
                 UpsertPropertyAgreementField(procedureCase, fields, "finalSignedAgreementVersion", "Final signed agreement version", "text", record.CurrentVersion, actorId, now);
-                var isRentalRequest = fields.TryGetValue("requestType", out var requestType)
-                    && requestType.Value?.Contains("rental", StringComparison.OrdinalIgnoreCase) == true;
+                var requestTypeValue = fields.TryGetValue("requestType", out var requestType)
+                    ? requestType.Value ?? string.Empty
+                    : string.Empty;
+                var isRentalRequest =
+                    (requestTypeValue.Contains("rental", StringComparison.OrdinalIgnoreCase)
+                        || requestTypeValue.Contains("rent", StringComparison.OrdinalIgnoreCase)
+                        || requestTypeValue.Contains("lease", StringComparison.OrdinalIgnoreCase))
+                    && !requestTypeValue.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+                    && !requestTypeValue.Contains("sale", StringComparison.OrdinalIgnoreCase);
                 if (isRentalRequest
                     && fields.TryGetValue("moveInDate", out var moveInDate)
                     && !string.IsNullOrWhiteSpace(moveInDate.Value))
@@ -1620,6 +1627,16 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
+        if (record is not null
+            && string.Equals(request.SourceEntityType, "LandAcquisition", StringComparison.OrdinalIgnoreCase))
+        {
+            return Conflict(new
+            {
+                success = false,
+                message = $"Agreement {record.DocumentReference} has already been generated for this land acquisition. Open the existing agreement instead of regenerating it."
+            });
+        }
+
         var documentReference = record?.DocumentReference
             ?? await NextDocumentReferenceAsync(tenantId, cancellationToken);
         var mergeValues = BuildMergeValues(template, request, now);
@@ -1824,7 +1841,11 @@ public sealed class DocumentManagementController : ControllerBase
     }
 
     [HttpGet("records")]
-    public async Task<IActionResult> GetRecords([FromQuery] string? module = null, [FromQuery] int take = 100, CancellationToken cancellationToken = default)
+    public async Task<IActionResult> GetRecords(
+        [FromQuery] string? module = null,
+        [FromQuery] string? documentReference = null,
+        [FromQuery] int take = 100,
+        CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         take = Math.Clamp(take, 1, 500);
@@ -1835,6 +1856,12 @@ public sealed class DocumentManagementController : ControllerBase
         if (!string.IsNullOrWhiteSpace(module))
         {
             query = query.Where(item => item.SourceModule == module);
+        }
+
+        if (!string.IsNullOrWhiteSpace(documentReference))
+        {
+            var reference = documentReference.Trim();
+            query = query.Where(item => item.DocumentReference == reference);
         }
 
         var records = await LoadViewableRecordsAsync(tenantId, query, take, cancellationToken);
@@ -2579,6 +2606,27 @@ public sealed class DocumentManagementController : ControllerBase
             CreatedBy = _currentUserService.UserName ?? "System",
             CreatedById = GetUserId()
         };
+
+        if (string.Equals(version.Status, "Current", StringComparison.OrdinalIgnoreCase))
+        {
+            var currentVersions = await _db.CentralDocumentVersions
+                .Where(item => item.TenantId == tenantId
+                    && item.DocumentRecordId == record.Id
+                    && item.Status == "Current"
+                    && !item.IsDeleted)
+                .ToListAsync(cancellationToken);
+
+            foreach (var currentVersion in currentVersions)
+            {
+                currentVersion.Status = "Published";
+                currentVersion.UpdatedAt = now;
+                currentVersion.UpdatedBy = _currentUserService.UserName ?? "System";
+                currentVersion.LastModifiedById = GetUserId();
+            }
+
+            version.PublishedAt = now;
+            version.PublishedById = GetUserId();
+        }
 
         record.CurrentVersion = version.VersionNumber;
         record.VersionStatus = version.Status;
@@ -3836,6 +3884,49 @@ public sealed class DocumentManagementController : ControllerBase
             Date: {{Today}}
             Prepared by: {{PreparedBy}}
             Source: Estate / Property Management -> Central DMS
+            """),
+        Template(
+            "EST-LAND-ACQ-AGREEMENT",
+            "Land Acquisition Agreement",
+            "Land Acquisition Agreement - {{CaseReference}}",
+            "EST-LEASE-XFER",
+            ["CaseReference", "Location", "EstimatedSize", "IntendedUse", "GrantorName", "GrantorAddress", "GranteeName", "GranteeAddress", "NegotiatedValue", "PaymentType", "PaymentAmount", "PaymentSchedule", "RootOfTitle", "SpecialConditions", "AgreementDate", "Witness1Name", "Witness2Name"],
+            """
+            LAND ACQUISITION AGREEMENT
+
+            Agreement date: {{AgreementDate}}
+            Estate acquisition reference: {{CaseReference}}
+            Parcel location: {{Location}}
+            Estimated size: {{EstimatedSize}}
+            Intended use: {{IntendedUse}}
+
+            Grantor / seller: {{GrantorName}}
+            Grantor address: {{GrantorAddress}}
+            Grantee / buyer: {{GranteeName}}
+            Grantee address: {{GranteeAddress}}
+
+            Root of title:
+            {{RootOfTitle}}
+
+            Negotiated consideration: {{NegotiatedValue}}
+            Payment type: {{PaymentType}}
+            Payment amount: {{PaymentAmount}}
+            Payment schedule:
+            {{PaymentSchedule}}
+
+            Special conditions:
+            {{SpecialConditions}}
+
+            This draft records the negotiated land acquisition terms and remains subject to Estate approval, execution by the parties, statutory consent, stamp duty processing, and registration.
+
+            Grantor signature: ____________________
+            Grantee / authorised signatory: ____________________
+            Witness 1: {{Witness1Name}}
+            Witness 2: {{Witness2Name}}
+
+            Date: {{Today}}
+            Prepared by: {{PreparedBy}}
+            Source: Estate / Land Acquisition -> Central DMS
             """),
         Template(
             "EST-DEED-VARIATION",
@@ -6182,6 +6273,9 @@ public sealed class DocumentManagementController : ControllerBase
                 "Estate Manager",
                 "Land Registry Officer",
                 "Survey Officer",
+                "Acquisition Committee",
+                "Executive Approver",
+                "Head of Estate",
                 "Facilities Officer",
                 "Facilities Manager",
                 "Property Manager");

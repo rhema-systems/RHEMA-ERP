@@ -237,6 +237,8 @@ export default function LegalProcedureWorkspacePage() {
         entityType={procedure.entityType}
         defaultTitle={procedure.title}
         workspaceType="Legal Matter"
+        registerOnly
+        caseBasePath={`/legal/${encodeURIComponent(procedure.entityType)}`}
       />
     </div>
   );

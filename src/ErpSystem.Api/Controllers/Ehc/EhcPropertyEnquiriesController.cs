@@ -150,6 +150,14 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             return BadRequest(new { success = false, message = "Enter the completed Sales reference, up to 200 characters." });
         if (request.AgreedAmount is <= 0)
             return BadRequest(new { success = false, message = "Enter a positive agreed amount." });
+        if (request.SalesAmountPaid is < 0)
+            return BadRequest(new { success = false, message = "Sales amount paid cannot be negative." });
+        if (request.SalesAmountPaid.HasValue
+            && request.AgreedAmount.HasValue
+            && request.SalesAmountPaid.Value > request.AgreedAmount.Value)
+            return BadRequest(new { success = false, message = "Sales amount paid cannot be greater than the agreed amount." });
+        if (request.SalesPaymentReference?.Trim().Length > 200)
+            return BadRequest(new { success = false, message = "Sales payment reference must be 200 characters or fewer." });
         if (!string.IsNullOrWhiteSpace(request.Currency)
             && (request.Currency.Trim().Length != 3 || !request.Currency.Trim().All(char.IsLetter)))
             return BadRequest(new { success = false, message = "Currency must be a three-letter code." });
@@ -165,6 +173,8 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 ticket.CrmOpportunityId.Value,
                 request.SalesReference.Trim(),
                 request.AgreedAmount,
+                request.SalesAmountPaid,
+                request.SalesPaymentReference,
                 request.Currency,
                 request.SalesCompletedAt,
                 request.Notes,
@@ -182,7 +192,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 TicketId = ticket.Id,
                 EventType = "EstateHandoff",
                 Title = "Sales handed the property enquiry to Estate",
-                Body = $"Sales reference: {request.SalesReference.Trim()}. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}.",
+                Body = $"Sales reference: {request.SalesReference.Trim()}. Sales amount paid: {request.SalesAmountPaid ?? 0m:0.00}. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}.",
                 IsInternal = true,
                 ActorUserId = actorUserId,
                 CreatedAt = DateTime.UtcNow,
@@ -193,7 +203,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
 
             await tickets.AddInternalCommentAsync(ticket.Id, new()
             {
-                Body = $"Sales completed CRM opportunity {ticket.CrmOpportunityId} and handed this enquiry to Estate. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}. Sales reference: {request.SalesReference.Trim()}."
+                Body = $"Sales completed CRM opportunity {ticket.CrmOpportunityId} and handed this enquiry to Estate. Estate application: {result.ReferenceNumber ?? result.ProcedureCaseId.ToString()}. Sales reference: {request.SalesReference.Trim()}. Sales amount paid: {request.SalesAmountPaid ?? 0m:0.00}."
             }, cancellationToken);
 
             await ResolveAfterEstateHandoffAsync(ticket, result.ReferenceNumber ?? result.ProcedureCaseId.ToString(), cancellationToken);
@@ -285,6 +295,8 @@ public sealed record PropertyEnquiryTransition(EhcTicketStatus Status, Guid? Tra
 public sealed record CreatePropertyEnquiryEstateHandoff(
     string? SalesReference,
     decimal? AgreedAmount,
+    decimal? SalesAmountPaid,
+    string? SalesPaymentReference,
     string? Currency,
     DateTime? SalesCompletedAt,
     string? Notes);

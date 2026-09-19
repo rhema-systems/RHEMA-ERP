@@ -20,20 +20,70 @@ interface CentralDocumentPdfViewerProps {
   fileData?: Uint8Array | null;
   fileName?: string | null;
   enableAnnotations?: boolean;
+  annotationStateJson?: string | null;
 }
 
-export default function CentralDocumentPdfViewer({
+export interface CentralDocumentPdfViewerHandle {
+  exportAnnotationState: () => Promise<string | null>;
+  exportAnnotatedPdfBlob: () => Promise<Blob | null>;
+}
+
+const CentralDocumentPdfViewer = React.forwardRef<
+  CentralDocumentPdfViewerHandle,
+  CentralDocumentPdfViewerProps
+>(function CentralDocumentPdfViewer(
+{
   fileUrl,
   fileData,
   fileName,
   enableAnnotations = false,
-}: CentralDocumentPdfViewerProps) {
+  annotationStateJson,
+},
+ref
+) {
   const viewerHostRef = React.useRef<HTMLDivElement | null>(null);
+  const viewerInstanceRef = React.useRef<PdfViewer | null>(null);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const viewerId = React.useMemo(
     () => `central-dms-pdf-${Math.random().toString(36).slice(2)}`,
     []
   );
+
+  React.useImperativeHandle(ref, () => ({
+    exportAnnotationState: async () => {
+      const viewer = viewerInstanceRef.current as
+        | (PdfViewer & {
+            exportAnnotationsAsObject?: () => unknown;
+            exportAnnotation?: (format?: string) => unknown;
+            exportAnnotations?: () => unknown;
+          })
+        | null;
+      if (!viewer) return null;
+
+      const exported =
+        typeof viewer.exportAnnotationsAsObject === 'function'
+          ? viewer.exportAnnotationsAsObject()
+          : typeof viewer.exportAnnotation === 'function'
+            ? viewer.exportAnnotation('Json')
+            : typeof viewer.exportAnnotations === 'function'
+              ? viewer.exportAnnotations()
+              : null;
+      const resolved = exported instanceof Promise ? await exported : exported;
+      if (!resolved) return null;
+      return typeof resolved === 'string'
+        ? resolved
+        : JSON.stringify(resolved);
+    },
+    exportAnnotatedPdfBlob: async () => {
+      const viewer = viewerInstanceRef.current as
+        | (PdfViewer & {
+            saveAsBlob?: () => Promise<Blob>;
+          })
+        | null;
+      if (!viewer || typeof viewer.saveAsBlob !== 'function') return null;
+      return viewer.saveAsBlob();
+    },
+  }));
 
   React.useEffect(() => {
     const host = viewerHostRef.current;
@@ -65,6 +115,20 @@ export default function CentralDocumentPdfViewer({
       }
       if (!disposed && documentBytes) {
         viewer.load(documentBytes, '');
+        if (enableAnnotations && annotationStateJson?.trim()) {
+          window.setTimeout(() => {
+            if (disposed) return;
+            const annotationViewer = viewer as PdfViewer & {
+              importAnnotations?: (data: string) => void;
+              importAnnotation?: (data: string) => void;
+            };
+            if (typeof annotationViewer.importAnnotations === 'function') {
+              annotationViewer.importAnnotations(annotationStateJson);
+            } else if (typeof annotationViewer.importAnnotation === 'function') {
+              annotationViewer.importAnnotation(annotationStateJson);
+            }
+          }, 250);
+        }
       }
     };
 
@@ -96,12 +160,14 @@ export default function CentralDocumentPdfViewer({
     });
 
     viewer.appendTo(host);
+    viewerInstanceRef.current = viewer;
 
     return () => {
       disposed = true;
+      viewerInstanceRef.current = null;
       viewer.destroy();
     };
-  }, [enableAnnotations, fileUrl, fileData]);
+  }, [annotationStateJson, enableAnnotations, fileUrl, fileData]);
 
   if (!fileUrl && !fileData) {
     return null;
@@ -126,4 +192,6 @@ export default function CentralDocumentPdfViewer({
       </div>
     </div>
   );
-}
+});
+
+export default CentralDocumentPdfViewer;

@@ -169,7 +169,7 @@ public sealed class PropertyListingEnquiryTests
         var service = new EstateSalesListingApplicationHandoffService(db, procedures.Object);
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(tenantId,
-            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1250000m, "GHS", DateTime.UtcNow, null)));
+            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1250000m, 0m, null, "GHS", DateTime.UtcNow, null)));
 
         Assert.Equal("Close the linked Sales opportunity as Won before handing the enquiry to Estate.", error.Message);
         procedures.Verify(item => item.CreateCaseAsync(It.IsAny<CreateProcedureCaseRequest>()), Times.Never);
@@ -197,11 +197,14 @@ public sealed class PropertyListingEnquiryTests
         var service = new EstateSalesListingApplicationHandoffService(db, procedures.Object);
 
         var result = await service.CreateAsync(tenantId,
-            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1200000m, "GHS", opportunity.ActualCloseDate,
+            new(asset.Id, partner.Id, "Sale", opportunity.Id, "AGR-001", 1200000m, 250000m, "RCT-001", "GHS", opportunity.ActualCloseDate,
                 "Accepted offer", Guid.NewGuid(), "EHC-26-000001"));
 
         Assert.False(result.AlreadyExists); Assert.Equal(caseId, result.ProcedureCaseId);
         Assert.NotNull(captured); Assert.Equal("AGR-001", captured!.FieldValues!["salesReference"]);
+        Assert.Equal("250000.00", captured.FieldValues["salesAmountPaid"]);
+        Assert.Equal("RCT-001", captured.FieldValues["salesPaymentReference"]);
+        Assert.Equal("950000.00", captured.FieldValues["estateRemainingAmount"]);
         Assert.Equal(opportunity.Id.ToString(), captured.FieldValues["salesOpportunityId"]);
         Assert.Equal("EHC-26-000001", captured.FieldValues["ehcTicketNumber"]);
         procedures.Verify(item => item.CreateCaseAsync(It.IsAny<CreateProcedureCaseRequest>()), Times.Once);
@@ -294,7 +297,7 @@ public sealed class PropertyListingEnquiryTests
             .ReturnsAsync(new EstateSalesListingApplicationHandoffResult(estateCaseId, "ESTATE-001", "Purchase enquiry", "Open", "Estate review", DateTime.UtcNow, false));
 
         var controller = new EhcPropertyEnquiriesController(db, User().Object, tickets.Object, handoffs.Object);
-        var result = await controller.CreateEstateHandoff(ticket.Id, new("AGR-001", 1250000m, "GHS", opportunity.ActualCloseDate, null), default);
+        var result = await controller.CreateEstateHandoff(ticket.Id, new("AGR-001", 1250000m, 1250000m, "RCT-FULL", "GHS", opportunity.ActualCloseDate, null), default);
 
         Assert.IsType<OkObjectResult>(result);
         tickets.Verify(item => item.TransitionTicketAsync(ticket.Id, EhcTicketStatus.InProgress, It.IsAny<string>(), null, null, It.IsAny<CancellationToken>()), Times.Once);
