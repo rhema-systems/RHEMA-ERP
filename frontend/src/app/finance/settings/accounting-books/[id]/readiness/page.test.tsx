@@ -69,6 +69,8 @@ describe('accounting book C4 readiness', () => {
         fireEvent.click(screen.getByText('2026-02 — February'));
         fireEvent.click(screen.getByRole('button', { name: 'Add Future period' }));
         await waitFor(() => expect(financeDataService.createAccountingBookPeriod).toHaveBeenCalledWith('book-1', 'fp-2'));
+        await waitFor(() => expect(screen.getByLabelText('Fiscal period')).toHaveTextContent('Select another fiscal period'));
+        expect(screen.getByLabelText('Fiscal period')).not.toHaveTextContent('fp-2');
     });
 
     it('requires a reason and rowversion for a period transition request', async () => {
@@ -107,7 +109,8 @@ describe('accounting book C4 readiness', () => {
         vi.mocked(financeDataService.prepareAccountingBookInitialization).mockResolvedValue({ accountingBookId: 'book-1', accountingBookCode: 'LOCAL', mode: 'IndependentOpeningBalances', cutoffDate: '2026-01-01', cutoffFiscalPeriodId: 'period-1', cutoffFiscalPeriodCode: '2026-01', functionalCurrencyCode: 'GHS', accounts: [{ accountId: 'account-1', accountNumber: '1000', accountName: 'Cash', accountClassificationId: 'class-1', accountClassificationCode: 'CASH', authoritativeSignedBalance: 0 }] });
         render(<AccountingBookReadinessPage />);
         fireEvent.change(await screen.findByLabelText('Cutoff date'), { target: { value: '2026-01-01' } });
-        fireEvent.change(screen.getByLabelText('Idempotency key'), { target: { value: 'init-1' } });
+        expect(screen.getByText(/prevents this initialization evidence from being saved twice/i)).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Preparation reference'), { target: { value: 'init-1' } });
         fireEvent.change(screen.getByLabelText('Preparation reason'), { target: { value: 'Reviewed opening evidence' } });
         fireEvent.click(screen.getByRole('button', { name: 'Load governed preparation' }));
         expect(await screen.findByText('1000 — Cash')).toBeInTheDocument();
