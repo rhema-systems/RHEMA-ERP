@@ -433,7 +433,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
     private string ActorName() => _currentUser.UserName ?? "system";
     private Task<T> AtomicAsync<T>(Func<Task<T>> action, CancellationToken ct) => !_db.Database.IsRelational() ? action() : _db.Database.CreateExecutionStrategy().ExecuteAsync(async () =>
     { await using var tx = await _db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct); try { var result = await action(); await tx.CommitAsync(ct); return result; }
-      catch { await tx.RollbackAsync(ct); _db.ChangeTracker.Clear(); throw; } });
+      catch { await tx.RollbackAsync(CancellationToken.None); _db.ChangeTracker.Clear(); throw; } });
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
     private static string D(decimal value) => value.ToString("0.############################", CultureInfo.InvariantCulture);
     private sealed record Prepared(IReadOnlyList<AccountingBookInitializationLineDto> Lines, int RequiredCount, decimal TotalDebits,
