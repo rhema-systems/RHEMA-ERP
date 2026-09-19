@@ -7,6 +7,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { authService } from '@/services/auth';
 import type { AccountingBookInitialization, AccountingBookInitializationLine } from '@/types/finance';
 
 type EvidenceFilter = 'all' | 'adjustments' | 'exceptions';
@@ -28,6 +29,14 @@ const csv = (value: string | number) => {
     return `"${spreadsheetSafe.replaceAll('"', '""')}"`;
 };
 
+export const clientFacingAccountNumber = (accountNumber: string | undefined, tenantCode: string | undefined) => {
+    if (!accountNumber || !tenantCode) return accountNumber ?? '';
+    const prefix = `${tenantCode}-`;
+    return accountNumber.toLocaleUpperCase().startsWith(prefix.toLocaleUpperCase())
+        ? accountNumber.slice(prefix.length)
+        : accountNumber;
+};
+
 function evidenceValues(initialization: AccountingBookInitialization, line: AccountingBookInitializationLine) {
     const proposedSignedBalance = line.openingDebit - line.openingCredit;
     const expectedSignedBalance = initialization.mode === 'IndependentOpeningBalances'
@@ -44,6 +53,7 @@ export function InitializationEvidencePack({ initialization }: { initialization:
     const [filter, setFilter] = useState<EvidenceFilter>('all');
     const [search, setSearch] = useState('');
     const currency = initialization.lines[0]?.currencyCode || '';
+    const tenantCode = authService.getCurrentTenant()?.code;
 
     const evidence = useMemo(() => {
         const rows = initialization.lines.map(line => ({ ...line, ...evidenceValues(initialization, line) }));
@@ -125,7 +135,7 @@ export function InitializationEvidencePack({ initialization }: { initialization:
                 <div className="max-h-[460px] overflow-auto rounded-md border">
                     <Table>
                         <TableHeader><TableRow><TableHead>Account</TableHead><TableHead>Type</TableHead><TableHead className="text-right">Source signed</TableHead><TableHead className="text-right">Adjustment</TableHead><TableHead className="text-right">Debit</TableHead><TableHead className="text-right">Credit</TableHead><TableHead className="text-right">Resulting signed</TableHead><TableHead className="text-right">Variance</TableHead></TableRow></TableHeader>
-                        <TableBody>{visibleRows.length === 0 ? <TableRow><TableCell colSpan={8} className="h-20 text-center text-muted-foreground">No evidence lines match this view.</TableCell></TableRow> : visibleRows.map(line => <TableRow key={line.accountId} className={line.isException ? 'bg-destructive/5' : undefined}><TableCell><p className="font-medium">{line.accountNumber || line.accountId}</p><p className="text-xs text-muted-foreground">{line.accountName || 'Account name unavailable'}</p></TableCell><TableCell>{line.accountType || '—'}</TableCell><TableCell className="text-right tabular-nums">{initialization.mode === 'IndependentOpeningBalances' ? '—' : money(line.baseBookSignedBalance)}</TableCell><TableCell className="text-right tabular-nums">{money(line.openingAdjustment)}</TableCell><TableCell className="text-right tabular-nums">{money(line.openingDebit)}</TableCell><TableCell className="text-right tabular-nums">{money(line.openingCredit)}</TableCell><TableCell className="text-right tabular-nums">{money(line.proposedSignedBalance)}</TableCell><TableCell className="text-right tabular-nums">{initialization.mode === 'IndependentOpeningBalances' ? '—' : money(line.variance)}</TableCell></TableRow>)}</TableBody>
+                        <TableBody>{visibleRows.length === 0 ? <TableRow><TableCell colSpan={8} className="h-20 text-center text-muted-foreground">No evidence lines match this view.</TableCell></TableRow> : visibleRows.map(line => <TableRow key={line.accountId} className={line.isException ? 'bg-destructive/5' : undefined}><TableCell><p className="font-medium">{clientFacingAccountNumber(line.accountNumber, tenantCode) || line.accountId}</p><p className="text-xs text-muted-foreground">{line.accountName || 'Account name unavailable'}</p></TableCell><TableCell>{line.accountType || '—'}</TableCell><TableCell className="text-right tabular-nums">{initialization.mode === 'IndependentOpeningBalances' ? '—' : money(line.baseBookSignedBalance)}</TableCell><TableCell className="text-right tabular-nums">{money(line.openingAdjustment)}</TableCell><TableCell className="text-right tabular-nums">{money(line.openingDebit)}</TableCell><TableCell className="text-right tabular-nums">{money(line.openingCredit)}</TableCell><TableCell className="text-right tabular-nums">{money(line.proposedSignedBalance)}</TableCell><TableCell className="text-right tabular-nums">{initialization.mode === 'IndependentOpeningBalances' ? '—' : money(line.variance)}</TableCell></TableRow>)}</TableBody>
                     </Table>
                 </div>
             </div>}
