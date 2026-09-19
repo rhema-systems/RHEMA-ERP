@@ -5,7 +5,21 @@
 
 import type {
     Account,
+    AccountTransactionInquiryPage,
     AccountingBook,
+    DecideAccountingBookTransition,
+    RequestAccountingBookTransition,
+    SaveAccountingBook,
+    AccountingBookApplicabilityPolicy,
+    SaveAccountingBookApplicabilityPolicy,
+    DecideAccountingBookApplicabilityPolicy,
+    ResolveAccountingBookApplicability,
+    FreezeAccountingBookSelection,
+    AccountingBookSelection,
+    AccountingBookApplicabilityEligibleBook,
+    AccountClassification,
+    AccountClassificationWhereUsed,
+    SaveAccountClassification,
     Currency,
     ExchangeRate,
     FiscalYear,
@@ -24,6 +38,9 @@ import type {
     SegmentLookupValue,
     ReportingSegmentOptionsResponse,
     AccountCurrencyLink,
+    AccountBookCurrencyPolicy,
+    SaveAccountBookCurrencyPolicyDto,
+    DecideAccountBookCurrencyPolicyDto,
     CreateAccountDto,
     UpdateAccountDto,
     CreateCurrencyDto,
@@ -48,6 +65,9 @@ import type {
     UpdateCurrencyLinkRatePolicyDto,
     ModuleDefinition,
     OpeningBalanceBatch,
+    OpeningBalanceBatchReversal,
+    RequestOpeningBalanceBatchReversalDto,
+    ReviewOpeningBalanceBatchReversalDto,
     OpeningBalanceDiagnostic,
     OpeningBalanceValidationResult,
     SubledgerOpeningBalanceReadiness,
@@ -134,6 +154,124 @@ class FinanceDataService {
         return apiService.get<AccountingBook[]>(endpoint);
     }
 
+    async getAccountingBook(id: string): Promise<AccountingBook> {
+        return apiService.get<AccountingBook>(`/finance/accounting-books/${id}`);
+    }
+
+    async createAccountingBook(dto: SaveAccountingBook): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>('/finance/accounting-books', dto);
+    }
+
+    async updateAccountingBook(id: string, dto: SaveAccountingBook): Promise<AccountingBook> {
+        return apiService.put<AccountingBook>(`/finance/accounting-books/${id}`, dto);
+    }
+
+    async requestAccountingBookTransition(id: string, dto: RequestAccountingBookTransition): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>(`/finance/accounting-books/${id}/transitions`, dto);
+    }
+
+    async approveAccountingBookTransition(id: string, dto: DecideAccountingBookTransition): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>(`/finance/accounting-books/${id}/transitions/approve`, dto);
+    }
+
+    async rejectAccountingBookTransition(id: string, dto: DecideAccountingBookTransition): Promise<AccountingBook> {
+        return apiService.post<AccountingBook>(`/finance/accounting-books/${id}/transitions/reject`, dto);
+    }
+
+    async getAccountingBookPeriods(accountingBookId: string): Promise<import('@/types/finance').AccountingBookPeriod[]> {
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/periods`);
+    }
+
+    async createAccountingBookPeriod(accountingBookId: string, fiscalPeriodId: string): Promise<import('@/types/finance').AccountingBookPeriod> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/periods`, { fiscalPeriodId, initialStatus: 'Future' });
+    }
+
+    async requestAccountingBookPeriodTransition(accountingBookId: string, periodId: string, targetStatus: string, reason: string, rowVersion: string): Promise<import('@/types/finance').AccountingBookPeriod> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/periods/${periodId}/transitions`, { targetStatus, reason, rowVersion });
+    }
+
+    async decideAccountingBookPeriodTransition(accountingBookId: string, periodId: string, action: 'approve' | 'reject', reason: string, rowVersion: string): Promise<import('@/types/finance').AccountingBookPeriod> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/periods/${periodId}/transitions/${action}`, { reason, rowVersion });
+    }
+
+    async getAccountingBookInitialization(accountingBookId: string): Promise<import('@/types/finance').AccountingBookInitialization | null> {
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/initialization`);
+    }
+
+    async getAccountingBookActivationReadiness(accountingBookId: string): Promise<import('@/types/finance').AccountingBookActivationReadiness> {
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/initialization/readiness`);
+    }
+
+    async getAccountingBookApplicabilityPolicies(): Promise<AccountingBookApplicabilityPolicy[]> {
+        return apiService.get('/finance/accounting-book-applicability/policies');
+    }
+
+    async getAccountingBookApplicabilityEligibleBooks(): Promise<AccountingBookApplicabilityEligibleBook[]> {
+        return apiService.get('/finance/accounting-book-applicability/eligible-books');
+    }
+
+    async createAccountingBookApplicabilityPolicy(request: SaveAccountingBookApplicabilityPolicy): Promise<AccountingBookApplicabilityPolicy> {
+        return apiService.post('/finance/accounting-book-applicability/policies', request);
+    }
+
+    async updateAccountingBookApplicabilityPolicy(id: string, request: SaveAccountingBookApplicabilityPolicy): Promise<AccountingBookApplicabilityPolicy> {
+        return apiService.put(`/finance/accounting-book-applicability/policies/${id}`, request);
+    }
+
+    async decideAccountingBookApplicabilityPolicy(id: string, action: 'submit' | 'approve' | 'reject' | 'retire' | 'retire/approve' | 'retire/reject', request: DecideAccountingBookApplicabilityPolicy): Promise<AccountingBookApplicabilityPolicy> {
+        return apiService.post(`/finance/accounting-book-applicability/policies/${id}/${action}`, request);
+    }
+
+    async resolveAccountingBookApplicability(request: ResolveAccountingBookApplicability): Promise<AccountingBookSelection> {
+        return apiService.post('/finance/accounting-book-applicability/resolve', request);
+    }
+
+    async freezeAccountingBookSelection(request: FreezeAccountingBookSelection): Promise<AccountingBookSelection> {
+        return apiService.post('/finance/accounting-book-applicability/selections/freeze', request);
+    }
+
+    async prepareAccountingBookInitialization(accountingBookId: string, mode: string, cutoffDate: string, sourceAccountingBookId?: string | null): Promise<import('@/types/finance').AccountingBookInitializationPreparation> {
+        const query = new URLSearchParams({ mode, cutoffDate });
+        if (sourceAccountingBookId) query.set('sourceAccountingBookId', sourceAccountingBookId);
+        return apiService.get(`/finance/accounting-books/${accountingBookId}/initialization/preparation?${query}`);
+    }
+
+    async configureAccountingBookInitialization(accountingBookId: string, request: Record<string, unknown>): Promise<import('@/types/finance').AccountingBookInitialization> {
+        return apiService.put(`/finance/accounting-books/${accountingBookId}/initialization`, request);
+    }
+
+    async submitAccountingBookInitialization(accountingBookId: string): Promise<import('@/types/finance').AccountingBookInitialization> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/initialization/submit`, {});
+    }
+
+    async decideAccountingBookInitialization(accountingBookId: string, action: 'approve' | 'reject', reason: string, rowVersion: string): Promise<import('@/types/finance').AccountingBookInitialization> {
+        return apiService.post(`/finance/accounting-books/${accountingBookId}/initialization/${action}`, { reason, rowVersion });
+    }
+
+    async getAccountClassifications(accountingBookId?: string, includeInactive = false): Promise<AccountClassification[]> {
+        const queryParams = new URLSearchParams();
+        if (accountingBookId) queryParams.append('accountingBookId', accountingBookId);
+        if (includeInactive) queryParams.append('includeInactive', 'true');
+        const suffix = queryParams.toString() ? `?${queryParams}` : '';
+        return apiService.get<AccountClassification[]>(`/finance/account-classifications${suffix}`);
+    }
+
+    async getAccountClassificationWhereUsed(id: string): Promise<AccountClassificationWhereUsed> {
+        return apiService.get<AccountClassificationWhereUsed>(`/finance/account-classifications/${id}/where-used`);
+    }
+
+    async createAccountClassification(dto: SaveAccountClassification): Promise<AccountClassification> {
+        return apiService.post<AccountClassification>('/finance/account-classifications', dto);
+    }
+
+    async updateAccountClassification(id: string, dto: SaveAccountClassification): Promise<AccountClassification> {
+        return apiService.put<AccountClassification>(`/finance/account-classifications/${id}`, dto);
+    }
+
+    async retireAccountClassification(id: string, reason: string, rowVersion: string): Promise<AccountClassification> {
+        return apiService.post<AccountClassification>(`/finance/account-classifications/${id}/retire`, { reason, rowVersion });
+    }
+
     async getAccounts(filters?: {
         accountType?: string;
         status?: string;
@@ -158,6 +296,22 @@ class FinanceDataService {
 
     async getAccountById(id: string): Promise<Account> {
         return apiService.get<Account>(`/finance/accounts/${id}`);
+    }
+
+    async getAccountTransactions(
+        accountId: string,
+        accountingBookCode: string,
+        page = 1,
+        pageSize = 10,
+    ): Promise<AccountTransactionInquiryPage> {
+        const queryParams = new URLSearchParams({
+            page: String(page),
+            pageSize: String(pageSize),
+            accountingBookCode,
+        });
+        return apiService.get<AccountTransactionInquiryPage>(
+            `/finance/accounts/${accountId}/transactions?${queryParams}`,
+        );
     }
 
     // ===== CODING DIMENSIONS =====
@@ -745,6 +899,18 @@ class FinanceDataService {
         return apiService.post<OpeningBalanceBatch>(`/finance/opening-balances/${batchId}/post`, { comment });
     }
 
+    async requestOpeningBalanceReversal(batchId: string, dto: RequestOpeningBalanceBatchReversalDto): Promise<OpeningBalanceBatchReversal> {
+        return apiService.post<OpeningBalanceBatchReversal>(`/finance/opening-balances/${batchId}/reversals`, dto);
+    }
+
+    async reviewOpeningBalanceReversal(batchId: string, requestId: string, dto: ReviewOpeningBalanceBatchReversalDto): Promise<OpeningBalanceBatchReversal> {
+        return apiService.post<OpeningBalanceBatchReversal>(`/finance/opening-balances/${batchId}/reversals/${requestId}/review`, dto);
+    }
+
+    async postOpeningBalanceReversal(batchId: string, requestId: string): Promise<OpeningBalanceBatchReversal> {
+        return apiService.post<OpeningBalanceBatchReversal>(`/finance/opening-balances/${batchId}/reversals/${requestId}/post`, {});
+    }
+
     async getOpeningBalanceDiagnostics(): Promise<OpeningBalanceDiagnostic[]> {
         return apiService.get<OpeningBalanceDiagnostic[]>('/finance/opening-balances/diagnostics');
     }
@@ -922,8 +1088,16 @@ class FinanceDataService {
         return apiService.put<SegmentStructure>(`/finance/segments/${id}`, dto);
     }
 
-    async deleteSegmentStructure(id: string): Promise<void> {
-        return apiService.delete(`/finance/segments/${id}`);
+    async activateSegmentStructure(id: string, rowVersion: string, reason?: string): Promise<SegmentStructure> {
+        return apiService.post<SegmentStructure>(`/finance/segments/${id}/activate`, { rowVersion, reason });
+    }
+
+    async freezeSegmentStructure(id: string, rowVersion: string, reason?: string): Promise<SegmentStructure> {
+        return apiService.post<SegmentStructure>(`/finance/segments/${id}/freeze`, { rowVersion, reason });
+    }
+
+    async deleteSegmentStructure(id: string, rowVersion: string): Promise<void> {
+        return apiService.delete(`/finance/segments/${id}`, { rowVersion });
     }
 
     // ===== SEGMENT LOOKUP VALUES =====
@@ -944,7 +1118,7 @@ class FinanceDataService {
         return apiService.delete(`/finance/segments/${segmentId}/values/${valueId}`);
     }
 
-    async reorderSegmentStructures(reorderList: { segmentId: string; newPosition: number }[]): Promise<void> {
+    async reorderSegmentStructures(reorderList: { segmentId: string; newPosition: number; rowVersion: string }[]): Promise<void> {
         return apiService.post('/finance/segments/reorder', reorderList);
     }
 
@@ -976,6 +1150,34 @@ class FinanceDataService {
         return apiService.put<AccountCurrencyLink>(
             `/finance/accounts/${accountId}/currencies/${currencyCode}/rate-policy`,
             dto
+        );
+    }
+
+    async getAccountBookCurrencyPolicies(accountId: string): Promise<AccountBookCurrencyPolicy[]> {
+        return apiService.get<AccountBookCurrencyPolicy[]>(`/finance/accounts/${accountId}/revaluation-policies`);
+    }
+
+    async saveAccountBookCurrencyPolicy(
+        accountId: string,
+        accountCurrencyLinkId: string,
+        accountingBookId: string,
+        dto: SaveAccountBookCurrencyPolicyDto
+    ): Promise<AccountBookCurrencyPolicy> {
+        return apiService.put<AccountBookCurrencyPolicy>(
+            `/finance/accounts/${accountId}/revaluation-policies/currency-links/${accountCurrencyLinkId}/books/${accountingBookId}`,
+            dto,
+        );
+    }
+
+    async decideAccountBookCurrencyPolicy(
+        accountId: string,
+        policyId: string,
+        action: 'approve' | 'reject',
+        dto: DecideAccountBookCurrencyPolicyDto
+    ): Promise<AccountBookCurrencyPolicy> {
+        return apiService.post<AccountBookCurrencyPolicy>(
+            `/finance/accounts/${accountId}/revaluation-policies/${policyId}/${action}`,
+            dto,
         );
     }
 

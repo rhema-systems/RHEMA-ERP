@@ -41,6 +41,9 @@ public sealed class InventoryDisposalDto
     public string? ExecutionReference { get; set; }
     public Guid? ProceedsPostingEventId { get; set; }
     public Guid? ProceedsJournalEntryId { get; set; }
+    /// <summary>Durable C7/C8 checker handoff identity; no book or execution capability is exposed.</summary>
+    public Guid? FinanceProducerApprovalId { get; set; }
+    public bool FinanceProducerApprovalIsGroup { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
     public decimal TotalQuantity { get; set; }
     public decimal TotalValue { get; set; }

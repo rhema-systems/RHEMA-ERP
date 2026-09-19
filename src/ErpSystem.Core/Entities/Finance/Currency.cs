@@ -330,16 +330,9 @@ public class Currency : BusinessEntity
     public decimal? RateVarianceThresholdPercentage { get; set; } = 5.0m;
 
     /// <summary>
-    /// Default exchange rate type used for transactions in this currency.
-    /// 
-    /// Values match ExchangeRateType enum:
-    /// - "Daily" - Use daily spot rate (most common)
-    /// - "Average" - Use monthly average rate
-    /// - "MonthEnd" - Use month-end rate
-    /// - "Budget" - Use budgeted rate
-    /// - "Fixed" - Use predetermined fixed rate
-    /// 
-    /// Can be overridden at account or transaction level.
+    /// Legacy schema value retained for backward-compatible database reads only.
+    /// It is intentionally not exposed as transaction policy: operational rate type is
+    /// governed by the effective account-currency link, with tenant policy fallbacks.
     /// </summary>
     [MaxLength(20)]
     public string DefaultRateType { get; set; } = "Daily";

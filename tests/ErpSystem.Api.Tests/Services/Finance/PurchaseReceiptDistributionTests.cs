@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
@@ -37,12 +38,13 @@ public sealed class PurchaseReceiptDistributionTests
         saved.HasOverrides.Should().BeTrue(); saved.Version.Should().NotBe(before.Version); audited.Should().Be(1);
         var movement = await db.InventoryMovements.SingleAsync();
         movement.TotalValue = 60m; await db.SaveChangesAsync();
-        FinancePostingRequestDto? captured = null;
+        FinancePostingRequestV2Dto? captured = null;
         var posting = new Mock<IFinancePostingEngine>();
-        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((value, _) => captured = value)
+        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(),
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, FinancePostingProducerContext, CancellationToken>((value, _, _) => captured = value)
             .ReturnsAsync(new FinancePostingResultDto { JournalEntryId = Guid.NewGuid(), PostingEventId = Guid.NewGuid() });
-        await new InventoryReceiptFinancePostingService(db, posting.Object).PostAcceptedReceiptAsync(receipt.Id);
+        await new InventoryReceiptFinancePostingService(db, posting.Object, Dimensions().Object).PostAcceptedReceiptAsync(receipt.Id);
         captured!.Lines.Should().Contain(value => value.AccountId == original.Id && value.DebitAmount == 20m);
         captured.Lines.Should().Contain(value => value.AccountId == alternate.Id && value.DebitAmount == 40m);
         captured.Lines.Should().OnlyContain(value => value.SourceDocumentLineId == item.Id);
@@ -79,11 +81,13 @@ public sealed class PurchaseReceiptDistributionTests
         var view = await service.GetAsync(receipt.TenantId, receipt.Id);
         view.Lines.Should().Contain(value => value.AccountId == replacement.Id && value.Debit == 120m);
         var posting = new Mock<IFinancePostingEngine>();
-        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
+        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(),
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new FinancePostingResultDto { JournalEntryId = Guid.NewGuid(), PostingEventId = Guid.NewGuid() });
-        await new InventoryReceiptFinancePostingService(db, posting.Object).PostAcceptedReceiptAsync(receipt.Id);
-        posting.Verify(value => value.PostAsync(It.Is<FinancePostingRequestDto>(request =>
-            request.Lines.Any(line => line.AccountId == replacement.Id && line.DebitAmount == 120m)), It.IsAny<CancellationToken>()), Times.Once);
+        await new InventoryReceiptFinancePostingService(db, posting.Object, Dimensions().Object).PostAcceptedReceiptAsync(receipt.Id);
+        posting.Verify(value => value.PostAsync(It.Is<FinancePostingRequestV2Dto>(request =>
+            request.Lines.Any(line => line.AccountId == replacement.Id && line.DebitAmount == 120m)),
+            It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -192,13 +196,15 @@ public sealed class PurchaseReceiptDistributionTests
         view.TotalDebit.Should().Be(120m); view.TotalCredit.Should().Be(120m);
         view.Lines.Should().Contain(line => line.AccountId == inventory.Id && line.Debit == 120m && line.Source == "Item default");
         view.Lines.Should().Contain(line => line.AccountId == accrued.Id && line.Credit == 120m && line.Source == "PO supplier default");
-        FinancePostingRequestDto? captured = null;
+        FinancePostingRequestV2Dto? captured = null;
         var posting = new Mock<IFinancePostingEngine>();
-        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => captured = request)
+        posting.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(),
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, FinancePostingProducerContext, CancellationToken>((request, _, _) => captured = request)
             .ReturnsAsync(new FinancePostingResultDto { JournalEntryId = Guid.NewGuid(), PostingEventId = Guid.NewGuid() });
-        await new InventoryReceiptFinancePostingService(db, posting.Object).PostAcceptedReceiptAsync(receipt.Id);
+        await new InventoryReceiptFinancePostingService(db, posting.Object, Dimensions().Object).PostAcceptedReceiptAsync(receipt.Id);
         captured!.Lines.Should().OnlyContain(line => line.SourceDocumentLineId == item.Id);
+        captured.Lines.Should().OnlyContain(line => line.ExchangeRateDate == receipt.ReceiptDate);
         captured.Lines.Select(line => (line.AccountId, line.DebitAmount, line.CreditAmount))
             .Should().BeEquivalentTo(view.Lines.Select(line => (line.AccountId, line.Debit, line.Credit)));
     }
@@ -208,16 +214,23 @@ public sealed class PurchaseReceiptDistributionTests
     {
         await using var db = Context();
         var (receipt, item, inventory, accrued) = await SeedAsync(db);
-        var journal = new JournalEntry { TenantId = receipt.TenantId, JournalEntryNumber = "JE-HISTORY", Description = "Receipt" };
+        var book = new AccountingBook { TenantId = receipt.TenantId, Code = "IFRS", Name = "IFRS",
+            Purpose = "Reporting", IsDefault = true };
+        db.AccountingBooks.Add(book);
+        var journal = new JournalEntry { TenantId = receipt.TenantId, AccountingBookId = book.Id,
+            JournalEntryNumber = "JE-HISTORY", Description = "Receipt" };
         db.JournalEntries.Add(journal);
         db.FinancePostingEvents.Add(new FinancePostingEvent { TenantId = receipt.TenantId, SourceModule = "Inventory",
             SourceDocumentType = "ProcurementPurchaseOrderReceipt", SourceDocumentId = receipt.Id,
             PostingAction = "PostAcceptedInventoryReceipt", PostingStatus = "Posted", JournalEntryId = journal.Id,
+            AccountingBookId = book.Id,
             FunctionalCurrencyCode = "GHS" });
         db.AccountTransactions.AddRange(
-            new AccountTransaction { TenantId = receipt.TenantId, JournalEntryId = journal.Id, AccountId = inventory.Id,
+            new AccountTransaction { TenantId = receipt.TenantId, AccountingBookId = book.Id,
+                JournalEntryId = journal.Id, AccountId = inventory.Id,
                 DebitAmount = 120m, LineNumber = 1, TransactionTag = "INV-RECEIPT-CONTROL" },
-            new AccountTransaction { TenantId = receipt.TenantId, JournalEntryId = journal.Id, AccountId = accrued.Id,
+            new AccountTransaction { TenantId = receipt.TenantId, AccountingBookId = book.Id,
+                JournalEntryId = journal.Id, AccountId = accrued.Id,
                 CreditAmount = 120m, LineNumber = 2, TransactionTag = "INV-RECEIPT-GRV-ACCRUAL" });
         item.InventoryAccountId = Guid.NewGuid();
         await db.SaveChangesAsync();
@@ -282,6 +295,25 @@ public sealed class PurchaseReceiptDistributionTests
     private static Account Account(Guid tenant, string code, AccountType type) => new() { TenantId = tenant,
         AccountCode = code, AccountNumber = code, AccountName = code, AccountType = type, Status = AccountStatus.Active,
         IsControlAccount = type != AccountType.Expense, AllowDirectPosting = type == AccountType.Expense };
+    private static Mock<IFinanceSourceDimensionService> Dimensions()
+    {
+        var dimensions = new Mock<IFinanceSourceDimensionService>();
+        dimensions.Setup(value => value.SynchronizeDraftAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(),
+                It.IsAny<FinanceSourceDocumentDimensionInputDto?>(), It.IsAny<bool>(), It.IsAny<string?>(),
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+        dimensions.Setup(value => value.ValidateAndFreezeAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<DateTime>(),
+                It.IsAny<IReadOnlyList<FinanceSourceDocumentLineContext>>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new FinanceSourceDocumentDimensionDto());
+        dimensions.Setup(value => value.ResolvePostingDimensionsAsync(
+                It.IsAny<FinancePostingProducerContext>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<DateTime>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Array.Empty<FinancePostingDimensionValueDto>());
+        return dimensions;
+    }
     private static ApplicationDbContext Context() => new(new DbContextOptionsBuilder<ApplicationDbContext>()
         .UseInMemoryDatabase(Guid.NewGuid().ToString()).ConfigureWarnings(value => value.Ignore(InMemoryEventId.TransactionIgnoredWarning)).Options);
 }

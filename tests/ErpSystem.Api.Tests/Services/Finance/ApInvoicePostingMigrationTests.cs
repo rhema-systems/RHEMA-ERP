@@ -208,27 +208,11 @@ public sealed class ApInvoicePostingMigrationTests
     [Trait("Category", "AccountsPayable")]
     public void BudgetEvidenceMigration_ShouldAddOnlyTheNullableApLineReferenceAndReverseCleanly()
     {
-        var migration = new AddApVendorInvoiceBudgetEvidence();
-        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, new object[] { up });
-
-        up.Operations.OfType<AddColumnOperation>().Should().ContainSingle(column =>
-            column.Table == "VendorInvoiceLineItem" &&
-            column.Name == "BudgetEntryId" &&
-            column.IsNullable);
-        up.Operations.OfType<CreateIndexOperation>().Select(index => index.Name).Should().BeEquivalentTo(
-            "IX_VendorInvoiceLineItem_BudgetEntryId",
-            "IX_VendorInvoiceLineItem_TenantId_BudgetEntryId");
-        up.Operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(foreignKey =>
-            foreignKey.PrincipalTable == "BudgetEntries" &&
-            foreignKey.OnDelete == ReferentialAction.Restrict);
-
-        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        migration.GetType().GetMethod("Down", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, new object[] { down });
-        down.Operations.OfType<DropColumnOperation>().Should().ContainSingle(column =>
-            column.Table == "VendorInvoiceLineItem" && column.Name == "BudgetEntryId");
+        var source = ArchivedMigrationSource.Read("20260826013000_AddApVendorInvoiceBudgetEvidence.cs");
+        foreach (var token in new[] { "VendorInvoiceLineItem", "BudgetEntryId",
+            "IX_VendorInvoiceLineItem_BudgetEntryId", "IX_VendorInvoiceLineItem_TenantId_BudgetEntryId",
+            "BudgetEntries", "onDelete: ReferentialAction.Restrict", "migrationBuilder.DropColumn" })
+            source.Should().Contain(token);
     }
 
     [Fact]
@@ -265,21 +249,21 @@ public sealed class ApInvoicePostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.ApAccount.Id).CreditAmount.Should().Be(100m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ApInvoicePosted && a.TenantId == tenantId)).Should().Be(1);
-        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
-        fixture.ExpenseAccount.Balance.Should().Be(100m);
-        fixture.ApAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.ExpenseAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.ApAccount.Id)).ClosingBalance.Should().Be(-100m);
     }
 
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task LineDiscounts_ShouldRetainEachOriginatingSourceDimensionCombination()
+    public async Task LineTradeDiscounts_ShouldReduceExpenseAndRetainSourceDimensionCombinations()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
         var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
         {
             var original = invoice.LineItems.Single();
+            original.DiscountPercentage = 10m;
             original.DiscountAmount = 10m;
             invoice.LineItems.Add(new VendorInvoiceLineItem
             {
@@ -291,6 +275,7 @@ public sealed class ApInvoicePostingMigrationTests
                 Description = "Implementation services",
                 Quantity = 1m,
                 UnitPrice = 50m,
+                DiscountPercentage = 10m,
                 DiscountAmount = 5m,
                 CreatedAt = DateTime.UtcNow.AddSeconds(1),
                 CreatedBy = "seed"
@@ -319,7 +304,7 @@ public sealed class ApInvoicePostingMigrationTests
             "BuildApInvoicePostingRequestAsync",
             BindingFlags.Instance | BindingFlags.NonPublic)!;
 
-        var request = await (Task<FinancePostingRequestDto>)build.Invoke(service, new object[]
+        var request = await (Task<FinancePostingRequestV2Dto>)build.Invoke(service, new object[]
         {
             fixture.Invoice,
             Array.Empty<Guid>(),
@@ -327,12 +312,102 @@ public sealed class ApInvoicePostingMigrationTests
             CancellationToken.None
         })!;
 
-        var discounts = request.Lines.Where(line => line.TransactionTag == "AP-Discount").ToList();
-        discounts.Should().HaveCount(2);
-        discounts.Single(line => line.SourceDocumentLineId == firstLine.Id)
+        request.Lines.Should().NotContain(line => line.TransactionTag == "AP-Discount");
+        var expenses = request.Lines.Where(line => line.TransactionTag == "AP-Expense").ToList();
+        expenses.Should().HaveCount(2);
+        expenses.Single(line => line.SourceDocumentLineId == firstLine.Id)
+            .TransactionDebitAmount.Should().Be(90m);
+        expenses.Single(line => line.SourceDocumentLineId == firstLine.Id)
             .Dimensions.Should().ContainSingle(value => value.DimensionCode == "DEPARTMENT" && value.ValueCode == "FIN");
-        discounts.Single(line => line.SourceDocumentLineId == secondLine.Id)
+        expenses.Single(line => line.SourceDocumentLineId == secondLine.Id)
+            .TransactionDebitAmount.Should().Be(45m);
+        expenses.Single(line => line.SourceDocumentLineId == secondLine.Id)
             .Dimensions.Should().ContainSingle(value => value.DimensionCode == "DEPARTMENT" && value.ValueCode == "OPS");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task InvoiceTradeDiscount_ShouldPostWithoutDiscountReceivedAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId, invoice =>
+        {
+            var line = invoice.LineItems.Single();
+            line.DiscountPercentage = 10m;
+            line.DiscountAmount = 10m;
+            invoice.SubTotal = 90m;
+            invoice.DiscountAmount = 10m;
+            invoice.TotalAmount = 90m;
+            invoice.BaseCurrencyAmount = 90m;
+        });
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.DiscountReceivedAccountId = null;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(item => item.AccountId == fixture.ApAccount.Id)
+            .CreditAmount.Should().Be(90m);
+        journal.Transactions.Single(item => item.AccountId == fixture.ExpenseAccount.Id)
+            .DebitAmount.Should().Be(90m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task CreateInvoice_ShouldApplyLineTradeDiscountBeforeTax()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        TaxCalculationRequestDto? capturedTaxRequest = null;
+        var taxEngine = new Mock<ITaxCalculationEngine>();
+        taxEngine.Setup(engine => engine.CalculateTaxesAsync(
+                It.IsAny<TaxCalculationRequestDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<TaxCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
+            .ReturnsAsync((TaxCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
+            {
+                TotalTaxAmount = decimal.Round(request.BaseAmount * 0.15m, 2, MidpointRounding.AwayFromZero)
+            });
+        var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
+
+        var created = await service.CreateAsync(new VendorInvoiceCreateDto
+        {
+            SupplierId = fixture.Supplier.Id,
+            SupplierInvoiceNumber = "SUP-DISCOUNT-001",
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            ExchangeRate = 1m,
+            LineItems = new List<VendorInvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "Expense",
+                    GLAccountId = fixture.ExpenseAccount.Id,
+                    Description = "Discounted service",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    DiscountPercentage = 10m,
+                    TaxGroupId = Guid.NewGuid(),
+                    TaxTreatment = TaxTreatment.Standard
+                }
+            }
+        });
+
+        capturedTaxRequest.Should().NotBeNull();
+        capturedTaxRequest!.BaseAmount.Should().Be(90m);
+        created.SubTotal.Should().Be(90m);
+        created.DiscountAmount.Should().Be(10m);
+        created.TaxAmount.Should().Be(13.5m);
+        created.TotalAmount.Should().Be(103.5m);
     }
 
     [Fact]
@@ -607,7 +682,7 @@ public sealed class ApInvoicePostingMigrationTests
             e.SourceDocumentType == "VendorInvoice" &&
             e.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
         (await db.Set<TaxCalculation>().CountAsync()).Should().Be(0);
-        fixture.ExpenseAccount.Balance.Should().Be(0m);
+        (await db.AccountBalances.CountAsync(x => x.AccountId == fixture.ExpenseAccount.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -681,10 +756,12 @@ public sealed class ApInvoicePostingMigrationTests
         (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-APPosting")]
     [Trait("Category", "AccountsPayable")]
-    public async Task ForeignOpeningBalanceApInvoice_ShouldRejectCreateWithoutRateEvidence()
+    public async Task ForeignApInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -698,7 +775,7 @@ public sealed class ApInvoicePostingMigrationTests
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
             ExchangeRate = 15m,
-            IsOpeningBalance = true,
+            IsOpeningBalance = isOpeningBalance,
             LineItems = new List<VendorInvoiceLineItemCreateDto>
             {
                 new()
@@ -954,7 +1031,76 @@ public sealed class ApInvoicePostingMigrationTests
 
         retried.JournalEntryId.Should().Be(first.JournalEntryId);
         (await db.FinanceBudgetReservations.CountAsync()).Should().Be(1);
+        (await db.FinancePostingEvents.CountAsync(posting =>
+            posting.SourceDocumentType == "VendorInvoice" &&
+            posting.SourceDocumentId == fixture.Invoice.Id &&
+            posting.PostingAction == "Post")).Should().Be(1);
+        (await db.AuditLogs.CountAsync(audit =>
+            audit.Action == FinanceAuditEvents.ApInvoiceDuplicatePostingAttempt)).Should().Be(1);
         retryCommitments.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("extra")]
+    [InlineData("wrong-event")]
+    [InlineData("wrong-journal")]
+    [Trait("Batch", "FinanceGoLive-APBudget")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task BudgetControlledPostingRetry_ShouldRejectInconsistentConsumedEvidence(string defect)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApInvoiceAsync(db, tenantId);
+        var budgetEntry = await SeedBudgetEntryAsync(db, fixture);
+        var postingEventId = Guid.NewGuid();
+        var journalEntryId = Guid.NewGuid();
+        var bookId = await db.AccountingBooks.Where(book => book.TenantId == tenantId)
+            .Select(book => book.Id).SingleAsync();
+        db.FinancePostingEvents.Add(new FinancePostingEvent
+        {
+            Id = postingEventId,
+            TenantId = tenantId,
+            SourceModule = "AP",
+            SourceDocumentType = "VendorInvoice",
+            SourceDocumentId = fixture.Invoice.Id,
+            PostingAction = "Post",
+            PostingStatus = "Posted",
+            JournalEntryId = journalEntryId,
+            PostingDate = fixture.Invoice.InvoiceDate,
+            AccountingBookId = bookId,
+            BookClassification = "IFRS",
+            FunctionalCurrencyCode = "GHS"
+        });
+
+        if (defect != "missing")
+        {
+            db.FinanceBudgetReservations.Add(ConsumedReservation(
+                tenantId,
+                fixture.Invoice.Id,
+                budgetEntry.Id,
+                defect == "wrong-event" ? Guid.NewGuid() : postingEventId,
+                defect == "wrong-journal" ? Guid.NewGuid() : journalEntryId));
+        }
+        if (defect == "extra")
+        {
+            db.FinanceBudgetReservations.Add(ConsumedReservation(
+                tenantId,
+                fixture.Invoice.Id,
+                Guid.NewGuid(),
+                postingEventId,
+                journalEntryId));
+        }
+        await db.SaveChangesAsync();
+        var commitments = new Mock<IFinanceBudgetCommitmentService>(MockBehavior.Strict);
+        var (service, _) = CreateService(db, tenantId, budgetCommitments: commitments.Object);
+
+        var action = () => service.PostAsync(fixture.Invoice.Id);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*missing or has inconsistent consumed Finance budget evidence*");
+        commitments.VerifyNoOtherCalls();
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -1233,13 +1379,23 @@ public sealed class ApInvoicePostingMigrationTests
             auditService,
             budgetCommitments: budgetCommitments);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(service => service.GenerateAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<DateTime?>(),
+                It.IsAny<string?>(),
+                It.IsAny<Guid?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync("VI-2026-TEST");
 
         var service = new VendorInvoiceService(
             new UnitOfWork(db),
             currentUser.Object,
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<VendorInvoiceService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            numbering.Object,
             workflowService ?? Mock.Of<IWorkflowService>(),
             financePostingEngine: postingEngine,
             financeAuditService: auditService,
@@ -1427,6 +1583,30 @@ public sealed class ApInvoicePostingMigrationTests
         return budgetEntry;
     }
 
+    private static FinanceBudgetReservation ConsumedReservation(
+        Guid tenantId,
+        Guid invoiceId,
+        Guid budgetEntryId,
+        Guid postingEventId,
+        Guid journalEntryId) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = tenantId,
+        BudgetEntryId = budgetEntryId,
+        SourceDocumentType = "VendorInvoice",
+        SourceDocumentId = invoiceId,
+        Status = "Consumed",
+        ReservationVersion = 2,
+        EvaluationHash = new string('C', 64),
+        CurrencyCode = "GHS",
+        TransactionCurrencyCode = "GHS",
+        ReservedByUserId = Guid.NewGuid(),
+        ReservedAt = DateTime.UtcNow,
+        ConsumedAt = DateTime.UtcNow,
+        JournalEntryId = journalEntryId,
+        PostingEventId = postingEventId
+    };
+
     private static void SeedTenant(ApplicationDbContext db, Guid tenantId, string code = "TEN")
     {
         db.Tenants.Add(new Tenant
@@ -1436,6 +1616,13 @@ public sealed class ApInvoicePostingMigrationTests
             Code = code,
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
+        });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
         });
     }
 
@@ -1474,6 +1661,7 @@ public sealed class ApInvoicePostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -1501,6 +1689,8 @@ public sealed class ApInvoicePostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 

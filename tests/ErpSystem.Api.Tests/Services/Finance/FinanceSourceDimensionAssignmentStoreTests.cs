@@ -2,6 +2,7 @@ using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
@@ -115,6 +116,54 @@ public sealed class FinanceSourceDimensionAssignmentStoreTests
         frozen.IsFrozen.Should().BeTrue();
         var clear = () => store.ClearAsync(producer, documentId, lineId);
         await clear.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cannot be cleared*");
+    }
+
+    [Fact]
+    public async Task PersistsTrustedAccountDateAndOrderIndependentLineManifest()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var store = CreateStore(db, tenantId);
+        var producer = new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceFixedAssetDisposal);
+        var documentId = Guid.NewGuid();
+        var first = new FinanceSourceDocumentLineContext(Guid.NewGuid(), Guid.NewGuid());
+        var second = new FinanceSourceDocumentLineContext(Guid.NewGuid(), Guid.NewGuid());
+        var date = new DateTime(2026, 9, 2);
+
+        await store.RegisterDocumentContextAsync(producer, documentId, date, [second, first]);
+        var assignments = await store.GetDocumentAssignmentsAsync(producer, documentId);
+
+        var header = assignments.Single(item => !item.SourceLineId.HasValue);
+        header.SourceDocumentDate.Should().Be(date);
+        header.ExpectedSourceLineCount.Should().Be(2);
+        header.SourceLineManifestHash.Should().Be(FinanceSourceLineManifest.Compute([
+            (first.SourceLineId, first.AccountId),
+            (second.SourceLineId, second.AccountId)
+        ]));
+        assignments.Where(item => item.SourceLineId.HasValue).Should().BeEquivalentTo([
+            new { SourceLineId = (Guid?)first.SourceLineId, ResolvedAccountId = (Guid?)first.AccountId },
+            new { SourceLineId = (Guid?)second.SourceLineId, ResolvedAccountId = (Guid?)second.AccountId }
+        ], options => options.Including(item => item.SourceLineId).Including(item => item.ResolvedAccountId));
+    }
+
+    [Fact]
+    public async Task RejectsRebindingFrozenSourceLineToAnotherAccount()
+    {
+        await using var db = CreateContext();
+        var tenantId = Guid.NewGuid();
+        var store = CreateStore(db, tenantId);
+        var producer = new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceFixedAssetDisposal);
+        var documentId = Guid.NewGuid();
+        var lineId = Guid.NewGuid();
+        var original = new FinanceSourceDocumentLineContext(lineId, Guid.NewGuid());
+        await store.RegisterDocumentContextAsync(producer, documentId, new DateTime(2026, 9, 2), [original]);
+        await store.FreezeLineAsync(producer, documentId, lineId, null, null);
+
+        var change = () => store.RegisterDocumentContextAsync(
+            producer, documentId, new DateTime(2026, 9, 2),
+            [new FinanceSourceDocumentLineContext(lineId, Guid.NewGuid())]);
+
+        await change.Should().ThrowAsync<InvalidOperationException>().WithMessage("*cannot be rebound*");
     }
 
     private static FinanceDimensionSet DimensionSet(Guid tenantId, string marker) => new()

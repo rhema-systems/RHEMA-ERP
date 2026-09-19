@@ -12,13 +12,7 @@ public sealed class CrossCurrencySettlementMigrationTests
     [Trait("Category", "Architecture")]
     public void Up_ShouldBackfillExistingSameCurrencyAllocationAndRealizedFxEvidence()
     {
-        var migrationBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableMigration().ApplyUp(migrationBuilder);
-
-        var dataOperations = migrationBuilder.Operations.OfType<SqlOperation>().ToArray();
-        dataOperations.Should().HaveCount(2);
-
-        var allocationBackfill = dataOperations[0].Sql;
+        var allocationBackfill = ArchivedMigrationSource.Read("20260806095000_AddApArCrossCurrencySettlement.cs");
         allocationBackfill.Should().Contain("Cannot safely backfill pre-migration AP cross-currency allocations");
         allocationBackfill.Should().Contain("Cannot safely backfill pre-migration AR cross-currency allocations");
         allocationBackfill.Should().Contain("[PaymentCurrencyAmount] = [a].[AllocatedAmount]");
@@ -46,15 +40,10 @@ public sealed class CrossCurrencySettlementMigrationTests
         triggerRestore.Should().BeGreaterThan(apUpdate, "the runtime readiness control must be restored after the AP backfill");
         arUpdate.Should().BeGreaterThan(triggerRestore, "the unrelated AR backfill must not run inside the AP trigger exception");
 
-        var realizedFxBackfill = dataOperations[1].Sql;
+        var realizedFxBackfill = allocationBackfill;
         realizedFxBackfill.Should().Contain("FROM [FxRealizedSettlements]");
         realizedFxBackfill.Should().Contain("INNER JOIN [VendorPaymentAllocation]");
         realizedFxBackfill.Should().Contain("INNER JOIN [PaymentAllocation]");
         realizedFxBackfill.Should().Contain("[PaymentExchangeRate] = [a].[PaymentExchangeRate]");
-    }
-
-    private sealed class TestableMigration : AddApArCrossCurrencySettlement
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
     }
 }

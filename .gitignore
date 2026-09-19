@@ -334,6 +334,9 @@ local-artifacts/
 /output/
 /tmp/
 
+# Raw local GL cutover rehearsal output. Sanitized review evidence is retained under docs/Finance/evidence.
+/.artifacts/
+
 # AI assistant local settings
 .claude/settings.local.json
 

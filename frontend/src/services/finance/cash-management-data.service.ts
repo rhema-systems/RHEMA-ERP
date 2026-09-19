@@ -41,6 +41,7 @@ import type {
     CashierTillSessionStatus,
 } from '@/types/cash-management';
 import { apiService } from '@/services/api.service';
+import type { FinanceSourceDocumentDimensionInput } from '@/types/finance';
 
 // =============================================================================
 // CASH MANAGEMENT DATA SERVICE
@@ -205,8 +206,16 @@ class CashManagementDataService {
             amount: number;
             notes?: string;
         }>;
+        financeDimensions?: FinanceSourceDocumentDimensionInput;
     }): Promise<BankDeposit> {
         return apiService.post<BankDeposit>('/finance/banking/deposits', dto);
+    }
+
+    async updateBankDepositDimensions(
+        id: string,
+        dto: FinanceSourceDocumentDimensionInput,
+    ): Promise<BankDeposit> {
+        return apiService.put<BankDeposit>(`/finance/banking/deposits/${id}/dimensions`, dto);
     }
 
     async submitBankDeposit(id: string): Promise<BankDeposit> {
@@ -280,8 +289,16 @@ class CashManagementDataService {
         expenseChargeAmount?: number;
         drawerBank?: string;
         notes?: string;
+        financeDimensions?: FinanceSourceDocumentDimensionInput;
     }): Promise<ReturnedChequeCase> {
         return apiService.post<ReturnedChequeCase>('/finance/banking/returned-cheques', dto);
+    }
+
+    async updateReturnedChequeDimensions(
+        id: string,
+        dto: FinanceSourceDocumentDimensionInput,
+    ): Promise<ReturnedChequeCase> {
+        return apiService.put<ReturnedChequeCase>(`/finance/banking/returned-cheques/${id}/dimensions`, dto);
     }
 
     async submitReturnedCheque(id: string): Promise<ReturnedChequeCase> {

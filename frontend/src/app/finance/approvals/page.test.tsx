@@ -72,4 +72,38 @@ describe('Finance approval workbench', () => {
     }).format(amount);
     expect(amountLabel.nextElementSibling).toHaveTextContent(expectedAmount);
   });
+
+  it('shows an assigned accounting-book transition but routes its decision to the book page', async () => {
+    apiServiceMock.get.mockResolvedValueOnce([{
+      approvalId: 'approval-book-1',
+      entityId: 'book-1',
+      entityType: 'AccountingBookLifecycle',
+      reference: 'IFRS',
+      title: 'IFRS Primary: Configuring to Initializing',
+      detailHref: '/finance/settings/accounting-books',
+      documentType: 'Accounting Book',
+      module: 'Finance Settings',
+      currentStep: 'Financial Controller Review',
+      statusLabel: 'Pending transition',
+      decisionOnDetailPage: true,
+      canApprove: false,
+      canReject: false,
+    }]);
+
+    render(
+      <ApprovalWorkbench
+        title="Finance Approval Workbench"
+        description="Finance approvals"
+        definitions={getFinanceApprovalQueueDefinitions()}
+      />
+    );
+
+    expect(await screen.findByText('IFRS Primary: Configuring to Initializing')).toBeInTheDocument();
+    expect(screen.getByText('Total Pending').nextElementSibling).toHaveTextContent('1');
+    expect(screen.getByRole('link', { name: 'Review & decide' })).toHaveAttribute(
+      'href', '/finance/settings/accounting-books'
+    );
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+  });
 });

@@ -7,77 +7,88 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from '@/components/ui/dialog';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { ArrowLeft, Edit, Trash2, DollarSign, Loader2, Plus, Link2, X, RefreshCcw, AlertTriangle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import type { Account, AccountType, AccountStatus, AccountCurrencyLink, Currency, AddCurrencyLinkDto, ExchangeRateQuoteSide, UpdateCurrencyLinkRatePolicyDto } from '@/types/finance';
+import type { Account, AccountType, AccountStatus, AccountCurrencyLink, AccountBookCurrencyPolicy, Currency, AddCurrencyLinkDto, ExchangeRateQuoteSide, UpdateCurrencyLinkRatePolicyDto } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
+import { AccountTransactionsInquiry } from '@/components/finance/accounts/account-transactions-inquiry';
 
 export default function AccountDetailPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = React.use(params);
     const router = useRouter();
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canOverrideFxPolicy = hasPermission('Finance.FX.Policy.Override');
+    const canApproveFxPolicy = hasPermission('Finance.FX.Policy.Approve');
 
     const [account, setAccount] = useState<Account | null>(null);
     const [currencies, setCurrencies] = useState<Currency[]>([]);
     const [currencyLinks, setCurrencyLinks] = useState<AccountCurrencyLink[]>([]);
+    const [revaluationPolicies, setRevaluationPolicies] = useState<AccountBookCurrencyPolicy[]>([]);
     const [loading, setLoading] = useState(true);
     const [addDialogOpen, setAddDialogOpen] = useState(false);
     const [addingLink, setAddingLink] = useState(false);
     const [removingLinkId, setRemovingLinkId] = useState<string | null>(null);
     const [editingLink, setEditingLink] = useState<AccountCurrencyLink | null>(null);
-    const [savingPolicy, setSavingPolicy] = useState(false);
+    const [savingRatePolicy, setSavingRatePolicy] = useState(false);
+    const [savingRevaluationPolicy, setSavingRevaluationPolicy] = useState(false);
     const [policyForm, setPolicyForm] = useState<UpdateCurrencyLinkRatePolicyDto | null>(null);
+    const [selectedPolicyBookId, setSelectedPolicyBookId] = useState('');
+    const [policyChoice, setPolicyChoice] = useState<'inherit' | 'include' | 'exclude'>('inherit');
+    const [policyReason, setPolicyReason] = useState('');
+    const [confirmNonstandard, setConfirmNonstandard] = useState(false);
+    const [decisionPolicy, setDecisionPolicy] = useState<AccountBookCurrencyPolicy | null>(null);
+    const [decisionAction, setDecisionAction] = useState<'approve' | 'reject'>('approve');
+    const [decisionReason, setDecisionReason] = useState('');
+    const [decidingPolicy, setDecidingPolicy] = useState(false);
 
     // New link form data
     const [newLink, setNewLink] = useState<Partial<AddCurrencyLinkDto>>({
         linkedCurrencyCode: '',
-        revaluationRequired: true,
         revaluationFrequency: 'Monthly',
-        transactionRateType: 'Spot',
+        transactionRateType: 'Daily',
         transactionQuoteSide: 'Mid',
-        revaluationRateType: 'MonthEnd',
+        revaluationRateType: 'Month-End',
         revaluationQuoteSide: 'Mid',
         notes: '',
     });
 
-    // Load account data
-    useEffect(() => {
-        const loadData = async () => {
-            try {
-                setLoading(true);
+    const loadAccountData = React.useCallback(async (showPageLoader = true) => {
+        try {
+            if (showPageLoader) setLoading(true);
 
-                // Load account, currencies, and currency links in parallel
-                const [accountData, currenciesData] = await Promise.all([
-                    financeDataService.getAccountById(id),
-                    financeDataService.getCurrencies(),
+            const [accountData, currenciesData] = await Promise.all([
+                financeDataService.getAccountById(id),
+                financeDataService.getCurrencies(),
+            ]);
+
+            setAccount(accountData);
+            setCurrencies(currenciesData);
+
+            if (accountData.isMultiCurrency) {
+                const [links, policies] = await Promise.all([
+                    financeDataService.getAccountCurrencyLinks(id),
+                    financeDataService.getAccountBookCurrencyPolicies(id),
                 ]);
-
-                setAccount(accountData);
-                setCurrencies(currenciesData);
-
-                // Load currency links if multi-currency enabled
-                if (accountData.isMultiCurrency) {
-                    const links = await financeDataService.getAccountCurrencyLinks(id);
-                    setCurrencyLinks(links);
-                }
-            } catch (error) {
-                console.error('Error loading account:', error);
-                toast({
-                    title: 'Error',
-                    description: 'Failed to load account details',
-                    variant: 'destructive',
-                });
-            } finally {
-                setLoading(false);
+                setCurrencyLinks(links);
+                setRevaluationPolicies(policies);
             }
-        };
-        loadData();
+        } catch (error) {
+            console.error('Error loading account:', error);
+            toast({ title: 'Refresh failed', description: 'Authoritative account policy state could not be refreshed.', variant: 'destructive' });
+        } finally {
+            if (showPageLoader) setLoading(false);
+        }
     }, [id, toast]);
+
+    useEffect(() => {
+        void loadAccountData();
+    }, [loadAccountData]);
 
     const getAccountTypeBadge = (type: AccountType) => {
         const colors: Record<AccountType, string> = {
@@ -131,6 +142,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
 
             const addedLink = await financeDataService.addAccountCurrencyLink(id, newLink as AddCurrencyLinkDto);
             setCurrencyLinks([...currencyLinks, addedLink]);
+            setRevaluationPolicies(await financeDataService.getAccountBookCurrencyPolicies(id));
 
             toast({
                 title: 'Success',
@@ -140,11 +152,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
             setAddDialogOpen(false);
             setNewLink({
                 linkedCurrencyCode: '',
-                revaluationRequired: true,
                 revaluationFrequency: 'Monthly',
-                transactionRateType: 'Spot',
+                transactionRateType: 'Daily',
                 transactionQuoteSide: 'Mid',
-                revaluationRateType: 'MonthEnd',
+                revaluationRateType: 'Month-End',
                 revaluationQuoteSide: 'Mid',
                 notes: '',
             });
@@ -182,9 +193,10 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
     };
 
     const openRatePolicyDialog = (link: AccountCurrencyLink) => {
+        const availablePolicies = revaluationPolicies.filter(policy => policy.accountCurrencyLinkId === link.id);
+        const selected = availablePolicies[0];
         setEditingLink(link);
         setPolicyForm({
-            revaluationRequired: link.revaluationRequired,
             revaluationFrequency: link.revaluationFrequency,
             transactionRateType: link.transactionRateType,
             transactionQuoteSide: link.transactionQuoteSide || 'Mid',
@@ -192,25 +204,100 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
             revaluationQuoteSide: link.revaluationQuoteSide || 'Mid',
             notes: link.notes,
         });
+        setSelectedPolicyBookId(selected?.accountingBookId || '');
+        setPolicyChoice(selected?.revaluationOverride == null ? 'inherit' : selected.revaluationOverride ? 'include' : 'exclude');
+        setPolicyReason('');
+        setConfirmNonstandard(false);
+    };
+
+    const selectedPolicy = revaluationPolicies.find(policy =>
+        policy.accountCurrencyLinkId === editingLink?.id && policy.accountingBookId === selectedPolicyBookId);
+
+    const selectPolicyBook = (bookId: string) => {
+        const selected = revaluationPolicies.find(policy =>
+            policy.accountCurrencyLinkId === editingLink?.id && policy.accountingBookId === bookId);
+        setSelectedPolicyBookId(bookId);
+        setPolicyChoice(selected?.revaluationOverride == null ? 'inherit' : selected.revaluationOverride ? 'include' : 'exclude');
+        setPolicyReason('');
+        setConfirmNonstandard(false);
     };
 
     const handleSaveRatePolicy = async () => {
         if (!editingLink || !policyForm) return;
         try {
-            setSavingPolicy(true);
-            const updated = await financeDataService.updateAccountCurrencyLinkRatePolicy(
-                id,
-                editingLink.linkedCurrencyCode,
-                policyForm
-            );
-            setCurrencyLinks(current => current.map(link => link.id === updated.id ? updated : link));
-            setEditingLink(null);
-            setPolicyForm(null);
-            toast({ title: 'Success', description: `${updated.linkedCurrencyCode} rate policy updated` });
+            setSavingRatePolicy(true);
+            await financeDataService.updateAccountCurrencyLinkRatePolicy(id, editingLink.linkedCurrencyCode, policyForm);
+            toast({
+                title: 'Rate settings saved',
+                description: `${editingLink.linkedCurrencyCode} transaction and closing-rate settings were updated independently.`,
+            });
         } catch (error: any) {
-            toast({ title: 'Error', description: error?.message || 'Failed to update rate policy', variant: 'destructive' });
+            toast({ title: 'Rate settings not saved', description: error?.message || 'The rate-policy update failed. Revaluation treatment was not changed by this action.', variant: 'destructive' });
         } finally {
-            setSavingPolicy(false);
+            setSavingRatePolicy(false);
+            await loadAccountData(false);
+        }
+    };
+
+    const handleSaveRevaluationPolicy = async () => {
+        if (!editingLink || !selectedPolicy) return;
+        if (policyReason.trim().length < 5) {
+            toast({ title: 'Reason required', description: 'Enter at least five characters explaining this policy decision.', variant: 'destructive' });
+            return;
+        }
+        const nonstandardRequest = policyChoice === 'include' && ['Equity', 'Revenue', 'Expense'].includes(selectedPolicy.coreAccountType);
+        if (nonstandardRequest && !confirmNonstandard) {
+            toast({ title: 'Explicit confirmation required', description: 'Confirm the prominent non-standard revaluation warning before continuing.', variant: 'destructive' });
+            return;
+        }
+        try {
+            setSavingRevaluationPolicy(true);
+            const savedPolicy = await financeDataService.saveAccountBookCurrencyPolicy(id, editingLink.id, selectedPolicy.accountingBookId, {
+                revaluationOverride: policyChoice === 'inherit' ? null : policyChoice === 'include',
+                reason: policyReason.trim(),
+                confirmNonstandardInclusion: confirmNonstandard,
+                rowVersion: selectedPolicy.rowVersion,
+            });
+            toast({
+                title: savedPolicy.lifecycleStatus === 'PendingApproval' ? 'Approval requested' : 'Policy saved',
+                description: savedPolicy.lifecycleStatus === 'PendingApproval'
+                    ? 'The non-standard inclusion is not effective until a different authorized user approves it.'
+                    : `${editingLink.linkedCurrencyCode} revaluation treatment was updated for ${savedPolicy.accountingBookCode}; rate settings were not changed.`,
+            });
+        } catch (error: any) {
+            toast({ title: 'Revaluation treatment not saved', description: error?.message || 'The governed override failed. Rate settings were not changed by this action.', variant: 'destructive' });
+        } finally {
+            setSavingRevaluationPolicy(false);
+            await loadAccountData(false);
+        }
+    };
+
+    const openPolicyDecision = (policy: AccountBookCurrencyPolicy, action: 'approve' | 'reject') => {
+        setDecisionPolicy(policy);
+        setDecisionAction(action);
+        setDecisionReason('');
+    };
+
+    const handlePolicyDecision = async () => {
+        if (!decisionPolicy?.id || !decisionPolicy.rowVersion || decisionReason.trim().length < 5) {
+            toast({ title: 'Decision reason required', description: 'Enter at least five characters and refresh if concurrency evidence is unavailable.', variant: 'destructive' });
+            return;
+        }
+        try {
+            setDecidingPolicy(true);
+            const updated = await financeDataService.decideAccountBookCurrencyPolicy(
+                id,
+                decisionPolicy.id,
+                decisionAction,
+                { reason: decisionReason.trim(), rowVersion: decisionPolicy.rowVersion },
+            );
+            setRevaluationPolicies(current => current.map(policy => policy.id === updated.id ? updated : policy));
+            setDecisionPolicy(null);
+            toast({ title: decisionAction === 'approve' ? 'Approval recorded' : 'Request rejected', description: `${updated.accountingBookCode}/${updated.currencyCode} policy is ${updated.lifecycleStatus}.` });
+        } catch (error: any) {
+            toast({ title: 'Decision failed', description: error?.message || 'The policy may have changed. Refresh and try again.', variant: 'destructive' });
+        } finally {
+            setDecidingPolicy(false);
         }
     };
 
@@ -377,37 +464,24 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                     </Select>
                                                 </div>
 
-                                                <div className="flex items-center space-x-2">
-                                                    <Checkbox
-                                                        id="revaluationRequired"
-                                                        checked={newLink.revaluationRequired}
-                                                        onCheckedChange={(checked) =>
-                                                            setNewLink({ ...newLink, revaluationRequired: checked as boolean })
-                                                        }
-                                                    />
-                                                    <Label htmlFor="revaluationRequired" className="cursor-pointer">
-                                                        Revaluation required
-                                                    </Label>
+                                                <Alert>
+                                                    <AlertTriangle className="h-4 w-4" />
+                                                    <AlertDescription>
+                                                        Revaluation inclusion is configured after linking, separately for each accounting book. The account classification supplies the inherited default.
+                                                    </AlertDescription>
+                                                </Alert>
+                                                <div className="space-y-2">
+                                                    <Label>Revaluation Frequency</Label>
+                                                    <Select value={newLink.revaluationFrequency} onValueChange={(v) => setNewLink({ ...newLink, revaluationFrequency: v })}>
+                                                        <SelectTrigger><SelectValue /></SelectTrigger>
+                                                        <SelectContent>
+                                                            <SelectItem value="Monthly">Monthly</SelectItem>
+                                                            <SelectItem value="Quarterly">Quarterly</SelectItem>
+                                                            <SelectItem value="Annually">Annually</SelectItem>
+                                                            <SelectItem value="AdHoc">Ad hoc</SelectItem>
+                                                        </SelectContent>
+                                                    </Select>
                                                 </div>
-
-                                                {newLink.revaluationRequired && (
-                                                    <div className="space-y-2">
-                                                        <Label>Revaluation Frequency</Label>
-                                                        <Select
-                                                            value={newLink.revaluationFrequency}
-                                                            onValueChange={(v) => setNewLink({ ...newLink, revaluationFrequency: v })}
-                                                        >
-                                                            <SelectTrigger>
-                                                                <SelectValue />
-                                                            </SelectTrigger>
-                                                            <SelectContent>
-                                                                <SelectItem value="Monthly">Monthly</SelectItem>
-                                                                <SelectItem value="Quarterly">Quarterly</SelectItem>
-                                                                <SelectItem value="Annually">Annually</SelectItem>
-                                                            </SelectContent>
-                                                        </Select>
-                                                    </div>
-                                                )}
 
                                                 <div className="grid grid-cols-2 gap-4">
                                                     <div className="space-y-2">
@@ -420,9 +494,8 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 <SelectValue />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="Spot">Spot</SelectItem>
                                                                 <SelectItem value="Daily">Daily</SelectItem>
-                                                                <SelectItem value="Average">Average</SelectItem>
+                                                                <SelectItem value="Fixed">Fixed contractual</SelectItem>
                                                             </SelectContent>
                                                         </Select>
                                                     </div>
@@ -436,9 +509,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 <SelectValue />
                                                             </SelectTrigger>
                                                             <SelectContent>
-                                                                <SelectItem value="MonthEnd">Month End</SelectItem>
-                                                                <SelectItem value="QuarterEnd">Quarter End</SelectItem>
-                                                                <SelectItem value="YearEnd">Year End</SelectItem>
+                                                                <SelectItem value="Month-End">Month End</SelectItem>
+                                                                <SelectItem value="Quarter-End">Quarter End</SelectItem>
+                                                                <SelectItem value="Year-End">Year End</SelectItem>
                                                             </SelectContent>
                                                         </Select>
                                                     </div>
@@ -524,25 +597,19 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                             <Badge variant={link.isActive ? 'default' : 'secondary'}>
                                                                 {link.isActive ? 'Active' : 'Inactive'}
                                                             </Badge>
-                                                            {link.revaluationRequired && (
-                                                                <Badge variant="outline" className="text-blue-600">
-                                                                    <RefreshCcw className="h-3 w-3 mr-1" />
-                                                                    {link.revaluationFrequency}
-                                                                </Badge>
+                                                            <Badge variant="outline"><RefreshCcw className="h-3 w-3 mr-1" />{link.revaluationFrequency}</Badge>
+                                                            {revaluationPolicies.some(policy => policy.accountCurrencyLinkId === link.id && policy.isNonstandardInclusion) && (
+                                                                <Badge className="border-amber-500 bg-amber-100 text-amber-900">Non-standard revaluation policy</Badge>
                                                             )}
                                                         </div>
                                                         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm mt-2">
                                                             <div>
-                                                                <p className="text-muted-foreground">Foreign Balance</p>
-                                                                <p className="font-mono font-semibold">
-                                                                    {formatCurrency(link.foreignCurrencyBalance, link.linkedCurrencyCode)}
-                                                                </p>
+                                                                <p className="text-muted-foreground">Foreign Exposure</p>
+                                                                <p className="text-xs font-medium">Select an exact book in balance inquiry</p>
                                                             </div>
                                                             <div>
-                                                                <p className="text-muted-foreground">Base Balance</p>
-                                                                <p className="font-mono font-semibold">
-                                                                    {formatCurrency(link.baseCurrencyBalance, account.currencyCode)}
-                                                                </p>
+                                                                <p className="text-muted-foreground">Functional Exposure</p>
+                                                                <p className="text-xs font-medium">Not held on currency-link configuration</p>
                                                             </div>
                                                             <div>
                                                                 <p className="text-muted-foreground">Current Rate</p>
@@ -568,6 +635,31 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                                 Revaluation: {link.revaluationRateType} / {link.revaluationQuoteSide || 'Mid'}
                                                             </Badge>
                                                         </div>
+                                                        <div className="mt-3 space-y-2">
+                                                            {revaluationPolicies.filter(policy => policy.accountCurrencyLinkId === link.id).map(policy => (
+                                                                <div key={policy.accountingBookId} className={policy.isNonstandardInclusion ? 'rounded border border-amber-400 bg-amber-50 p-2' : 'rounded border p-2'}>
+                                                                    <div className="flex flex-wrap items-center gap-2">
+                                                                        <strong>{policy.accountingBookCode}</strong>
+                                                                        <Badge variant={policy.effectiveRevaluationRequired ? 'default' : 'secondary'}>
+                                                                            {policy.effectiveRevaluationRequired ? 'Included' : 'Excluded'}
+                                                                        </Badge>
+                                                                        <Badge variant="outline">{policy.effectiveSource === 'Classification' ? 'Inherited' : 'Override'}</Badge>
+                                                                        {policy.lifecycleStatus === 'PendingApproval' && <Badge className="bg-amber-600">Pending approval</Badge>}
+                                                                    </div>
+                                                                    <p className="mt-1 text-muted-foreground">{policy.accountClassificationCode} — {policy.accountClassificationName}; default {policy.classificationDefault}</p>
+                                                                    {policy.warning && <p className="mt-1 font-semibold text-amber-900">{policy.warning}</p>}
+                                                                    {policy.lifecycleStatus === 'PendingApproval' && policy.pendingReason && (
+                                                                        <p className="mt-1 text-sm text-amber-950">Request reason: {policy.pendingReason}</p>
+                                                                    )}
+                                                                    {policy.lifecycleStatus === 'PendingApproval' && canApproveFxPolicy && policy.id && (
+                                                                        <div className="mt-2 flex gap-2">
+                                                                            <Button size="sm" onClick={() => openPolicyDecision(policy, 'approve')}>Review and approve</Button>
+                                                                            <Button size="sm" variant="outline" onClick={() => openPolicyDecision(policy, 'reject')}>Reject</Button>
+                                                                        </div>
+                                                                    )}
+                                                                </div>
+                                                            ))}
+                                                        </div>
                                                         {link.notes && (
                                                             <p className="text-xs text-muted-foreground mt-2">
                                                                 {link.notes}
@@ -579,7 +671,7 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                                             variant="ghost"
                                                             size="sm"
                                                             onClick={() => openRatePolicyDialog(link)}
-                                                            disabled={!link.isActive}
+                                                            disabled={!link.isActive || !canOverrideFxPolicy}
                                                             aria-label={`Edit ${link.linkedCurrencyCode} rate policy`}
                                                         >
                                                             <Edit className="h-4 w-4" />
@@ -621,23 +713,78 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                     }}>
                         <DialogContent>
                             <DialogHeader>
-                                <DialogTitle>Edit {editingLink?.linkedCurrencyCode} Rate Policy</DialogTitle>
+                                <DialogTitle>Edit {editingLink?.linkedCurrencyCode} Book and Rate Policy</DialogTitle>
                                 <DialogDescription>
                                     These defaults apply to foreign-currency GL posting. AR/AP document policy remains authoritative for customer and supplier subledgers.
                                 </DialogDescription>
                             </DialogHeader>
                             {policyForm && (
                                 <div className="space-y-4 py-4">
+                                    <div className="rounded-md border p-4 space-y-3">
+                                        <div className="space-y-2">
+                                            <Label>Accounting book</Label>
+                                            <Select value={selectedPolicyBookId} onValueChange={selectPolicyBook}>
+                                                <SelectTrigger><SelectValue placeholder="Select accounting book" /></SelectTrigger>
+                                                <SelectContent>
+                                                    {revaluationPolicies.filter(policy => policy.accountCurrencyLinkId === editingLink?.id).map(policy => (
+                                                        <SelectItem key={policy.accountingBookId} value={policy.accountingBookId}>{policy.accountingBookCode} — {policy.accountingBookName}</SelectItem>
+                                                    ))}
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                        {selectedPolicy && <>
+                                            <div className="rounded bg-muted p-3 text-sm">
+                                                <strong>{selectedPolicy.accountClassificationCode} — {selectedPolicy.accountClassificationName}</strong>
+                                                <div>Classification default: {selectedPolicy.classificationDefault}; current effective result: {selectedPolicy.effectiveRevaluationRequired ? 'Include' : 'Exclude'} ({selectedPolicy.effectiveSource}).</div>
+                                            </div>
+                                            <div className="space-y-2">
+                                                <Label>Closing revaluation treatment</Label>
+                                                <Select value={policyChoice} onValueChange={(value: 'inherit' | 'include' | 'exclude') => { setPolicyChoice(value); setConfirmNonstandard(false); }}>
+                                                    <SelectTrigger><SelectValue /></SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="inherit">Inherit classification default</SelectItem>
+                                                        <SelectItem value="include">Include in closing revaluation</SelectItem>
+                                                        <SelectItem value="exclude">Exclude from closing revaluation</SelectItem>
+                                                    </SelectContent>
+                                                </Select>
+                                            </div>
+                                            {policyChoice === 'include' && ['Equity', 'Revenue', 'Expense'].includes(selectedPolicy.coreAccountType) && (
+                                                <Alert className="border-amber-500 bg-amber-50 text-amber-950">
+                                                    <AlertTriangle className="h-5 w-5" />
+                                                    <AlertDescription className="font-semibold">
+                                                        NON-STANDARD REVALUATION POLICY. This {selectedPolicy.coreAccountType} account will enter closing revaluation. A different authorized user must approve before it becomes effective.
+                                                        <label className="mt-3 flex items-center gap-2 font-normal"><input type="checkbox" checked={confirmNonstandard} onChange={event => setConfirmNonstandard(event.target.checked)} />I understand and explicitly confirm this request.</label>
+                                                    </AlertDescription>
+                                                </Alert>
+                                            )}
+                                            <div className="space-y-2">
+                                                <Label>Mandatory reason</Label>
+                                                <Input value={policyReason} onChange={event => setPolicyReason(event.target.value)} placeholder="Explain why this book/currency treatment is required" />
+                                            </div>
+                                            {selectedPolicy.lifecycleStatus === 'PendingApproval' && <Alert className="border-amber-500"><AlertTriangle className="h-4 w-4" /><AlertDescription>Pending independent approval. The current effective treatment remains unchanged.</AlertDescription></Alert>}
+                                            <div className="flex justify-end">
+                                                <Button onClick={handleSaveRevaluationPolicy} disabled={savingRevaluationPolicy || !canOverrideFxPolicy || selectedPolicy.lifecycleStatus === 'PendingApproval'}>
+                                                    {savingRevaluationPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                                    Save revaluation treatment
+                                                </Button>
+                                            </div>
+                                        </>}
+                                        <div className="space-y-2">
+                                            <Label>Revaluation Frequency</Label>
+                                            <Select value={policyForm.revaluationFrequency} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationFrequency: value })}>
+                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                <SelectContent><SelectItem value="Monthly">Monthly</SelectItem><SelectItem value="Quarterly">Quarterly</SelectItem><SelectItem value="Annually">Annually</SelectItem><SelectItem value="AdHoc">Ad hoc</SelectItem></SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
                                     <div className="grid grid-cols-2 gap-4">
                                         <div className="space-y-2">
                                             <Label>Transaction Rate Type</Label>
                                             <Select value={policyForm.transactionRateType} onValueChange={(value) => setPolicyForm({ ...policyForm, transactionRateType: value })}>
                                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="Spot">Spot</SelectItem>
                                                     <SelectItem value="Daily">Daily</SelectItem>
-                                                    <SelectItem value="Average">Average</SelectItem>
-                                                    <SelectItem value="Fixed">Fixed</SelectItem>
+                                                    <SelectItem value="Fixed">Fixed contractual</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -657,9 +804,9 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                             <Select value={policyForm.revaluationRateType} onValueChange={(value) => setPolicyForm({ ...policyForm, revaluationRateType: value })}>
                                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                                 <SelectContent>
-                                                    <SelectItem value="MonthEnd">Month End</SelectItem>
-                                                    <SelectItem value="QuarterEnd">Quarter End</SelectItem>
-                                                    <SelectItem value="YearEnd">Year End</SelectItem>
+                                                    <SelectItem value="Month-End">Month End</SelectItem>
+                                                    <SelectItem value="Quarter-End">Quarter End</SelectItem>
+                                                    <SelectItem value="Year-End">Year End</SelectItem>
                                                 </SelectContent>
                                             </Select>
                                         </div>
@@ -679,31 +826,53 @@ export default function AccountDetailPage({ params }: { params: Promise<{ id: st
                                         <Label>Notes</Label>
                                         <Input value={policyForm.notes || ''} onChange={(event) => setPolicyForm({ ...policyForm, notes: event.target.value })} />
                                     </div>
+                                    <div className="flex justify-end">
+                                        <Button variant="secondary" onClick={handleSaveRatePolicy} disabled={savingRatePolicy || !canOverrideFxPolicy}>
+                                            {savingRatePolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                            Save rate settings
+                                        </Button>
+                                    </div>
                                 </div>
                             )}
                             <DialogFooter>
-                                <Button variant="outline" onClick={() => setEditingLink(null)}>Cancel</Button>
-                                <Button onClick={handleSaveRatePolicy} disabled={savingPolicy}>
-                                    {savingPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Save Policy
+                                <Button variant="outline" onClick={() => setEditingLink(null)}>Close</Button>
+                            </DialogFooter>
+                        </DialogContent>
+                    </Dialog>
+
+                    <Dialog open={Boolean(decisionPolicy)} onOpenChange={(open) => !open && setDecisionPolicy(null)}>
+                        <DialogContent>
+                            <DialogHeader>
+                                <DialogTitle>{decisionAction === 'approve' ? 'Approve' : 'Reject'} non-standard revaluation policy</DialogTitle>
+                                <DialogDescription>
+                                    {decisionPolicy?.accountingBookCode}/{decisionPolicy?.currencyCode} — {decisionPolicy?.accountClassificationCode}. The requester cannot decide their own request.
+                                </DialogDescription>
+                            </DialogHeader>
+                            <Alert className="border-amber-500 bg-amber-50 text-amber-950">
+                                <AlertTriangle className="h-5 w-5" />
+                                <AlertDescription className="font-semibold">
+                                    This {decisionPolicy?.coreAccountType} account will be included in closing revaluation if the approval workflow completes.
+                                </AlertDescription>
+                            </Alert>
+                            <div className="space-y-2">
+                                <Label>Mandatory independent decision reason</Label>
+                                <Input value={decisionReason} onChange={event => setDecisionReason(event.target.value)} placeholder="Record the finance review rationale" />
+                            </div>
+                            <DialogFooter>
+                                <Button variant="outline" onClick={() => setDecisionPolicy(null)}>Cancel</Button>
+                                <Button
+                                    variant={decisionAction === 'reject' ? 'destructive' : 'default'}
+                                    onClick={handlePolicyDecision}
+                                    disabled={decidingPolicy || decisionReason.trim().length < 5 || !decisionPolicy?.rowVersion}
+                                >
+                                    {decidingPolicy && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    {decisionAction === 'approve' ? 'Approve request' : 'Reject request'}
                                 </Button>
                             </DialogFooter>
                         </DialogContent>
                     </Dialog>
 
-                    {/* Transaction History Placeholder */}
-                    <Card>
-                        <CardHeader>
-                            <CardTitle>Recent Transactions</CardTitle>
-                            <CardDescription>Last 10 transactions for this account</CardDescription>
-                        </CardHeader>
-                        <CardContent>
-                            <div className="text-center py-8 text-muted-foreground">
-                                <p>No transactions to display</p>
-                                <p className="text-sm mt-2">Transaction history will appear here once the backend is connected</p>
-                            </div>
-                        </CardContent>
-                    </Card>
+                    <AccountTransactionsInquiry accountId={id} accountBooks={account.accountingBooks} />
                 </div>
 
                 {/* Sidebar */}

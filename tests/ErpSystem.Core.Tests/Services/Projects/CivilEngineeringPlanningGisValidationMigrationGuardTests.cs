@@ -12,8 +12,8 @@ public sealed class CivilEngineeringPlanningGisValidationMigrationGuardTests
     public void Migration_adds_a_tenant_safe_child_gate_without_creating_parallel_estate_permitting_or_dms_owners()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
-        var evidenceBinding = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", EvidenceBindingMigrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
+        var evidenceBinding = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", EvidenceBindingMigrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("ProjectCivilPlanningGisValidations")

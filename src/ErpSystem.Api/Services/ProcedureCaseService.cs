@@ -4985,7 +4985,6 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             3 => ["customerNotificationStatus", "reservationStatus", "notes"],
             _ => ["customerNotificationStatus", "applicationStatus", "notes"]
         };
-    }
 
     private static ProcedureCaseFieldDto ToFieldDto(ProcedureCaseField field) =>
         new(field.Id, field.Key, field.Label, field.FieldType, field.Value, ParseOptions(field.OptionsJson));

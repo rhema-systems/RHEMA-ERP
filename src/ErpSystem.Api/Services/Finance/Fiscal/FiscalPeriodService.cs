@@ -104,10 +104,16 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
         public async Task<FiscalYearDto> CreateFiscalYearAsync(CreateFiscalYearDto dto, CancellationToken cancellationToken = default)
         {
+            var startDate = dto.StartDate.Date;
+            var endDate = dto.EndDate.Date;
+            if (endDate < startDate)
+                throw new InvalidOperationException("Fiscal year end date must be on or after its start date.");
+
             var overlapping = await _unitOfWork.Repository<FiscalYear>()
                 .GetQueryable(fy => fy.TenantId == TenantId
-                    && ((dto.StartDate >= fy.StartDate && dto.StartDate <= fy.EndDate)
-                        || (dto.EndDate >= fy.StartDate && dto.EndDate <= fy.EndDate)))
+                    && !fy.IsDeleted
+                    && startDate <= fy.EndDate
+                    && endDate >= fy.StartDate)
                 .AnyAsync(cancellationToken);
 
             if (overlapping)
@@ -122,9 +128,9 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 FiscalYearName = dto.FiscalYearName,
                 Year = dto.Year,
                 FiscalYearType = dto.FiscalYearType,
-                StartDate = dto.StartDate.Date,
-                EndDate = dto.EndDate.Date,
-                TotalDays = (dto.EndDate - dto.StartDate).Days + 1,
+                StartDate = startDate,
+                EndDate = endDate,
+                TotalDays = (endDate - startDate).Days + 1,
                 NumberOfPeriods = dto.NumberOfPeriods,
                 Status = "Future",
                 IsActive = true, // Default to true as property missing in DTO
@@ -140,7 +146,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
 
             // Generate periods based on type
             var periodType = dto.PeriodType;
-            var currentDate = dto.StartDate.Date;
+            var currentDate = startDate;
             int maxPeriods = dto.NumberOfPeriods;
 
             // Safety check for daily/weekly if user put wrong number
@@ -152,7 +158,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
             
             int periodNumber = 1;
 
-            while (currentDate <= dto.EndDate.Date && periodNumber <= maxPeriods)
+            while (currentDate <= endDate && periodNumber <= maxPeriods)
             {
                 DateTime periodStart = currentDate;
                 DateTime periodEnd;
@@ -194,8 +200,8 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 }
 
                 // Cap at fiscal year end
-                if (periodEnd > dto.EndDate.Date)
-                    periodEnd = dto.EndDate.Date;
+                if (periodEnd > endDate)
+                    periodEnd = endDate;
 
                 // Create period
                 var period = new FiscalPeriod
@@ -3238,7 +3244,24 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 .ThenBy(item => item.TemplateNumber)
                 .ToListAsync(cancellationToken);
 
-            var exceptionCount = occurrenceExceptions.Count + overdueTemplates.Count;
+            // Once the occurrence has posted, a later template pause, completion,
+            // cancellation or version change cannot suppress its authorised reversal.
+            var reversalExceptions = await _unitOfWork.Repository<RecurringJournalOccurrence>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    item.Status == RecurringJournalOccurrenceStatus.Posted &&
+                    item.JournalEntryId.HasValue && item.ReversalDueDate.HasValue &&
+                    item.ReversalDueDate.Value <= periodEnd && item.ReversalAuthorizedAt.HasValue &&
+                    !item.ReversalJournalEntryId.HasValue && !item.ReversedAt.HasValue &&
+                    !item.WaivedAt.HasValue &&
+                    (item.ReversalStatus == RecurringJournalReversalStatus.Scheduled ||
+                     item.ReversalStatus == RecurringJournalReversalStatus.Processing ||
+                     item.ReversalStatus == RecurringJournalReversalStatus.Failed))
+                .Include(item => item.Template)
+                .OrderBy(item => item.ReversalDueDate)
+                .ThenBy(item => item.Template.TemplateNumber)
+                .ToListAsync(cancellationToken);
+
+            var exceptionCount = occurrenceExceptions.Count + overdueTemplates.Count + reversalExceptions.Count;
             if (exceptionCount == 0)
             {
                 return new CloseCheckResult(
@@ -3247,10 +3270,10 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                     "General Ledger",
                     FinanceCloseCheckSeverities.Mandatory,
                     FinanceCloseCheckStatuses.Passed,
-                    "No unresolved recurring-journal generation exceptions or overdue schedule cursors exist at period end.",
+                    "No unresolved recurring-journal generation, schedule, or due automatic-reversal exceptions exist at period end.",
                     0,
                     null,
-                    new { OccurrenceExceptions = 0, OverdueTemplates = 0 });
+                    new { OccurrenceExceptions = 0, OverdueTemplates = 0, ReversalExceptions = 0 });
             }
 
             return new CloseCheckResult(
@@ -3259,7 +3282,7 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                 "General Ledger",
                 FinanceCloseCheckSeverities.Mandatory,
                 FinanceCloseCheckStatuses.Failed,
-                $"{occurrenceExceptions.Count} recurring-journal occurrence exception(s) and {overdueTemplates.Count} overdue active template schedule(s) require resolution before close.",
+                $"{occurrenceExceptions.Count} recurring-journal occurrence exception(s), {overdueTemplates.Count} overdue active template schedule(s), and {reversalExceptions.Count} due automatic reversal(s) require resolution before close.",
                 exceptionCount,
                 null,
                 new
@@ -3281,6 +3304,20 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                         item.ErrorMessage,
                         item.JournalEntryId,
                         item.WorkflowInstanceId
+                    }).ToList(),
+                    Reversals = reversalExceptions.Select(item => new
+                    {
+                        item.Id,
+                        item.TemplateId,
+                        item.Template.TemplateNumber,
+                        TemplateName = item.Template.Name,
+                        item.ReversalDueDate,
+                        Status = item.ReversalStatus.ToString(),
+                        item.ReversalAttemptCount,
+                        item.ReversalLastAttemptAt,
+                        item.ReversalError,
+                        item.JournalEntryId,
+                        item.ReversalJournalEntryId
                     }).ToList(),
                     OverdueTemplates = overdueTemplates.Select(item => new
                     {
@@ -3620,13 +3657,57 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                     item.PostingDate < period.EndDate.Date.AddDays(1))
                 .AnyAsync(cancellationToken);
 
+            var postedBatches = await _unitOfWork.Repository<FxRevaluationBatch>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    item.FiscalPeriodId == period.Id && item.Status == "Posted" &&
+                    !item.ReversalPostingEventId.HasValue)
+                .OrderBy(item => item.AccountingBookCode)
+                .ThenBy(item => item.RevaluationDate)
+                .Select(item => new
+                {
+                    item.Id,
+                    item.BatchNumber,
+                    item.AccountingBookId,
+                    item.AccountingBookCode,
+                    item.RevaluationDate,
+                    item.PreviewFingerprint,
+                    item.PostingEventId,
+                    item.JournalEntryId
+                })
+                .ToListAsync(cancellationToken);
+            var postedBatchIds = postedBatches.Select(item => item.Id).ToArray();
+            var nonstandardEvidence = await _unitOfWork.Repository<FxRevaluationLine>()
+                .GetQueryable(item => item.TenantId == TenantId && !item.IsDeleted &&
+                    postedBatchIds.Contains(item.FxRevaluationBatchId) && item.HasGovernanceWarning)
+                .OrderBy(item => item.AccountClassificationCode)
+                .ThenBy(item => item.AccountId)
+                .ThenBy(item => item.TransactionCurrency)
+                .Select(item => new
+                {
+                    item.FxRevaluationBatchId,
+                    item.AccountId,
+                    item.AccountClassificationId,
+                    item.AccountClassificationCode,
+                    item.AccountClassificationName,
+                    item.CoreAccountType,
+                    item.TransactionCurrency,
+                    item.EffectivePolicySource,
+                    item.GovernanceWarning
+                })
+                .ToListAsync(cancellationToken);
+
             if (!hasForeignCurrencyActivity)
             {
                 return new CloseCheckResult(
                     "FX_REVALUATION", "Foreign-currency revaluation", "Foreign Exchange",
                     FinanceCloseCheckSeverities.Mandatory, FinanceCloseCheckStatuses.NotApplicable,
                     "No posted foreign-currency activity requires period-end revaluation.", 0, null,
-                    new { HasForeignCurrencyActivity = false });
+                    new
+                    {
+                        HasForeignCurrencyActivity = false,
+                        PostedBookBatches = postedBatches,
+                        NonstandardPolicyWarnings = nonstandardEvidence
+                    });
             }
 
             return period.CurrencyRevaluationComplete
@@ -3634,12 +3715,26 @@ namespace ErpSystem.Api.Services.Finance.Fiscal
                     "FX_REVALUATION", "Foreign-currency revaluation", "Foreign Exchange",
                     FinanceCloseCheckSeverities.Mandatory, FinanceCloseCheckStatuses.Passed,
                     "Foreign-currency revaluation is marked complete for this period.", 0, null,
-                    new { HasForeignCurrencyActivity = true, period.CurrencyRevaluationComplete, period.CurrencyRevaluationDate })
+                    new
+                    {
+                        HasForeignCurrencyActivity = true,
+                        period.CurrencyRevaluationComplete,
+                        period.CurrencyRevaluationDate,
+                        PostedBookBatches = postedBatches,
+                        NonstandardPolicyWarnings = nonstandardEvidence
+                    })
                 : new CloseCheckResult(
                     "FX_REVALUATION", "Foreign-currency revaluation", "Foreign Exchange",
                     FinanceCloseCheckSeverities.Mandatory, FinanceCloseCheckStatuses.Failed,
                     "Foreign-currency activity exists but period-end revaluation is not complete.", 1, null,
-                    new { HasForeignCurrencyActivity = true, period.CurrencyRevaluationComplete, period.CurrencyRevaluationDate });
+                    new
+                    {
+                        HasForeignCurrencyActivity = true,
+                        period.CurrencyRevaluationComplete,
+                        period.CurrencyRevaluationDate,
+                        PostedBookBatches = postedBatches,
+                        NonstandardPolicyWarnings = nonstandardEvidence
+                    });
         }
 
         private static CloseCheckResult BuildMessageCheck(

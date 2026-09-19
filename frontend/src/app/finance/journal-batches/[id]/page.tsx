@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -18,6 +18,7 @@ import {
     Trash2,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { EligibleDraftJournalCombobox } from '@/components/finance/journal-batches/eligible-draft-journal-combobox';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ import type {
     JournalBatchDetail,
     JournalBatchItem,
     JournalBatchValidation,
+    EligibleJournalBatchDraft,
     ReviewJournalBatchItem,
 } from '@/types/journal-batches';
 
@@ -84,7 +86,13 @@ export default function JournalBatchDetailPage() {
     const [reviewDecisions, setReviewDecisions] = useState<Record<string, 'Approved' | 'Rejected'>>({});
     const [reviewComments, setReviewComments] = useState<Record<string, string>>({});
     const [stageComment, setStageComment] = useState('');
-    const [existingJournalId, setExistingJournalId] = useState('');
+    const [selectedDraftJournal, setSelectedDraftJournal] = useState<EligibleJournalBatchDraft>();
+    const [eligibleDrafts, setEligibleDrafts] = useState<EligibleJournalBatchDraft[]>([]);
+    const [eligibleDraftSearch, setEligibleDraftSearch] = useState('');
+    const [eligibleDraftsLoading, setEligibleDraftsLoading] = useState(false);
+    const [eligibleDraftsError, setEligibleDraftsError] = useState<string>();
+    const [eligibleDraftsOpen, setEligibleDraftsOpen] = useState(false);
+    const eligibleDraftRequest = useRef(0);
     const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
     const [entry, setEntry] = useState({
         transactionDate: today(),
@@ -117,6 +125,29 @@ export default function JournalBatchDetailPage() {
             .then((result) => setAccounts(result.filter((account) => account.allowDirectPosting && !account.isControlAccount)))
             .catch(() => undefined);
     }, []);
+
+    const loadEligibleDrafts = useCallback(async (search: string) => {
+        const requestId = ++eligibleDraftRequest.current;
+        try {
+            setEligibleDraftsLoading(true);
+            setEligibleDraftsError(undefined);
+            const result = await journalBatchDataService.getEligibleDraftJournals(id, search);
+            if (requestId !== eligibleDraftRequest.current) return;
+            setEligibleDrafts(result);
+        } catch (error: any) {
+            if (requestId !== eligibleDraftRequest.current) return;
+            setEligibleDrafts([]);
+            setEligibleDraftsError(error.message || 'Eligible draft journals could not be loaded.');
+        } finally {
+            if (requestId === eligibleDraftRequest.current) setEligibleDraftsLoading(false);
+        }
+    }, [id]);
+
+    useEffect(() => {
+        if (!batch?.canEdit) return;
+        const timeout = window.setTimeout(() => loadEligibleDrafts(eligibleDraftSearch), 250);
+        return () => window.clearTimeout(timeout);
+    }, [batch?.canEdit, eligibleDraftSearch, loadEligibleDrafts]);
 
     const readyItems = useMemo(() => batch?.items.filter((item) =>
         item.reviewStatus === (batch.approvalRequired === false ? 'NotRequired' : 'Approved') && item.postingStatus === 'Ready') ?? [], [batch]);
@@ -159,6 +190,19 @@ export default function JournalBatchDetailPage() {
         } finally {
             setBusy(null);
         }
+    };
+
+    const attachExistingJournal = async () => {
+        if (!selectedDraftJournal) return;
+        const attached = await run(
+            'attach',
+            () => journalBatchDataService.attachJournal(id, selectedDraftJournal.id),
+            'Journal attached',
+        );
+        if (!attached) return;
+        setSelectedDraftJournal(undefined);
+        setEligibleDraftSearch('');
+        await loadEligibleDrafts('');
     };
 
     const saveEntry = async () => {
@@ -416,8 +460,40 @@ export default function JournalBatchDetailPage() {
                             <div className="flex gap-2">{editingJournalId && <Button variant="outline" onClick={resetEntry}>Cancel edit</Button>}<Button onClick={saveEntry} disabled={busy !== null}><Save className="mr-2 h-4 w-4" />{editingJournalId ? 'Update journal' : 'Add journal'}</Button></div>
                         </div>
                         <div className="grid gap-3 border-t pt-4 md:grid-cols-[1fr_auto]">
-                            <div className="space-y-2"><Label>Attach an existing draft journal by ID</Label><Input value={existingJournalId} onChange={(event) => setExistingJournalId(event.target.value)} placeholder="00000000-0000-0000-0000-000000000000" /></div>
-                            <Button className="self-end" variant="outline" onClick={() => run('attach', () => journalBatchDataService.attachJournal(id, existingJournalId), 'Journal attached')} disabled={!existingJournalId || busy !== null}>Attach</Button>
+                            <div className="space-y-2">
+                                <Label>Attach an existing draft journal</Label>
+                                <EligibleDraftJournalCombobox
+                                    options={eligibleDrafts}
+                                    selected={selectedDraftJournal}
+                                    search={eligibleDraftSearch}
+                                    onSearchChange={setEligibleDraftSearch}
+                                    onSelect={setSelectedDraftJournal}
+                                    open={eligibleDraftsOpen}
+                                    onOpenChange={setEligibleDraftsOpen}
+                                    loading={eligibleDraftsLoading}
+                                    error={eligibleDraftsError}
+                                    currencyCode={batch.controlCurrencyCode}
+                                    disabled={busy !== null}
+                                />
+                                {selectedDraftJournal && (
+                                    <div className="text-xs text-muted-foreground">
+                                        Same period and book · <Link className="text-primary hover:underline" href={`/finance/journal-entries/${selectedDraftJournal.id}`} target="_blank">Open journal</Link>
+                                    </div>
+                                )}
+                                {!selectedDraftJournal && !eligibleDraftsLoading && !eligibleDraftsError && eligibleDrafts.length === 0 && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {batch.batchType === 'Reversal'
+                                            ? 'Only system-generated reversal journals belonging to this reversal batch can be selected.'
+                                            : 'Create or save a balanced manual journal as Draft in this batch\'s period and accounting book first.'}
+                                    </p>
+                                )}
+                                {eligibleDraftsError && (
+                                    <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => loadEligibleDrafts(eligibleDraftSearch)}>Retry loading journals</Button>
+                                )}
+                            </div>
+                            <Button className="self-end" variant="outline" onClick={attachExistingJournal} disabled={!selectedDraftJournal || busy !== null}>
+                                {busy === 'attach' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Attach
+                            </Button>
                         </div>
                     </CardContent>
                 </Card>

@@ -1,4 +1,6 @@
 using ErpSystem.Api.Services.Inventory;
+using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -21,6 +23,25 @@ namespace ErpSystem.Api.Tests.Services.Inventory;
 
 public sealed class InventoryDisposalServiceTests
 {
+    [Fact, Trait("Batch", "TDC-0615")]
+    public void SqlServer_disposal_completion_lock_captures_and_rejects_negative_application_lock_results()
+    {
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
+        while (directory is not null && !File.Exists(Path.Combine(directory.FullName, "ErpSystem.sln")))
+            directory = directory.Parent;
+        var root = directory?.FullName ?? throw new InvalidOperationException("Repository root was not found.");
+        var source = File.ReadAllText(Path.Combine(root,
+            "src", "ErpSystem.Api", "Services", "Inventory", "InventoryDisposalService.cs"));
+        var start = source.IndexOf("private async Task AcquireDisposalLockAsync", StringComparison.Ordinal);
+        var end = source.IndexOf("private sealed record DisposalFinancePlan", start, StringComparison.Ordinal);
+        var lockBody = source[start..end];
+
+        lockBody.Should().Contain("DECLARE @result int;")
+            .And.Contain("EXEC @result = sp_getapplock")
+            .And.Contain("IF @result < 0 THROW 51000")
+            .And.Contain("INV_DISPOSAL_LOCK_FAILED");
+    }
+
     [Fact, Trait("Batch", "TDC-0615")]
     public async Task Identify_derives_exact_location_value_links_current_clean_dms_and_replays_idempotently()
     {
@@ -284,7 +305,7 @@ public sealed class InventoryDisposalServiceTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task Direct_disposal_stages_and_posts_once_without_another_human_approval(bool postImmediately)
+    public async Task Direct_disposal_stages_once_and_never_auto_approves_the_finance_intent(bool postImmediately)
     {
         await using var fixture = await Fixture.CreateAsync();
         var request = fixture.Request("direct-post");
@@ -292,31 +313,18 @@ public sealed class InventoryDisposalServiceTests
         var draft = await fixture.Service.CreateAsync(request);
         var ready = await fixture.Service.SubmitAsync(draft.Id, new SubmitInventoryDisposalRequest
             { RowVersion = draft.RowVersion, IdempotencyKey = "continue" });
-        var adjustment = new StockAdjustmentDetailDto
-        {
-            Id = Guid.NewGuid(), AdjustmentNumber = "ADJ-DISPOSAL-TEST", Status = "Draft",
-            ApprovalRequired = false, Items = [new() { Id = Guid.NewGuid(), InventoryItemId = fixture.Item.Id,
-                LocationId = fixture.Location.Id, AdjustmentQuantity = -4m }]
-        };
-        fixture.Adjustments.Setup(value => value.CreateAsync(It.IsAny<CreateStockAdjustmentDto>(), fixture.Current.UserId))
-            .ReturnsAsync(adjustment);
-        fixture.Adjustments.Setup(value => value.SubmitAsync(adjustment.Id, fixture.Current.UserId, It.IsAny<StockAdjustmentActionRequest>()))
-            .ReturnsAsync(() => { adjustment.Status = "ReadyToPost"; return adjustment; });
-        fixture.Adjustments.Setup(value => value.GetByIdAsync(adjustment.Id)).ReturnsAsync(adjustment);
-        fixture.Adjustments.Setup(value => value.PostAsync(adjustment.Id, fixture.Current.UserId, It.IsAny<StockAdjustmentActionRequest>()))
-            .ReturnsAsync(() => { adjustment.Status = "Posted"; return adjustment; });
         var stageRequest = new StageInventoryDisposalExecutionRequest
             { RowVersion = ready.RowVersion, IdempotencyKey = "prepare", ExecutionReference = ready.DisposalNumber, PostImmediately = postImmediately };
         var staged = await fixture.Service.StageExecutionAsync(ready.Id, stageRequest);
-        staged.Status.Should().Be(postImmediately ? InventoryDisposalStatus.Completed : InventoryDisposalStatus.AdjustmentPending);
-        var complete = new CompleteInventoryDisposalRequest { RowVersion = staged.RowVersion, IdempotencyKey = "post" };
-        var posted = postImmediately ? staged : await fixture.Service.CompleteAsync(staged.Id, complete);
-        posted.Status.Should().Be(InventoryDisposalStatus.Completed);
-        posted.ApprovedById.Should().BeNull();
-        (postImmediately ? await fixture.Service.StageExecutionAsync(staged.Id, stageRequest) : await fixture.Service.CompleteAsync(staged.Id, complete))
-            .Status.Should().Be(InventoryDisposalStatus.Completed);
-        fixture.Adjustments.Verify(value => value.PostAsync(adjustment.Id, fixture.Current.UserId, It.IsAny<StockAdjustmentActionRequest>()), Times.Once);
-        fixture.Adjustments.Verify(value => value.DecideAsync(It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<DecideStockAdjustmentRequest>()), Times.Never);
+        staged.Status.Should().Be(InventoryDisposalStatus.AdjustmentPending);
+        staged.ApprovedById.Should().BeNull();
+        (await fixture.Service.StageExecutionAsync(staged.Id, stageRequest)).Should().BeEquivalentTo(staged);
+        fixture.ProducerIntents.Verify(value => value.PrepareAsync(
+            It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        fixture.ProducerIntents.Verify(value => value.ApprovePreparedAsync(
+            It.IsAny<Guid>(), It.IsAny<DecideProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.ProducerIntents.Verify(value => value.GetAsync(
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     private sealed class Fixture : IAsyncDisposable
@@ -357,6 +365,7 @@ public sealed class InventoryDisposalServiceTests
         public IReadOnlyList<Guid> CommitteeMemberIds { get; }
         public Mock<IWorkflowIntegrationService> Workflow { get; }
         public Mock<IStockAdjustmentService> Adjustments { get; init; } = new();
+        public Mock<IFinanceProducerIntentService> ProducerIntents { get; init; } = new();
 
         public CreateInventoryDisposalRequest Request(string key) => new()
         {
@@ -486,12 +495,47 @@ public sealed class InventoryDisposalServiceTests
                 .ReturnsAsync(new WorkflowIntegrationResult(new ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult
                     { Success = true }, WorkflowOutcome.Approved, approvalRequired: false));
             var adjustments = new Mock<IStockAdjustmentService>();
+            InventoryDisposalStockAdjustmentRequest? disposalRequest = null;
+            var disposalParticipant = new Mock<IInventoryDisposalStockAdjustmentParticipant>();
+            disposalParticipant.Setup(value => value.PreviewAsync(
+                    It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((InventoryDisposalStockAdjustmentRequest request, CancellationToken _) =>
+                {
+                    disposalRequest = request;
+                    return new StockAdjustment
+                    {
+                        Id = request.AdjustmentId,
+                        TenantId = request.TenantId,
+                        AdjustmentNumber = request.AdjustmentNumber,
+                        WarehouseId = request.Create.WarehouseId,
+                        AdjustmentDate = request.PostingDateUtc,
+                        ReasonCode = request.Create.ReasonCode,
+                        Status = "Draft"
+                    };
+                });
+            var valuation = new Mock<IStockAdjustmentValuationIntentBuilder>();
+            valuation.Setup(value => value.BuildAsync(
+                    It.IsAny<StockAdjustment>(), It.IsAny<ProducerOwnerEffectIdentityDto>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((StockAdjustment _, ProducerOwnerEffectIdentityDto owner, CancellationToken _) =>
+                    new ProducerAccountingIntentDto
+                    {
+                        AccountingEventId = disposalRequest!.FinanceApprovalId,
+                        ParticipantIdentity = owner.ParticipantCode,
+                        ExpectedOwnerEffect = owner
+                    });
+            var producerIntents = new Mock<IFinanceProducerIntentService>();
+            producerIntents.Setup(value => value.PrepareAsync(
+                    It.IsAny<ProducerAccountingIntentDto>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync((ProducerAccountingIntentDto intent, CancellationToken _) =>
+                    new AccountingEventDto { Id = intent.AccountingEventId!.Value, Status = "Prepared" });
             var service = new InventoryDisposalService(db, current, access.Object,
                 Mock.Of<IProcurementSodGuardService>(), workflow.Object,
-                adjustments.Object, Mock.Of<IFinancePostingEngine>(),
+                disposalParticipant.Object, valuation.Object,
+                producerIntents.Object, Mock.Of<IFinanceProducerIntentGroupService>(),
+                Mock.Of<IFinanceProducerApprovedExecution>(), Mock.Of<IFinanceProducerIntentGroupApprovedExecution>(),
                 trackingControls.Object, events.Object);
             return new Fixture(db, service, current, events, trackingControls, warehouse, location, item, version, upload,
-                auditorId, memberIds, workflow) { Adjustments = adjustments };
+                auditorId, memberIds, workflow) { Adjustments = adjustments, ProducerIntents = producerIntents };
         }
 
         private static ApplicationUser User(Guid id, Guid tenantId, Tenant tenant, string first, string last) => new()

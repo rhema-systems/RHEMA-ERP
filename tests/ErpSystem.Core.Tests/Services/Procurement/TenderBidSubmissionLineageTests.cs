@@ -539,7 +539,7 @@ public sealed class TenderBidSubmissionLineageTests
         payment.JournalEntryId.Should().NotBeNull();
         payment.PostedAtUtc.Should().NotBeNull();
         fixture.FinancePosting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -568,6 +568,7 @@ public sealed class TenderBidSubmissionLineageTests
     public async Task BidSummaryUsesVerifiedPaymentFromExactTenderAndTenant()
     {
         var fixture = new Fixture(advancedSourcingCase: false);
+        fixture.Bid.OpenedDate = DateTime.UtcNow;
         var fee = fixture.AddMandatoryFee(100m);
         fixture.Bids.Setup(repository => repository.GetBidsAsync(
                 1, 10, null, null, fixture.Tender.Id))
@@ -710,7 +711,7 @@ public sealed class TenderBidSubmissionLineageTests
             UnitOfWork.Setup(unit => unit.Repository<Account>()).Returns(accounts.Object);
             UnitOfWork.Setup(unit => unit.Repository<FinanceSettings>()).Returns(settings.Object);
             FinancePosting.Setup(engine => engine.PostAsync(
-                    It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
+                    It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new FinancePostingResultDto
                 {
                     PostingEventId = Guid.NewGuid(),

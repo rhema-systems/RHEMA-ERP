@@ -4,6 +4,7 @@ using ErpSystem.Shared;
 using ErpSystem.Core.Services.Finance;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -14,7 +15,7 @@ namespace ErpSystem.Api.Controllers.Finance
     /// This controller is only relevant when the COA type is set to "Segmented".
     /// Segments define how account numbers are constructed and validated.
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     [ApiController]
     [Route("api/finance/segments")]
     public class SegmentStructureController : ControllerBase
@@ -209,10 +210,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     DataType = dto.DataType,
                     SeparatorCharacter = dto.SeparatorCharacter,
                     LookupTableRequired = dto.LookupTableRequired,
-                    IsMandatory = dto.IsMandatory,
-                    IsReportingDimension = dto.IsReportingDimension,
                     IsNaturalAccount = dto.IsNaturalAccount,
-                    IsActive = true, // Default to true on create
                     Description = dto.Description
                 };
 
@@ -238,19 +236,18 @@ namespace ErpSystem.Api.Controllers.Finance
         /// **Common Use Cases:**
         /// - Rename a segment (e.g., rename "Dept" to "Department")
         /// - Update the description for clarity
-        /// - Toggle IsReportingDimension to include/exclude from reports
-        /// - Activate or deactivate a segment
+        /// - Clarify the name or description of an unused Draft identity segment
         ///
         /// **Integration Pattern:**
         /// - Fetch the current segment via GET /api/finance/segments/{id}
-        /// - Modify allowed fields (SegmentName, Description, IsReportingDimension, IsActive)
+        /// - Modify allowed Draft fields and return the original row version
         /// - PUT the updated payload; the route ID must match the dto.Id
         ///
         /// **Business Rules:**
         /// - Structural fields (Code, Position, Length, DataType, Separator) are preserved and cannot be changed via update
         /// - The route parameter ID must match the ID in the request body; otherwise a 400 is returned
         /// - Null fields in the request body default to the existing values (partial update semantics)
-        /// - Deactivating a segment does not delete it; it remains in the structure but is flagged inactive
+        /// - Activation and freezing use their dedicated governed endpoints
         ///
         /// **Authorization:** Requires Finance.Write permission
         /// </remarks>
@@ -284,9 +281,7 @@ namespace ErpSystem.Api.Controllers.Finance
                     // Mapped fields
                     SegmentName = dto.SegmentName ?? existing.SegmentName,
                     Description = dto.Description ?? existing.Description,
-                    IsReportingDimension = dto.IsReportingDimension ?? existing.IsReportingDimension,
-                    IsMandatory = dto.IsMandatory ?? existing.IsMandatory,
-                    IsActive = dto.IsActive ?? existing.IsActive,
+                    RowVersion = dto.RowVersion,
 
                     // Preserved fields
                     SegmentCode = existing.SegmentCode,
@@ -307,6 +302,10 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 return NotFound(ex.Message);
             }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "The segment changed; refresh and retry." });
+            }
             catch (InvalidOperationException ex)
             {
                 return BadRequest(ex.Message);
@@ -315,6 +314,26 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 return StatusCode(500, $"Internal server error: {ex.Message}");
             }
+        }
+
+        [HttpPost("{id}/activate")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
+        public async Task<ActionResult<SegmentStructureDto>> Activate(Guid id, [FromBody] AccountSegmentLifecycleTransitionDto dto)
+        {
+            try { return Ok(MapToSegmentStructureDto(await _accountSegmentStructureService.ActivateAsync(id, dto))); }
+            catch (DbUpdateConcurrencyException) { return Conflict(new { message = "The segment changed; refresh and retry." }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+        }
+
+        [HttpPost("{id}/freeze")]
+        [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
+        public async Task<ActionResult<SegmentStructureDto>> Freeze(Guid id, [FromBody] AccountSegmentLifecycleTransitionDto dto)
+        {
+            try { return Ok(MapToSegmentStructureDto(await _accountSegmentStructureService.FreezeAsync(id, dto))); }
+            catch (DbUpdateConcurrencyException) { return Conflict(new { message = "The segment changed; refresh and retry." }); }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
+            catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
         }
 
         /// <summary>
@@ -345,12 +364,16 @@ namespace ErpSystem.Api.Controllers.Finance
         /// <response code="500">Internal server error.</response>
         [HttpDelete("{id}")]
         [Authorize(Policy = FinancePermissions.ConfigureChartOfAccountsPolicy)]
-        public async Task<ActionResult> DeleteSegmentStructure(Guid id)
+        public async Task<ActionResult> DeleteSegmentStructure(Guid id, [FromBody] AccountSegmentDeleteDto dto)
         {
             try
             {
-                await _accountSegmentStructureService.DeleteAsync(id);
+                await _accountSegmentStructureService.DeleteAsync(id, dto);
                 return NoContent();
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "The segment changed; refresh and retry." });
             }
             catch (ArgumentException ex)
             {
@@ -370,28 +393,27 @@ namespace ErpSystem.Api.Controllers.Finance
         /// Reorders segments according to the provided list of new positions.
         /// </summary>
         /// <remarks>
-        /// **Warning:** This operation will regenerate account numbers for all accounts.
+        /// **Warning:** Reordering is allowed only while every segment is Draft and no account identity exists.
         ///
         /// **Common Use Cases:**
-        /// - Change the order of segments in the account number (e.g., move Location before Department)
-        /// - Restructure the Chart of Accounts layout after organizational changes
+        /// - Finalize the order of Draft segments during initial setup
+        /// - Correct Draft structure ordering before any GL account is assigned
         ///
         /// **Integration Pattern:**
         /// - Fetch current segments via GET /api/finance/segments
         /// - Build a reorder list mapping each segment ID to its new position
-        /// - POST the list; all existing account numbers will be regenerated automatically
-        /// - Refresh account displays after completion
+        /// - Include the row version returned for every segment
+        /// - POST the list and refresh the structure after completion
         ///
         /// **Business Rules:**
-        /// - The reorder list must include all active segments with unique positions
-        /// - All existing account numbers are regenerated to reflect the new order
-        /// - This is a potentially long-running operation for large account sets
-        /// - Cannot be undone without another reorder operation
+        /// - The reorder list must include every configured Draft segment with unique sequential positions
+        /// - Reordering is rejected after any segment is activated or any account identity exists
+        /// - A stale row version returns 409 and requires the caller to refresh
         ///
         /// **Authorization:** Requires Finance.Write permission
         /// </remarks>
         /// <param name="reorderList">List of segment IDs with their new positions.</param>
-        /// <returns>Success message confirming segments were reordered and accounts updated.</returns>
+        /// <returns>Success message confirming the Draft structure was reordered.</returns>
         /// <response code="200">Segments reordered successfully.</response>
         /// <response code="400">Invalid reorder list.</response>
         /// <response code="500">Internal server error.</response>
@@ -405,7 +427,11 @@ namespace ErpSystem.Api.Controllers.Finance
             try
             {
                 await _accountSegmentStructureService.ReorderSegmentsAsync(reorderList);
-                return Ok(new { message = "Segments reordered and accounts updated successfully." });
+                return Ok(new { message = "Draft account-number segments reordered successfully." });
+            }
+            catch (DbUpdateConcurrencyException)
+            {
+                return Conflict(new { message = "The segment structure changed; refresh and retry." });
             }
             catch (ArgumentException ex)
             {
@@ -475,10 +501,16 @@ namespace ErpSystem.Api.Controllers.Finance
                  DataType = source.DataType,
                  SeparatorCharacter = source.SeparatorCharacter,
                  LookupTableRequired = source.LookupTableRequired,
-                 IsMandatory = source.IsMandatory,
+                 IsRequired = true,
                  IsReportingDimension = source.IsReportingDimension,
                  IsNaturalAccount = source.IsNaturalAccount,
                  IsActive = source.IsActive,
+                 LifecycleStatus = source.LifecycleStatus,
+                 RowVersion = source.RowVersion,
+                 AccountUsageCount = source.AccountUsageCount,
+                 CanActivate = source.CanActivate,
+                 CanFreeze = source.CanFreeze,
+                 IsSystemDefined = source.IsSystemDefined,
                  Description = source.Description,
                  LookupValueCount = source.LookupValuesCount
              };

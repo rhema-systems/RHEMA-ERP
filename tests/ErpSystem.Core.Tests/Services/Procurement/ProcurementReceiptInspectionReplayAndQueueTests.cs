@@ -170,10 +170,10 @@ public sealed class ProcurementReceiptInspectionReplayAndQueueTests
     public void Fingerprint_migration_preserves_legacy_rows_and_immutable_action_protection()
     {
         var migration = ReadRepositoryFile(
-            "src", "ErpSystem.Data", "Migrations",
+            "src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260801220000_TDC0502ReceiptInspectionActionFingerprints.cs");
         var originalLifecycleMigration = ReadRepositoryFile(
-            "src", "ErpSystem.Data", "Migrations",
+            "src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260731140000_TDC0502ReceiptInspectionClosure.cs");
 
         migration.Should().Contain("name: \"RequestFingerprint\"");

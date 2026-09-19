@@ -112,6 +112,9 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? ReversalReason { get; set; }
         public ControlledDocumentIssueSummaryDto? ReceiptIssuance { get; set; }
         public List<PaymentAllocationDto> Allocations { get; set; } = new();
+        public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
+        public IReadOnlyList<FinanceSettlementDimensionComponentDto> SettlementDimensions { get; set; } =
+            Array.Empty<FinanceSettlementDimensionComponentDto>();
         public DateTime CreatedAt { get; set; }
     }
 

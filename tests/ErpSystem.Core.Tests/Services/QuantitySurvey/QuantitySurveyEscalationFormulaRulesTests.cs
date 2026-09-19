@@ -53,7 +53,7 @@ public sealed class QuantitySurveyEscalationFormulaRulesTests
             root,
             "src",
             "ErpSystem.Data",
-            "Migrations",
+            "LegacyMigrationsArchive",
             "20260809152905_AddQuantitySurveyEscalationFormulaRegister.cs"));
 
         source.Should().NotContain("EstateManagedAssets");
@@ -77,7 +77,7 @@ public sealed class QuantitySurveyEscalationFormulaRulesTests
     {
         var root = FindRepositoryRoot();
         var migrationId = "20260809152905_AddQuantitySurveyEscalationFormulaRegister";
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
+        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         metadata.Should().Contain($"Migration(\"{migrationId}\")");

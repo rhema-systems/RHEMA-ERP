@@ -32,7 +32,7 @@ import type {
     ProcurementFinanceReconciliationReport,
     ProcurementAcceptedSupplyOptions,
     ApInvoiceSupplier,
-    ApInvoiceSupplierEntry,
+    ApInvoiceSupplierEntryOption,
     ApGoodsInvoiceEntry,
     SupplierDebitNote,
     SupplierDebitNoteCreateRequest,
@@ -166,8 +166,9 @@ class AccountsPayableService {
         return apiService.get<VendorInvoiceDistribution>(`/ap/invoices/${id}/distribution`);
     }
 
-    public async getInvoiceSupplierEntryOptions(): Promise<ApInvoiceSupplierEntry[]> {
-        return apiService.get<ApInvoiceSupplierEntry[]>(`${this.baseUrl}/invoices/supplier-entry-options`);
+    /** Returns invoice-entry options spanning approved Business Partners and AP Suppliers. */
+    public async getInvoiceSupplierEntryOptions(): Promise<ApInvoiceSupplierEntryOption[]> {
+        return apiService.get<ApInvoiceSupplierEntryOption[]>(`${this.baseUrl}/invoices/entry-suppliers`);
     }
 
     public async getGoodsInvoiceEntry(purchaseOrderId: string, currentInvoiceId?: string): Promise<ApGoodsInvoiceEntry> {

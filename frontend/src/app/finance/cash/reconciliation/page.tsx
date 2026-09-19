@@ -47,9 +47,12 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
 import { parseBankStatementImportFile } from '@/lib/finance/bank-statement-import';
+import { calendarDayDifference, isWithinStatementDateTolerance } from '@/lib/finance/banking-policy';
 import { cn, formatCurrency } from '@/lib/utils';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 import {
     BankAccount,
     BankReconciliation,
@@ -488,6 +491,10 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
         queryKey: ['reconciliation-matches', reconciliation.id],
         queryFn: () => cashManagementDataService.getReconciliationMatches(reconciliation.id),
     });
+    const settingsQuery = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeDataService.getFinanceSettings(),
+    });
 
     const refresh = async () => {
         await Promise.all([
@@ -564,6 +571,15 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
     const selectedLine = summary?.unmatchedStatementLines.find((item) => item.id === selectedLineId);
     const amountsAgree = Boolean(selectedBook && selectedLine && Math.abs(selectedBook.amount - selectedLine.amount) < 0.005);
     const directionsAgree = Boolean(selectedBook && selectedLine && isDirectionCompatible(selectedBook, selectedLine));
+    const statementDateToleranceDays = settingsQuery.data?.bankStatementMatchDateToleranceDays ?? 3;
+    const selectedDateDifferenceDays = selectedBook && selectedLine
+        ? calendarDayDifference(selectedBook.transactionDate, selectedLine.transactionDate)
+        : null;
+    const selectedDatesWithinTolerance = Boolean(selectedBook && selectedLine && isWithinStatementDateTolerance(
+        selectedBook.transactionDate,
+        selectedLine.transactionDate,
+        statementDateToleranceDays,
+    ));
     const isRefreshing = summaryQuery.isFetching || matchesQuery.isFetching;
 
     if (summaryQuery.isLoading || matchesQuery.isLoading) {
@@ -596,6 +612,7 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
                     <Badge variant="secondary">{summary.totalMatches} matched</Badge>
                     <Badge variant="outline">{summary.unmatchedBookTransactions.length} unmatched book</Badge>
                     <Badge variant="outline">{summary.unmatchedStatementLines.length} unmatched statement</Badge>
+                    <Badge variant="outline">Auto-match date window: ±{statementDateToleranceDays} calendar days</Badge>
                 </div>
                 <div className="flex flex-wrap gap-2">
                     <Button variant="outline" size="sm" onClick={() => refresh()} disabled={isRefreshing}>
@@ -618,7 +635,11 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
             )}
 
             {canEdit && (selectedBook || selectedLine) && (
-                <Card className={cn('border-dashed', selectedBook && selectedLine && !amountsAgree && 'border-destructive/60')}>
+                <Card className={cn(
+                    'border-dashed',
+                    selectedBook && selectedLine && (!amountsAgree || !directionsAgree) && 'border-destructive/60',
+                    selectedBook && selectedLine && amountsAgree && directionsAgree && !selectedDatesWithinTolerance && 'border-amber-500/70',
+                )}>
                     <CardContent className="flex flex-wrap items-center justify-between gap-4 p-4">
                         <div>
                             <p className="font-medium">{selectedBook && selectedLine && amountsAgree && directionsAgree ? 'Ready to create a manual match' : selectedBook && selectedLine ? 'The selected rows cannot be matched' : 'Select one row from each table'}</p>
@@ -626,8 +647,10 @@ function ReconciliationWorkspace({ reconciliation, account }: { reconciliation: 
                                 {selectedBook && selectedLine
                                     ? !amountsAgree
                                         ? `Amounts differ: ${formatCurrency(selectedBook.amount, currency)} vs ${formatCurrency(selectedLine.amount, currency)}`
+                                        : directionsAgree && !selectedDatesWithinTolerance
+                                        ? `Amounts and direction agree, but the dates are ${selectedDateDifferenceDays} calendar day(s) apart—outside the ±${statementDateToleranceDays}-day auto-match policy. Manual matching remains available for a reviewed exception.`
                                         : directionsAgree
-                                        ? `${formatCurrency(selectedBook.amount, currency)} on both sides`
+                                        ? `${formatCurrency(selectedBook.amount, currency)} on both sides; dates are within the ±${statementDateToleranceDays}-day policy window.`
                                         : 'The receipt/payment direction does not agree with the statement credit/debit.'
                                     : 'A match requires one posted book transaction and one statement line.'}
                             </p>
@@ -814,6 +837,11 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
     const [transactionDate, setTransactionDate] = useState(format(new Date(reconciliation.reconciliationDate), 'yyyy-MM-dd'));
     const [referenceNumber, setReferenceNumber] = useState('');
     const [description, setDescription] = useState('');
+    const [bankDimensionLineId] = useState(() => crypto.randomUUID());
+    const [offsetDimensionLineId] = useState(() => crypto.randomUUID());
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     const accountsQuery = useQuery({
         queryKey: ['reconciliation-adjustment-accounts'],
@@ -823,6 +851,7 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
     const postingAccounts = useMemo(() => (accountsQuery.data ?? [])
         .filter((item) => item.id !== bankGlAccountId && item.allowDirectPosting && item.isPostingAllowed !== false && !item.isControlAccount)
         .sort((a, b) => a.accountNumber.localeCompare(b.accountNumber)), [accountsQuery.data, bankGlAccountId]);
+    const selectedOffsetAccount = postingAccounts.find((item) => item.id === offsetAccountId);
 
     const mutation = useMutation({
         mutationFn: (dto: CreateReconciliationAdjustmentDto) => cashManagementDataService.postReconciliationAdjustment(reconciliation.id, dto),
@@ -830,6 +859,9 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
             await onPosted();
             onOpenChange(false);
             setAmount('');
+            setDefaultDimensionValues({});
+            setLineDimensionValues({});
+            setApplyDefaultToAll(false);
             toast({ title: result.wasDuplicate ? 'Adjustment already posted' : 'Adjustment posted', description: `${formatCurrency(result.amount, currency)} was posted to the GL.` });
         },
         onError: (error) => toast({ title: 'Adjustment failed', description: errorMessage(error, 'The adjustment could not be posted.'), variant: 'destructive' }),
@@ -837,6 +869,10 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
 
     const submit = () => {
         const numericAmount = Number(amount);
+        if (!bankGlAccountId) {
+            toast({ title: 'Bank GL account required', description: 'Link the bank account to a posting account before recording an adjustment.', variant: 'destructive' });
+            return;
+        }
         if (!offsetAccountId || !Number.isFinite(numericAmount) || numericAmount <= 0) return;
         mutation.mutate({
             adjustmentType,
@@ -846,6 +882,22 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
             referenceNumber: referenceNumber.trim() || undefined,
             description: description.trim() || ADJUSTMENT_LABELS[adjustmentType],
             idempotencyKey: crypto.randomUUID(),
+            financeDimensions: {
+                defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                lines: [
+                    {
+                        sourceLineId: bankDimensionLineId,
+                        accountId: bankGlAccountId,
+                        dimensions: toFinancePostingDimensionValues(lineDimensionValues[bankDimensionLineId] || {}),
+                    },
+                    {
+                        sourceLineId: offsetDimensionLineId,
+                        accountId: offsetAccountId,
+                        dimensions: toFinancePostingDimensionValues(lineDimensionValues[offsetDimensionLineId] || {}),
+                    },
+                ],
+                applyDefaultToEligibleLines: applyDefaultToAll,
+            },
         });
     };
 
@@ -875,12 +927,45 @@ function AdjustmentDialog({ open, onOpenChange, reconciliation, currency, bankGl
                             <SelectContent>{postingAccounts.map((item) => <SelectItem key={item.id} value={item.id}>{item.accountNumber} · {item.accountName}</SelectItem>)}</SelectContent>
                         </Select>
                     </div>
+                    <SourceDocumentDimensionPanel
+                        context={{
+                            sourceModule: 'CASHBANK',
+                            sourceDocumentType: 'BankReconciliationAdjustment',
+                            postingAction: 'Post',
+                            sourceRoute: 'finance.cash.bank-reconciliation-adjustments',
+                            contractVersion: '1.0',
+                        }}
+                        effectiveDate={transactionDate}
+                        lines={[
+                            {
+                                id: bankDimensionLineId,
+                                accountId: bankGlAccountId,
+                                accountLabel: 'Reconciliation bank leg',
+                            },
+                            {
+                                id: offsetDimensionLineId,
+                                accountId: offsetAccountId || undefined,
+                                accountLabel: selectedOffsetAccount
+                                    ? `${selectedOffsetAccount.accountNumber} · ${selectedOffsetAccount.accountName}`
+                                    : 'Adjustment offset leg',
+                            },
+                        ]}
+                        defaultValues={defaultDimensionValues}
+                        lineValues={lineDimensionValues}
+                        onDefaultValuesChange={(values) => {
+                            setDefaultDimensionValues(values);
+                            setApplyDefaultToAll(false);
+                        }}
+                        onLineValuesChange={setLineDimensionValues}
+                        onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                        disabled={mutation.isPending}
+                    />
                     <div className="space-y-2"><Label htmlFor="adjustment-reference">Reference</Label><Input id="adjustment-reference" value={referenceNumber} onChange={(event) => setReferenceNumber(event.target.value)} /></div>
                     <div className="space-y-2"><Label htmlFor="adjustment-description">Description</Label><Textarea id="adjustment-description" value={description} onChange={(event) => setDescription(event.target.value)} placeholder={ADJUSTMENT_LABELS[adjustmentType]} /></div>
                 </div>
                 <DialogFooter>
                     <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-                    <Button onClick={submit} disabled={mutation.isPending || !offsetAccountId || Number(amount) <= 0}>
+                    <Button onClick={submit} disabled={mutation.isPending || !bankGlAccountId || !offsetAccountId || Number(amount) <= 0}>
                         {mutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Post adjustment
                     </Button>
                 </DialogFooter>

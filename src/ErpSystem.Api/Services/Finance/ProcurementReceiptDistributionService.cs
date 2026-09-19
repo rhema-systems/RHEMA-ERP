@@ -144,7 +144,7 @@ public sealed partial class ProcurementReceiptDistributionService(ApplicationDbC
         var snapshot = BusinessPartnerPostingDefaults.ReadSnapshot(receipt.PurchaseOrder.SupplierDefaultsSnapshotJson);
         var defaults = snapshot?.PostingDefaults ?? BusinessPartnerPostingDefaults.FromPartner(partner);
         var supplierSource = snapshot is null ? "Supplier default" : "PO supplier default";
-        var result = new ReceiptPostingDistribution(currency, basis);
+        var result = new ReceiptPostingDistribution(currency, basis, receipt.ReceiptDate);
         var totalInventory = Round(values.Sum(value => value.Inventory));
         var totalVariance = Round(values.Sum(value => value.Variance));
         var inventoryAmounts = MonetaryAllocation.Allocate(values.Select(value => value.Inventory).ToArray(), totalInventory);
@@ -198,7 +198,7 @@ public sealed partial class ProcurementReceiptDistributionService(ApplicationDbC
         }
         var number = result.Lines.Count + 1;
         result.Lines.Add(Line(account, $"{Purpose(tag)} {reference}", Math.Max(amount, 0m), Math.Max(-amount, 0m),
-            result.Currency, number, reference, tag));
+            result.Currency, number, reference, tag, exchangeRateDate: result.PostingDate));
         // Item lineage lets later AP invoices clear the original accrual even after master changes.
         result.Lines[^1].SourceDocumentLineId = itemId;
         result.Sources[number] = source;
@@ -211,7 +211,7 @@ public sealed partial class ProcurementReceiptDistributionService(ApplicationDbC
         "INV-RECEIPT-PRICE-VARIANCE" => "Purchase price variance", _ => "Receipt posting"
     };
     private sealed record ReceiptValue(Guid ItemId, decimal Inventory, decimal Variance);
-    internal sealed record ReceiptPostingDistribution(string Currency, string Basis)
+    internal sealed record ReceiptPostingDistribution(string Currency, string Basis, DateTime PostingDate)
     {
         public List<FinancePostingLineDto> Lines { get; } = new();
         public Dictionary<int, string> Sources { get; } = new();

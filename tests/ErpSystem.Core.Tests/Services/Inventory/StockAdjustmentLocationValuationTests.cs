@@ -274,6 +274,39 @@ public sealed class StockAdjustmentLocationValuationTests
     }
 
     [Fact]
+    public async Task Disposal_scoped_build_uses_every_preassigned_item_id_in_exact_fifo_order()
+    {
+        await using var fixture = new Fixture();
+        fixture.Item.ValuationMethod = ValuationMethod.FIFO;
+        await fixture.AddLayerAsync(1m, 10m, 1);
+        await fixture.AddLayerAsync(1m, 20m, 2);
+        var itemIds = new[]
+        {
+            Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff"),
+            Guid.Parse("00000000-0000-0000-0000-000000000001")
+        };
+        var postingDate = new DateTime(2026, 9, 14, 12, 0, 0, DateTimeKind.Utc);
+
+        var lines = await fixture.BuildManyAsync(
+            [-1m, -1m],
+            systemQuantity: 2m,
+            callerCost: 999m,
+            preassignedItemIds: itemIds,
+            deterministicCreatedAtUtc: postingDate,
+            useProvidedUnitCost: true,
+            reasonCode: StockAdjustmentReasonCodes.WriteOff);
+
+        lines.Select(line => line.Id).Should().Equal(itemIds);
+        lines.Select(line => line.AdjustmentValue).Should().Equal([-10m, -20m],
+            "preassigned identity must not disturb sequential FIFO consumption");
+        lines.Select(line => line.CreatedAt).Should().Equal(postingDate, postingDate.AddTicks(1));
+        (await fixture.Context.Set<InventoryLayer>().OrderBy(layer => layer.LayerDate)
+                .Select(layer => layer.RemainingQuantity).ToListAsync())
+            .Should().Equal([1m, 1m], "preview construction must not consume or persist FIFO layers");
+        (await fixture.Context.Set<InventoryMovement>().CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
     public async Task Rebuilding_after_reorder_or_removal_reprices_survivors_from_unchanged_layers()
     {
         await using var fixture = new Fixture();
@@ -392,7 +425,14 @@ public sealed class StockAdjustmentLocationValuationTests
             return (await BuildManyAsync([delta], systemQuantity, callerCost)).Single();
         }
 
-        public async Task<List<StockAdjustmentItem>> BuildManyAsync(decimal[] deltas, decimal systemQuantity, decimal? callerCost = null)
+        public async Task<List<StockAdjustmentItem>> BuildManyAsync(
+            decimal[] deltas,
+            decimal systemQuantity,
+            decimal? callerCost = null,
+            IReadOnlyList<Guid>? preassignedItemIds = null,
+            DateTime? deterministicCreatedAtUtc = null,
+            bool useProvidedUnitCost = false,
+            string reasonCode = StockAdjustmentReasonCodes.PhysicalCount)
         {
             var stock = await Context.Set<InventoryLocation>().SingleOrDefaultAsync(value =>
                 value.TenantId == Item.TenantId && value.InventoryItemId == Item.Id && value.LocationId == Location.Id);
@@ -405,14 +445,21 @@ public sealed class StockAdjustmentLocationValuationTests
             await Context.SaveChangesAsync();
             var adjustment = new StockAdjustment
             {
-                TenantId = Item.TenantId, WarehouseId = Warehouse.Id, ReasonCode = StockAdjustmentReasonCodes.PhysicalCount
+                TenantId = Item.TenantId, WarehouseId = Warehouse.Id, ReasonCode = reasonCode
             };
             var method = typeof(StockAdjustmentService).GetMethod("BuildLinesAsync", BindingFlags.Instance | BindingFlags.NonPublic)!;
-            await (Task)method.Invoke(Service, [adjustment, deltas.Select((delta, index) => new CreateStockAdjustmentItemDto
-            {
-                InventoryItemId = Item.Id, LocationId = Location.Id, AdjustmentQuantity = delta,
-                UnitCost = callerCost, LotNumber = $"LOT-{index}"
-            }).ToList()])!;
+            await (Task)method.Invoke(Service,
+            [
+                adjustment,
+                deltas.Select((delta, index) => new CreateStockAdjustmentItemDto
+                {
+                    InventoryItemId = Item.Id, LocationId = Location.Id, AdjustmentQuantity = delta,
+                    UnitCost = callerCost, LotNumber = $"LOT-{index}"
+                }).ToList(),
+                preassignedItemIds,
+                deterministicCreatedAtUtc,
+                useProvidedUnitCost
+            ])!;
             return adjustment.Items.ToList();
         }
 

@@ -22,6 +22,13 @@ public class AuditLog : BaseEntity
     [StringLength(100)]
     public string? ResourceId { get; set; }
 
+    /// <summary>
+    /// Optional producer-supplied key for an audit event that must be recorded exactly once.
+    /// The database enforces uniqueness within a tenant so retries cannot duplicate evidence.
+    /// </summary>
+    [StringLength(450)]
+    public string? IdempotencyKey { get; set; }
+
     public string? OldValues { get; set; } // JSON string
 
     public string? NewValues { get; set; } // JSON string

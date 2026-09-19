@@ -21,10 +21,17 @@ public interface ILeaseAccountingService
     /// Activate the lease: create the ROU FixedAsset + post recognition GL journal
     /// (DR ROU Asset, CR Lease Liability)
     /// </summary>
-    Task<LeaseContractDetailDto> ActivateLeaseAsync(Guid leaseId);
+    Task<LeaseContractDetailDto> ActivateLeaseAsync(
+        Guid leaseId,
+        ActivateLeaseDto? dto = null,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Post a single period's journal: DR Interest Expense + DR Lease Liability, CR Cash/Payable
     /// </summary>
-    Task<LeaseContractDetailDto> PostPeriodJournalAsync(Guid leaseId, Guid scheduleLineId);
+    Task<LeaseContractDetailDto> PostPeriodJournalAsync(
+        Guid leaseId,
+        Guid scheduleLineId,
+        PostLeasePeriodDto? dto = null,
+        CancellationToken cancellationToken = default);
 }

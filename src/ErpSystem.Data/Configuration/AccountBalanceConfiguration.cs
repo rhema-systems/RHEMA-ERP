@@ -19,8 +19,8 @@ public sealed class AccountBalanceConfiguration : IEntityTypeConfiguration<Accou
         {
             balance.TenantId,
             balance.AccountId,
+            balance.AccountingBookId,
             balance.FiscalPeriodId,
-            balance.BookClassification,
             balance.Currency
         }).IsUnique()
             .HasFilter(null);
@@ -36,7 +36,8 @@ public sealed class AccountBalanceConfiguration : IEntityTypeConfiguration<Accou
             .IsRequired()
             .HasMaxLength(20);
         builder.Property(balance => balance.Currency)
-            .HasMaxLength(3);
+            .HasMaxLength(3)
+            .IsRequired();
         builder.Property(balance => balance.OpeningBalance)
             .HasColumnType("decimal(18,2)");
         builder.Property(balance => balance.OpeningBalanceType)
@@ -82,12 +83,20 @@ public sealed class AccountBalanceConfiguration : IEntityTypeConfiguration<Accou
 
         builder.HasOne(balance => balance.Account)
             .WithMany()
-            .HasForeignKey(balance => balance.AccountId)
+            .HasForeignKey(balance => new { balance.TenantId, balance.AccountId })
+            .HasPrincipalKey(account => new { account.TenantId, account.Id })
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.HasOne(balance => balance.FiscalPeriod)
             .WithMany()
-            .HasForeignKey(balance => balance.FiscalPeriodId)
+            .HasForeignKey(balance => new { balance.TenantId, balance.FiscalPeriodId })
+            .HasPrincipalKey(period => new { period.TenantId, period.Id })
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(balance => balance.AccountingBook)
+            .WithMany()
+            .HasForeignKey(balance => new { balance.TenantId, balance.AccountingBookId })
+            .HasPrincipalKey(book => new { book.TenantId, book.Id })
             .OnDelete(DeleteBehavior.Restrict);
     }
 }

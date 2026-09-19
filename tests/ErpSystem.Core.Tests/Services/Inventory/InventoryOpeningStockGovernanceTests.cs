@@ -17,12 +17,45 @@ using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Inventory;
 
 public sealed class InventoryOpeningStockGovernanceTests
 {
+    [Fact]
+    public async Task Disposal_participant_denies_forged_authority_before_any_stock_mutation()
+    {
+        var tenantId = Guid.NewGuid();
+        var makerId = Guid.NewGuid();
+        var currentUser = new Mock<ICurrentUserProvider>(MockBehavior.Strict);
+        currentUser.SetupGet(value => value.IsAuthenticated).Returns(true);
+        currentUser.SetupGet(value => value.UserId).Returns(makerId);
+        currentUser.SetupGet(value => value.TenantId).Returns(tenantId);
+        currentUser.SetupGet(value => value.Username).Returns("inventory.disposal.maker@tenant.test");
+        currentUser.SetupGet(value => value.FullName).Returns("Inventory Disposal Maker");
+        var service = CreateService(currentUser.Object);
+        var valid = DisposalRequest(tenantId, makerId);
+
+        foreach (var forged in new[]
+                 {
+                     valid with { TenantId = Guid.NewGuid() },
+                     valid with { DisposalCaseId = Guid.Empty },
+                     valid with { FinanceApprovalId = Guid.Empty },
+                     valid with { PreparedOwnerEffectFingerprint = string.Empty },
+                     valid with { RequestedById = Guid.Empty },
+                     valid with { AdjustmentId = Guid.NewGuid() },
+                     valid with { ItemIds = [Guid.Empty] },
+                     PositiveDisposalRequest(valid)
+                 })
+        {
+            await FluentActions.Awaiting(() => service.PreviewDisposalAsync(forged)).Should()
+                .ThrowAsync<InvalidOperationException>();
+        }
+    }
+
     [Fact]
     public async Task Ordinary_adjustment_entry_point_rejects_initial_stock()
     {
@@ -32,7 +65,8 @@ public sealed class InventoryOpeningStockGovernanceTests
         currentUser.SetupGet(x => x.IsAuthenticated).Returns(true);
         currentUser.SetupGet(x => x.UserId).Returns(userId);
         currentUser.SetupGet(x => x.TenantId).Returns(tenantId);
-        var service = CreateService(currentUser.Object);
+        await using var context = Context();
+        var service = CreateService(context, currentUser.Object, AllowAllAccess().Object);
         var request = new CreateStockAdjustmentDto
         {
             WarehouseId = Guid.NewGuid(),
@@ -577,4 +611,46 @@ public sealed class InventoryOpeningStockGovernanceTests
             }
         ]
     };
+
+    private static InventoryDisposalStockAdjustmentRequest DisposalRequest(Guid tenantId, Guid makerId)
+    {
+        var disposalId = Guid.NewGuid();
+        var adjustmentId = DeterministicGuid($"RHEMA:INV_DISPOSAL:ADJUSTMENT:V1:{tenantId:N}:{disposalId:N}");
+        return new InventoryDisposalStockAdjustmentRequest
+        {
+            TenantId = tenantId, DisposalCaseId = disposalId, FinanceApprovalId = Guid.NewGuid(),
+            PreparedOwnerEffectFingerprint = new string('A', 64), AdjustmentId = adjustmentId,
+            ItemIds = [Guid.NewGuid()], AdjustmentNumber = $"IDP-SA-{disposalId:N}"[..23].ToUpperInvariant(),
+            PostingDateUtc = new DateTime(2026, 9, 9, 0, 0, 0, DateTimeKind.Utc), RequestedById = makerId,
+            Create = new CreateStockAdjustmentDto
+            {
+                WarehouseId = Guid.NewGuid(), ReasonCode = StockAdjustmentReasonCodes.WriteOff,
+                Description = "Disposal authority validation test", Reference = "DISPOSAL-TEST",
+                IdempotencyKey = $"disposal:{disposalId:N}:adjustment",
+                Items = [new CreateStockAdjustmentItemDto
+                {
+                    InventoryItemId = Guid.NewGuid(), LocationId = Guid.NewGuid(), AdjustmentQuantity = -1m, UnitCost = 1m
+                }]
+            }
+        };
+    }
+
+    private static InventoryDisposalStockAdjustmentRequest PositiveDisposalRequest(
+        InventoryDisposalStockAdjustmentRequest request) => request with
+    {
+        Create = new CreateStockAdjustmentDto
+        {
+            WarehouseId = request.Create.WarehouseId, ReasonCode = request.Create.ReasonCode,
+            Description = request.Create.Description, Reference = request.Create.Reference,
+            IdempotencyKey = request.Create.IdempotencyKey,
+            Items = request.Create.Items.Select(item => new CreateStockAdjustmentItemDto
+            {
+                InventoryItemId = item.InventoryItemId, LocationId = item.LocationId,
+                AdjustmentQuantity = 1m, UnitCost = item.UnitCost
+            }).ToList()
+        }
+    };
+
+    private static Guid DeterministicGuid(string canonical) =>
+        new(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)).AsSpan(0, 16));
 }

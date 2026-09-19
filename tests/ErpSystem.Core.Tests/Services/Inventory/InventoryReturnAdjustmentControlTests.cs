@@ -398,7 +398,7 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         repository.Should().Contain("sa.TenantId == tenantId && sa.AdjustmentNumber.StartsWith",
             "number generation must include deleted numbers without crossing tenant boundaries");
         var financePosting = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api", "Services", "Finance",
-            "InventoryAdjustmentFinancePostingService.cs"));
+            "StockAdjustmentValuationIntentBuilder.cs"));
         financePosting.Should().Contain("var expenseAccount = expense");
         financePosting.Should().Contain("var recoveryAccount = recovery");
         financePosting.Should().NotContain("Guid? expense = !isOpeningStock",

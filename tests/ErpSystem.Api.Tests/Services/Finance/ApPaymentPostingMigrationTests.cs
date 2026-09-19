@@ -269,9 +269,56 @@ public sealed partial class ApPaymentPostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.BankGlAccount.Id).CreditAmount.Should().Be(100m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ApPaymentPosted && a.TenantId == tenantId)).Should().Be(1);
-        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
-        fixture.ApAccount.Balance.Should().Be(-100m);
-        fixture.BankGlAccount.Balance.Should().Be(-100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.ApAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.BankGlAccount.Id)).ClosingBalance.Should().Be(-100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PartialCashAllocationPlusResidualAdvance_ShouldRemainUnsupported()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment => payment.TotalAmount = 100m,
+            allocationAmount: 60m);
+        var (service, _) = CreateService(db, tenantId);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        var error = await post.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task NonCashSettlementComponents_ShouldNotReplaceAllocatedPaymentCash()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment => payment.TotalAmount = 100m,
+            allocationAmount: 60m);
+        fixture.Allocation.DiscountAmount = 40m;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        var error = await post.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -1250,6 +1297,13 @@ public sealed partial class ApPaymentPostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -1277,6 +1331,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -1291,7 +1346,7 @@ public sealed partial class ApPaymentPostingMigrationTests
 
         var start = new DateTime(today.Year, today.Month, 1);
         var end = start.AddMonths(1).AddDays(-1);
-        db.FiscalPeriods.Add(new FiscalPeriod
+        var currentPeriod = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -1307,7 +1362,9 @@ public sealed partial class ApPaymentPostingMigrationTests
             IsOpen = seededPeriod.IsOpen,
             IsClosed = seededPeriod.IsClosed,
             IsLocked = seededPeriod.IsLocked
-        });
+        };
+        db.FiscalPeriods.Add(currentPeriod);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, currentPeriod);
     }
 
     private static Account SeedAccount(
@@ -1334,6 +1391,8 @@ public sealed partial class ApPaymentPostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 
@@ -1416,6 +1475,7 @@ public sealed partial class ApPaymentPostingMigrationTests
         Guid? fiscalPeriodId = null,
         bool seedPostingEvent = true)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(),
@@ -1457,6 +1517,7 @@ public sealed partial class ApPaymentPostingMigrationTests
             TotalCreditAmount = amount,
             IsBalanced = true,
             FiscalPeriodId = fiscalPeriodId ?? Guid.NewGuid(),
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = invoiceDate,
@@ -1482,6 +1543,7 @@ public sealed partial class ApPaymentPostingMigrationTests
                 SourceDocumentReference = invoice.InvoiceNumber,
                 IdempotencyKey = $"AP:VendorInvoice:{tenantId:N}:{invoice.Id:N}:Post",
                 JournalEntryId = invoiceJournal.Id,
+                AccountingBookId = book.Id,
                 PostingStatus = "Posted",
                 PostingDate = invoiceDate,
                 RequestedAt = DateTime.UtcNow,

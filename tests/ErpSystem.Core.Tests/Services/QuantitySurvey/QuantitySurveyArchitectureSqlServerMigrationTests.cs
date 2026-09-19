@@ -332,7 +332,10 @@ public sealed class QuantitySurveyArchitectureSqlServerMigrationTests
         {
             var baseConnection = Environment.GetEnvironmentVariable("RHEMA_TEST_SQLSERVER")
                 ?? throw new InvalidOperationException("RHEMA_TEST_SQLSERVER is required.");
-            var databaseName = $"RhemaERP_QsArchitecture_{Guid.NewGuid():N}";
+            // This QS gate exercises the shared production chain and creates/drops a real SQL
+            // Server database. The Stage A prefix is therefore a cross-owner safety contract,
+            // not a QS schema assertion; compatibility-specific coverage lives in Finance tests.
+            var databaseName = $"RHEMAERP_GL_REHEARSAL_MIGRATION_{Guid.NewGuid():N}";
             var masterBuilder = new SqlConnectionStringBuilder(baseConnection)
             {
                 InitialCatalog = "master",

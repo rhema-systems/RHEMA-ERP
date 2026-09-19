@@ -33,7 +33,7 @@ public sealed class QuantitySurveyAdvanceRecoveryGuardTests
     [Fact]
     public void Migration_enforces_finance_lineage_maker_checker_and_append_only_audit()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260810185711_AddQuantitySurveyAdvanceRecoveryLifecycle.cs");
         source.Should().Contain("TR_QsAdvanceRecoveryAgreements_QS0505Guard")
             .And.Contain("TR_ProjectPaymentCertificates_QS0505AdvanceRecoveryGuard")

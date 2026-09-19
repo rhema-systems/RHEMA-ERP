@@ -324,8 +324,8 @@ public sealed class ApReceiptAccountResolutionTests
             foreach (var line in invoice.LineItems) line.VendorInvoiceId = invoice.Id;
             await Context.SaveChangesAsync();
         }
-        public Task<FinancePostingRequestDto> PostingRequestAsync(VendorInvoice invoice) =>
-            (Task<FinancePostingRequestDto>)typeof(VendorInvoiceService).GetMethod("BuildApInvoicePostingRequestAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+        public Task<FinancePostingRequestV2Dto> PostingRequestAsync(VendorInvoice invoice) =>
+            (Task<FinancePostingRequestV2Dto>)typeof(VendorInvoiceService).GetMethod("BuildApInvoicePostingRequestAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
                 .Invoke(service, new object?[] { invoice, Array.Empty<Guid>(), null, CancellationToken.None })!;
         public Task<IReadOnlyList<FinanceSourceDocumentLineContext>> ContextsAsync(VendorInvoice invoice) =>
             (Task<IReadOnlyList<FinanceSourceDocumentLineContext>>)typeof(VendorInvoiceService).GetMethod("BuildDimensionLineContextsAsync",

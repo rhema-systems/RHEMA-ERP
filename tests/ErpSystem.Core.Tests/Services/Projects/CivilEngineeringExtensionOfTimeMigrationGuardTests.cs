@@ -11,7 +11,7 @@ public sealed class CivilEngineeringExtensionOfTimeMigrationGuardTests
     public void Migration_reuses_projects_eot_qs_variation_contract_workflow_and_central_dms_without_financial_duplication()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260822003400_AddCivilEngineeringExtensionOfTimeControls.cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260822003400_AddCivilEngineeringExtensionOfTimeControls.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("ProjectExtensionOfTimeRequests(Id)")

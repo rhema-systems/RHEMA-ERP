@@ -270,6 +270,12 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         fixture.PostedRequest!.OriginModuleCode.Should().Be("PROC");
         fixture.PostedRequest.SourceDocumentType.Should()
             .Be("SupplierOnboardingTokenPayment");
+        fixture.PostedRequest.SourceDocumentId.Should().Be(pending.Id);
+        fixture.PostedRequest.SourceDocumentTenantId.Should().Be(fixture.TenantId);
+        fixture.PostedRequest.AccountingBookCode.Should().Be("IFRS");
+        fixture.PostedRequest.IdempotencyKey.Should().Be(
+            $"PROCUREMENT|SUPPLIER-ONBOARDING|{pending.Id:N}|IFRS|POST");
+        fixture.PostedRequest.ReturnExistingOnDuplicate.Should().BeTrue();
         fixture.PostedRequest.SourceDocumentReference.Should()
             .Be("PROVIDER-CONFIRM-0001",
                 "Finance must use the independently verified provider reference, not the applicant claim reference");
@@ -667,6 +673,7 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
     public async Task FinanceReconciliationRequiresAnIndependentActorAndIsReplaySafe()
     {
         await using var fixture = new Fixture(paid: true);
+        fixture.SetPostingMode("Local");
         var issued = await fixture.Service.IssueAsync(
             new IssueProcurementSupplierOnboardingTokenRequest
             {
@@ -724,6 +731,68 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         replay.Token.Payments.Should().ContainSingle(item =>
             item.ReconciliationReference == "BANK-RECON-001" &&
             item.Status == ProcurementSupplierOnboardingPaymentStatus.Reconciled);
+        fixture.PostedRequest!.AccountingBookCode.Should().Be("LOCAL_STATUTORY");
+        fixture.PostedRequest.IdempotencyKey.Should().Contain("|LOCAL_STATUTORY|POST");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("AllClassifiedBooks")]
+    [InlineData("UnknownBook")]
+    public async Task ReconciliationRejectsInvalidBookConfigurationBeforeFinanceOrStateMutation(string configured)
+    {
+        await using var fixture = new Fixture(paid: true);
+        fixture.SetPostingMode(configured);
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest { RegistrationId = fixture.Registration.Id }, "issue-book-denial");
+        var submitted = await fixture.Service.RecordPaymentAsync(issued.Token.Id,
+            new RecordProcurementSupplierOnboardingPaymentRequest
+            {
+                PaymentMethodId = fixture.PaymentMethod!.Id, PaymentReference = "BOOK-DENIAL",
+                RowVersion = issued.Token.RowVersion
+            }, "record-book-denial");
+        var payment = submitted.Token.Payments.Single();
+        fixture.SetUser(Guid.NewGuid());
+
+        var action = () => fixture.Service.ReconcilePaymentAsync(issued.Token.Id, payment.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = "BOOK-DENIAL-CONFIRMED", RowVersion = payment.RowVersion
+            }, "reconcile-book-denial");
+
+        await action.Should().ThrowAsync<ProcurementSupplierOnboardingTokenValidationException>();
+        fixture.FinancePostCount.Should().Be(0);
+        (await fixture.Context.ProcurementSupplierOnboardingPayments.SingleAsync(item => item.Id == payment.Id))
+            .Status.Should().Be(ProcurementSupplierOnboardingPaymentStatus.Pending);
+    }
+
+    [Theory]
+    [InlineData("IFRS", "IFRS")]
+    [InlineData("Local", "LOCAL_STATUTORY")]
+    [InlineData("Management", "MANAGEMENT")]
+    public async Task ReconciliationMapsSupportedSingleBookAliases(string configured, string expected)
+    {
+        await using var fixture = new Fixture(paid: true);
+        fixture.SetPostingMode(configured);
+        var issued = await fixture.Service.IssueAsync(
+            new IssueProcurementSupplierOnboardingTokenRequest { RegistrationId = fixture.Registration.Id }, "issue-book-alias");
+        var submitted = await fixture.Service.RecordPaymentAsync(issued.Token.Id,
+            new RecordProcurementSupplierOnboardingPaymentRequest
+            {
+                PaymentMethodId = fixture.PaymentMethod!.Id, PaymentReference = $"BOOK-{expected}",
+                RowVersion = issued.Token.RowVersion
+            }, "record-book-alias");
+        var payment = submitted.Token.Payments.Single();
+        fixture.SetUser(Guid.NewGuid());
+
+        await fixture.Service.ReconcilePaymentAsync(issued.Token.Id, payment.Id,
+            new ReconcileProcurementSupplierOnboardingPaymentRequest
+            {
+                ReconciliationReference = $"CONFIRMED-{expected}", RowVersion = payment.RowVersion
+            }, "reconcile-book-alias");
+
+        fixture.PostedRequest!.AccountingBookCode.Should().Be(expected);
+        fixture.PostedRequest.IdempotencyKey.Should().Contain($"|{expected}|POST");
     }
 
     [Fact]
@@ -1095,9 +1164,9 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
                     Task.FromResult<WorkflowInstance?>(WorkflowInstance));
             var finance = new Mock<IFinancePostingEngine>();
             finance.Setup(item => item.PostAsync(
-                    It.IsAny<FinancePostingRequestDto>(),
+                    It.IsAny<FinancePostingRequestV2Dto>(),
                     It.IsAny<CancellationToken>()))
-                .Returns(async (FinancePostingRequestDto request, CancellationToken cancellationToken) =>
+                .Returns(async (FinancePostingRequestV2Dto request, CancellationToken cancellationToken) =>
                 {
                     PostedRequest = request;
                     FinancePostCount++;
@@ -1148,9 +1217,9 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         public FinancePaymentMethod? PaymentMethod { get; }
         public WorkflowDefinition? WorkflowDefinition { get; }
         public WorkflowInstance? WorkflowInstance { get; private set; }
-        public FinancePostingRequestDto? PostedRequest { get; private set; }
+        public FinancePostingRequestV2Dto? PostedRequest { get; private set; }
         public int FinancePostCount { get; private set; }
-        public Func<FinancePostingRequestDto, CancellationToken, Task>? FinancePostHandler { get; set; }
+        public Func<FinancePostingRequestV2Dto, CancellationToken, Task>? FinancePostHandler { get; set; }
         public ProcurementSupplierOnboardingTokenService Service { get; }
         public bool HasActiveTransaction => _unitOfWork.HasActiveTransaction;
 
@@ -1163,6 +1232,20 @@ public sealed class ProcurementSupplierOnboardingTokenServiceTests
         public void SetExternal(bool value) => _external = value;
         public void SetTenant(Guid value) => _tenantId = value;
         public void SetUser(Guid value) => _userId = value;
+        public void SetPostingMode(string? value)
+        {
+            var settings = Context.FinanceSettings.SingleOrDefault(item => item.TenantId == TenantId);
+            if (settings is null)
+            {
+                Context.FinanceSettings.Add(new FinanceSettings
+                {
+                    Id = Guid.NewGuid(), TenantId = TenantId, BaseCurrency = "GHS",
+                    SubledgerPostingMode = value!, CreatedAt = DateTime.UtcNow
+                });
+            }
+            else settings.SubledgerPostingMode = value!;
+            Context.SaveChanges();
+        }
         public void UseApplicantSession(
             Guid registrationId,
             Guid tokenId,

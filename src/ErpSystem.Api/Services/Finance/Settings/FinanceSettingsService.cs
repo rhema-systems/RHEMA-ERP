@@ -313,8 +313,6 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.ReturnedChequeBankChargeAccountId = dto.ReturnedChequeBankChargeAccountId;
             if (dto.DefaultReturnedChequeChargeTreatment.HasValue)
                 settings.DefaultReturnedChequeChargeTreatment = dto.DefaultReturnedChequeChargeTreatment.Value;
-            if (dto.DirectionalExchangeRatePolicyEnabled.HasValue)
-                settings.DirectionalExchangeRatePolicyEnabled = dto.DirectionalExchangeRatePolicyEnabled.Value;
             if (dto.DefaultTransactionQuoteSide != null)
                 settings.DefaultTransactionQuoteSide = ParseQuoteSide(dto.DefaultTransactionQuoteSide);
             if (dto.ArInvoiceQuoteSide != null)
@@ -327,6 +325,13 @@ namespace ErpSystem.Api.Services.Finance.Settings
                 settings.ApSettlementQuoteSide = ParseQuoteSide(dto.ApSettlementQuoteSide);
             if (dto.ClosingQuoteSide != null)
                 settings.ClosingQuoteSide = ParseQuoteSide(dto.ClosingQuoteSide);
+            if (dto.DirectionalExchangeRatePolicyEnabled == true &&
+                !beforeFxPolicy.DirectionalExchangeRatePolicyEnabled)
+            {
+                await EnsureDirectionalRateReadinessAsync(tenantId, settings);
+            }
+            if (dto.DirectionalExchangeRatePolicyEnabled.HasValue)
+                settings.DirectionalExchangeRatePolicyEnabled = dto.DirectionalExchangeRatePolicyEnabled.Value;
             if (dto.RequireExchangeRateOverrideApproval.HasValue)
             {
                 if (!dto.RequireExchangeRateOverrideApproval.Value)
@@ -481,6 +486,63 @@ namespace ErpSystem.Api.Services.Finance.Settings
 
             var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
             return MapToDto(settings, baseCurrency, await HasAccountingActivityAsync(tenantId));
+        }
+
+        private async Task EnsureDirectionalRateReadinessAsync(Guid tenantId, FinanceSettings settings)
+        {
+            var baseCurrency = await _tenantSettingsService.GetBaseCurrencyReferenceAsync();
+            var functionalCurrency = baseCurrency.CurrencyCode.Trim().ToUpperInvariant();
+            var activeForeignCurrencies = await _context.Currencies
+                .AsNoTracking()
+                .Where(currency => currency.TenantId == tenantId
+                    && !currency.IsDeleted
+                    && currency.IsActive
+                    && !currency.IsBaseCurrency
+                    && currency.CurrencyCode != functionalCurrency)
+                .Select(currency => currency.CurrencyCode)
+                .Distinct()
+                .OrderBy(code => code)
+                .ToListAsync();
+
+            var requiredQuoteSides = new[]
+            {
+                settings.DefaultTransactionQuoteSide,
+                settings.ArInvoiceQuoteSide,
+                settings.ArSettlementQuoteSide,
+                settings.ApInvoiceQuoteSide,
+                settings.ApSettlementQuoteSide
+            }.Distinct().ToList();
+            var effectiveDate = DateTime.UtcNow.Date;
+            var missing = new List<string>();
+
+            foreach (var currencyCode in activeForeignCurrencies)
+            {
+                foreach (var quoteSide in requiredQuoteSides)
+                {
+                    var exists = await _context.ExchangeRates.AsNoTracking().AnyAsync(rate =>
+                        rate.TenantId == tenantId
+                        && !rate.IsDeleted
+                        && rate.IsActive
+                        && rate.BaseCurrencyCode == functionalCurrency
+                        && rate.TargetCurrencyCode == currencyCode
+                        && rate.RateType == ExchangeRateType.Daily
+                        && rate.QuoteSide == quoteSide
+                        && rate.Rate > 0m
+                        && (rate.ApprovalStatus == RateApprovalStatus.Approved
+                            || rate.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                        && rate.EffectiveDate.Date <= effectiveDate
+                        && (!rate.EndDate.HasValue || rate.EndDate.Value.Date >= effectiveDate));
+                    if (!exists)
+                        missing.Add($"{currencyCode} {quoteSide}");
+                }
+            }
+
+            if (missing.Count > 0)
+            {
+                throw new InvalidOperationException(
+                    "Directional exchange-rate policy cannot be enabled. Load and approve active Daily rates for: "
+                    + string.Join(", ", missing) + ".");
+            }
         }
 
         public async Task<bool> CanChangeCOATypeAsync()

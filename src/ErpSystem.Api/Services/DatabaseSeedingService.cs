@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Api.Configuration;
+using ErpSystem.Api.Extensions;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
@@ -22,6 +23,7 @@ using ErpSystem.Shared;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ErpSystem.Web.Services
 {
@@ -86,6 +88,15 @@ namespace ErpSystem.Web.Services
                     "Financial Controller Final Approval",
                     new[] { "Financial Controller" },
                     "Independent final payment authorization before posting, clearing, or settlement finalization.")
+            };
+
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> AccountingBookApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Financial Controller Review",
+                    new[] { "Financial Controller" },
+                    "Independent approval of accounting-book opening, period, or lifecycle evidence.")
             };
 
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
@@ -408,7 +419,12 @@ namespace ErpSystem.Web.Services
             _logger.LogInformation("Ensuring EHC workflow is seeded...");
             await EnsureEhcWorkflowSeededAsync();
             if (_context.Database.IsSqlServer())
+            {
                 await _context.Database.ExecuteSqlRawAsync(EhcPropertyEnquiryConfiguration.Sql);
+                // The disposable baseline creates schema from the current model rather than replaying
+                // historical data migrations. Reapply this idempotent tenant notification authority.
+                await _context.Database.ExecuteSqlRawAsync(EhcPropertyEnquiryNotificationHandoffConfiguration.Sql);
+            }
             _logger.LogInformation("Ensuring finance workflows are seeded...");
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
@@ -1228,9 +1244,11 @@ namespace ErpSystem.Web.Services
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
                         var approvalStages = spec.EntityCode is
-                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
-                            ? FinancePaymentApprovalStages
-                            : FinanceApprovalStages;
+                            "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
+                            ? AccountingBookApprovalStages
+                            : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
+                                ? FinancePaymentApprovalStages
+                                : FinanceApprovalStages;
 
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
@@ -1613,6 +1631,12 @@ namespace ErpSystem.Web.Services
                     "Sequential finance journal approval: Accounts Officer review -> Finance Manager approval -> Financial Controller final approval."),
                 new("JournalBatch", "Journal Batch", typeof(JournalBatch).FullName, "Journal Batch Approval",
                     "Batch-level journal approval with per-entry decisions, control totals, partial posting, and batch reversal controls."),
+                new("AccountingBookInitialization", "Accounting Book Initialization", typeof(AccountingBookInitialization).FullName,
+                    "Accounting Book Initialization Approval", "Independent approval of balanced, complete opening evidence before book activation."),
+                new("AccountingBookPeriodLifecycle", "Accounting Book Period Lifecycle", typeof(AccountingBookPeriod).FullName,
+                    "Accounting Book Period Lifecycle Approval", "Independent approval of exact-book period opening and close transitions."),
+                new("AccountingBookLifecycle", "Accounting Book Lifecycle", typeof(AccountingBook).FullName,
+                    "Accounting Book Lifecycle Approval", "Independent approval of governed accounting-book state transitions."),
 
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
@@ -10292,8 +10316,26 @@ namespace ErpSystem.Web.Services
     // Extension methods for easy registration
     public static class DatabaseSeedingServiceExtensions
     {
+        public static IServiceCollection AddDatabaseSeedingFinanceBoundary(this IServiceCollection services)
+        {
+            // The supplier-onboarding fixture owns Procurement intent, while Finance retains
+            // canonical account/classification/segment/book provisioning. Reduced seed-command
+            // hosts therefore need this same production boundary without loading the entire web
+            // service graph. Request-backed web registrations win because these are TryAdd fallbacks.
+            services.TryAddScoped<DatabaseSeedingCurrentUserContext>();
+            services.TryAddScoped<ErpSystem.Core.Interfaces.ICurrentUserService>(provider =>
+                provider.GetRequiredService<DatabaseSeedingCurrentUserContext>());
+            services.TryAddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider>(provider =>
+                provider.GetRequiredService<DatabaseSeedingCurrentUserContext>());
+            services.AddFinanceAccountProvisioning();
+
+            return services;
+        }
+
         public static IServiceCollection AddDatabaseSeeding(this IServiceCollection services)
         {
+            services.AddDatabaseSeedingFinanceBoundary();
+
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
             services.AddScoped<FinanceCloseTemplateBaselineSeeder>();

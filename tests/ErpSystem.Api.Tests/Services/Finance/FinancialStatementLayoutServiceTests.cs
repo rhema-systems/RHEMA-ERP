@@ -3,6 +3,7 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Reporting;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -10,6 +11,7 @@ using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -73,6 +75,11 @@ public sealed class FinancialStatementLayoutServiceTests
         published.Rows.Select(row => row.RowCode)
             .Should().ContainInOrder("1000", "1100", "1200", "1900");
         published.PublishedAt.Should().NotBeNull();
+        published.PublicationSnapshotSchemaVersion.Should().Be(
+            FinancialStatementPublicationFingerprint.SnapshotSchemaVersion);
+        published.PublicationAccountCount.Should().Be(2);
+        published.HierarchyFingerprint.Should().HaveLength(64);
+        published.ResolutionFingerprint.Should().HaveLength(64);
 
         var persisted = await service.GetLayoutAsync(layout.Id);
         persisted.Should().NotBeNull();
@@ -279,6 +286,215 @@ public sealed class FinancialStatementLayoutServiceTests
             row.Mappings.Single().AccountId == cash.Id);
     }
 
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task ClassificationMapping_ShouldExpandDescendantsFreezeMembershipAndRejectOverlap()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var assets = SeedClassification(context, tenantId, book.Id, "ASSET", "Assets", AccountType.Asset);
+        var otherAssets = SeedClassification(context, tenantId, book.Id, "OTHER_ASSET", "Other assets", AccountType.Asset);
+        var cashClass = SeedClassification(context, tenantId, book.Id, "CASH", "Cash", AccountType.Asset, assets.Id);
+        var receivableClass = SeedClassification(context, tenantId, book.Id, "RECEIVABLE", "Receivable", AccountType.Asset, assets.Id);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        var receivable = SeedAccount(context, tenantId, book.Id, "1100", "Receivable", AccountType.Asset);
+        await context.SaveChangesAsync();
+        context.AccountAccountingBooks.Single(item => item.AccountId == cash.Id).AccountClassificationId = cashClass.Id;
+        context.AccountAccountingBooks.Single(item => item.AccountId == receivable.Id).AccountClassificationId = receivableClass.Id;
+        await context.SaveChangesAsync();
+        var service = CreateService(context, tenantId);
+        var layout = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "BS_CLASS", Name = "Classification Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id
+        });
+        var draft = layout.Versions.Single();
+
+        var overlap = () => service.ReplaceDraftRowsAsync(draft.Id, new ReplaceFinancialStatementRowsDto
+        {
+            ExpectedVersionRevision = draft.Revision,
+            Rows =
+            {
+                Row("ASSETS", "Assets", FinancialStatementRowType.Account, 10,
+                    mappings: ClassificationMapping(assets.Id, true),
+                    additionalMappings: new[] { ClassificationMapping(cashClass.Id, false) })
+            }
+        });
+        var overlapError = await overlap.Should().ThrowAsync<FinancialStatementLayoutValidationException>();
+        overlapError.Which.Validation.Issues.Should().Contain(item => item.Code == "OVERLAPPING_ROW_MAPPINGS");
+
+        var replaced = await service.ReplaceDraftRowsAsync(draft.Id, new ReplaceFinancialStatementRowsDto
+        {
+            ExpectedVersionRevision = draft.Revision,
+            Rows = { Row("ASSETS", "Assets", FinancialStatementRowType.Account, 10,
+                mappings: ClassificationMapping(assets.Id, true)) }
+        });
+        var published = await service.PublishVersionAsync(replaced.Id, new PublishFinancialStatementLayoutVersionDto
+        {
+            ExpectedVersionRevision = replaced.Revision
+        });
+        published.PublicationAccountCount.Should().Be(2);
+        var frozen = await context.FinancialStatementPublicationAccounts.AsNoTracking().Where(item => item.FinancialStatementLayoutVersionId == published.Id).ToListAsync();
+        frozen.Select(item => item.AccountId).Should().BeEquivalentTo(new[] { cash.Id, receivable.Id });
+        frozen.Select(item => item.ClassificationCode).Should().OnlyContain(code => code == "RECEIVABLE" || code == "CASH");
+
+        context.AccountAccountingBooks.Single(item => item.AccountId == cash.Id).AccountClassificationId = otherAssets.Id;
+        cashClass.Name = "Renamed cash classification";
+        await context.SaveChangesAsync();
+        var liveDraft = await service.CreateDraftVersionAsync(layout.Id, new CreateFinancialStatementLayoutVersionDto
+        {
+            SourceVersionId = published.Id
+        });
+        var liveValidation = await service.ValidateVersionAsync(liveDraft.Id);
+        liveValidation.Issues.Should().Contain(item => item.Code == "UNMAPPED_ACCOUNTS"
+            && item.Message.StartsWith("1 eligible", StringComparison.Ordinal));
+        (await context.FinancialStatementPublicationAccounts.CountAsync(item =>
+            item.FinancialStatementLayoutVersionId == published.Id)).Should().Be(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task ProtectedStandard_ShouldBeCloneOnly()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        await context.SaveChangesAsync();
+        var service = CreateService(context, tenantId);
+        var created = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "STD_BS", Name = "Standard Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id
+        });
+        var entity = await context.FinancialStatementLayouts.SingleAsync(item => item.Id == created.Id);
+        entity.IsProtectedStandard = true;
+        await context.SaveChangesAsync();
+
+        var edit = () => service.UpdateLayoutAsync(entity.Id, new UpdateFinancialStatementLayoutDto
+        {
+            Name = "Changed", IsActive = true, ExpectedRevision = entity.Revision
+        });
+        await edit.Should().ThrowAsync<InvalidOperationException>().WithMessage("*protected standard*");
+
+        var clone = await service.CloneProtectedStandardAsync(entity.Id, new CloneFinancialStatementLayoutDto
+        {
+            Code = "BS_TENANT", Name = "Tenant Balance Sheet", AccountingBookId = book.Id
+        });
+        clone.IsProtectedStandard.Should().BeFalse();
+        clone.StandardSourceLayoutId.Should().Be(entity.Id);
+        clone.Versions.Should().ContainSingle(item => item.Status == FinancialStatementLayoutVersionStatus.Draft);
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task Publish_ShouldRollBackSnapshotAndStatusWhenAuditFails()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlite(connection).Options);
+        await CreateSqliteLayoutSchemaAsync(context);
+        var book = SeedTenantAndBook(context, tenantId);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        await context.SaveChangesAsync();
+        var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AuditLog { Id = Guid.NewGuid(), TenantId = tenantId });
+        audit.Setup(item => item.RecordAsync(
+                It.Is<FinanceAuditEventDto>(entry => entry.EventType == FinanceAuditEvents.FinancialStatementLayoutVersionPublished),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("audit unavailable"));
+        var service = CreateService(context, tenantId, audit);
+        var layout = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "BS_ATOMIC", Name = "Atomic Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id
+        });
+        var draft = layout.Versions.Single();
+        var replaced = await service.ReplaceDraftRowsAsync(draft.Id, new ReplaceFinancialStatementRowsDto
+        {
+            ExpectedVersionRevision = draft.Revision,
+            Rows = { Row("CASH", "Cash", FinancialStatementRowType.Account, 10,
+                mappings: Mapping(FinancialStatementRowMappingType.Account, cash.Id)) }
+        });
+
+        var publish = () => service.PublishVersionAsync(replaced.Id, new PublishFinancialStatementLayoutVersionDto
+        {
+            ExpectedVersionRevision = replaced.Revision
+        });
+        await publish.Should().ThrowAsync<InvalidOperationException>().WithMessage("audit unavailable");
+
+        context.ChangeTracker.Clear();
+        (await context.FinancialStatementLayoutVersions.SingleAsync(item => item.Id == replaced.Id)).Status
+            .Should().Be(FinancialStatementLayoutVersionStatus.Draft);
+        (await context.FinancialStatementPublicationAccounts.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task Publish_ShouldNotPersistStatusWhenSnapshotWriteFails()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = new ApplicationDbContext(new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseInMemoryDatabase($"financial-layout-snapshot-failure-{Guid.NewGuid()}")
+            .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+            .AddInterceptors(new RejectPublicationSnapshotInterceptor())
+            .Options);
+        var book = SeedTenantAndBook(context, tenantId);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        await context.SaveChangesAsync();
+        var service = CreateService(context, tenantId);
+        var layout = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "BS_SNAPSHOT_FAIL", Name = "Snapshot failure",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id
+        });
+        var draft = layout.Versions.Single();
+        var replaced = await service.ReplaceDraftRowsAsync(draft.Id, new ReplaceFinancialStatementRowsDto
+        {
+            ExpectedVersionRevision = draft.Revision,
+            Rows = { Row("CASH", "Cash", FinancialStatementRowType.Account, 10,
+                mappings: Mapping(FinancialStatementRowMappingType.Account, cash.Id)) }
+        });
+
+        var publish = () => service.PublishVersionAsync(replaced.Id, new PublishFinancialStatementLayoutVersionDto
+        {
+            ExpectedVersionRevision = replaced.Revision
+        });
+        await publish.Should().ThrowAsync<InvalidOperationException>().WithMessage("snapshot write rejected");
+
+        context.ChangeTracker.Clear();
+        (await context.FinancialStatementLayoutVersions.SingleAsync(item => item.Id == replaced.Id)).Status
+            .Should().Be(FinancialStatementLayoutVersionStatus.Draft);
+        (await context.FinancialStatementPublicationAccounts.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Concurrency")]
+    public async Task ReplaceDraftRows_ShouldRejectStaleDraftRevision()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        await context.SaveChangesAsync();
+        var service = CreateService(context, tenantId);
+        var layout = await service.CreateLayoutAsync(new CreateFinancialStatementLayoutDto
+        {
+            Code = "BS_STALE", Name = "Stale Draft", StatementType = FinancialStatementType.BalanceSheet,
+            AccountingBookId = book.Id
+        });
+
+        var action = () => service.ReplaceDraftRowsAsync(layout.Versions.Single().Id, new ReplaceFinancialStatementRowsDto
+        {
+            ExpectedVersionRevision = layout.Versions.Single().Revision + 1,
+            Rows = { Row("HEADER", "Header", FinancialStatementRowType.Header, 10) }
+        });
+
+        await action.Should().ThrowAsync<DbUpdateConcurrencyException>();
+    }
+
     private static FinancialStatementRowInputDto Row(
         string code,
         string label,
@@ -286,8 +502,10 @@ public sealed class FinancialStatementLayoutServiceTests
         int displayOrder,
         string? parentCode = null,
         FinancialStatementRowMappingInputDto? mappings = null,
-        string? formula = null)
-        => new()
+        string? formula = null,
+        IReadOnlyCollection<FinancialStatementRowMappingInputDto>? additionalMappings = null)
+    {
+        var row = new FinancialStatementRowInputDto
         {
             RowCode = code,
             Label = label,
@@ -301,6 +519,9 @@ public sealed class FinancialStatementLayoutServiceTests
                 ? new List<FinancialStatementRowMappingInputDto>()
                 : new List<FinancialStatementRowMappingInputDto> { mappings }
         };
+        if (additionalMappings != null) row.Mappings.AddRange(additionalMappings);
+        return row;
+    }
 
     private static FinancialStatementRowMappingInputDto Mapping(
         FinancialStatementRowMappingType mappingType,
@@ -310,6 +531,29 @@ public sealed class FinancialStatementLayoutServiceTests
             MappingType = mappingType,
             AccountId = accountId
         };
+
+    private static FinancialStatementRowMappingInputDto ClassificationMapping(Guid classificationId, bool descendants)
+        => new()
+        {
+            MappingType = FinancialStatementRowMappingType.Classification,
+            AccountClassificationId = classificationId,
+            IncludeClassificationDescendants = descendants
+        };
+
+    private static AccountClassification SeedClassification(
+        ApplicationDbContext context, Guid tenantId, Guid bookId, string code, string name,
+        AccountType accountType, Guid? parentId = null)
+    {
+        var classification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = bookId,
+            ParentClassificationId = parentId, Code = code, Name = name,
+            CoreAccountType = accountType, Status = AccountClassificationStatus.Active,
+            IsPostingClassification = parentId.HasValue, DisplayOrder = 10
+        };
+        context.AccountClassifications.Add(classification);
+        return classification;
+    }
 
     private static ApplicationDbContext CreateContext()
     {
@@ -321,9 +565,26 @@ public sealed class FinancialStatementLayoutServiceTests
         return new ApplicationDbContext(options);
     }
 
+    private static async Task CreateSqliteLayoutSchemaAsync(ApplicationDbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
+        var tableNames = new[]
+        {
+            "Tenants", "AccountingBooks", "Accounts", "AccountAccountingBooks", "AccountClassifications",
+            "FinancialStatementLayouts", "FinancialStatementLayoutVersions", "FinancialStatementRows",
+            "FinancialStatementRowMappings", "FinancialStatementPublicationAccounts"
+        };
+        var statements = context.Database.GenerateCreateScript().Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Where(statement => tableNames.Any(table => statement.Contains($"CREATE TABLE \"{table}\"", StringComparison.Ordinal)));
+        foreach (var statement in statements)
+            await context.Database.ExecuteSqlRawAsync(statement.Replace(
+                "\"RowVersion\" BLOB NOT NULL", "\"RowVersion\" BLOB NOT NULL DEFAULT X''", StringComparison.Ordinal));
+    }
+
     private static FinancialStatementLayoutService CreateService(
         ApplicationDbContext context,
-        Guid tenantId)
+        Guid tenantId,
+        Mock<IFinanceAuditService>? auditOverride = null)
     {
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(service => service.TenantId).Returns(tenantId);
@@ -333,11 +594,14 @@ public sealed class FinancialStatementLayoutServiceTests
         currentUser.SetupGet(service => service.IpAddress).Returns("127.0.0.1");
         currentUser.SetupGet(service => service.UserAgent).Returns("layout-tests");
 
-        var audit = new Mock<IFinanceAuditService>();
-        audit.Setup(service => service.RecordAsync(
-                It.IsAny<FinanceAuditEventDto>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new AuditLog { Id = Guid.NewGuid(), TenantId = tenantId });
+        var audit = auditOverride ?? new Mock<IFinanceAuditService>();
+        if (auditOverride == null)
+        {
+            audit.Setup(service => service.RecordAsync(
+                    It.IsAny<FinanceAuditEventDto>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new AuditLog { Id = Guid.NewGuid(), TenantId = tenantId });
+        }
 
         return new FinancialStatementLayoutService(
             context,
@@ -412,5 +676,21 @@ public sealed class FinancialStatementLayoutServiceTests
             });
         }
         return account;
+    }
+
+    private sealed class RejectPublicationSnapshotInterceptor : SaveChangesInterceptor
+    {
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (eventData.Context?.ChangeTracker.Entries<FinancialStatementPublicationAccount>()
+                .Any(entry => entry.State == EntityState.Added) == true)
+            {
+                throw new InvalidOperationException("snapshot write rejected");
+            }
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
     }
 }

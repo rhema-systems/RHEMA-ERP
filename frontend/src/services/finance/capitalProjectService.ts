@@ -3,6 +3,7 @@
  */
 
 import { apiService } from '@/services/api.service';
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from '@/types/finance';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -52,6 +53,7 @@ export interface CapitalProjectDetail extends CapitalProjectList {
   updatedBy?: string;
   costLines: ProjectCostLine[];
   settlementRules: ProjectSettlementRule[];
+  financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface CreateCapitalProjectDto {
@@ -121,8 +123,8 @@ class CapitalProjectService {
     return apiService.delete(`/finance/capital-projects/${id}/settlement-rules/${ruleId}`);
   }
 
-  async capitalize(id: string): Promise<CapitalProjectDetail> {
-    return apiService.post<CapitalProjectDetail>(`/finance/capital-projects/${id}/capitalize`);
+  async capitalize(id: string, financeDimensions?: FinanceSourceDocumentDimensionInput): Promise<CapitalProjectDetail> {
+    return apiService.post<CapitalProjectDetail>(`/finance/capital-projects/${id}/capitalize`, { financeDimensions });
   }
 }
 

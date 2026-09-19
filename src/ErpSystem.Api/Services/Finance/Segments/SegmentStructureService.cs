@@ -55,10 +55,13 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 DataType = s.DataType,
                 SeparatorCharacter = s.SeparatorCharacter,
                 LookupTableRequired = s.LookupTableRequired,
-                IsMandatory = s.IsMandatory,
+                IsRequired = true,
                 IsReportingDimension = s.IsReportingDimension,
                 IsNaturalAccount = s.IsNaturalAccount,
                 IsActive = s.IsActive,
+                LifecycleStatus = s.LifecycleStatus.ToString(),
+                RowVersion = Convert.ToBase64String(s.RowVersion ?? Array.Empty<byte>()),
+                IsSystemDefined = s.IsSystemDefined,
                 Description = s.Description,
                 LookupValues = s.LookupValues?.Select(lv => new SegmentLookupValueDto
                 {
@@ -102,10 +105,13 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 DataType = structure.DataType,
                 SeparatorCharacter = structure.SeparatorCharacter,
                 LookupTableRequired = structure.LookupTableRequired,
-                IsMandatory = structure.IsMandatory,
+                IsRequired = true,
                 IsReportingDimension = structure.IsReportingDimension,
                 IsNaturalAccount = structure.IsNaturalAccount,
                 IsActive = structure.IsActive,
+                LifecycleStatus = structure.LifecycleStatus.ToString(),
+                RowVersion = Convert.ToBase64String(structure.RowVersion ?? Array.Empty<byte>()),
+                IsSystemDefined = structure.IsSystemDefined,
                 Description = structure.Description,
                 LookupValues = structure.LookupValues?.Select(lv => new SegmentLookupValueDto
                 {
@@ -241,7 +247,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
         // Account Number Utility Operations
         public async Task<bool> ValidateAccountNumberAsync(string accountNumber, CancellationToken cancellationToken = default)
         {
-            var segments = await GetSegmentStructuresAsync(cancellationToken);
+            var segments = (await GetSegmentStructuresAsync(cancellationToken)).Where(item => item.IsActive).ToList();
             
             // Build expected pattern from segments
             var expectedLength = segments.Sum(s => s.SegmentLength) + segments.Count(s => !string.IsNullOrEmpty(s.SeparatorCharacter));
@@ -251,7 +257,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
 
         public async Task<string> ConstructAccountNumberAsync(Dictionary<int, string> segmentValues, CancellationToken cancellationToken = default)
         {
-            var segments = await GetSegmentStructuresAsync(cancellationToken);
+            var segments = (await GetSegmentStructuresAsync(cancellationToken)).Where(item => item.IsActive).ToList();
             var orderedSegments = segments.OrderBy(s => s.SegmentPosition).ToList();
             var sb = new System.Text.StringBuilder();
 
@@ -262,7 +268,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
                 {
                     sb.Append(value);
                 }
-                else if (segment.IsMandatory)
+                else
                 {
                     throw new ArgumentException($"Missing required segment at position {segment.SegmentPosition}");
                 }
@@ -279,7 +285,7 @@ namespace ErpSystem.Api.Services.Finance.Segments
 
         public async Task<List<SegmentValueDto>> ParseAccountNumberAsync(string accountNumber, CancellationToken cancellationToken = default)
         {
-            var segments = await GetSegmentStructuresAsync(cancellationToken);
+            var segments = (await GetSegmentStructuresAsync(cancellationToken)).Where(item => item.IsActive).ToList();
             var result = new List<SegmentValueDto>();
             var position = 0;
 

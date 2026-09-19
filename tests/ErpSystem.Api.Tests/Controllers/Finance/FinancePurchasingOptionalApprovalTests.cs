@@ -44,7 +44,7 @@ public sealed class FinancePurchasingOptionalApprovalTests
         dto.ApprovalRequired.Should().BeFalse();
         f.Order.LastModifiedById.Should().Be(f.ActorId);
         f.AssertCommitted();
-        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -82,9 +82,9 @@ public sealed class FinancePurchasingOptionalApprovalTests
     public async Task NoWorkflow_ReceiptPostsBalancedSourceThroughFinanceOwner_WithNoHumanApprover()
     {
         await using var f = await Fixture.CreateAsync();
-        FinancePostingRequestDto? posted = null;
-        f.Engine.Setup(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) =>
+        FinancePostingRequestV2Dto? posted = null;
+        f.Engine.Setup(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, CancellationToken>((request, _) =>
             {
                 f.Transaction.Verify(x => x.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
                 f.Receipt.ApprovalRequired.Should().BeFalse();
@@ -113,7 +113,7 @@ public sealed class FinancePurchasingOptionalApprovalTests
 
         // A replay of Submit cannot post a second time.
         (await f.ReceiptController().SubmitForApproval(f.Receipt.Id)).Result.Should().BeOfType<BadRequestObjectResult>();
-        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Once);
+        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
@@ -128,7 +128,7 @@ public sealed class FinancePurchasingOptionalApprovalTests
         f.Receipt.ApprovalRequired.Should().BeTrue();
         f.Receipt.WorkflowInstanceId.Should().Be(f.InstanceId);
         f.Receipt.ApprovedById.Should().BeNull();
-        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
         f.AssertCommitted();
     }
 
@@ -166,7 +166,7 @@ public sealed class FinancePurchasingOptionalApprovalTests
         await action.Should().ThrowAsync<InvalidOperationException>();
         f.AssertRolledBack();
         f.Db.ChangeTracker.Entries().Should().BeEmpty();
-        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -177,7 +177,7 @@ public sealed class FinancePurchasingOptionalApprovalTests
     {
         await using var f = await Fixture.CreateAsync();
         if (error == "finance")
-            f.Engine.Setup(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
+            f.Engine.Setup(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
                 .ThrowsAsync(new InvalidOperationException("Posting period is closed"));
         else if (error == "mapping")
             (await f.Db.FinanceSettings.SingleAsync()).ControlAccountGRVAccrualId = null;
@@ -189,7 +189,7 @@ public sealed class FinancePurchasingOptionalApprovalTests
         await action.Should().ThrowAsync<InvalidOperationException>();
         f.AssertRolledBack();
         if (error != "finance")
-            f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+            f.Engine.Verify(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -252,7 +252,7 @@ public sealed class FinancePurchasingOptionalApprovalTests
             f.Workflow.Setup(x => x.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>())).ReturnsAsync(
                 new WorkflowIntegrationResult(new WorkflowExecutionResult
                 { Success = true, Status = WorkflowInstanceStatus.Completed }, WorkflowOutcome.Approved, false));
-            f.Engine.Setup(x => x.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
+            f.Engine.Setup(x => x.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
                 .ReturnsAsync(new FinancePostingResultDto());
             var vendor = new BusinessPartner { Id = Guid.NewGuid(), TenantId = f.TenantId,
                 PartnerCode = "SUP-TEST", PartnerName = "Test supplier" };

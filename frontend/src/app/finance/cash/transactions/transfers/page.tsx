@@ -43,6 +43,8 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 import { cn } from '@/lib/utils';
 
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
@@ -95,6 +97,11 @@ export default function RecordBankTransferPage() {
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [transferPairId, setTransferPairId] = useState('');
+    const [sourceLineId] = useState(() => globalThis.crypto.randomUUID());
+    const [destinationLineId] = useState(() => globalThis.crypto.randomUUID());
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // The pair id is generated once per screen visit and reused if a network retry occurs. The
     // database's unique OUT/IN pair guard then returns the first transfer instead of duplicating it.
@@ -208,6 +215,14 @@ export default function RecordBankTransferPage() {
             });
             return;
         }
+        if (!fromAccount?.glAccountId || !toAccount?.glAccountId) {
+            toast({
+                title: 'Bank ledger mapping required',
+                description: 'Both transfer accounts must have their own Finance GL account before dimensions can be captured.',
+                variant: 'destructive',
+            });
+            return;
+        }
 
         setIsSubmitting(true);
         try {
@@ -220,6 +235,22 @@ export default function RecordBankTransferPage() {
                 destinationExchangeRateId: preview.destinationExchangeRateId,
                 referenceNumber: data.referenceNumber?.trim() || undefined,
                 description: data.description?.trim() || undefined,
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: [
+                        {
+                            sourceLineId,
+                            accountId: fromAccount.glAccountId,
+                            dimensions: toFinancePostingDimensionValues(lineDimensionValues[sourceLineId] || {}),
+                        },
+                        {
+                            sourceLineId: destinationLineId,
+                            accountId: toAccount.glAccountId,
+                            dimensions: toFinancePostingDimensionValues(lineDimensionValues[destinationLineId] || {}),
+                        },
+                    ],
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             };
 
             await cashManagementDataService.createBankTransfer(payload);
@@ -265,7 +296,7 @@ export default function RecordBankTransferPage() {
             </div>
 
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-                <div className="lg:col-span-2">
+                <div className="space-y-6 lg:col-span-2">
                     <Card>
                         <form onSubmit={form.handleSubmit(onSubmit)}>
                             <CardHeader>
@@ -423,6 +454,47 @@ export default function RecordBankTransferPage() {
                                 </Button>
                             </CardFooter>
                         </form>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Finance coding dimensions</CardTitle>
+                            <CardDescription>
+                                Code each bank leg independently. Defaults are resolved against each leg&apos;s own account rules.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'CASHBANK',
+                                    sourceDocumentType: 'CashBankTransfer',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.cash.bank-transfers',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(transactionDate || new Date(), 'yyyy-MM-dd')}
+                                lines={[
+                                    ...(fromAccount?.glAccountId ? [{
+                                        id: sourceLineId,
+                                        accountId: fromAccount.glAccountId,
+                                        accountLabel: `Source · ${formatAccount(fromAccount)}`,
+                                    }] : []),
+                                    ...(toAccount?.glAccountId ? [{
+                                        id: destinationLineId,
+                                        accountId: toAccount.glAccountId,
+                                        accountLabel: `Destination · ${formatAccount(toAccount)}`,
+                                    }] : []),
+                                ]}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={lineDimensionValues}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={setLineDimensionValues}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                disabled={isSubmitting}
+                            />
+                        </CardContent>
                     </Card>
                 </div>
 

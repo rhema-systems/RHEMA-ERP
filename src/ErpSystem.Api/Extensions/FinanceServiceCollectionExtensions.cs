@@ -1,4 +1,6 @@
 using System.Reflection;
+using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Core.Interfaces.Finance;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -6,8 +8,21 @@ namespace ErpSystem.Api.Extensions;
 
 public static class FinanceServiceCollectionExtensions
 {
+    /// <summary>
+    /// Registers the Finance-owned account provisioning boundary used by producer modules.
+    /// Keep this narrow registration reusable by command hosts that do not load the entire
+    /// web application graph.
+    /// </summary>
+    public static IServiceCollection AddFinanceAccountProvisioning(this IServiceCollection services)
+    {
+        services.TryAddScoped<IFinanceAccountProvisioningService, FinanceAccountProvisioningService>();
+        return services;
+    }
+
     public static IServiceCollection AddErpSystemFinanceServices(this IServiceCollection services)
     {
+        services.AddFinanceAccountProvisioning();
+
         // Assemblies to scan
         var coreAssembly = Assembly.Load("ErpSystem.Core");
         var dataAssembly = Assembly.Load("ErpSystem.Data");

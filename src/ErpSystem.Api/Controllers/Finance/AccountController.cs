@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using ErpSystem.Api.Services.Finance;
 
 namespace ErpSystem.Api.Controllers.Finance
 {
@@ -33,7 +34,7 @@ namespace ErpSystem.Api.Controllers.Finance
     ///
     /// **Authorization:** Requires authenticated user with Finance module access
     /// </remarks>
-    [Authorize]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
     [ApiController]
     [Route("api/finance/accounts")]
     public class AccountController : ControllerBase
@@ -41,15 +42,32 @@ namespace ErpSystem.Api.Controllers.Finance
         private readonly IAccountService _accountService;
         private readonly IGeneralLedgerService _glService;
         private readonly IAccountCombinationService _combinationService;
+        private readonly IAccountSegmentIdentityService _segmentIdentityService;
+        private readonly ICurrentUserService _currentUserService;
 
         public AccountController(
             IAccountService accountService,
             IGeneralLedgerService glService,
-            IAccountCombinationService combinationService)
+            IAccountCombinationService combinationService,
+            IAccountSegmentIdentityService segmentIdentityService,
+            ICurrentUserService currentUserService)
         {
             _accountService = accountService;
             _glService = glService;
             _combinationService = combinationService;
+            _segmentIdentityService = segmentIdentityService;
+            _currentUserService = currentUserService;
+        }
+
+        [HttpGet("{id:guid}/segment-readiness")]
+        public async Task<ActionResult<AccountSegmentReadinessDto>> GetSegmentReadiness(Guid id, CancellationToken cancellationToken)
+        {
+            try
+            {
+                return Ok(await _segmentIdentityService.GetReadinessAsync(
+                    _currentUserService.GetRequiredFinanceTenantId(), id, cancellationToken));
+            }
+            catch (KeyNotFoundException ex) { return NotFound(new { message = ex.Message }); }
         }
 
         /// <summary>
@@ -92,7 +110,7 @@ namespace ErpSystem.Api.Controllers.Finance
                 var account = await _glService.CreateSegmentedAccountAsync(accountDto);
 
                 return CreatedAtAction(
-                    nameof(GetAccountBalance),
+                    nameof(GetAccountById),
                     new { id = account.Id },
                     new
                     {
@@ -310,39 +328,38 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
-        /// Retrieves the current balance of a GL account in the specified currency.
+        /// Returns a stable, tenant- and accounting-book-scoped page of posted GL lines for an account.
         /// </summary>
-        /// <remarks>
-        /// **Common Use Cases:**
-        /// - Displaying real-time account balances on the Chart of Accounts inquiry screen
-        /// - Checking an account balance before posting a journal entry to validate sufficient funds or limits
-        /// - Viewing account balances in foreign currencies for multi-currency reporting
-        ///
-        /// **Integration Pattern:**
-        /// - Delegates to the General Ledger service which computes the balance from posted journal entry lines
-        /// - Balance is calculated as the net of all debits and credits, respecting the account's normal balance direction
-        /// - When a non-base currency is specified, the balance reflects translated amounts using the currency revaluation rates
-        ///
-        /// **Business Rules:**
-        /// - The currency code defaults to the base currency configured in Finance multi-currency setup if not specified
-        /// - Balance includes only posted (not draft or pending) journal entry lines
-        /// - The balance reflects all periods up to and including the current open period
-        /// - Requesting a balance in a currency not linked to the account may return zero or trigger a translation
-        ///
-        /// **Authorization:** Requires authenticated user with Finance module read access
-        /// </remarks>
-        /// <param name="id">The unique identifier (GUID) of the GL account.</param>
-        /// <param name="currencyCode">The ISO 4217 currency code for the balance inquiry. Defaults to the configured finance base currency when omitted.</param>
-        /// <returns>The account balance details including debit total, credit total, and net balance in the requested currency.</returns>
-        /// <response code="200">Balance retrieved successfully.</response>
-        /// <response code="401">Not authenticated.</response>
-        /// <response code="404">No account exists with the specified ID.</response>
-        /// <response code="500">Internal server error.</response>
-        [HttpGet("{id}/balance")]
-        public async Task<IActionResult> GetAccountBalance(Guid id, [FromQuery] string? currencyCode = null)
+        [HttpGet("{accountId:guid}/transactions")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        public async Task<ActionResult<AccountTransactionInquiryPageDto>> GetAccountTransactions(
+            Guid accountId,
+            [FromQuery] string accountingBookCode,
+            [FromQuery] int page = 1,
+            [FromQuery] int pageSize = 10,
+            CancellationToken cancellationToken = default)
         {
-            var balance = await _glService.GetAccountBalanceAsync(id, currencyCode);
-            return Ok(balance);
+            try
+            {
+                return Ok(await _accountService.GetTransactionsAsync(
+                    accountId,
+                    accountingBookCode,
+                    page,
+                    pageSize,
+                    cancellationToken));
+            }
+            catch (KeyNotFoundException ex)
+            {
+                return NotFound(new { error = ex.Message });
+            }
+            catch (ArgumentException ex)
+            {
+                return BadRequest(new { error = ex.Message, parameter = ex.ParamName });
+            }
+            catch (InvalidOperationException ex)
+            {
+                return BadRequest(new { error = ex.Message });
+            }
         }
 
         #region Account Combination Generator

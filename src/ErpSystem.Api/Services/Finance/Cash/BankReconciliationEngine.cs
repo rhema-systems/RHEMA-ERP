@@ -10,9 +10,11 @@ public class BankReconciliationEngine
 {
     public List<MatchResult> AutoMatch(
         List<CashTransaction> transactions,
-        List<BankStatementLine> statementLines)
+        List<BankStatementLine> statementLines,
+        int dateToleranceDays)
     {
         var matches = new List<MatchResult>();
+        var normalizedDateToleranceDays = Math.Clamp(dateToleranceDays, 0, 30);
         // Matching needs a shrinking candidate set to prevent one statement line from being
         // selected twice. Keep that set private: the service still needs its original tracked
         // rows after this method returns so it can mark each selected line as reconciled.
@@ -20,7 +22,7 @@ public class BankReconciliationEngine
 
         foreach (var transaction in transactions)
         {
-            var bestMatch = FindBestMatch(transaction, availableStatementLines);
+            var bestMatch = FindBestMatch(transaction, availableStatementLines, normalizedDateToleranceDays);
             if (bestMatch != null && bestMatch.Confidence >= 80) // 80% confidence threshold
             {
                 matches.Add(bestMatch);
@@ -32,14 +34,17 @@ public class BankReconciliationEngine
         return matches;
     }
 
-    private MatchResult? FindBestMatch(CashTransaction transaction, List<BankStatementLine> statementLines)
+    private MatchResult? FindBestMatch(
+        CashTransaction transaction,
+        List<BankStatementLine> statementLines,
+        int dateToleranceDays)
     {
         MatchResult? bestMatch = null;
         int highestConfidence = 0;
 
         foreach (var line in statementLines)
         {
-            var confidence = CalculateMatchConfidence(transaction, line);
+            var confidence = CalculateMatchConfidence(transaction, line, dateToleranceDays);
             if (confidence > highestConfidence)
             {
                 highestConfidence = confidence;
@@ -55,9 +60,21 @@ public class BankReconciliationEngine
         return bestMatch;
     }
 
-    private int CalculateMatchConfidence(CashTransaction transaction, BankStatementLine line)
+    private int CalculateMatchConfidence(
+        CashTransaction transaction,
+        BankStatementLine line,
+        int dateToleranceDays)
     {
         if (!IsDirectionCompatible(transaction, line))
+        {
+            return 0;
+        }
+
+        // The tenant's tolerance defines the candidate window. It is only matching assistance:
+        // a date inside the window still needs enough amount/reference/description evidence, and
+        // reviewed manual matching remains available outside the window.
+        var dateDiff = Math.Abs((transaction.TransactionDate.Date - line.TransactionDate.Date).Days);
+        if (dateDiff > dateToleranceDays)
         {
             return 0;
         }
@@ -82,7 +99,6 @@ public class BankReconciliationEngine
         }
 
         // 2. Date match (30 points)
-        var dateDiff = Math.Abs((transaction.TransactionDate - line.TransactionDate).TotalDays);
         if (dateDiff == 0)
         {
             confidence += 30;
@@ -91,13 +107,9 @@ public class BankReconciliationEngine
         {
             confidence += 25;
         }
-        else if (dateDiff <= 3)
+        else
         {
             confidence += 20;
-        }
-        else if (dateDiff <= 7)
-        {
-            confidence += 10;
         }
 
         // 3. Reference number match (20 points)
