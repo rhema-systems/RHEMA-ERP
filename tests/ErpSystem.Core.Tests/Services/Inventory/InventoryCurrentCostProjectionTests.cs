@@ -32,7 +32,8 @@ public sealed class InventoryCurrentCostProjectionTests
         var movement = new InventoryMovement { TenantId=fixture.Tenant, InventoryItemId=fixture.Item.Id,
             WarehouseId=scope.Warehouse.Id, LocationId=scope.Bin.Id, MovementNumber="IMMUTABLE-HISTORY",
             UnitCost=1918.85m, Quantity=1, TotalValue=1918.85m, IsPosted=true };
-        var journal = new JournalEntry { TenantId=fixture.Tenant, JournalEntryNumber="JE-COST-HISTORY",
+        var journal = new JournalEntry { TenantId=fixture.Tenant, AccountingBookId=fixture.Book.Id,
+            JournalEntryNumber="JE-COST-HISTORY",
             Description="Retained count journal", TotalDebitAmount=1918.85m, TotalCreditAmount=1918.85m };
         fixture.Db.AddRange(countLine, movement, journal);
         await fixture.Db.SaveChangesAsync();
@@ -254,12 +255,14 @@ public sealed class InventoryCurrentCostProjectionTests
         public Guid Tenant { get; } = Guid.NewGuid();
         public ApplicationDbContext Db { get; } = new(new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N")).Options);
+        public AccountingBook Book { get; }
         public InventoryItem Item { get; }
         public Fixture()
         {
+            Book = new AccountingBook { TenantId=Tenant, Code="PRIMARY", Name="Primary book", IsDefault=true };
             Item = new InventoryItem { TenantId=Tenant, ItemCode="COST-PROJECTION", Name="Projection test item",
                 UnitOfMeasure="EA", ValuationMethod=ValuationMethod.WeightedAverage };
-            Db.Add(Item);
+            Db.AddRange(Book, Item);
         }
         public ScopeRows Scope(decimal quantity, decimal value, Warehouse? warehouse = null, WarehouseQuantity? warehouseQuantity = null)
         {

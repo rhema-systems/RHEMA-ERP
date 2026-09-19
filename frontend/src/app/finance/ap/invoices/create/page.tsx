@@ -10,7 +10,6 @@ import {
     Loader2,
     Plus,
     Trash2,
-    Calendar as CalendarIcon,
     Check,
     ChevronsUpDown,
 } from 'lucide-react';
@@ -47,7 +46,7 @@ import {
     CommandInput,
     CommandList,
 } from '@/components/ui/command';
-import { Calendar } from '@/components/ui/calendar';
+import { FinanceDateInput } from '@/components/finance/finance-date-input';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { purchasingService } from '@/services/purchasingService';
 import { financeDataService } from '@/services/finance/finance-data.service';
@@ -73,6 +72,7 @@ import {
     toFinancePostingDimensionValues,
     toFinanceSourceDimensionFormState,
 } from '@/lib/finance/source-document-dimensions';
+import { calculateNetTradeDiscountLineAmount } from '@/lib/finance/invoice-trade-discount';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -114,6 +114,9 @@ const invoiceSchema = z.object({
     withholdingTaxRate: z.coerce.number().min(0).max(100).optional().default(0),
     isOpeningBalance: z.boolean().default(false),
     lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
+}).refine(({ invoiceDate, dueDate }) => dueDate >= invoiceDate, {
+    message: 'Due date cannot be earlier than the invoice date',
+    path: ['dueDate'],
 });
 
 type InvoiceFormValues = z.infer<typeof invoiceSchema>;
@@ -169,10 +172,11 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         isLoading: suppliersLoading,
         error: suppliersError,
     } = useQuery({
-        queryKey: ['ap-invoice-suppliers'],
+        queryKey: ['ap-invoice-entry-suppliers'],
         queryFn: async () => {
-            // The entry lookup includes approved Procurement suppliers not yet projected into AP.
-            // The command resolves and persists the canonical Supplier id; reports use another lookup.
+            // The Finance entry projection includes approved Business Partners that do not yet
+            // have a canonical Supplier row. The invoice command resolves either identity and
+            // persists Supplier.Id inside its controlled transaction.
             const suppliers = await accountsPayableService.getInvoiceSupplierEntryOptions();
             return { items: suppliers };
         },
@@ -210,7 +214,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
 
     const { data: withholdingTaxes = [] } = useQuery({
         queryKey: ['taxes', 'ap-invoice-withholding'],
-        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
+        queryFn: () => taxDataService.getActiveTaxes({
+            applicability: TaxApplicability.Purchases,
+            category: TaxCategory.Withholding,
+        }),
     });
 
     const { data: warehousesData } = useQuery({
@@ -354,7 +361,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
     const watchWithholdingTaxId = form.watch('withholdingTaxId');
     const withholdingTaxOptions = (withholdingTaxes as Tax[]).filter(tax =>
-        tax.isActive && (
+        tax.isActive && tax.category === TaxCategory.Withholding && (
             tax.applicability === TaxApplicability.Purchases ||
             tax.applicability === TaxApplicability.Both
         )
@@ -511,66 +518,42 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
         const requestId = ++exchangeRateRequestId.current;
         const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
-        const isOpeningBalance = form.getValues('isOpeningBalance');
-
-        if (isOpeningBalance) {
-            // Clear the prior date/currency evidence before the async lookup so Save cannot race
-            // with a stale approved-rate identity while the new historical rate is loading.
-            form.setValue('exchangeRateId', undefined);
-            if (!financeSettings) {
-                throw new Error('Finance settings are still loading. Try again before saving this opening invoice.');
-            }
-            let snapshot;
-            try {
-                snapshot = await loadApprovedInvoiceRate(
-                    {
-                        module: 'AP',
-                        transactionCurrency: currencyCode,
-                        functionalCurrency,
-                        invoiceDate: form.getValues('invoiceDate'),
-                        settings: financeSettings,
-                    },
-                    (code, query) => financeService.getCurrentExchangeRate(code, query)
-                );
-            } catch (error) {
-                if (requestId !== exchangeRateRequestId.current) return;
-                throw error;
-            }
-            if (requestId !== exchangeRateRequestId.current) return;
-            form.setValue('exchangeRate', snapshot.rate);
-            form.setValue('exchangeRateId', snapshot.exchangeRateId);
-            form.setValue('exchangeRateSource', snapshot.source);
-            return;
-        }
-
         form.setValue('exchangeRateId', undefined);
-        if (currencyCode === functionalCurrency) {
-            form.setValue('exchangeRate', 1);
-            form.setValue('exchangeRateSource', 'Daily');
-            return;
+        if (!financeSettings) {
+            throw new Error('Finance settings are still loading. Try again before saving this invoice.');
         }
-
-        let rateObj;
+        let snapshot;
         try {
-            rateObj = await financeService.getCurrentExchangeRate(currencyCode);
+            snapshot = await loadApprovedInvoiceRate(
+                {
+                    module: 'AP',
+                    transactionCurrency: currencyCode,
+                    functionalCurrency,
+                    invoiceDate: form.getValues('invoiceDate'),
+                    settings: financeSettings,
+                },
+                (code, query) => financeService.getCurrentExchangeRate(code, query)
+            );
         } catch (error) {
             if (requestId !== exchangeRateRequestId.current) return;
             throw error;
         }
         if (requestId !== exchangeRateRequestId.current) return;
-        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-        form.setValue('exchangeRateId', rateObj.id);
-        form.setValue('exchangeRateSource', 'Daily');
+        form.setValue('exchangeRate', snapshot.rate);
+        form.setValue('exchangeRateId', snapshot.exchangeRateId);
+        form.setValue('exchangeRateDate', form.getValues('invoiceDate'));
+        form.setValue('exchangeRateSource', snapshot.source);
     };
 
     useEffect(() => {
-        if (!watchIsOpeningBalance || !financeSettings || !watchInvoiceDate) return;
+        if (!financeSettings || !watchInvoiceDate) return;
         void applyInvoiceExchangeRate(watchCurrencyCode).catch((error) => {
-            console.error('Failed to resolve governed AP opening-invoice rate', error);
+            console.error('Failed to resolve governed AP invoice rate', error);
             form.setValue('exchangeRateId', undefined);
+            form.setValue('exchangeRate', 0);
             form.setValue('exchangeRateSource', 'Unavailable');
         });
-    }, [financeSettings, watchCurrencyCode, watchInvoiceDate, watchIsOpeningBalance]);
+    }, [financeSettings, watchCurrencyCode, watchInvoiceDate]);
 
     useEffect(() => {
         if (!watchIsOpeningBalance) return;
@@ -590,7 +573,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || 0;
         const discount = Number(item.discountPercentage) || 0;
-        return acc + (qty * price * (1 - discount / 100));
+        return acc + calculateNetTradeDiscountLineAmount(qty * price, discount);
     }, 0);
 
     const resolveLineTaxGroupId = (
@@ -616,7 +599,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || 0;
         const discount = Number(item.discountPercentage) || 0;
-        const lineSubtotal = qty * price * (1 - discount / 100);
+        const lineSubtotal = calculateNetTradeDiscountLineAmount(qty * price, discount);
         const activeGroupId = resolveLineTaxGroupId(item, isOpeningBalance, headerTaxGroupId);
         const activeGroup = taxGroupsData?.find(tg => tg.id === activeGroupId);
 
@@ -654,7 +637,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 totalTaxAmount: 0,
                 withholdingTaxAmount: 0,
                 grandTotal: subtotal,
-                netPayable: subtotal,
+                estimatedCashPayable: subtotal,
                 taxList: []
             };
         }
@@ -666,7 +649,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             const qty = Number(item.quantity) || 0;
             const price = Number(item.unitPrice) || 0;
             const discount = Number(item.discountPercentage) || 0;
-            const lineSubtotal = qty * price * (1 - discount / 100);
+            const lineSubtotal = calculateNetTradeDiscountLineAmount(qty * price, discount);
 
             // Resolve line tax group or fallback to header
             const activeGroupId = resolveLineTaxGroupId(item);
@@ -707,13 +690,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         // Compute separate withholding tax deduction based on withholdingTaxRate
         const withholdingTaxAmount = Math.round((subtotal * (watchWithholdingTaxRate / 100) + Number.EPSILON) * 100) / 100;
         const grandTotal = subtotal + totalTaxAmount; // subtotal + standard taxes
-        const netPayable = grandTotal - withholdingTaxAmount; // WHT is a deduction
+        const estimatedCashPayable = grandTotal - withholdingTaxAmount;
 
         return {
             totalTaxAmount,
             withholdingTaxAmount,
             grandTotal,
-            netPayable,
+            estimatedCashPayable,
             taxList: Object.entries(breakdowns).map(([code, data]) => ({ code, ...data }))
         };
     };
@@ -759,7 +742,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 } catch (err) {
                     console.error("Failed to fetch exchange rate for supplier currency", err);
                     form.setValue('exchangeRateId', undefined);
-                    form.setValue('exchangeRate', 1.0);
+                    form.setValue('exchangeRate', 0);
                     form.setValue('exchangeRateSource', 'Unavailable');
                 }
             } else {
@@ -784,6 +767,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         if (suppressPurchaseOrderHydrationRef.current) {
             // The saved draft is authoritative while editing. Loading its PO must not replace
             // existing invoice lines with today's remaining PO quantities.
+            suppressPurchaseOrderHydrationRef.current = false;
             return;
         }
         if (hydratedPurchaseOrderIdRef.current === selectedPurchaseOrder.id) return;
@@ -899,10 +883,10 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                 return;
             }
             const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
-            if (isOpeningBalance && data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
+            if (data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
                 toast({
                     title: 'Approved exchange rate required',
-                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this opening invoice.',
+                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this invoice.',
                     variant: 'destructive',
                 });
                 return;
@@ -1082,7 +1066,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         <CardTitle>Invoice Details</CardTitle>
                     </CardHeader>
                     <CardContent className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-                        <div className="space-y-2">
+                        <div className="min-w-0 space-y-2">
                             <Label htmlFor="supplier">Supplier</Label>
                             <Popover open={supplierComboOpen} onOpenChange={setSupplierComboOpen}>
                                 <PopoverTrigger asChild>
@@ -1092,14 +1076,16 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                         id="supplier"
                                         aria-label="Supplier"
                                         aria-expanded={supplierComboOpen}
-                                        className="w-full justify-between"
+                                        className="w-full min-w-0 justify-between overflow-hidden"
                                         disabled={isEditMode}
                                     >
-                                        {selectedSupplier
-                                            ? `${selectedSupplier.name} (${selectedSupplier.code})`
-                                            : suppliersLoading
-                                                ? "Loading suppliers..."
-                                                : "Select a supplier..."}
+                                        <span className="min-w-0 flex-1 truncate text-left">
+                                            {selectedSupplier
+                                                ? `${selectedSupplier.name} (${selectedSupplier.code})`
+                                                : suppliersLoading
+                                                    ? "Loading suppliers..."
+                                                    : "Select a supplier..."}
+                                        </span>
                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
                                     </Button>
                                 </PopoverTrigger>
@@ -1202,45 +1188,50 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                         </div>
 
                         <div className="space-y-2">
-                            <Label>Invoice Date</Label>
+                            <Label htmlFor="invoiceDate">Invoice Date</Label>
                             <Controller
                                 control={form.control}
                                 name="invoiceDate"
                                 render={({ field }) => (
-                                    <Popover>
-                                        <PopoverTrigger asChild>
-                                            <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
-                                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0">
-                                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} />
-                                        </PopoverContent>
-                                    </Popover>
+                                    <FinanceDateInput
+                                        id="invoiceDate"
+                                        name={field.name}
+                                        ref={field.ref}
+                                        aria-invalid={Boolean(form.formState.errors.invoiceDate)}
+                                        value={field.value}
+                                        onBlur={field.onBlur}
+                                        onChange={field.onChange}
+                                        required
+                                    />
                                 )}
                             />
+                            {form.formState.errors.invoiceDate && (
+                                <p className="text-sm text-red-500">{form.formState.errors.invoiceDate.message}</p>
+                            )}
                         </div>
 
                         <div className="space-y-2">
-                            <Label>Due Date</Label>
+                            <Label htmlFor="dueDate">Due Date</Label>
                             <Controller
                                 control={form.control}
                                 name="dueDate"
                                 render={({ field }) => (
-                                    <Popover>
-                                        <PopoverTrigger asChild>
-                                            <Button variant="outline" className={cn("w-full justify-start text-left font-normal", !field.value && "text-muted-foreground")}>
-                                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                            </Button>
-                                        </PopoverTrigger>
-                                        <PopoverContent className="w-auto p-0">
-                                            <Calendar mode="single" selected={field.value} onSelect={field.onChange} />
-                                        </PopoverContent>
-                                    </Popover>
+                                    <FinanceDateInput
+                                        id="dueDate"
+                                        name={field.name}
+                                        ref={field.ref}
+                                        aria-invalid={Boolean(form.formState.errors.dueDate)}
+                                        value={field.value}
+                                        min={watchInvoiceDate}
+                                        onBlur={field.onBlur}
+                                        onChange={field.onChange}
+                                        required
+                                    />
                                 )}
                             />
+                            {form.formState.errors.dueDate && (
+                                <p className="text-sm text-red-500">{form.formState.errors.dueDate.message}</p>
+                            )}
                         </div>
 
                         <div className="space-y-2">
@@ -1258,7 +1249,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             } catch (err) {
                                                 console.error("Failed to fetch exchange rate for currency", err);
                                                 form.setValue('exchangeRateId', undefined);
-                                                form.setValue('exchangeRate', 1.0);
+                                                form.setValue('exchangeRate', 0);
                                                 form.setValue('exchangeRateSource', 'Unavailable');
                                             }
                                         }}
@@ -1284,17 +1275,13 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                     type="number" 
                                     step="0.0001" 
                                     min="0.0001" 
-                                    readOnly={watchIsOpeningBalance}
-                                    aria-readonly={watchIsOpeningBalance}
-                                    {...form.register('exchangeRate', {
-                                        onChange: () => {
-                                            if (!watchIsOpeningBalance) form.setValue('exchangeRateSource', 'Custom');
-                                        }
-                                    })} 
+                                    readOnly
+                                    aria-readonly="true"
+                                    {...form.register('exchangeRate')}
                                 />
                                 <span className="text-[11px] text-muted-foreground block mt-1">
                                     1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
-                                    {watchIsOpeningBalance ? ' · approved rate locked to this opening invoice' : ''}
+                                    {' · approved rate locked to this invoice'}
                                 </span>
                             </div>
                         )}
@@ -1373,22 +1360,21 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 <div className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Advanced FX Details</div>
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                                     <div className="space-y-2">
-                                        <Label className="text-xs">Exchange Rate Date</Label>
+                                        <Label htmlFor="exchangeRateDate" className="text-xs">Exchange Rate Date</Label>
                                         <Controller
                                             control={form.control}
                                             name="exchangeRateDate"
                                             render={({ field }) => (
-                                                <Popover>
-                                                    <PopoverTrigger asChild>
-                                                        <Button variant="outline" disabled={watchIsOpeningBalance} className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
-                                                            <CalendarIcon className="mr-2 h-3 w-3" />
-                                                            {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                                        </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0">
-                                                        <Calendar mode="single" selected={field.value} onSelect={field.onChange} />
-                                                    </PopoverContent>
-                                                </Popover>
+                                                <FinanceDateInput
+                                                    id="exchangeRateDate"
+                                                    name={field.name}
+                                                    ref={field.ref}
+                                                    className="text-xs"
+                                                    disabled
+                                                    value={field.value}
+                                                    onBlur={field.onBlur}
+                                                    onChange={field.onChange}
+                                                />
                                             )}
                                         />
                                     </div>
@@ -1398,22 +1384,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             control={form.control}
                                             name="exchangeRateSource"
                                             render={({ field }) => (
-                                                watchIsOpeningBalance ? (
-                                                    <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
-                                                ) : (
-                                                    <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
-                                                        <SelectTrigger className="h-10 text-xs">
-                                                            <SelectValue placeholder="Select FX Source" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Daily">Daily</SelectItem>
-                                                            <SelectItem value="Spot">Spot</SelectItem>
-                                                            <SelectItem value="Official">Official</SelectItem>
-                                                            <SelectItem value="Market">Market</SelectItem>
-                                                            <SelectItem value="Custom">Custom</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                )
+                                                <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
                                             )}
                                         />
                                     </div>
@@ -1574,7 +1545,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
 
                                         {lineItemType === 'Expense' ? (
                                             <>
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="col-span-2 min-w-0 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>GL Account</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1585,8 +1556,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                 onOpenChange={(open) => { setGlAccountOpenIndex(open ? index : null); if (!open) setGlAccountSearch(''); }}
                                                             >
                                                                 <PopoverTrigger asChild>
-                                                                    <Button variant="outline" role="combobox" className="w-full justify-between text-left font-medium line-clamp-1 h-10 px-3">
-                                                                        <span className="truncate text-sm">
+                                                                    <Button variant="outline" role="combobox" className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
+                                                                        <span className="min-w-0 flex-1 truncate text-sm">
                                                                             {getAccountDisplay(accountField.value) || (glAccountsLoading ? "Loading..." : "Select account...")}
                                                                         </span>
                                                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -1648,10 +1619,16 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                     <SelectContent>
                                                                         {(budgetCellsByLine[field.id] || []).map(cell => (
                                                                             <SelectItem key={cell.budgetEntryId} value={cell.budgetEntryId}>
-                                                                                <span className="flex flex-col">
-                                                                                    <span>{cell.dimensionAssignments.map(item => `${item.dimensionCode}: ${item.valueCode}`).join(' · ') || 'Account total'}</span>
-                                                                                    <span className="text-xs text-muted-foreground">
-                                                                                        {cell.fiscalPeriodCode} · {formatCurrency(cell.availableAmount, cell.functionalCurrencyCode)} available
+                                                                                <span className="flex min-w-72 flex-col gap-1 py-1">
+                                                                                    <span>
+                                                                                        {cell.dimensionAssignments.map(item => `${item.dimensionCode}: ${item.valueCode}`).join(' · ') || 'Account total'}
+                                                                                    </span>
+                                                                                    <span className="text-xs text-muted-foreground">{cell.fiscalPeriodCode}</span>
+                                                                                    <span className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs text-muted-foreground">
+                                                                                        <span>Approved: {formatCurrency(cell.approvedAmount, cell.functionalCurrencyCode)}</span>
+                                                                                        <span>Actual: {formatCurrency(cell.postedActualAmount, cell.functionalCurrencyCode)}</span>
+                                                                                        <span>Reserved: {formatCurrency(cell.reservedAmount, cell.functionalCurrencyCode)}</span>
+                                                                                        <span>Available: {formatCurrency(cell.availableAmount, cell.functionalCurrencyCode)}</span>
                                                                                     </span>
                                                                                 </span>
                                                                             </SelectItem>
@@ -1669,7 +1646,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             </>
                                         ) : lineItemType === 'Inventory' ? (
                                             <>
-                                                <div className="col-span-2 space-y-2">
+                                                <div className="col-span-2 min-w-0 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>Inventory Item</Label>
                                                     <Controller
                                                         control={form.control}
@@ -1680,8 +1657,8 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                                 onOpenChange={(open) => { setInventoryItemOpenIndex(open ? index : null); if (!open) setInventoryItemSearch(''); }}
                                                             >
                                                                 <PopoverTrigger asChild>
-                                                                    <Button variant="outline" role="combobox" className="w-full justify-between text-left font-medium line-clamp-1 h-10 px-3">
-                                                                        <span className="truncate text-sm">
+                                                                    <Button variant="outline" role="combobox" className="h-10 w-full min-w-0 justify-between overflow-hidden px-3 text-left font-medium">
+                                                                        <span className="min-w-0 flex-1 truncate text-sm">
                                                                             {getInventoryItemDisplay(field.value) || (inventoryItemsLoading ? "Loading..." : "Select item...")}
                                                                         </span>
                                                                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
@@ -1756,7 +1733,14 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             <Label className={index !== 0 ? 'sr-only' : ''}>Price</Label>
                                             <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
                                         </div>
-                                        <div className="col-span-3 space-y-2">
+                                        <div className="col-span-1 space-y-2">
+                                            <Label className={index !== 0 ? 'sr-only' : ''}>Trade Disc %</Label>
+                                            <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
+                                            {form.formState.errors.lineItems?.[index]?.discountPercentage && (
+                                                <p className="text-xs text-red-500">Use 0–100</p>
+                                            )}
+                                        </div>
+                                        <div className="col-span-2 space-y-2">
                                             <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
                                             {editInvoice?.lineItems.some(line => line.landedCostItemId) && <>
                                                 <Label>Tax treatment</Label>
@@ -1841,14 +1825,20 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 </div>
                                 {!watchIsOpeningBalance && withholdingDecision === true && (
                                     <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                        <span>Withholding Tax Deduction ({watchWithholdingTaxRate}%):</span>
+                                        <span>Estimated WHT at payment ({watchWithholdingTaxRate}%):</span>
                                         <span className="font-medium text-red-600">-{formatAmountWithCurrency(taxEstimate.withholdingTaxAmount)}</span>
                                     </div>
                                 )}
                                 <div className="flex justify-between w-72 text-xl font-bold border-t pt-2 mt-2">
-                                    <span>Net Payable:</span>
-                                    <span className="text-primary">{formatAmountWithCurrency(taxEstimate.netPayable)}</span>
+                                    <span>Gross Invoice Total:</span>
+                                    <span>{formatAmountWithCurrency(taxEstimate.grandTotal)}</span>
                                 </div>
+                                {taxEstimate.withholdingTaxAmount > 0 && (
+                                    <div className="flex justify-between w-72 text-sm font-semibold text-primary">
+                                        <span>Est. Cash Payable after WHT:</span>
+                                        <span>{formatAmountWithCurrency(taxEstimate.estimatedCashPayable)}</span>
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </CardContent>

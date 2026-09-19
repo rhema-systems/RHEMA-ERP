@@ -10,7 +10,7 @@ export default function FinanceApprovalsPage() {
     return (
         <ApprovalWorkbench
             title="Finance Approval Workbench"
-            description="One inbox for finance documents that need review, approval, or rejection."
+            description="One inbox for finance documents and assigned accounting-book approvals."
             definitions={definitions}
             breadcrumbs={[
                 { label: 'Dashboard', href: '/dashboard' },

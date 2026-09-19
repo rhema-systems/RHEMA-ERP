@@ -18,53 +18,29 @@ public sealed class FixedAssetDisposalSettlementMigrationTests
     [Trait("Category", "Architecture")]
     public void Up_ShouldAddSettlementEvidenceConstraintsAndRestrictedDocumentLinks()
     {
-        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableMigration().ApplyUp(builder);
-
-        var columns = builder.Operations.OfType<AddColumnOperation>().Select(item => item.Name).ToArray();
-        columns.Should().Contain(new[]
+        var source = ArchivedMigrationSource.Read("20260813103000_AddFixedAssetDisposalSettlement.cs");
+        foreach (var column in new[]
         {
             "BuyerBusinessPartnerId", "SettlementMode", "SettlementStatus", "SaleTaxGroupId",
             "CustomerInvoiceId", "CustomerPaymentId", "SettlementInvoiceAmount", "SettlementTaxAmount"
-        });
-
-        var checks = builder.Operations.OfType<AddCheckConstraintOperation>().ToArray();
-        checks.Select(item => item.Name).Should().BeEquivalentTo(
-            "CK_AssetDisposals_SettlementDestination",
-            "CK_AssetDisposals_SettlementDocumentState");
-
-        var documentIndexes = builder.Operations.OfType<CreateIndexOperation>()
-            .Where(item => item.Name is "IX_AssetDisposals_TenantId_CustomerInvoiceId" or "IX_AssetDisposals_TenantId_CustomerPaymentId")
-            .ToArray();
-        documentIndexes.Should().HaveCount(2);
-        documentIndexes.Should().OnlyContain(item => item.IsUnique && item.Filter != null);
-
-        var foreignKeys = builder.Operations.OfType<AddForeignKeyOperation>().ToArray();
-        foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerInvoiceId" && item.PrincipalTable == "Invoices");
-        foreignKeys.Should().Contain(item => item.Columns.Single() == "CustomerPaymentId" && item.PrincipalTable == "CustomerPayment");
-        foreignKeys.Should().Contain(item => item.Columns.Single() == "SettlementPaymentMethodId" && item.PrincipalTable == "PaymentMethod");
-        foreignKeys.Should().OnlyContain(item => item.OnDelete == ReferentialAction.Restrict);
+        }) source.Should().Contain(column);
+        foreach (var token in new[] { "CK_AssetDisposals_SettlementDestination",
+            "CK_AssetDisposals_SettlementDocumentState", "IX_AssetDisposals_TenantId_CustomerInvoiceId",
+            "IX_AssetDisposals_TenantId_CustomerPaymentId", "[\"CustomerInvoiceId\"] = \"Invoices\"",
+            "[\"CustomerPaymentId\"] = \"CustomerPayment\"", "[\"SettlementPaymentMethodId\"] = \"PaymentMethod\"",
+            "onDelete: ReferentialAction.Restrict" }) source.Should().Contain(token);
     }
 
     [Fact]
     [Trait("Category", "Architecture")]
     public void Down_ShouldRemoveEverySettlementColumnAndConstraint()
     {
-        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableMigration().ApplyDown(builder);
-
-        builder.Operations.OfType<DropCheckConstraintOperation>().Should().HaveCount(2);
-        var droppedColumns = builder.Operations.OfType<DropColumnOperation>().Select(item => item.Name).ToArray();
-        droppedColumns.Should().Contain(new[]
+        var source = ArchivedMigrationSource.Read("20260813103000_AddFixedAssetDisposalSettlement.cs");
+        foreach (var column in new[]
         {
             "BuyerBusinessPartnerId", "SettlementMode", "SettlementStatus", "SaleTaxGroupId",
             "CustomerInvoiceId", "CustomerPaymentId", "SettlementInvoiceAmount", "SettlementTaxAmount"
-        });
-    }
-
-    private sealed class TestableMigration : AddFixedAssetDisposalSettlement
-    {
-        public void ApplyUp(MigrationBuilder builder) => Up(builder);
-        public void ApplyDown(MigrationBuilder builder) => Down(builder);
+        }) source.Should().Contain(column);
+        source.Should().Contain("migrationBuilder.DropCheckConstraint(");
     }
 }

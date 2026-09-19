@@ -113,6 +113,18 @@ class TaxDataService {
         return apiService.get<Tax[]>(endpoint);
     }
 
+    async getActiveTaxes(filters?: {
+        applicability?: string;
+        category?: string;
+    }): Promise<Tax[]> {
+        const queryParams = new URLSearchParams();
+        if (filters?.applicability) queryParams.append('applicability', filters.applicability);
+        if (filters?.category) queryParams.append('category', filters.category);
+
+        const endpoint = `/finance/tax/taxes/active${queryParams.toString() ? `?${queryParams}` : ''}`;
+        return apiService.get<Tax[]>(endpoint);
+    }
+
     async getTaxById(id: string): Promise<Tax> {
         return apiService.get<Tax>(`/finance/tax/taxes/${id}`);
     }

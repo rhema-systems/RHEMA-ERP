@@ -26,5 +26,6 @@ public enum FinancialStatementRowMappingType
 {
     Account = 1,
     AccountRange = 2,
-    AccountHierarchy = 3
+    AccountHierarchy = 3,
+    Classification = 4
 }

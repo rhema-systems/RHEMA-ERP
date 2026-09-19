@@ -13,17 +13,21 @@ public sealed class SupplierOnboardingCategoryAlignmentMigrationTests
 {
     private const string MigrationId =
         "20260827090000_AlignSupplierOnboardingPartnerCategories";
+    private const string CurrentBaselineId =
+        "20260916132000_DisposableDevelopmentCurrentModelBaseline";
 
     [Fact]
-    public void MigrationIsDiscoverableAndRepairsExistingApprovedSuppliers()
+    public void ArchivedRepairIsRetainedWhileOnlyCurrentBaselineIsDiscoverable()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=SupplierCategoryMigrationDiscovery;Trusted_Connection=True")
             .Options;
         using var context = new ApplicationDbContext(options);
 
-        context.GetService<IMigrationsAssembly>().Migrations
-            .Should().ContainKey(MigrationId);
+        var discovered = context.GetService<IMigrationsAssembly>().Migrations;
+        discovered.Should().ContainSingle();
+        discovered.Should().ContainKey(CurrentBaselineId);
+        discovered.Should().NotContainKey(MigrationId);
 
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
         new TestableMigration().ApplyUp(builder);

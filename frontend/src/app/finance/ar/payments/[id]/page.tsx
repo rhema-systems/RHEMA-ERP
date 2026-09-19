@@ -27,6 +27,10 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import {
+    SettlementDimensionEvidence,
+    SourceDocumentDimensionEvidence,
+} from '@/components/finance/dimensions/source-document-dimension-panel';
 
 export default function CustomerReceiptDetailsPage() {
     const router = useRouter();
@@ -197,6 +201,11 @@ export default function CustomerReceiptDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <div className="no-print space-y-4">
+                <SourceDocumentDimensionEvidence evidence={payment.financeDimensions} />
+                <SettlementDimensionEvidence evidence={payment.settlementDimensions} />
+            </div>
 
             {payment.journalEntryId && (
                 <Card className="no-print">

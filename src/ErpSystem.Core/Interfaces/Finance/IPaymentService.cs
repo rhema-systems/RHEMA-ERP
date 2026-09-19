@@ -4,6 +4,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.Finance.Integration;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
@@ -16,6 +17,10 @@ public interface IPaymentService
     /// Retrieves a customer payment by ID.
     /// </summary>
     Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto?> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto?> GetByIdAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
 
     /// <summary>Returns source, operational-subledger, ledger, reversal, and audit evidence.</summary>
     Task<CustomerPaymentTraceDto?> GetTraceAsync(Guid id, CancellationToken cancellationToken = default);
@@ -38,11 +43,19 @@ public interface IPaymentService
     /// - Creates credit note record if applicable
     /// </summary>
     Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> CreateAsync(PaymentCreateDto dto, CancellationToken cancellationToken = default);
+    Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> CreateAsync(
+        PaymentCreateDto dto,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Posts an approved or postable customer receipt to the General Ledger through the central finance posting engine.
     /// </summary>
     Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> PostAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ErpSystem.Core.DTOs.Finance.CustomerPaymentDto> PostAsync(
+        Guid id,
+        FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Reverses a posted receipt through linked compensating Finance postings and operational

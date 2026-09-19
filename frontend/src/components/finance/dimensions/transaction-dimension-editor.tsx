@@ -52,6 +52,7 @@ export interface TransactionDimensionDefaultsProps {
   onChange: (values: Record<string, string>) => void;
   onApplyToAll: () => void;
   disabled?: boolean;
+  showApplyToAll?: boolean;
 }
 
 export function TransactionDimensionDefaults({
@@ -61,6 +62,7 @@ export function TransactionDimensionDefaults({
   onChange,
   onApplyToAll,
   disabled = false,
+  showApplyToAll = true,
 }: TransactionDimensionDefaultsProps) {
   if (definitions.length === 0) return null;
   return (
@@ -83,15 +85,17 @@ export function TransactionDimensionDefaults({
           >
             Clear
           </Button>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            disabled={disabled}
-            onClick={onApplyToAll}
-          >
-            Apply to all eligible lines
-          </Button>
+          {showApplyToAll && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={disabled}
+              onClick={onApplyToAll}
+            >
+              Apply to all eligible lines
+            </Button>
+          )}
         </div>
       </div>
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">

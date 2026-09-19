@@ -124,11 +124,14 @@ public class CapitalProjectsController : ControllerBase
     }
 
     [HttpPost("{id}/capitalize")]
-    public async Task<ActionResult<CapitalProjectDetailDto>> Capitalize(Guid id)
+    public async Task<ActionResult<CapitalProjectDetailDto>> Capitalize(
+        Guid id,
+        [FromBody] CapitalizeCapitalProjectDto? dto = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            return Ok(await _service.CapitalizeProjectAsync(id));
+            return Ok(await _service.CapitalizeProjectAsync(id, dto, cancellationToken));
         }
         catch (KeyNotFoundException) { return NotFound(); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }

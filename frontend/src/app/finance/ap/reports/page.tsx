@@ -18,7 +18,6 @@ import {
 } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { accountsPayableService } from '@/services/accountsPayableService';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -49,10 +48,6 @@ import {
 } from '@/lib/finance/ap-report-query-keys';
 
 const REPORT_TABS = ['aging', 'cash', 'statements', 'match-exceptions', 'procurement-reconciliation'] as const;
-const supplierPartnerTypes = new Set(['supplier', 'contractor', 'both']);
-
-const isSupplierPartner = (partner: BusinessPartnerDto) =>
-    supplierPartnerTypes.has((partner.partnerType ?? '').toLowerCase());
 
 function getReportTab(tab: string | null) {
     return REPORT_TABS.find((reportTab) => reportTab === tab) ?? 'aging';
@@ -509,17 +504,16 @@ function SupplierStatementsView() {
         const loadPartners = async () => {
             setPartnersLoading(true);
             try {
-                const allPartners = await businessPartnerService.getAllPartnersForDropdown();
+                const allPartners = await accountsPayableService.getInvoiceSupplierEntryOptions();
                 if (!isMounted) return;
 
                 setPartners(
                     allPartners
-                        .filter(isSupplierPartner)
                         .map((partner) => ({
                             id: partner.id,
-                            code: partner.partnerCode,
-                            name: partner.partnerName,
-                            currencyCode: partner.currency,
+                            code: partner.code,
+                            name: partner.name,
+                            currencyCode: partner.currency ?? undefined,
                         }))
                         .sort((a, b) => a.name.localeCompare(b.name))
                 );

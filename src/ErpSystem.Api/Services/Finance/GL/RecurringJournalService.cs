@@ -26,6 +26,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
     private readonly IFinancePostingEngine _postingEngine;
     private readonly IFinanceAuditService _audit;
     private readonly RecurringJournalGenerationProcessor _generator;
+    private readonly RecurringJournalReversalProcessor _reversals;
 
     public RecurringJournalService(
         ApplicationDbContext db,
@@ -33,7 +34,8 @@ public sealed class RecurringJournalService : IRecurringJournalService
         IDocumentNumberingService numbering,
         IFinancePostingEngine postingEngine,
         IFinanceAuditService audit,
-        RecurringJournalGenerationProcessor generator)
+        RecurringJournalGenerationProcessor generator,
+        RecurringJournalReversalProcessor reversals)
     {
         _db = db;
         _currentUser = currentUser;
@@ -41,6 +43,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
         _postingEngine = postingEngine;
         _audit = audit;
         _generator = generator;
+        _reversals = reversals;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -59,7 +62,8 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var exceptionCounts = await _db.RecurringJournalOccurrences.AsNoTracking()
             .Where(item => item.TenantId == TenantId && !item.IsDeleted && ids.Contains(item.TemplateId) &&
                 (item.Status == RecurringJournalOccurrenceStatus.Failed ||
-                 item.Status == RecurringJournalOccurrenceStatus.SubmissionFailed))
+                 item.Status == RecurringJournalOccurrenceStatus.SubmissionFailed ||
+                 item.ReversalStatus == RecurringJournalReversalStatus.Failed))
             .GroupBy(item => item.TemplateId)
             .Select(group => new { TemplateId = group.Key, Count = group.Count() })
             .ToDictionaryAsync(item => item.TemplateId, item => item.Count, cancellationToken);
@@ -110,11 +114,12 @@ public sealed class RecurringJournalService : IRecurringJournalService
         };
 
         ApplyDefinition(template, request);
-        ReplaceLines(template, request.Lines, now, userId, template.CreatedBy);
+        RecurringJournalLineDefinitionEditor.Apply(template, request.Lines, now, userId, template.CreatedBy,
+            allowExistingLineIds: false);
         _db.RecurringJournalTemplates.Add(template);
         await _db.SaveChangesAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateCreated, template.Id, null,
-            new { template.TemplateNumber, template.Name, template.Frequency, lineCount = template.Lines.Count }, null,
+            new { template.TemplateNumber, template.Name, template.Frequency, lineCount = template.Lines.Count(line => !line.IsDeleted) }, null,
             cancellationToken);
         return await RequireMappedAsync(template.Id, cancellationToken);
     }
@@ -132,7 +137,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
 
         SetRowVersion(template, request.RowVersion);
         await ValidateDefinitionAsync(request, TenantId, cancellationToken);
-        var before = new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count };
+        var before = new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count(line => !line.IsDeleted) };
         var now = DateTime.UtcNow;
         var userId = CurrentUserId();
         ApplyDefinition(template, request);
@@ -149,12 +154,12 @@ public sealed class RecurringJournalService : IRecurringJournalService
         template.UpdatedAt = now;
         template.UpdatedBy = _currentUser.UserName;
         template.LastModifiedById = userId;
-        _db.RecurringJournalTemplateLines.RemoveRange(template.Lines);
-        template.Lines = [];
-        ReplaceLines(template, request.Lines, now, userId, template.UpdatedBy);
+        var lineEdit = RecurringJournalLineDefinitionEditor.Apply(template, request.Lines, now, userId, template.UpdatedBy,
+            allowExistingLineIds: true);
+        _db.RecurringJournalTemplateLines.AddRange(lineEdit.AddedLines);
         await _db.SaveChangesAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.RecurringJournalTemplateUpdated, template.Id, before,
-            new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count }, null,
+            new { template.Name, template.Frequency, template.EffectiveFrom, template.EndDate, lineCount = template.Lines.Count(line => !line.IsDeleted) }, null,
             cancellationToken);
         return await RequireMappedAsync(template.Id, cancellationToken);
     }
@@ -224,6 +229,10 @@ public sealed class RecurringJournalService : IRecurringJournalService
     public Task<RecurringJournalGenerationResultDto> GenerateDueAsync(DateOnly asOfDate, CancellationToken cancellationToken = default) =>
         _generator.ProcessTenantAsync(TenantId, asOfDate, _currentUser.UserName ?? "Finance user", cancellationToken);
 
+    public Task<RecurringJournalReversalProcessingResultDto> ProcessDueReversalsAsync(
+        DateOnly asOfDate, Guid? occurrenceId = null, CancellationToken cancellationToken = default) =>
+        _reversals.ProcessTenantAsync(TenantId, asOfDate, occurrenceId, cancellationToken);
+
     public async Task<RecurringJournalOccurrenceDto> ApproveOccurrenceAsync(
         Guid occurrenceId,
         string comment,
@@ -240,12 +249,30 @@ public sealed class RecurringJournalService : IRecurringJournalService
         occurrence.ReviewedAt = DateTime.UtcNow;
         occurrence.ReviewedByUserId = reviewerId;
         occurrence.ReviewComment = comment.Trim();
+        if (occurrence.ReversalDueDate.HasValue)
+        {
+            // The approval screen explicitly tells the checker that this decision
+            // authorises both this occurrence and its exact mechanical reversal.
+            occurrence.ReversalStatus = RecurringJournalReversalStatus.Scheduled;
+            occurrence.ReversalAuthorizedAt = occurrence.ReviewedAt;
+            occurrence.ReversalAuthorizedByUserId = reviewerId;
+            occurrence.ReversalError = null;
+        }
         occurrence.UpdatedAt = DateTime.UtcNow;
         occurrence.UpdatedBy = _currentUser.UserName;
         occurrence.LastModifiedById = reviewerId;
         await _db.SaveChangesAsync(cancellationToken);
         await AuditAsync(FinanceAuditEvents.RecurringJournalOccurrenceApproved, occurrence.Id, null,
-            new { occurrence.Status, occurrence.ReviewedAt, occurrence.ReviewedByUserId }, comment, cancellationToken);
+            new
+            {
+                occurrence.Status,
+                occurrence.ReviewedAt,
+                occurrence.ReviewedByUserId,
+                occurrence.ReversalDueDate,
+                occurrence.ReversalStatus,
+                occurrence.ReversalAuthorizedAt,
+                occurrence.ReversalAuthorizedByUserId
+            }, comment, cancellationToken);
         return MapOccurrence(occurrence);
     }
 
@@ -289,7 +316,7 @@ public sealed class RecurringJournalService : IRecurringJournalService
         var snapshot = DeserializeSnapshot(occurrence.TemplateSnapshotJson);
         try
         {
-            var result = await _postingEngine.PostAsync(new FinancePostingRequestDto
+            var result = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
             {
                 SourceModule = "GL",
                 OriginModuleCode = "FIN",
@@ -301,13 +328,14 @@ public sealed class RecurringJournalService : IRecurringJournalService
                 Description = $"Recurring journal {snapshot.TemplateNumber}: {snapshot.Name}",
                 PostingDate = occurrence.EffectiveDate.ToDateTime(TimeOnly.MinValue),
                 JournalType = "Recurring",
-                BookClassification = snapshot.BookClassification,
+                AccountingBookCode = snapshot.BookClassification,
                 FunctionalCurrencyCode = snapshot.CurrencyCode,
                 IdempotencyKey = $"RecurringJournal:{TenantId:N}:{occurrence.Id:N}:Post",
                 ReturnExistingOnDuplicate = true,
                 Lines = snapshot.Lines.OrderBy(item => item.LineNumber).Select(line => new FinancePostingLineDto
                 {
                     AccountId = line.AccountId,
+                    SourceDocumentLineId = line.SourceLineId == Guid.Empty ? null : line.SourceLineId,
                     Description = line.Description ?? snapshot.Name,
                     DebitAmount = line.IsDebit ? line.FixedAmount : 0m,
                     CreditAmount = line.IsDebit ? 0m : line.FixedAmount,
@@ -425,6 +453,9 @@ public sealed class RecurringJournalService : IRecurringJournalService
             throw new InvalidOperationException("Maximum occurrences must be positive when supplied.");
         if (request.Lines.Count < 2)
             throw new InvalidOperationException("A recurring journal requires at least two balanced lines.");
+        if (request.Lines.Where(line => line.Id.HasValue).Select(line => line.Id!.Value).Distinct().Count() !=
+            request.Lines.Count(line => line.Id.HasValue))
+            throw new InvalidOperationException("Recurring-journal line identities must be unique.");
         if (request.Lines.Any(line => line.AccountId == Guid.Empty || line.FixedAmount <= 0))
             throw new InvalidOperationException("Every recurring-journal line requires an account and a positive fixed amount.");
 
@@ -541,10 +572,10 @@ public sealed class RecurringJournalService : IRecurringJournalService
             LastFailure = template.LastFailure,
             ExceptionCount = includeOccurrences ? template.Occurrences.Count(item => !item.IsDeleted &&
                 item.Status is RecurringJournalOccurrenceStatus.Failed or RecurringJournalOccurrenceStatus.SubmissionFailed) : 0,
-            TotalDebit = RoundMoney(template.Lines.Where(line => line.IsDebit).Sum(line => line.FixedAmount)),
-            TotalCredit = RoundMoney(template.Lines.Where(line => !line.IsDebit).Sum(line => line.FixedAmount)),
+            TotalDebit = RoundMoney(template.Lines.Where(line => !line.IsDeleted && line.IsDebit).Sum(line => line.FixedAmount)),
+            TotalCredit = RoundMoney(template.Lines.Where(line => !line.IsDeleted && !line.IsDebit).Sum(line => line.FixedAmount)),
             RowVersion = Convert.ToBase64String(template.RowVersion),
-            Lines = template.Lines.OrderBy(line => line.LineNumber).Select(line => new RecurringJournalTemplateLineDto
+            Lines = template.Lines.Where(line => !line.IsDeleted).OrderBy(line => line.LineNumber).Select(line => new RecurringJournalTemplateLineDto
             {
                 Id = line.Id, LineNumber = line.LineNumber, AccountId = line.AccountId,
                 AccountCode = accounts.GetValueOrDefault(line.AccountId)?.AccountCode ?? string.Empty,
@@ -568,6 +599,10 @@ public sealed class RecurringJournalService : IRecurringJournalService
         ScheduledDate = item.ScheduledDate, EffectiveDate = item.EffectiveDate, Status = item.Status,
         JournalEntryId = item.JournalEntryId, ReversalJournalEntryId = item.ReversalJournalEntryId,
         ReversalDueDate = item.ReversalDueDate, AttemptCount = item.AttemptCount, GeneratedAt = item.GeneratedAt,
+        ReversalStatus = item.ReversalStatus, ReversalAuthorizedAt = item.ReversalAuthorizedAt,
+        ReversalAuthorizedByUserId = item.ReversalAuthorizedByUserId, ReversalAttemptCount = item.ReversalAttemptCount,
+        ReversalLastAttemptAt = item.ReversalLastAttemptAt, ReversalError = item.ReversalError,
+        ReversalPostingEventId = item.ReversalPostingEventId, ReversalProcessedBy = item.ReversalProcessedBy,
         ReviewedAt = item.ReviewedAt, ReviewedByUserId = item.ReviewedByUserId, ReviewComment = item.ReviewComment,
         PostedAt = item.PostedAt, PostedByUserId = item.PostedByUserId, ReversedAt = item.ReversedAt,
         ErrorMessage = item.ErrorMessage, AdjustmentExplanation = item.AdjustmentExplanation
@@ -594,23 +629,6 @@ public sealed class RecurringJournalService : IRecurringJournalService
         template.AutoReverse = request.AutoReverse;
         template.ReversalRule = request.AutoReverse ? request.ReversalRule : RecurringJournalReversalRule.None;
         template.ReversalDayOffset = request.AutoReverse ? request.ReversalDayOffset : null;
-    }
-
-    private static void ReplaceLines(RecurringJournalTemplate template, IReadOnlyList<RecurringJournalTemplateLineInputDto> lines,
-        DateTime now, Guid? userId, string? userName)
-    {
-        var number = 1;
-        foreach (var input in lines)
-        {
-            template.Lines.Add(new RecurringJournalTemplateLine
-            {
-                Id = Guid.NewGuid(), TenantId = template.TenantId, TemplateId = template.Id, LineNumber = number++,
-                AccountId = input.AccountId, IsDebit = input.IsDebit, FixedAmount = RoundMoney(input.FixedAmount),
-                Description = NormalizeOptional(input.Description, 500),
-                DimensionValuesJson = string.IsNullOrWhiteSpace(input.DimensionValuesJson) ? "{}" : input.DimensionValuesJson.Trim(),
-                CreatedAt = now, CreatedBy = userName, CreatedById = userId
-            });
-        }
     }
 
     private async Task<string> ResolveFunctionalCurrencyAsync(Guid tenantId, CancellationToken cancellationToken)
@@ -812,6 +830,9 @@ public sealed class RecurringJournalGenerationProcessor
                         ReversalDueDate = await ResolveReversalDueDateAsync(template, effective, cancellationToken),
                         CreatedAt = DateTime.UtcNow, CreatedBy = actor
                     };
+                    occurrence.ReversalStatus = occurrence.ReversalDueDate.HasValue
+                        ? RecurringJournalReversalStatus.PendingAuthorization
+                        : RecurringJournalReversalStatus.NotApplicable;
                     _db.RecurringJournalOccurrences.Add(occurrence);
                     template.GeneratedOccurrenceCount++;
                     template.LastGeneratedDueDate = scheduled;
@@ -914,12 +935,13 @@ internal sealed record RecurringJournalSnapshot(
     public static RecurringJournalSnapshot From(RecurringJournalTemplate template) => new(
         template.TemplateNumber, template.Name, template.BookClassification, template.CurrencyCode,
         template.ReferencePattern, template.Frequency, template.AutoReverse, template.ReversalRule,
-        template.ReversalDayOffset, template.Lines.OrderBy(line => line.LineNumber).Select(line =>
-            new RecurringJournalSnapshotLine(line.LineNumber, line.AccountId, line.IsDebit, line.FixedAmount,
+        template.ReversalDayOffset, template.Lines.Where(line => !line.IsDeleted).OrderBy(line => line.LineNumber).Select(line =>
+            new RecurringJournalSnapshotLine(line.Id, line.LineNumber, line.AccountId, line.IsDebit, line.FixedAmount,
                 line.Description, line.DimensionValuesJson)).ToList());
 }
 
 internal sealed record RecurringJournalSnapshotLine(
+    Guid SourceLineId,
     int LineNumber,
     Guid AccountId,
     bool IsDebit,

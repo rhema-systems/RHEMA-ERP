@@ -28,9 +28,16 @@ public class FinancialStatementLayout : TenantEntity
 
     public bool IsActive { get; set; } = true;
 
+    /// <summary>Protected standards are clone-only templates and cannot be edited or retired in place.</summary>
+    public bool IsProtectedStandard { get; set; }
+
+    public Guid? StandardSourceLayoutId { get; set; }
+
     public int Revision { get; set; } = 1;
 
     public virtual AccountingBook AccountingBook { get; set; } = null!;
+
+    public virtual FinancialStatementLayout? StandardSourceLayout { get; set; }
 
     public virtual ICollection<FinancialStatementLayoutVersion> Versions { get; set; }
         = new List<FinancialStatementLayoutVersion>();
@@ -65,10 +72,30 @@ public class FinancialStatementLayoutVersion : TenantEntity
 
     public int Revision { get; set; } = 1;
 
+    [MaxLength(20)]
+    public string? PublicationSnapshotSchemaVersion { get; set; }
+
+    public Guid? PublishedAccountingBookId { get; set; }
+
+    [MaxLength(20)]
+    public string? PublishedAccountingBookCode { get; set; }
+
+    [MaxLength(100)]
+    public string? PublishedAccountingBookName { get; set; }
+
+    [MaxLength(64)]
+    public string? HierarchyFingerprint { get; set; }
+
+    [MaxLength(64)]
+    public string? ResolutionFingerprint { get; set; }
+
     public virtual FinancialStatementLayout FinancialStatementLayout { get; set; } = null!;
 
     public virtual ICollection<FinancialStatementRow> Rows { get; set; }
         = new List<FinancialStatementRow>();
+
+    public virtual ICollection<FinancialStatementPublicationAccount> PublicationAccounts { get; set; }
+        = new List<FinancialStatementPublicationAccount>();
 }
 
 /// <summary>
@@ -136,6 +163,11 @@ public class FinancialStatementRowMapping : TenantEntity
     /// </summary>
     public Guid? AccountId { get; set; }
 
+    /// <summary>Stable classification selector for Classification mappings.</summary>
+    public Guid? AccountClassificationId { get; set; }
+
+    public bool IncludeClassificationDescendants { get; set; } = true;
+
     [MaxLength(100)]
     public string? FromAccountNumber { get; set; }
 
@@ -145,4 +177,52 @@ public class FinancialStatementRowMapping : TenantEntity
     public virtual FinancialStatementRow FinancialStatementRow { get; set; } = null!;
 
     public virtual Account? Account { get; set; }
+
+    public virtual AccountClassification? AccountClassification { get; set; }
+}
+
+/// <summary>
+/// Immutable resolved membership captured when a layout version is published. Published execution
+/// never re-resolves live account, hierarchy, or classification membership.
+/// </summary>
+public sealed class FinancialStatementPublicationAccount : TenantEntity
+{
+    public Guid FinancialStatementLayoutVersionId { get; set; }
+    public Guid FinancialStatementRowId { get; set; }
+    public Guid FinancialStatementRowMappingId { get; set; }
+    public FinancialStatementRowMappingType MappingType { get; set; }
+    public Guid AccountId { get; set; }
+
+    [Required, MaxLength(50)]
+    public string RowCode { get; set; } = string.Empty;
+
+    [Required, MaxLength(100)]
+    public string AccountNumber { get; set; } = string.Empty;
+
+    [Required, MaxLength(200)]
+    public string AccountName { get; set; } = string.Empty;
+
+    public AccountType AccountType { get; set; }
+    public Guid AccountingBookId { get; set; }
+
+    [Required, MaxLength(20)]
+    public string AccountingBookCode { get; set; } = string.Empty;
+
+    public Guid? AccountClassificationId { get; set; }
+
+    [MaxLength(50)]
+    public string? ClassificationCode { get; set; }
+
+    [MaxLength(200)]
+    public string? ClassificationName { get; set; }
+
+    [MaxLength(1000)]
+    public string? ClassificationPath { get; set; }
+
+    [MaxLength(500)]
+    public string? MappingSelector { get; set; }
+
+    public FinancialStatementLayoutVersion FinancialStatementLayoutVersion { get; set; } = null!;
+    public FinancialStatementRow FinancialStatementRow { get; set; } = null!;
+    public FinancialStatementRowMapping FinancialStatementRowMapping { get; set; } = null!;
 }

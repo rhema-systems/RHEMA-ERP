@@ -1,4 +1,5 @@
 using ErpSystem.Data;
+using ErpSystem.Api.Controllers.Finance;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -9,6 +10,24 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 
 public sealed class FinanceConcurrencyHardeningTests
 {
+    [Theory]
+    [InlineData("Invoice", "AR_INVOICE_POSTING_BLOCKED")]
+    [InlineData("VendorInvoice", "AP_INVOICE_POSTING_BLOCKED")]
+    public void InvoiceApprovalPostingFailure_ShouldPreserveSafeValidationMessage(
+        string entityType,
+        string expectedCode)
+    {
+        const string validationMessage = "The configured tax account is missing.";
+
+        var result = FinanceApprovalsController.CreateInvoicePostingBusinessRuleException(
+            entityType,
+            new InvalidOperationException(validationMessage));
+
+        result.Code.Should().Be(expectedCode);
+        result.Message.Should().Be(validationMessage);
+        result.StatusCode.Should().Be(422);
+    }
+
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "QuantitySurveyFinalAcceptance")]
@@ -78,7 +97,7 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
-    public void FinancePostingEngine_ShouldRespectAmbientTransactionsAndUseAtomicBalanceDeltas()
+    public void FinancePostingEngine_ShouldRespectAmbientTransactionsAndUseBookScopedProjection()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "GL", "FinancePostingEngine.cs"));
@@ -86,11 +105,8 @@ public sealed class FinanceConcurrencyHardeningTests
         source.Should().Contain("CurrentTransaction", "posting must join an existing DbContext transaction when callers already opened one");
         source.Should().Contain("ExecutePostingAsync", "owned and ambient transaction paths should share one posting implementation");
         source.Should().Contain("IsSqlServer()", "SQL Server lock hints must not run against other relational providers used in dev/test");
-        source.Should().Contain("ExecuteSqlInterpolatedAsync", "account balance snapshots should be incremented atomically in the database");
-        source.Should().Contain("UPDLOCK", "same-account concurrent postings must serialize balance snapshot updates");
-        source.Should().Contain("ApplyTrackedAccountBalanceDeltasAsync", "non-SQL Server providers need a provider-neutral balance update path");
-        source.Should().NotContain("account.Balance += transaction", "balance snapshot updates must not use read-modify-write per transaction line");
-        source.Should().NotContain("account.Balance -= transaction", "balance snapshot updates must not use read-modify-write per transaction line");
+        source.Should().Contain("_bookBalances.ApplyPostingAsync", "posted lines must update exact-book projections");
+        source.Should().NotContain("ApplyTrackedAccountBalanceDeltasAsync", "the unscoped account snapshot must remain retired");
     }
 
     [Fact]
@@ -141,7 +157,7 @@ public sealed class FinanceConcurrencyHardeningTests
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Cash", "CashTransactionService.cs"));
-        var method = ExtractMember(source, "public async Task<CashTransactionDto> PostAsync", "public async Task DeleteAsync");
+        var method = ExtractMember(source, "private async Task<CashTransactionDto> PostAsync", "public async Task DeleteAsync");
 
         var transactionIndex = method.IndexOf("BeginTransactionAsync(cancellationToken)", StringComparison.Ordinal);
         var postingIndex = method.IndexOf("_financePostingEngine.PostAsync", StringComparison.Ordinal);
@@ -165,7 +181,7 @@ public sealed class FinanceConcurrencyHardeningTests
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "Cash", "CashTransactionService.cs"));
-        var method = ExtractMember(source, "public async Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync", "public async Task<CashTransactionDto> SubmitAsync");
+        var method = ExtractMember(source, "private async Task<(CashTransactionDto FromTransaction, CashTransactionDto ToTransaction)> CreateTransferAsync", "public async Task<CashTransactionDto> SubmitAsync");
 
         var transactionIndex = method.IndexOf("BeginTransactionAsync(IsolationLevel.Serializable", StringComparison.Ordinal);
         var numberingIndex = method.IndexOf("GenerateTransactionNumberAsync(FinanceDocumentTypes.BankTransfer", StringComparison.Ordinal);
@@ -204,7 +220,7 @@ public sealed class FinanceConcurrencyHardeningTests
         var serviceSource = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "VendorInvoiceService.cs"));
 
         var approvalsMethod = ExtractMember(approvalsSource, "private async Task FinalizeVendorInvoiceApprovalAsync", "private async Task RecordFinanceWorkflowAuditAsync");
-        var serviceMethod = ExtractMember(serviceSource, "public async Task<VendorInvoiceDto> ApproveAsync", "public async Task<VendorInvoiceDto> PostAsync");
+        var serviceMethod = ExtractMember(serviceSource, "private async Task<VendorInvoiceDto> ApproveCoreAsync", "public Task<VendorInvoiceDto> PostAsync");
 
         approvalsMethod.Should().NotContain("ProcessInventoryReceiptAsync", "the workbench approval path must leave every stock receipt to the governed purchase-receipt/inspection lifecycle");
         approvalsMethod.Should().NotContain("LineItemType == \"Inventory\"", "invoice approval must not contain a parallel inventory-receipt branch");
@@ -280,38 +296,35 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
-    public void SupplierReturns_ShouldValidateSourceLineOwnershipAndRemainingQuantities()
+    public void SupplierReturns_ShouldRemainQuarantinedUntilAuthoritativeProducerEvidenceExists()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Api", "Controllers", "Finance", "SupplierReturnsController.cs"));
-        var createMethod = ExtractMember(source, "public async Task<ActionResult<SupplierReturnDto>> Create", "[HttpPost(\"{id:guid}/approve\")]");
-        var validationRegion = ExtractMember(source, "private async Task<string?> ValidateSupplierReturnQuantitiesAsync", "private async Task PostSupplierDebitNoteThroughFinancePostingEngineAsync");
+        var createMethod = ExtractMember(source, "public ActionResult<SupplierReturnDto> Create", "[HttpPost(\"{id:guid}/approve\")]");
+        var quarantineMethod = ExtractMember(source, "private ObjectResult LegacyMutationUnavailable", "private IQueryable<SupplierReturn> BaseQuery");
 
-        createMethod.Should().Contain("ValidateSupplierReturnQuantitiesAsync(dto, tenantId, cancellationToken)", "server-side source validation must run before supplier return lines are persisted");
-        createMethod.IndexOf("ValidateSupplierReturnQuantitiesAsync(dto, tenantId, cancellationToken)", StringComparison.Ordinal)
-            .Should().BeLessThan(createMethod.IndexOf("supplierReturn.LineItems.Add", StringComparison.Ordinal), "supplier returns should not be created before source-line availability is checked");
-
-        validationRegion.Should().Contain("ValidateVendorInvoiceReturnQuantitiesAsync", "invoice-backed returns need source invoice line validation");
-        validationRegion.Should().Contain("ValidateFinanceGrvReturnQuantitiesAsync", "GRV-backed returns need source receipt line validation");
-        validationRegion.Should().Contain("does not belong to the selected supplier invoice", "source line IDs must belong to the selected invoice");
-        validationRegion.Should().Contain("does not belong to the selected finance GRV", "source line IDs must belong to the selected GRV");
-        validationRegion.Should().Contain("SupplierReturn.Status != SupplierReturnStatus.Cancelled", "previous non-cancelled returns must consume remaining quantity");
-        validationRegion.Should().Contain("submittedByLine", "duplicate submitted lines must be aggregated before checking availability");
-        validationRegion.Should().Contain("exceeds the remaining returnable quantity", "over-returns must fail at the API boundary");
+        createMethod.Should().Contain("LegacyMutationUnavailable(\"create\")", "Finance cannot originate Procurement or Inventory return evidence");
+        source.Should().Contain("LegacyMutationUnavailable(\"approve-and-post\")", "the former one-click approval/post path must also fail closed");
+        quarantineMethod.Should().Contain("StatusCodes.Status409Conflict");
+        quarantineMethod.Should().Contain("FIN-INT-012");
+        quarantineMethod.Should().Contain("FIN-INT-013");
+        source.Should().NotContain("ValidateSupplierReturnQuantitiesAsync", "validation of a legacy Finance-owned mutation must not re-enable the quarantined workflow");
+        source.Should().NotContain("PostSupplierDebitNoteThroughFinancePostingEngineAsync", "Finance must consume later producer evidence instead of manufacturing it here");
     }
 
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
-    public void FinanceApReturnCreatePage_ShouldUseFinancePurchaseReceiptRoutesForGrvs()
+    public void FinanceApReturnCreatePage_ShouldExposeTheQuarantinedProducerBoundary()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(root, "frontend", "src", "app", "finance", "ap", "returns", "create", "page.tsx"));
 
-        source.Should().Contain("'/finance/ap/purchase-receipts'", "GRV-backed supplier returns should call the finance purchase receipt list endpoint");
-        source.Should().Contain("`/finance/ap/purchase-receipts/${id}`", "GRV-backed supplier returns should call the finance purchase receipt detail endpoint");
-        source.Should().NotContain("'/ap/purchase-receipts'", "the AP route is not registered for finance GRV receipts");
-        source.Should().NotContain("`/ap/purchase-receipts/${id}`", "the AP route is not registered for finance GRV receipt details");
+        source.Should().Contain("The legacy Finance return wizard is quarantined");
+        source.Should().Contain("FIN-INT-012");
+        source.Should().Contain("FIN-INT-013");
+        source.Should().NotContain("'/finance/ap/purchase-receipts'", "the quarantined page must not call the former Finance-owned GRV route");
+        source.Should().NotContain("`/finance/ap/purchase-receipts/${id}`", "the quarantined page must not fetch mutable legacy GRV detail");
     }
 
     [Fact]
@@ -418,7 +431,7 @@ public sealed class FinanceConcurrencyHardeningTests
     public void CurrentArInvoiceMigration_ShouldRepairExistingLegacyCustomerIdTables()
     {
         var root = FindRepositoryRoot();
-        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260710100000_EnsureCurrentArInvoiceTables.cs"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260710100000_EnsureCurrentArInvoiceTables.cs"));
 
         var createMissingTableIndex = source.IndexOf("IF OBJECT_ID(N'[dbo].[Invoices]', N'U') IS NULL", StringComparison.Ordinal);
         var repairExistingTableIndex = source.IndexOf("IF COL_LENGTH(N'[dbo].[Invoices]', N'BusinessPartnerId') IS NULL", StringComparison.Ordinal);
@@ -437,10 +450,10 @@ public sealed class FinanceConcurrencyHardeningTests
     [Fact]
     [Trait("Category", "Architecture")]
     [Trait("Batch", "FinanceReviewHardening")]
-    public void SalesReturnBusinessPartnerMigration_ShouldBeDiscoveredByEfCore()
+    public void SalesReturnBusinessPartnerMigration_ShouldBeArchivedWhileTheCurrentBaselineIsDiscovered()
     {
         var root = FindRepositoryRoot();
-        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260717090000_UseBusinessPartnersForSalesReturnAccounting.cs"));
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260717090000_UseBusinessPartnersForSalesReturnAccounting.cs"));
 
         source.Should().Contain("[Microsoft.EntityFrameworkCore.Infrastructure.DbContext(typeof(ApplicationDbContext))]",
             "hand-written migrations need DbContext metadata when no generated designer partial is present");
@@ -455,8 +468,9 @@ public sealed class FinanceConcurrencyHardeningTests
         using var context = new ApplicationDbContext(options);
         var migrations = context.GetService<IMigrationsAssembly>().Migrations;
 
-        migrations.Should().ContainKey("20260717090000_UseBusinessPartnersForSalesReturnAccounting",
-            "the hand-written migration must be included in EF Core's migration assembly");
+        migrations.Should().ContainSingle()
+            .Which.Key.Should().Be("20260916132000_DisposableDevelopmentCurrentModelBaseline",
+                "legacy migration sources are retained byte-for-byte while only the true current-model baseline is compiled");
     }
 
     [Fact]
@@ -488,11 +502,14 @@ public sealed class FinanceConcurrencyHardeningTests
         service.Should().Contain("resolvePostingExchangeRate", "entry forms need one explicit contract for the rate validated by the posting engine");
         service.Should().Contain("return resolvedRate;", "the service must preserve the API snapshot rather than derive an inverse rate");
 
-        foreach (var pageSource in new[] { arInvoice, apInvoice, purchaseOrder })
+        foreach (var pageSource in new[] { arInvoice, apInvoice })
         {
-            pageSource.Should().Contain("resolvePostingExchangeRate(rateObj)");
-            pageSource.Should().NotContain("rawRate < 1", "the exchange-rate direction cannot be inferred from a rate being smaller than one");
+            pageSource.Should().Contain("loadApprovedInvoiceRate", "invoice entry must consume the governed date-scoped rate snapshot helper");
+            pageSource.Should().Contain("snapshot.rate", "invoice entry must preserve the approved API rate direction");
+            pageSource.Should().NotContain("rawRate < 1", "invoice entry cannot infer direction from rate magnitude");
         }
+        purchaseOrder.Should().Contain("resolvePostingExchangeRate(rateObj)");
+        purchaseOrder.Should().NotContain("rawRate < 1", "the purchase-order rate direction cannot be inferred from magnitude");
     }
 
     [Fact]
@@ -545,7 +562,7 @@ public sealed class FinanceConcurrencyHardeningTests
             root,
             "src",
             "ErpSystem.Data",
-            "Migrations",
+            "LegacyMigrationsArchive",
             "20260720110000_AlignCustomerPaymentsToBusinessPartners.cs"));
 
         source.Should().Contain("[Migration(\"20260720110000_AlignCustomerPaymentsToBusinessPartners\")]",
@@ -567,8 +584,9 @@ public sealed class FinanceConcurrencyHardeningTests
             .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=MigrationDiscovery;Trusted_Connection=True")
             .Options;
         using var context = new ApplicationDbContext(options);
-        context.GetService<IMigrationsAssembly>().Migrations.Should()
-            .ContainKey("20260720110000_AlignCustomerPaymentsToBusinessPartners");
+        context.GetService<IMigrationsAssembly>().Migrations.Should().ContainSingle()
+            .Which.Key.Should().Be("20260916132000_DisposableDevelopmentCurrentModelBaseline",
+                "the archived compatibility source remains auditable while the merged current-model baseline is the sole compiled migration");
     }
 
     [Fact]
@@ -670,8 +688,10 @@ public sealed class FinanceConcurrencyHardeningTests
             "workflow persistence must occur inside the shared atomic helper");
         atomicMethod.Should().Contain("CreateExecutionStrategy()",
             "the explicit transaction must run through the configured relational retry strategy");
-        atomicMethod.Should().Contain("BeginTransactionAsync(cancellationToken)",
+        atomicMethod.Should().Contain("BeginTransactionAsync(",
             "workflow completion and outcome application need one database transaction");
+        atomicMethod.Should().Contain("isolationLevel",
+            "the transaction must retain the entity-specific isolation decision inside the retry strategy");
         atomicMethod.Should().Contain("_workflowService.ProcessApprovalStepAsync",
             "workflow state changes must occur inside the transaction");
         atomicMethod.Should().Contain("ApplyApprovedOutcomeAsync",
@@ -702,7 +722,7 @@ public sealed class FinanceConcurrencyHardeningTests
             "PaymentService.cs"));
         var createMethod = ExtractMember(
             source,
-            "public async Task<CustomerPaymentDto> CreateAsync",
+            "private async Task<CustomerPaymentDto> CreateAsync",
             "public async Task<CustomerPaymentDto> UpdateAsync");
         var allocationMethod = ExtractMember(
             source,
@@ -733,6 +753,10 @@ public sealed class FinanceConcurrencyHardeningTests
             "allocation references must be validated before invoice or customer snapshots are changed");
         allocationMethod.Should().NotContain("skipping allocation",
             "missing or mismatched invoice references must fail rather than silently becoming unapplied cash");
+        allocationMethod.Should().NotContain("Capping",
+            "maker-entered cash and statutory deductions must never be silently rewritten");
+        allocationMethod.Should().Contain("Allocation would over-settle invoice",
+            "every over-allocation must fail closed for maker correction");
         resolverMethod.Should().Contain("i.TenantId == TenantId", "allocation invoice lookup must remain tenant-scoped");
         resolverMethod.Should().Contain("i.BusinessPartnerId != payment.CustomerId",
             "every allocated invoice must belong to the receipt customer");
@@ -756,18 +780,24 @@ public sealed class FinanceConcurrencyHardeningTests
             "WithholdingTaxCertificateService.cs"));
         var generateMethod = ExtractMember(
             source,
-            "public async Task<WhtCertificateDto> GenerateApCertificateAsync",
-            "private async Task<WhtCertificateDto> GenerateApCertificateCoreAsync");
+            "public Task<WhtCertificateDto> GenerateApCertificateAsync",
+            "public Task<WhtCertificateDto> ReissueApCertificateAsync");
         var coreMethod = ExtractMember(
             source,
-            "private async Task<WhtCertificateDto> GenerateApCertificateCoreAsync",
-            "public async Task<string> GetApCertificateHtmlAsync");
+            "private async Task<WhtCertificateDto> IssueCertificateCoreAsync",
+            "private async Task<WhtCertificateDto> ReissueCertificateCoreAsync");
+        var transactionHelper = ExtractMember(
+            source,
+            "private async Task<T> ExecuteSerializableAsync<T>",
+            "private async Task RecordCertificateAuditAsync");
 
-        generateMethod.Should().Contain("CreateExecutionStrategy",
+        generateMethod.Should().Contain("ExecuteSerializableAsync",
+            "certificate generation must use the shared serializable issuance boundary");
+        transactionHelper.Should().Contain("CreateExecutionStrategy",
             "SQL retry behavior must wrap the complete certificate assignment transaction");
-        generateMethod.Should().Contain("IsolationLevel.Serializable",
+        transactionHelper.Should().Contain("IsolationLevel.Serializable",
             "concurrent generated or manual certificate numbers must be serialized");
-        generateMethod.Should().Contain("GenerateApCertificateCoreAsync",
+        generateMethod.Should().Contain("IssueCertificateCoreAsync",
             "ambient and service-owned transactions must share one assignment implementation");
         coreMethod.Should().Contain("EnsureCertificateNumberIsUniqueAsync",
             "manual certificate numbers must remain tenant-unique");

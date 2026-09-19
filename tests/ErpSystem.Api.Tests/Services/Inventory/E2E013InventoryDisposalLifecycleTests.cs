@@ -1,4 +1,6 @@
 using ErpSystem.Api.Services.Inventory;
+using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.DTOs.Procurement;
@@ -38,6 +40,8 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         var completionId = Guid.NewGuid();
         var proceedsAccountId = Guid.NewGuid();
         var recoveryAccountId = Guid.NewGuid();
+        var inventoryControlAccountId = Guid.NewGuid();
+        var writeOffExpenseAccountId = Guid.NewGuid();
         var postingEventId = Guid.NewGuid();
         var journalEntryId = Guid.NewGuid();
 
@@ -110,10 +114,14 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         db.FinanceSettings.Add(new FinanceSettings
         {
             Id = Guid.NewGuid(), TenantId = tenantId, BaseCurrency = "GHS",
+            ControlAccountInventoryId = inventoryControlAccountId,
+            WriteOffExpenseAccountId = writeOffExpenseAccountId,
             WriteOffRecoveryAccountId = recoveryAccountId
         });
         db.Accounts.AddRange(
             Account(proceedsAccountId, tenantId, "101-E2E-013", "Disposal proceeds", AccountType.Asset),
+            Account(inventoryControlAccountId, tenantId, "141-E2E-013", "Inventory control", AccountType.Asset),
+            Account(writeOffExpenseAccountId, tenantId, "611-E2E-013", "Disposal write-off", AccountType.Expense),
             Account(recoveryAccountId, tenantId, "409-E2E-013", "Disposal recovery", AccountType.Revenue));
         await db.SaveChangesAsync();
 
@@ -150,65 +158,68 @@ public sealed class E2E013InventoryDisposalLifecycleTests
                 Success = true, Status = WorkflowInstanceStatus.Completed, WorkflowInstanceId = workflowInstanceId
             }, WorkflowOutcome.Approved));
 
-        CreateStockAdjustmentDto? adjustmentRequest = null;
-        var adjustmentId = Guid.NewGuid();
-        var adjustmentLineId = Guid.NewGuid();
+        InventoryDisposalStockAdjustmentRequest? adjustmentRequest = null;
         var adjustmentPostingEventId = Guid.NewGuid();
         var adjustmentJournalId = Guid.NewGuid();
-        var adjustment = new StockAdjustmentDetailDto
-        {
-            Id = adjustmentId,
-            AdjustmentNumber = "ADJ-E2E-013",
-            Status = "Draft",
-            RowVersion = string.Empty,
-            Items =
-            [
-                new StockAdjustmentItemDto
+        var valuationEventId = Guid.NewGuid();
+        var participant = new Mock<IInventoryDisposalStockAdjustmentParticipant>();
+        participant.Setup(value => value.PreviewAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InventoryDisposalStockAdjustmentRequest request, CancellationToken _) => new StockAdjustment
+            {
+                Id = request.AdjustmentId, TenantId = tenantId, AdjustmentNumber = request.AdjustmentNumber,
+                AdjustmentDate = request.PostingDateUtc, WarehouseId = request.Create.WarehouseId,
+                ReasonCode = request.Create.ReasonCode, Status = "Draft",
+                Items = request.Create.Items.Select((line, index) => new StockAdjustmentItem
                 {
-                    Id = adjustmentLineId, InventoryItemId = item.Id, LocationId = location.Id,
-                    AdjustmentQuantity = -4m, UnitCost = 12.5m, AdjustmentValue = -50m
-                }
-            ]
-        };
-        var adjustments = new Mock<IStockAdjustmentService>();
-        adjustments.Setup(value => value.CreateAsync(It.IsAny<CreateStockAdjustmentDto>(), executorId))
-            .ReturnsAsync((CreateStockAdjustmentDto request, Guid _) =>
+                    Id = request.ItemIds[index], TenantId = tenantId, AdjustmentId = request.AdjustmentId,
+                    InventoryItemId = line.InventoryItemId, LocationId = line.LocationId,
+                    LotNumber = line.LotNumber, BatchNumber = line.BatchNumber, SerialNumber = line.SerialNumber,
+                    AdjustmentQuantity = line.AdjustmentQuantity, UnitCost = line.UnitCost ?? 0m,
+                    AdjustmentValue = decimal.Round(line.AdjustmentQuantity * (line.UnitCost ?? 0m), 4),
+                    CreatedAt = request.PostingDateUtc
+                }).ToList()
+            });
+        participant.Setup(value => value.StageApprovedAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((InventoryDisposalStockAdjustmentRequest request, CancellationToken _) =>
             {
                 adjustmentRequest = request;
-                return adjustment;
+                return new StockAdjustment { Id = request.AdjustmentId, TenantId = tenantId, Status = "Approved" };
             });
-        adjustments.Setup(value => value.SubmitAsync(adjustmentId, executorId, It.IsAny<StockAdjustmentActionRequest>()))
-            .ReturnsAsync((Guid _, Guid _, StockAdjustmentActionRequest _) =>
+        participant.Setup(value => value.StagePostedAsync(It.IsAny<StockAdjustment>(), completionId,
+                adjustmentPostingEventId, adjustmentJournalId, It.IsAny<IReadOnlyDictionary<Guid, Guid>>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        var valuation = new StockAdjustmentValuationIntentBuilder(db);
+        var groups = new Mock<IFinanceProducerIntentGroupService>();
+        ProducerIntentGroupRequestDto? preparedGroup = null;
+        groups.Setup(value => value.PrepareAsync(It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((ProducerIntentGroupRequestDto request, CancellationToken _) =>
             {
-                adjustment.Status = "PendingApproval";
-                return adjustment;
+                preparedGroup = request;
+                return new ProducerIntentGroupDto { Id = request.ProducerIntentGroupId!.Value };
             });
-        adjustments.Setup(value => value.GetByIdAsync(adjustmentId)).ReturnsAsync(() => adjustment);
-        adjustments.Setup(value => value.DecideAsync(adjustmentId, completionId, It.IsAny<DecideStockAdjustmentRequest>()))
-            .ReturnsAsync((Guid _, Guid _, DecideStockAdjustmentRequest _) =>
+        groups.Setup(value => value.GetAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid id, CancellationToken _) => new ProducerIntentGroupDto
             {
-                adjustment.Status = "Approved";
-                return adjustment;
+                Id = id, Status = "Approved", PreparedByUserId = executorId, DecidedByUserId = completionId,
+                DecidedAtUtc = DateTime.UtcNow, GroupFingerprint = "E2E-GROUP",
+                ExpectedOwnerEffect = preparedGroup!.ExpectedOwnerEffect,
+                Members = preparedGroup.Members.Select((member, index) => new ProducerIntentGroupMemberDto
+                {
+                    MemberOrder = index + 1, MemberFingerprint = index == 0 ? "P" : "V",
+                    AccountingEvent = new AccountingEventDto { Id = member.AccountingEventId!.Value,
+                        RequestFingerprint = index == 0 ? "P" : "V" }
+                }).ToList()
             });
-        adjustments.Setup(value => value.PostAsync(adjustmentId, completionId, It.IsAny<StockAdjustmentActionRequest>()))
-            .ReturnsAsync((Guid _, Guid _, StockAdjustmentActionRequest _) =>
-            {
-                adjustment.Status = "Posted";
-                adjustment.FinancePostingEventId = adjustmentPostingEventId;
-                adjustment.FinanceJournalEntryId = adjustmentJournalId;
-                return adjustment;
-            });
-
-        FinancePostingRequestDto? financeRequest = null;
-        var finance = new Mock<IFinancePostingEngine>();
-        finance.Setup(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) => financeRequest = request)
-            .ReturnsAsync(new FinancePostingResultDto
-            {
-                PostingEventId = postingEventId, JournalEntryId = journalEntryId,
-                JournalEntryNumber = "JE-E2E-013", PostingStatus = "Posted",
-                FunctionalCurrencyCode = "GHS", TotalDebitAmount = 40m, TotalCreditAmount = 40m
-            });
+        var intents = new Mock<IFinanceProducerIntentService>();
+        var groupExecution = new Mock<IFinanceProducerIntentGroupApprovedExecution>();
+        Func<FinanceProducerIntentGroupApprovedExecutionResult,
+            FinanceProducerIntentGroupApprovedExecutionResult> compatibilityDecorator = value => value;
+        groupExecution.Setup(value => value.ExecuteWithCompatibilityResultInAmbientTransactionAsync(It.IsAny<Guid>(), It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<ProducerOwnerEffectReceiptDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid groupId, ProducerIntentGroupRequestDto request, ProducerOwnerEffectReceiptDto _, CancellationToken _) =>
+                compatibilityDecorator(new FinanceProducerIntentGroupApprovedExecutionResult(groupId, "E2E-GROUP", "Posted",
+                [new FinanceProducerIntentGroupMemberExecutionResult(1, "P", request.Members[0].AccountingEventId!.Value, "P", postingEventId, journalEntryId),
+                 new FinanceProducerIntentGroupMemberExecutionResult(2, "V", request.Members[1].AccountingEventId!.Value, "V", adjustmentPostingEventId, adjustmentJournalId)])));
+        var intentExecution = new Mock<IFinanceProducerApprovedExecution>();
         var controlEventRequests = new List<ProcurementControlEventWriteRequest>();
         var controlEvents = new Mock<IProcurementControlEventService>();
         controlEvents.Setup(value => value.RecordAsync(
@@ -217,7 +228,8 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             .ReturnsAsync(new ProcurementControlEventDto { Id = Guid.NewGuid(), TenantId = tenantId });
 
         var service = new InventoryDisposalService(db, current, access.Object, sod.Object, workflow.Object,
-            adjustments.Object, finance.Object, Mock.Of<IInventoryTrackingControlService>(), controlEvents.Object);
+            participant.Object, valuation, intents.Object, groups.Object, intentExecution.Object, groupExecution.Object,
+            Mock.Of<IInventoryTrackingControlService>(), controlEvents.Object);
         var identified = await service.CreateAsync(new CreateInventoryDisposalRequest
         {
             WarehouseId = warehouse.Id,
@@ -298,7 +310,7 @@ public sealed class E2E013InventoryDisposalLifecycleTests
             Comment = "Independent delegated authority approval."
         });
         current.UserId = executorId;
-        var staged = await service.StageExecutionAsync(identified.Id, new StageInventoryDisposalExecutionRequest
+        var stageRequest = new StageInventoryDisposalExecutionRequest
         {
             ProceedsAmount = 40m,
             ProceedsAccountId = proceedsAccountId,
@@ -314,23 +326,64 @@ public sealed class E2E013InventoryDisposalLifecycleTests
                     EvidenceReference = "Auction award and settlement evidence"
                 }
             ]
-        });
+        };
+        var staged = await service.StageExecutionAsync(identified.Id, stageRequest);
+        var stagedReplay = await service.StageExecutionAsync(identified.Id, stageRequest);
+        stagedReplay.Should().BeEquivalentTo(staged);
+        var conflictingStageReplay = new StageInventoryDisposalExecutionRequest
+        {
+            IdempotencyKey = stageRequest.IdempotencyKey,
+            RowVersion = staged.RowVersion,
+            ProceedsAmount = 41m
+        };
+        (await FluentActions.Awaiting(() => service.StageExecutionAsync(identified.Id, conflictingStageReplay)).Should()
+            .ThrowAsync<InventoryDisposalException>()).Which.Code.Should().Be("INV_DISPOSAL_IDEMPOTENCY_CONFLICT");
         current.UserId = completionId;
-        var completed = await service.CompleteAsync(identified.Id, new CompleteInventoryDisposalRequest
+        var completionRequest = new CompleteInventoryDisposalRequest
         {
             RowVersion = staged.RowVersion,
             IdempotencyKey = "e2e-013-complete",
             Comment = "Independently approve and post the linked stock adjustment and proceeds."
-        });
+        };
+        var corruptions = new Func<FinanceProducerIntentGroupApprovedExecutionResult,
+            FinanceProducerIntentGroupApprovedExecutionResult>[]
+        {
+            value => value with { ProducerIntentGroupId = Guid.NewGuid() },
+            value => value with { GroupFingerprint = "WRONG" },
+            value => value with { Members = [value.Members[0]] },
+            value => value with { Members = [value.Members[0], value.Members[0]] },
+            value => value with { Members = [value.Members[1] with { MemberOrder = 1 }, value.Members[0] with { MemberOrder = 2 }] },
+            value => value with { Members = [value.Members[0] with { AccountingEventId = Guid.NewGuid() }, value.Members[1]] },
+            value => value with { Members = [value.Members[0] with { MemberFingerprint = "WRONG" }, value.Members[1]] },
+            value => value with { Members = [value.Members[0] with { AccountingEventRequestFingerprint = "WRONG" }, value.Members[1]] },
+            value => value with { Members = [value.Members[0] with { FinancePostingEventId = Guid.Empty }, value.Members[1]] },
+            value => value with { Members = [value.Members[0], value.Members[1] with { JournalEntryId = Guid.Empty }] }
+        };
+        var stagedActionCount = staged.Actions.Count;
+        foreach (var corrupt in corruptions)
+        {
+            compatibilityDecorator = corrupt;
+            (await FluentActions.Awaiting(() => service.CompleteAsync(identified.Id, completionRequest)).Should()
+                .ThrowAsync<InventoryDisposalException>()).Which.Code.Should()
+                .Be("INV_DISPOSAL_FINANCE_COMPATIBILITY_INVALID");
+            var unchanged = await service.GetByIdAsync(identified.Id);
+            unchanged.Status.Should().Be(InventoryDisposalStatus.AdjustmentPending);
+            unchanged.Actions.Should().HaveCount(stagedActionCount);
+            unchanged.StockAdjustmentId.Should().Be(staged.StockAdjustmentId);
+        }
+        compatibilityDecorator = value => value;
+        var completed = await service.CompleteAsync(identified.Id, completionRequest);
+        var completedStageReplay = await service.StageExecutionAsync(identified.Id, stageRequest);
+        completedStageReplay.Should().BeEquivalentTo(completed);
 
         completed.Status.Should().Be(InventoryDisposalStatus.Completed);
-        completed.StockAdjustmentId.Should().Be(adjustmentId);
+        completed.StockAdjustmentId.Should().NotBeNull();
         completed.ProceedsAmount.Should().Be(40m);
         completed.ProceedsPostingEventId.Should().Be(postingEventId);
         completed.ProceedsJournalEntryId.Should().Be(journalEntryId);
         completed.Evidence.Should().Contain(value => value.Stage == "Identification");
         completed.Evidence.Should().Contain(value => value.Stage == "Execution");
-        completed.Actions.Select(value => value.ActionType).Should().ContainInOrder(
+        completed.Actions.Reverse().Select(value => value.ActionType).Should().ContainInOrder(
             InventoryDisposalActionType.Identified,
             InventoryDisposalActionType.AuditVerified,
             InventoryDisposalActionType.CommitteeScheduled,
@@ -344,29 +397,24 @@ public sealed class E2E013InventoryDisposalLifecycleTests
         completed.CommitteeMembers.Should().OnlyContain(value => value.RecommendApproval == true && !value.ConflictDeclared);
 
         adjustmentRequest.Should().NotBeNull();
-        adjustmentRequest!.ReasonCode.Should().Be(StockAdjustmentReasonCodes.WriteOff);
-        adjustmentRequest.Reference.Should().Be(completed.DisposalNumber);
-        adjustmentRequest.Items.Should().ContainSingle(value =>
+        adjustmentRequest!.Create.ReasonCode.Should().Be(StockAdjustmentReasonCodes.WriteOff);
+        adjustmentRequest.Create.Reference.Should().Be(completed.DisposalNumber);
+        adjustmentRequest.Create.Items.Should().ContainSingle(value =>
             value.InventoryItemId == item.Id && value.LocationId == location.Id && value.AdjustmentQuantity == -4m);
-        adjustmentRequest.Evidence.Should().HaveCount(2);
-        adjustments.Verify(value => value.SubmitAsync(adjustmentId, executorId, It.IsAny<StockAdjustmentActionRequest>()), Times.Once);
-        adjustments.Verify(value => value.DecideAsync(adjustmentId, completionId, It.IsAny<DecideStockAdjustmentRequest>()), Times.Once);
-        adjustments.Verify(value => value.PostAsync(adjustmentId, completionId, It.IsAny<StockAdjustmentActionRequest>()), Times.Once);
+        adjustmentRequest.Create.Evidence.Should().HaveCount(2);
+        participant.Verify(value => value.PreviewAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(3 + corruptions.Length * 2));
+        participant.Verify(value => value.StageApprovedAsync(It.IsAny<InventoryDisposalStockAdjustmentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Exactly(corruptions.Length + 1));
 
         sodRequest.Should().NotBeNull();
         sodRequest!.ProhibitedActorUserIds.Should().BeEquivalentTo(new[] { requesterId, auditorId }.Concat(committeeIds));
-        financeRequest.Should().NotBeNull();
-        financeRequest!.SourceModule.Should().Be("Inventory");
-        financeRequest.SourceDocumentType.Should().Be("InventoryDisposal");
-        financeRequest.SourceDocumentId.Should().Be(identified.Id);
-        financeRequest.SourceDocumentTenantId.Should().Be(tenantId);
-        financeRequest.IdempotencyKey.Should().Contain(identified.Id.ToString("N"));
-        financeRequest.Lines.Sum(value => value.DebitAmount).Should().Be(40m);
-        financeRequest.Lines.Sum(value => value.CreditAmount).Should().Be(40m);
-        financeRequest.Lines.Should().ContainSingle(value =>
-            value.AccountId == proceedsAccountId && value.DebitAmount == 40m && value.CreditAmount == 0m);
-        financeRequest.Lines.Should().ContainSingle(value =>
-            value.AccountId == recoveryAccountId && value.CreditAmount == 40m && value.DebitAmount == 0m);
+        groups.Verify(value => value.PrepareAsync(It.Is<ProducerIntentGroupRequestDto>(group =>
+            group.Members.Count == 2 && group.Members[0].PostingRequest.SourceDocumentType == "InventoryDisposal" &&
+            group.Members[1].PostingRequest.SourceDocumentType == "StockAdjustment"), It.IsAny<CancellationToken>()), Times.Once);
+        groupExecution.Verify(value => value.ExecuteWithCompatibilityResultInAmbientTransactionAsync(
+            It.IsAny<Guid>(), It.IsAny<ProducerIntentGroupRequestDto>(), It.IsAny<ProducerOwnerEffectReceiptDto>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(corruptions.Length + 1));
         controlEventRequests.Should().HaveCount(completed.Actions.Count);
         controlEventRequests.Should().OnlyContain(value =>
             value.RuleCode == "INV-020" && value.DecisionKeys.Count == 14 &&

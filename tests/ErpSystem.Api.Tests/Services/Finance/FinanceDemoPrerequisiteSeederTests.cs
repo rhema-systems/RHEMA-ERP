@@ -79,7 +79,7 @@ public sealed class FinanceDemoPrerequisiteSeederTests
     }
 
     [Fact]
-    public async Task AccountCombinationSeed_ShouldCreateApprovedSubsetAndRemainIdempotent()
+    public async Task AccountCombinationSeed_DoesNotDuplicateTransactionDimensionsIntoAccountIdentity()
     {
         await using var context = CreateContext();
         var tenantId = Guid.NewGuid();
@@ -128,11 +128,8 @@ public sealed class FinanceDemoPrerequisiteSeederTests
 
         var firstCount = await context.Accounts.CountAsync(account =>
             account.TenantId == tenantId && account.CreatedBy == "System (Finance Demo)");
-        firstCount.Should().Be(15);
-        (await context.Accounts.SingleAsync(account => account.AccountNumber == "300-6500-P101"))
-            .RequireProjectCode.Should().BeTrue();
-        (await context.Accounts.SingleAsync(account => account.AccountNumber == "100-1002-0000"))
-            .CurrencyCode.Should().Be("USD");
+        firstCount.Should().Be(0);
+        (await context.Accounts.CountAsync(account => account.TenantId == tenantId)).Should().Be(9);
 
         await (Task)seedMethod.Invoke(seeder, new object[] { tenantId, DateTime.UtcNow })!;
         await context.SaveChangesAsync();
@@ -159,7 +156,6 @@ public sealed class FinanceDemoPrerequisiteSeederTests
             SegmentLength = code == "ACCT" ? 4 : code == "DEPT" ? 3 : 4,
             DataType = "Alphanumeric",
             LookupTableRequired = !isNatural,
-            IsMandatory = true,
             IsReportingDimension = true,
             IsNaturalAccount = isNatural,
             IsActive = true,

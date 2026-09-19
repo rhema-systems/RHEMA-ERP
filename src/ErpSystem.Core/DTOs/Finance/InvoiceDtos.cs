@@ -146,7 +146,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? TaxGroupId { get; set; }
         public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
-        public decimal DiscountPercentage { get; set; } = 0; // AR-specific
+        [Range(typeof(decimal), "0", "100")]
+        public decimal DiscountPercentage { get; set; } = 0; // AR line trade discount
 
         [MaxLength(50)]
         public string? Unit { get; set; }

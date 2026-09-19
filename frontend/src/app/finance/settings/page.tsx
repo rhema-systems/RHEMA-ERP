@@ -12,7 +12,7 @@ import { Switch } from '@/components/ui/switch';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote, ShieldCheck, Undo2 } from 'lucide-react';
+import { Settings, Lock, AlertTriangle, Save, DollarSign, Layers, Check, ChevronsUpDown, Banknote, ShieldCheck, Undo2, Tags, BookOpen } from 'lucide-react';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type { FinanceSettings, UpdateFinanceSettingsDto, Account } from '@/types/finance';
 import { useToast } from '@/hooks/use-toast';
@@ -101,7 +101,11 @@ export default function FinanceSettingsPage() {
         baseCurrency: 'GHS',
         retainedEarningsAccountId: undefined,
         unrealizedGainLossAccountId: undefined,
+        unrealizedFxGainAccountId: undefined,
+        unrealizedFxLossAccountId: undefined,
         realizedGainLossAccountId: undefined,
+        realizedFxGainAccountId: undefined,
+        realizedFxLossAccountId: undefined,
         suspenseAccountId: undefined,
         controlAccountArId: undefined,
         controlAccountApId: undefined,
@@ -114,7 +118,6 @@ export default function FinanceSettingsPage() {
         discountAllowedAccountId: undefined,
         discountReceivedAccountId: undefined,
         migrationClearingAccountId: undefined,
-        openingBalanceAutoRoutingEnabled: true,
         bankDepositPolicy: 'DepositIntact',
         requireBankDepositPrimaryEvidence: true,
         autoPostBankDepositAfterApproval: true,
@@ -160,7 +163,11 @@ export default function FinanceSettingsPage() {
                 baseCurrency: data.baseCurrency,
                 retainedEarningsAccountId: data.retainedEarningsAccountId,
                 unrealizedGainLossAccountId: data.unrealizedGainLossAccountId,
+                unrealizedFxGainAccountId: data.unrealizedFxGainAccountId,
+                unrealizedFxLossAccountId: data.unrealizedFxLossAccountId,
                 realizedGainLossAccountId: data.realizedGainLossAccountId,
+                realizedFxGainAccountId: data.realizedFxGainAccountId,
+                realizedFxLossAccountId: data.realizedFxLossAccountId,
                 suspenseAccountId: data.suspenseAccountId,
                 controlAccountArId: data.controlAccountArId,
                 controlAccountApId: data.controlAccountApId,
@@ -173,7 +180,6 @@ export default function FinanceSettingsPage() {
                 discountAllowedAccountId: data.discountAllowedAccountId,
                 discountReceivedAccountId: data.discountReceivedAccountId,
                 migrationClearingAccountId: data.migrationClearingAccountId,
-                openingBalanceAutoRoutingEnabled: data.openingBalanceAutoRoutingEnabled ?? true,
                 bankDepositPolicy: data.bankDepositPolicy ?? 'DepositIntact',
                 requireBankDepositPrimaryEvidence: data.requireBankDepositPrimaryEvidence ?? true,
                 autoPostBankDepositAfterApproval: data.autoPostBankDepositAfterApproval ?? true,
@@ -324,6 +330,18 @@ export default function FinanceSettingsPage() {
                                 </Button>
                             </Link>
                         )}
+                        <Link href="/finance/settings/account-classifications">
+                            <Button variant="outline" size="sm">
+                                <Tags className="mr-2 h-4 w-4" />
+                                Account Classifications
+                            </Button>
+                        </Link>
+                        <Link href="/finance/settings/accounting-books">
+                            <Button variant="outline" size="sm">
+                                <BookOpen className="mr-2 h-4 w-4" />
+                                Accounting Books
+                            </Button>
+                        </Link>
                         <Link href="/finance/accounts">
                             <Button variant="outline" size="sm">
                                 <DollarSign className="mr-2 h-4 w-4" />
@@ -423,7 +441,7 @@ export default function FinanceSettingsPage() {
                         <div>
                             <Label htmlFor="directionalRates">Enforce directional rates</Label>
                             <p className="text-sm text-muted-foreground">
-                                Enable after approved Buying and Selling rates have been loaded for every active currency.
+                                Saving is blocked until every active foreign currency has approved Daily rates for all configured transaction quote sides.
                             </p>
                         </div>
                         <Switch
@@ -583,6 +601,7 @@ export default function FinanceSettingsPage() {
                                     <SelectItem value="Split">Split at case capture</SelectItem>
                                 </SelectContent>
                             </Select>
+                            <p className="text-xs text-muted-foreground">Initial treatment on a new returned-cheque case. Users may change it at case capture.</p>
                         </div>
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
@@ -602,8 +621,8 @@ export default function FinanceSettingsPage() {
                         </div>
                     )}
                     <div className="grid gap-4 md:grid-cols-3">
-                        <div className="space-y-2"><Label>Statement date tolerance (days)</Label><Input type="number" min={0} max={30} value={formData.bankStatementMatchDateToleranceDays ?? 3} onChange={event => setFormData({ ...formData, bankStatementMatchDateToleranceDays: Number(event.target.value) })} /></div>
-                        <div className="space-y-2"><Label>Cheque clearing period (days)</Label><Input type="number" min={0} max={90} value={formData.chequeClearingPeriodDays ?? 3} onChange={event => setFormData({ ...formData, chequeClearingPeriodDays: Number(event.target.value) })} /></div>
+                        <div className="space-y-2"><Label>Statement date tolerance (calendar days)</Label><Input type="number" min={0} max={30} value={formData.bankStatementMatchDateToleranceDays ?? 3} onChange={event => setFormData({ ...formData, bankStatementMatchDateToleranceDays: Number(event.target.value) })} /><p className="text-xs text-muted-foreground">Limits auto-match candidates by book-to-statement date difference. Manual review can still match an exception.</p></div>
+                        <div className="space-y-2"><Label>Cheque clearing period (calendar days)</Label><Input type="number" min={0} max={90} value={formData.chequeClearingPeriodDays ?? 3} onChange={event => setFormData({ ...formData, chequeClearingPeriodDays: Number(event.target.value) })} /><p className="text-xs text-muted-foreground">Shows an advisory expected clearing date for cheque receipts; it does not post or settle them automatically.</p></div>
                         <div className="space-y-2"><Label>Returned-cheque bank charge GL</Label><AccountPicker id="returnedChequeBankCharge" value={formData.returnedChequeBankChargeAccountId} placeholder="Search expense accounts..." accounts={accounts.filter(account => account.accountType === 'Expense')} onChange={value => setFormData({ ...formData, returnedChequeBankChargeAccountId: value })} /></div>
                     </div>
                     <Alert>
@@ -690,34 +709,40 @@ export default function FinanceSettingsPage() {
                         </p>
                     </div>
 
-                    <div className="space-y-2">
-                        <Label htmlFor="unrealizedGainLoss">Unrealized Gain/Loss Account</Label>
-                        <AccountPicker
-                            id="unrealizedGainLoss"
-                            value={formData.unrealizedGainLossAccountId}
-                            placeholder="Search revenue/expense accounts..."
-                            disabled={settings?.transactionsExist}
-                            accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
-                            onChange={(value) => setFormData({ ...formData, unrealizedGainLossAccountId: value })}
-                        />
-                        <p className="text-sm text-muted-foreground">
-                            Used for currency revaluation entries
-                        </p>
-                    </div>
-
-                    <div className="space-y-2">
-                        <Label htmlFor="realizedGainLoss">Realized Gain/Loss Account</Label>
-                        <AccountPicker
-                            id="realizedGainLoss"
-                            value={formData.realizedGainLossAccountId}
-                            placeholder="Search revenue/expense accounts..."
-                            disabled={settings?.transactionsExist}
-                            accounts={accounts.filter(a => a.accountType === 'Revenue' || a.accountType === 'Expense')}
-                            onChange={(value) => setFormData({ ...formData, realizedGainLossAccountId: value })}
-                        />
-                        <p className="text-sm text-muted-foreground">
-                            Used for settled foreign currency transactions
-                        </p>
+                    <div className="space-y-4 rounded-lg border p-4">
+                        <div>
+                            <h3 className="font-semibold">Foreign Exchange Gain/Loss Accounts</h3>
+                            <p className="text-sm text-muted-foreground">Separate gain and loss mappings are enforced by revaluation and settlement posting. These mappings remain configurable after transactions exist and every change is audited.</p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                            <div className="space-y-2">
+                                <Label htmlFor="unrealizedFxGain">Unrealized FX Gain</Label>
+                                <AccountPicker id="unrealizedFxGain" value={formData.unrealizedFxGainAccountId} placeholder="Search revenue accounts..." accounts={accounts.filter(a => a.accountType === 'Revenue')} onChange={(value) => setFormData({ ...formData, unrealizedFxGainAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Credit side of favorable closing revaluation movements.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="unrealizedFxLoss">Unrealized FX Loss</Label>
+                                <AccountPicker id="unrealizedFxLoss" value={formData.unrealizedFxLossAccountId} placeholder="Search expense accounts..." accounts={accounts.filter(a => a.accountType === 'Expense')} onChange={(value) => setFormData({ ...formData, unrealizedFxLossAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Debit side of adverse closing revaluation movements.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="realizedFxGain">Realized FX Gain</Label>
+                                <AccountPicker id="realizedFxGain" value={formData.realizedFxGainAccountId} placeholder="Search revenue accounts..." accounts={accounts.filter(a => a.accountType === 'Revenue')} onChange={(value) => setFormData({ ...formData, realizedFxGainAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Used when invoices, receipts, payments and other FX items settle favorably.</p>
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="realizedFxLoss">Realized FX Loss</Label>
+                                <AccountPicker id="realizedFxLoss" value={formData.realizedFxLossAccountId} placeholder="Search expense accounts..." accounts={accounts.filter(a => a.accountType === 'Expense')} onChange={(value) => setFormData({ ...formData, realizedFxLossAccountId: value })} />
+                                <p className="text-xs text-muted-foreground">Used when invoices, receipts, payments and other FX items settle adversely.</p>
+                            </div>
+                        </div>
+                        {(formData.unrealizedGainLossAccountId || formData.realizedGainLossAccountId) && (
+                            <Alert>
+                                <AlertTriangle className="h-4 w-4" />
+                                <AlertTitle>Legacy combined mappings retained</AlertTitle>
+                                <AlertDescription>The old combined gain/loss mappings remain stored for compatibility. New controlled postings use the separate mappings above.</AlertDescription>
+                            </Alert>
+                        )}
                     </div>
 
                     <div className="space-y-2">
@@ -734,29 +759,6 @@ export default function FinanceSettingsPage() {
                             Used as the offset account for opening-balance migration postings.
                         </p>
                     </div>
-                    <div className="rounded-md border border-dashed bg-muted/20 p-3">
-                        <div className="flex items-center justify-between">
-                            <div className="space-y-1">
-                                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                                    Advanced / Legacy Manual GL Opening Balance
-                                </p>
-                                <Label htmlFor="openingBalanceAutoRouting">Manual GL Opening Balance Auto-Routing</Label>
-                                <p className="text-sm text-muted-foreground">
-                                    Applies only to manual GL journals with type Opening Balance. Controlled OpeningBalanceBatch,
-                                    AR opening invoices, AP opening bills, and subledger opening adjustments use explicit balanced
-                                    postings and do not read this toggle.
-                                </p>
-                            </div>
-                            <Switch
-                                id="openingBalanceAutoRouting"
-                                checked={formData.openingBalanceAutoRoutingEnabled ?? true}
-                                onCheckedChange={(checked) =>
-                                    setFormData({ ...formData, openingBalanceAutoRoutingEnabled: checked })
-                                }
-                            />
-                        </div>
-                    </div>
-
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t">
                         <div className="space-y-2">
                             <Label htmlFor="controlAccountAr">Accounts Receivable (AR) Control</Label>

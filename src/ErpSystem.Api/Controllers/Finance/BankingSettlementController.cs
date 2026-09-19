@@ -111,6 +111,13 @@ public sealed class BankingSettlementController : ControllerBase
         CancellationToken cancellationToken)
         => Ok(await _service.UpdateDepositAsync(id, dto, cancellationToken));
 
+    [HttpPut("deposits/{id:guid}/dimensions")]
+    public async Task<ActionResult<BankDepositDto>> UpdateDepositDimensions(
+        Guid id,
+        [FromBody] FinanceSourceDocumentDimensionInputDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.UpdateDepositDimensionsAsync(id, dto, cancellationToken));
+
     [HttpPost("deposits/{id:guid}/attachments")]
     public async Task<ActionResult<BankDepositDto>> LinkDepositAttachment(
         Guid id,
@@ -191,6 +198,13 @@ public sealed class BankingSettlementController : ControllerBase
         var item = await _service.CreateReturnedChequeAsync(dto, cancellationToken);
         return CreatedAtAction(nameof(GetReturnedCheque), new { id = item.Id }, item);
     }
+
+    [HttpPut("returned-cheques/{id:guid}/dimensions")]
+    public async Task<ActionResult<ReturnedChequeCaseDto>> UpdateReturnedChequeDimensions(
+        Guid id,
+        [FromBody] FinanceSourceDocumentDimensionInputDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _service.UpdateReturnedChequeDimensionsAsync(id, dto, cancellationToken));
 
     [HttpPost("returned-cheques/{id:guid}/attachments")]
     public async Task<ActionResult<ReturnedChequeCaseDto>> LinkReturnedChequeAttachment(

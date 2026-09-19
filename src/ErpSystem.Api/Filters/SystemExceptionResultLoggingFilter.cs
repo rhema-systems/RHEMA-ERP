@@ -65,8 +65,9 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
             return;
         }
 
-        var statusCode = objectResult.StatusCode ?? StatusCodes.Status500InternalServerError;
-        if (statusCode < StatusCodes.Status400BadRequest)
+        var statusCode = objectResult.StatusCode
+            ?? (objectResult.Value as ProblemDetails)?.Status;
+        if (!statusCode.HasValue || statusCode.Value < StatusCodes.Status400BadRequest)
         {
             return;
         }
@@ -82,18 +83,19 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
 
         // Preserve existing anonymous 4xx contracts. TryGetProblem still creates
         // an internal ProblemDetails snapshot so the failure is searchable.
-        if (statusCode < StatusCodes.Status500InternalServerError &&
+        if (statusCode.Value < StatusCodes.Status500InternalServerError &&
             objectResult.Value is not string)
         {
             return;
         }
 
-        var isServerFailure = statusCode >= StatusCodes.Status500InternalServerError;
+        var effectiveStatusCode = statusCode.Value;
+        var isServerFailure = effectiveStatusCode >= StatusCodes.Status500InternalServerError;
         var traceId = context.HttpContext.TraceIdentifier;
         var legacyDetail = objectResult.Value as string;
         var problem = new ProblemDetails
         {
-            Status = statusCode,
+            Status = effectiveStatusCode,
             Title = isServerFailure ? "We couldn't complete your request" : "Request could not be completed",
             Detail = isServerFailure
                 ? $"Something went wrong while processing your request. Please try again. If the problem continues, contact your administrator. Reference ID: {traceId}."
@@ -102,10 +104,10 @@ public sealed class SystemExceptionResultLoggingFilter : IAsyncResultFilter
                     : legacyDetail.Trim(),
             Instance = context.HttpContext.Request.Path
         };
-        problem.Extensions["code"] = isServerFailure ? "UNEXPECTED_ERROR" : $"HTTP_{statusCode}";
+        problem.Extensions["code"] = isServerFailure ? "UNEXPECTED_ERROR" : $"HTTP_{effectiveStatusCode}";
         problem.Extensions["correlationId"] = traceId;
 
-        context.Result = new ObjectResult(problem) { StatusCode = statusCode };
+        context.Result = new ObjectResult(problem) { StatusCode = effectiveStatusCode };
     }
 
     private async Task TryPersistAsync(

@@ -107,7 +107,59 @@ public static class FinancePermissionPolicyMap
         var policies = controller switch
         {
             "Account" => AccountPolicy(action, methods),
-            "AccountingBooks" => One(FinancePermissions.ViewFinance),
+            "AccountingBooks" => action switch
+            {
+                "GetBooks" or "GetBook" => One(FinancePermissions.ViewFinance),
+                "Create" or "Update" => One(FinancePermissions.ManageAccountingBooks),
+                "RequestTransition" => One(FinancePermissions.RequestAccountingBookTransitions),
+                "ApproveTransition" or "RejectTransition" => One(FinancePermissions.ApproveAccountingBookTransitions),
+                _ => One(FinancePermissions.ViewFinance)
+            },
+            "AccountingBookPeriods" => action switch
+            {
+                "Get" => One(FinancePermissions.ViewFinance),
+                "Approve" or "Reject" => One(FinancePermissions.ApproveAccountingBookPeriods),
+                _ => One(FinancePermissions.ManageAccountingBookPeriods)
+            },
+            "AccountingBookInitialization" => action switch
+            {
+                "Get" or "GetReadiness" or "Prepare" => One(FinancePermissions.ViewFinance),
+                "Approve" or "Reject" => One(FinancePermissions.ApproveAccountingBookInitialization),
+                _ => One(FinancePermissions.ManageAccountingBookInitialization)
+            },
+            "AccountingBookApplicability" => action switch
+            {
+                "GetPolicies" or "GetEligibleBooks" => One(FinancePermissions.ViewAccountingBookApplicabilityPolicy),
+                "Approve" or "Reject" or "ApproveRetirement" or "RejectRetirement" => One(FinancePermissions.ApproveAccountingBookApplicabilityPolicy),
+                "Resolve" or "Freeze" => One(FinancePermissions.ResolveAccountingBookApplicability),
+                _ => One(FinancePermissions.ManageAccountingBookApplicabilityPolicy)
+            },
+            "AccountingEvents" => action switch
+            {
+                "Get" or "GetBook" => One(FinancePermissions.ViewAccountingEvents),
+                "Create" => One(FinancePermissions.PrepareAccountingEvents),
+                "Release" => One(FinancePermissions.OrchestrateAccountingEvents),
+                _ => One(FinancePermissions.ViewAccountingEvents)
+            },
+            "ProducerAccountingIntents" => action switch
+            {
+                "Prepare" => One(FinancePermissions.PrepareAccountingEvents),
+                "Approve" or "Reject" => One(FinancePermissions.OrchestrateAccountingEvents),
+                _ => One(FinancePermissions.ViewAccountingEvents)
+            },
+            "ProducerIntentGroups" => action switch
+            {
+                "Prepare" => One(FinancePermissions.PrepareAccountingEvents),
+                "Approve" or "Reject" => One(FinancePermissions.OrchestrateAccountingEvents),
+                _ => One(FinancePermissions.ViewAccountingEvents)
+            },
+            "AccountClassifications" => ReadOrManage(action, methods, FinancePermissions.ManageChartOfAccounts),
+            "AccountBookCurrencyPolicies" => action switch
+            {
+                "Get" => One(FinancePermissions.ViewFinance),
+                "Approve" or "Reject" => One(FinancePermissions.ApproveFxRevaluationPolicy),
+                _ => One(FinancePermissions.OverrideFxRevaluationPolicy)
+            },
             "Allocation" => AllocationPolicy(action),
             "VendorInvoice" => VendorInvoicePolicy(action),
             "VendorPayment" => VendorPaymentPolicy(action),
@@ -364,7 +416,8 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "PostJournalEntry" => One(FinancePermissions.PostJournalEntries),
-            "RunRevaluation" => One(FinancePermissions.RunFxRevaluation),
+            "RunRevaluation" => new[] { FinancePermissions.ViewFinance, FinancePermissions.RunFxRevaluation },
+            "ReverseRevaluation" => new[] { FinancePermissions.ViewFinance, FinancePermissions.RunFxRevaluation },
             _ when ReportActions.Contains(action) => One(FinancePermissions.RunFinanceReports),
             _ => One(FinancePermissions.ViewFinance)
         };
@@ -472,7 +525,7 @@ public static class FinancePermissionPolicyMap
     private static IReadOnlyList<string> OpeningBalancePolicy(string action)
         => action switch
         {
-            "Get" or "List" or "GetSubledgerReadiness" => One(FinancePermissions.ViewFinance),
+            "Get" or "List" or "GetSubledgerReadiness" or "GetReversals" => One(FinancePermissions.ViewFinance),
             "Diagnostics" => One(FinancePermissions.RunMigrationDiagnostics),
             // Fixed-asset batches are another preparation route into the same maker-checker
             // opening-balance aggregate; they must not inherit the more powerful adjustment
@@ -483,6 +536,7 @@ public static class FinancePermissionPolicyMap
                 or "CreateApWithholding" or "CreateArWithholding" or "Update" or "Validate"
                 => One(FinancePermissions.PrepareOpeningBalances),
             "Submit" => new[] { FinancePermissions.PrepareOpeningBalances, FinancePermissions.WorkflowSubmit },
+            "ReviewReversal" => One(FinancePermissions.ApproveOpeningBalanceReversal),
             _ => One(FinancePermissions.RunMigrationAdjustments)
         };
 
@@ -491,13 +545,13 @@ public static class FinancePermissionPolicyMap
         {
             "CompleteSetup" => One(FinancePermissions.ManageBankingSettings),
             "CreateLiquidityAccount" or "UpdateLiquidityAccount" => One(FinancePermissions.ManageLiquidityAccounts),
-            "CreateDeposit" or "UpdateDeposit" or "LinkDepositAttachment" or "UnlinkDepositAttachment" or "RegisterPostedPayment" =>
+            "CreateDeposit" or "UpdateDeposit" or "UpdateDepositDimensions" or "LinkDepositAttachment" or "UnlinkDepositAttachment" or "RegisterPostedPayment" =>
                 One(FinancePermissions.CreateBankDeposits),
             "SubmitDeposit" or "CancelDeposit" => One(FinancePermissions.SubmitBankDeposits),
             "ApproveDeposit" or "RejectDeposit" or "ReturnDeposit" => One(FinancePermissions.ApproveBankDeposits),
             "PostDeposit" => One(FinancePermissions.WorkflowPostAfterApproval),
             "ConfirmDeposit" => One(FinancePermissions.ConfirmBankDeposits),
-            "CreateReturnedCheque" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
+            "CreateReturnedCheque" or "UpdateReturnedChequeDimensions" or "LinkReturnedChequeAttachment" or "SubmitReturnedCheque" =>
                 One(FinancePermissions.ManageReturnedCheques),
             "ApproveReturnedCheque" or "RejectReturnedCheque" => One(FinancePermissions.ApproveBankDeposits),
             _ => One(FinancePermissions.ViewFinance)
@@ -616,14 +670,14 @@ public static class FinancePermissionPolicyMap
         => action switch
         {
             "PublishVersion" => One(FinancePermissions.PublishFinancialStatementLayouts),
-            "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "ReplaceDraftRows"
-                or "PreviewVersion" or "DownloadImportTemplate"
+            "CreateLayout" or "UpdateLayout" or "CreateDraftVersion" or "CloneProtectedStandard" or "ReplaceDraftRows"
+                or "DownloadImportTemplate"
                 or "PreviewJsonImport" or "CommitJsonImport"
                 or "PreviewWorkbookImport" or "CommitWorkbookImport"
                 or "PreviewLegacyMigration" or "CommitLegacyMigration" =>
                 One(FinancePermissions.ManageFinancialStatementLayouts),
             "ValidateVersion" => One(FinancePermissions.ManageFinancialStatementLayouts),
-            "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
+            "PreviewVersion" or "ExecutePublished" => One(FinancePermissions.RunFinanceReports),
             _ => One(FinancePermissions.ViewFinance)
         };
 

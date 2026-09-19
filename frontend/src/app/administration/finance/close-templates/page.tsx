@@ -1,15 +1,17 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CheckCircle2, ClipboardList, Loader2, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { CheckCircle2, ClipboardList, Eye, Loader2, Plus, RefreshCw, Save, ShieldCheck, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/hooks/use-toast';
+import { useAuth } from '@/hooks/use-auth';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import type {
     FinanceCloseTemplate,
@@ -24,7 +26,14 @@ const CLOSE_TYPES: Array<{ value: FinanceCloseType; label: string }> = [
     { value: 'YearEnd', label: 'Year-end' },
 ];
 
-const NON_WAIVABLE_CHECKS = new Set(['POSTING_INTEGRITY', 'TRIAL_BALANCE', 'FIXED_ASSET_DEPRECIATION']);
+const NON_WAIVABLE_CHECKS = new Set([
+    'POSTING_INTEGRITY',
+    'TRIAL_BALANCE',
+    'AP_CONTROL_RECONCILIATION',
+    'AR_CONTROL_RECONCILIATION',
+    'RECURRING_JOURNAL_EXCEPTIONS',
+    'FIXED_ASSET_DEPRECIATION',
+]);
 
 const withoutId = (task: FinanceCloseTemplateTask): Omit<FinanceCloseTemplateTask, 'id'> => {
     const { id: _id, ...definition } = task;
@@ -38,12 +47,17 @@ const withoutId = (task: FinanceCloseTemplateTask): Omit<FinanceCloseTemplateTas
  */
 export default function FinanceCloseTemplatesPage() {
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const canAdminister = hasPermission('Finance.Admin');
     const [templates, setTemplates] = useState<FinanceCloseTemplate[]>([]);
     const [draftId, setDraftId] = useState<string | null>(null);
     const [draft, setDraft] = useState<SaveFinanceCloseTemplateVersion | null>(null);
+    const [viewingTemplate, setViewingTemplate] = useState<FinanceCloseTemplate | null>(null);
     const [approvalDeclaration, setApprovalDeclaration] = useState('');
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [draftRevealRequest, setDraftRevealRequest] = useState(0);
+    const draftEditorRef = useRef<HTMLDivElement>(null);
 
     const loadTemplates = useCallback(async () => {
         try {
@@ -57,6 +71,17 @@ export default function FinanceCloseTemplatesPage() {
     }, [toast]);
 
     useEffect(() => { void loadTemplates(); }, [loadTemplates]);
+
+    useEffect(() => {
+        if (draftRevealRequest === 0) return;
+
+        const frame = window.requestAnimationFrame(() => {
+            draftEditorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            draftEditorRef.current?.focus({ preventScroll: true });
+        });
+
+        return () => window.cancelAnimationFrame(frame);
+    }, [draftRevealRequest]);
 
     const activeByType = useMemo(() => new Map(
         CLOSE_TYPES.map(type => [type.value, templates.find(template => template.closeType === type.value && template.isActive)])
@@ -72,6 +97,7 @@ export default function FinanceCloseTemplatesPage() {
             tasks: template.tasks.map(withoutId),
         });
         setApprovalDeclaration('');
+        setDraftRevealRequest(current => current + 1);
     };
 
     const updateTask = (
@@ -177,7 +203,7 @@ export default function FinanceCloseTemplatesPage() {
                                 <CardDescription>{active ? `${active.name} · ${active.templateCode} v${active.version}` : 'No approved template'}</CardDescription>
                             </CardHeader>
                             <CardContent>
-                                {active ? (
+                                {active && canAdminister ? (
                                     <Button className="w-full" variant="outline" onClick={() => openDraft(active, false)}>
                                         <Plus className="mr-2 h-4 w-4" /> Create next version
                                     </Button>
@@ -201,21 +227,67 @@ export default function FinanceCloseTemplatesPage() {
                             <Badge variant="outline">v{template.version}</Badge>
                             <Badge variant={template.isActive ? 'default' : 'secondary'}>{template.status}</Badge>
                             <span className="text-muted-foreground">{template.tasks.length} tasks</span>
-                            {template.status === 'Draft' ? (
-                                <Button className="ml-auto" size="sm" variant="outline" onClick={() => openDraft(template, true)}>Edit draft</Button>
-                            ) : null}
+                            <div className="ml-auto flex gap-2">
+                                <Button size="sm" variant="outline" onClick={() => setViewingTemplate(template)}>
+                                    <Eye className="mr-1 h-4 w-4" /> View steps
+                                </Button>
+                                {template.status === 'Draft' && canAdminister ? (
+                                    <Button size="sm" variant="outline" onClick={() => openDraft(template, true)}>Edit draft</Button>
+                                ) : null}
+                            </div>
                         </div>
                     ))}
                 </CardContent>
             </Card>
 
+            <Dialog open={Boolean(viewingTemplate)} onOpenChange={open => { if (!open) setViewingTemplate(null); }}>
+                <DialogContent className="max-h-[90vh] max-w-4xl overflow-y-auto">
+                    <DialogHeader>
+                        <DialogTitle>{viewingTemplate?.name} v{viewingTemplate?.version}</DialogTitle>
+                        <DialogDescription>
+                            Read-only control steps retained for this {viewingTemplate?.status.toLowerCase()} template version.
+                        </DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3">
+                        {viewingTemplate?.tasks
+                            .slice()
+                            .sort((left, right) => left.sequence - right.sequence)
+                            .map(task => (
+                                <div key={task.id || task.taskCode} className="rounded-md border p-3">
+                                    <div className="flex flex-wrap items-start justify-between gap-2">
+                                        <div>
+                                            <p className="font-medium">{task.sequence}. {task.title}</p>
+                                            <p className="text-sm text-muted-foreground">{task.taskCode} · {task.category}</p>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            <Badge variant={task.isMandatory ? 'default' : 'secondary'}>{task.isMandatory ? 'Mandatory' : 'Warning'}</Badge>
+                                            <Badge variant="outline">{task.isAutomated ? task.checkCode : 'Manual'}</Badge>
+                                            <Badge variant="outline">Due {task.dueDaysAfterPeriodEnd >= 0 ? '+' : ''}{task.dueDaysAfterPeriodEnd} day(s)</Badge>
+                                        </div>
+                                    </div>
+                                    {task.dependsOnTaskCode ? <p className="mt-2 text-sm">Depends on: <span className="font-medium">{task.dependsOnTaskCode}</span></p> : null}
+                                    {task.instructions ? <p className="mt-2 text-sm text-muted-foreground">{task.instructions}</p> : null}
+                                </div>
+                            ))}
+                    </div>
+                </DialogContent>
+            </Dialog>
+
             {draft ? (
-                <Card>
+                <Card ref={draftEditorRef} tabIndex={-1} className="scroll-mt-6 outline-none">
                     <CardHeader>
                         <CardTitle>{draftId ? 'Edit draft version' : 'Create next draft version'}</CardTitle>
                         <CardDescription>Automated check codes remain tied to the existing Finance providers; manual tasks are completed with retained evidence in the close workspace.</CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-5">
+                        <div className="rounded-md border border-blue-200 bg-blue-50/50 p-3" role="status">
+                            <p className="font-medium">{draftId ? 'Editing saved draft' : 'Unsaved next version'}</p>
+                            <p className="text-sm text-muted-foreground">
+                                {draftId
+                                    ? 'Changes remain in this draft until you save them. Activation still requires an independent Finance administrator.'
+                                    : 'This is a working copy of the active template. No new version is created until you select Save draft.'}
+                            </p>
+                        </div>
                         <div className="grid gap-4 md:grid-cols-3">
                             <div><Label>Template code</Label><Input value={draft.templateCode} disabled /></div>
                             <div className="md:col-span-2"><Label>Name</Label><Input value={draft.name} onChange={event => setDraft({ ...draft, name: event.target.value })} maxLength={160} /></div>

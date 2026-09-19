@@ -11,7 +11,7 @@ public sealed class CivilEngineeringWorksCaseInitiationMigrationGuardTests
     public void Migration_extends_the_existing_design_case_owner_with_legacy_safe_source_lineage_guards()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("ALTER TABLE dbo.ProjectCivilDesignCases ADD")

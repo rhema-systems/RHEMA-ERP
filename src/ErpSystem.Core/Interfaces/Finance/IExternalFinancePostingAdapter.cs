@@ -1,0 +1,18 @@
+using ErpSystem.Core.DTOs.Finance;
+
+namespace ErpSystem.Core.Interfaces.Finance;
+
+/// <summary>
+/// Finance-owned adapter for approved external source transactions. Producer modules consume this
+/// interface but cannot supply or impersonate Finance's trusted route metadata.
+/// </summary>
+public interface IExternalFinancePostingAdapter
+{
+    Task<FinanceSourceDocumentDimensionDto> ValidateDimensionsAsync(
+        FinanceExternalPostingEnvelopeV2Dto envelope,
+        CancellationToken cancellationToken = default);
+
+    Task<FinancePostingResultDto> PostAsync(
+        FinanceExternalPostingEnvelopeV2Dto envelope,
+        CancellationToken cancellationToken = default);
+}

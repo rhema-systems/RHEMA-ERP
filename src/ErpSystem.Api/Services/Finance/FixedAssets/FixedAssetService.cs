@@ -3,6 +3,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Api.Services.Finance;
@@ -11,11 +12,22 @@ using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using ClosedXML.Excel;
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 
 namespace ErpSystem.Api.Services.Finance.FixedAssets
 {
     public class FixedAssetService : IFixedAssetService
     {
+        private static readonly JsonSerializerOptions CapitalizationSnapshotJsonOptions = new()
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            PropertyNameCaseInsensitive = true,
+            Converters = { new JsonStringEnumConverter() }
+        };
+
         private readonly ApplicationDbContext _context;
         private readonly ICurrentUserService _currentUser;
         private readonly IAccountingBookService? _accountingBookService;
@@ -23,6 +35,12 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         private readonly IFinanceAuditService? _financeAuditService;
         private readonly IWorkflowService? _workflowService;
         private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
+        private readonly IFixedAssetDimensionService? _fixedAssetDimensions;
+
+        private static readonly FinancePostingProducerContext DirectCapitalizationProducer =
+            new(FinanceDimensionRouteId.FinanceFixedAssetCapitalization);
+        private static readonly FinancePostingProducerContext CapitalizationReversalProducer =
+            new(FinanceDimensionRouteId.FinanceFixedAssetCapitalizationReversal);
 
         public FixedAssetService(
         ApplicationDbContext context,
@@ -31,7 +49,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IWorkflowService? workflowService = null,
-        IFinanceReversalPolicyService? financeReversalPolicyService = null)
+        IFinanceReversalPolicyService? financeReversalPolicyService = null,
+        IFixedAssetDimensionService? fixedAssetDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -40,11 +59,16 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
         _financeReversalPolicyService = financeReversalPolicyService;
+        _fixedAssetDimensions = fixedAssetDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
     private string UserName => _currentUser.UserName ?? "system";
     private Guid CurrentUserGuid => Guid.TryParse(_currentUser.UserId, out var id) ? id : Guid.Empty;
+
+    public Task<IReadOnlyList<FixedAssetLocationOptionDto>> GetLocationOptionsAsync(
+        CancellationToken cancellationToken = default)
+        => FixedAssetLocationMaster.GetOptionsAsync(_context, TenantId, cancellationToken);
 
     private async Task<bool> AssetCodeExistsAsync(string assetCode, Guid? excludingAssetId = null)
     {
@@ -64,7 +88,32 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             .Where(a => a.TenantId == TenantId && a.Id == id)
             .FirstOrDefaultAsync();
 
-        return asset == null ? null : MapToDto(asset);
+        if (asset == null)
+            return null;
+        var result = MapToDto(asset);
+        var snapshot = TryReadCapitalizationApprovalSnapshot(asset);
+        if (_fixedAssetDimensions is not null && snapshot is not null
+            && !string.Equals(snapshot.SourceDocumentType, "ProcurementFixedAssetCapitalization", StringComparison.Ordinal))
+        {
+            var sourceDocumentId = DirectCapitalizationDocumentId(asset);
+            result.FinanceDimensions = await _fixedAssetDimensions.GetAsync(
+                DirectCapitalizationProducer,
+                sourceDocumentId,
+                snapshot.CapitalizationDate,
+                BuildDirectCapitalizationDimensionLines(
+                    asset,
+                    sourceDocumentId,
+                    snapshot.DebitAccountId,
+                    snapshot.CreditAccountId,
+                    snapshot.TransactionAmount,
+                    snapshot.TransactionCurrencyCode,
+                    snapshot.FunctionalCurrencyCode,
+                    snapshot.ExchangeRate,
+                    snapshot.ExchangeRateId,
+                    snapshot.ExchangeRateDate,
+                    snapshot.Reference));
+        }
+        return result;
     }
 
     public async Task<IEnumerable<FixedAssetDto>> GetAllAsync()
@@ -185,6 +234,18 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             .FirstOrDefaultAsync(a => a.TenantId == TenantId && a.Id == id)
             ?? throw new KeyNotFoundException("Fixed asset not found.");
 
+        if (asset.Status == FixedAssetStatus.PendingApproval)
+            throw new InvalidOperationException("A fixed asset pending capitalization approval cannot be edited. Reject or withdraw the request first.");
+        if (asset.Status == FixedAssetStatus.Acquired &&
+            asset.CapitalizationApprovalApprovedAt.HasValue &&
+            !asset.CapitalizationApprovalInvalidatedAt.HasValue)
+            throw new InvalidOperationException("An approved direct capitalization cannot be edited before posting. Invalidate and resubmit the approval evidence instead.");
+
+        var resetsRejectedApproval = asset.Status == FixedAssetStatus.Rejected;
+        var resetsReversedApproval = asset.Status == FixedAssetStatus.Draft &&
+            asset.CapitalizationReversalPostingEventId.HasValue &&
+            !string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash);
+
         var assetCode = NormalizeRequiredText(dto.AssetCode);
         if (string.IsNullOrWhiteSpace(assetCode))
         {
@@ -238,13 +299,18 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             asset.DiminishingBalanceRatePercent = RoundRate(dto.DiminishingBalanceRatePercent);
             asset.LifetimeProductionCapacity = dto.LifetimeProductionCapacity;
             asset.AccumulatedProductionUnits = 0m;
-            asset.Status = dto.Status;
+            asset.Status = resetsRejectedApproval || resetsReversedApproval
+                ? FixedAssetStatus.Draft
+                : dto.Status;
             asset.DisposalDate = dto.DisposalDate;
         }
         asset.MaintenanceAssetId = dto.MaintenanceAssetId;
         asset.SerialNumber = dto.SerialNumber;
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = UserName;
+
+        if (resetsRejectedApproval || resetsReversedApproval)
+            ClearCapitalizationApproval(asset);
 
         if (!isCapitalized && asset.Status == ErpSystem.Core.Enums.FixedAssetStatus.Draft)
         {
@@ -313,6 +379,11 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         {
             throw new InvalidOperationException("Capitalized fixed assets cannot be deleted. Use a controlled reversal or disposal workflow.");
         }
+        if (asset.Status == FixedAssetStatus.PendingApproval ||
+            (asset.Status == FixedAssetStatus.Acquired && asset.CapitalizationApprovalApprovedAt.HasValue))
+        {
+            throw new InvalidOperationException("Fixed assets with pending or approved capitalization evidence cannot be deleted.");
+        }
 
         _context.FixedAssets.Remove(asset);
         await _context.SaveChangesAsync();
@@ -361,6 +432,15 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             JournalEntryId = asset.JournalEntryId,
             PostingEventId = asset.PostingEventId,
             CapitalizedAt = asset.CapitalizedAt,
+            CapitalizationApprovalSnapshot = TryReadCapitalizationApprovalSnapshot(asset),
+            CapitalizationApprovalSnapshotHash = asset.CapitalizationApprovalSnapshotHash,
+            CapitalizationApprovalWorkflowInstanceId = asset.CapitalizationApprovalWorkflowInstanceId,
+            CapitalizationApprovalSubmittedByUserId = asset.CapitalizationApprovalSubmittedByUserId,
+            CapitalizationApprovalSubmittedAt = asset.CapitalizationApprovalSubmittedAt,
+            CapitalizationApprovalApprovedByUserId = asset.CapitalizationApprovalApprovedByUserId,
+            CapitalizationApprovalApprovedAt = asset.CapitalizationApprovalApprovedAt,
+            CapitalizationApprovalInvalidatedAt = asset.CapitalizationApprovalInvalidatedAt,
+            CapitalizationApprovalInvalidationReason = asset.CapitalizationApprovalInvalidationReason,
             CapitalizationReversalJournalEntryId = asset.CapitalizationReversalJournalEntryId,
             CapitalizationReversalPostingEventId = asset.CapitalizationReversalPostingEventId,
             CapitalizationReversedAt = asset.CapitalizationReversedAt,
@@ -419,52 +499,20 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         };
     }
 
-    private async Task<List<AccountingBook>> GetActivePostingBooksAsync(bool persistFallback = true)
+    private async Task<List<AccountingBook>> GetActivePostingBooksAsync()
     {
-        if (_accountingBookService != null)
-        {
-            await _accountingBookService.EnsureTenantDefaultsAsync();
-        }
-
         var books = await _context.AccountingBooks
             .Where(book => book.TenantId == TenantId && !book.IsDeleted && book.IsActive && book.AllowsPosting)
             .OrderBy(book => book.SortOrder)
             .ThenBy(book => book.Name)
             .ToListAsync();
 
-        if (books.Count > 0)
-        {
-            return books;
-        }
+        // Book setup is governed master data in C3. Fixed Assets must never create a book as a
+        // side effect because that would bypass lifecycle, maker-checker and initialization gates.
+        if (books.Count == 0)
+            throw new InvalidOperationException("No active posting accounting book is configured for this tenant.");
 
-        var fallbackBook = new AccountingBook
-        {
-            TenantId = TenantId,
-            Code = "IFRS",
-            Name = "IFRS",
-            Description = "Primary corporate reporting book for IFRS financial statements.",
-            Purpose = "Primary",
-            IsActive = true,
-            IsDefault = true,
-            AllowsPosting = true,
-            IsSystemDefined = true,
-            SortOrder = 10,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = UserName
-        };
-
-        if (persistFallback)
-        {
-            _context.AccountingBooks.Add(fallbackBook);
-            await _context.SaveChangesAsync();
-            // Do not clear the shared tracker here. This helper runs inside asset acquisition and
-            // capitalization workflows; clearing it detaches the caller's FixedAsset immediately
-            // before register/book values are updated, producing a successful response without a
-            // persisted register change. The saved fallback book can safely remain tracked for the
-            // remainder of the unit of work.
-        }
-
-        return new List<AccountingBook> { fallbackBook };
+        return books;
     }
 
     private static AccountingBook GetDefaultBook(IReadOnlyList<AccountingBook> books)
@@ -589,7 +637,11 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         var categoryRows = await _context.FixedAssetCategories
             .Where(c => c.TenantId == TenantId)
-            .Select(c => new { c.Code, c.Name, c.Id })
+            .Select(c => new
+            {
+                c.Code, c.Name, c.Id, c.DefaultMethod, c.DefaultUsefulLifeMonths,
+                c.DefaultDiminishingBalanceRatePercent, c.DefaultLifetimeProductionCapacity
+            })
             .ToListAsync();
 
         var categories = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
@@ -598,8 +650,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             AddLookupValue(categories, category.Code, category.Id);
             AddLookupValue(categories, category.Name, category.Id);
         }
+        var categoryDefaultsById = categoryRows.ToDictionary(category => category.Id);
 
-        var activeBooks = await GetActivePostingBooksAsync(persistFallback: !dryRun);
+        var activeBooks = await GetActivePostingBooksAsync();
         var booksByCode = activeBooks
             .GroupBy(book => NormalizeBookCode(book.Code), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
@@ -707,6 +760,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     var summaryValues = CalculateOpeningValues(summaryRow.Data);
                     var data = firstRow.Data;
                     var summaryData = summaryRow.Data;
+                    var categoryDefaults = categoryDefaultsById[firstRow.CategoryId];
 
                     var asset = new FixedAsset
                     {
@@ -723,12 +777,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                         TaxAmount = summaryData.TaxAmount ?? 0,
                         AcquisitionCost = summaryValues.AcquisitionCost,
                         NetBookValue = summaryValues.NetBookValue,
-                        DepreciationMethod = ErpSystem.Core.Enums.DepreciationMethod.StraightLine,
+                        DepreciationMethod = categoryDefaults.DefaultMethod,
                         DepreciationConvention = ErpSystem.Core.Enums.DepreciationConvention.FullMonth,
-                        UsefulLifeMonths = summaryData.UsefulLifeMonths ?? 36,
+                        UsefulLifeMonths = summaryData.UsefulLifeMonths ?? categoryDefaults.DefaultUsefulLifeMonths,
                         ResidualValue = summaryData.ResidualValue ?? 0,
+                        DiminishingBalanceRatePercent = categoryDefaults.DefaultDiminishingBalanceRatePercent,
+                        LifetimeProductionCapacity = categoryDefaults.DefaultLifetimeProductionCapacity,
                         SerialNumber = data.SerialNumber,
-                        Status = data.Status ?? ErpSystem.Core.Enums.FixedAssetStatus.Draft,
+                        Status = ErpSystem.Core.Enums.FixedAssetStatus.Draft,
                         CreatedAt = DateTime.UtcNow,
                         CreatedBy = UserName
                     };
@@ -754,7 +810,9 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                                 asset.PlacedInServiceDate,
                                 importRow.Data.OpeningAsOfDate,
                                 importRow.Data.OpeningYtdDepreciation ?? 0,
-                                openingValues.AccumulatedDepreciation > 0 ? "OpeningImport" : "Acquisition"));
+                                importRow.Data.OpeningAsOfDate.HasValue || openingValues.AccumulatedDepreciation > 0
+                                    ? "OpeningImport"
+                                    : "Acquisition"));
 
                             _context.AssetTransactions.Add(new AssetTransaction
                             {
@@ -1139,6 +1197,14 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         if (!string.IsNullOrWhiteSpace(data.RawStatus) && !data.Status.HasValue)
             errors.Add(new BulkImportErrorDto { RowNumber = rowNumber, AssetCode = data.AssetCode, Field = "Status", Error = "Invalid fixed asset status" });
+        else if (!string.IsNullOrWhiteSpace(data.RawStatus) && data.Status != FixedAssetStatus.Draft)
+            errors.Add(new BulkImportErrorDto
+            {
+                RowNumber = rowNumber,
+                AssetCode = data.AssetCode,
+                Field = "Status",
+                Error = "Fixed asset imports may only create controlled Draft records; approval, activation, depreciation and disposal states cannot be imported."
+            });
 
         return errors;
     }
@@ -1342,9 +1408,10 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
     public async Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(
         Guid id,
-        string? comments = null,
+        SubmitFixedAssetCapitalizationDto dto,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(dto);
         var asset = await _context.FixedAssets
             .Include(a => a.Category)
             .Include(a => a.BookValues)
@@ -1367,13 +1434,46 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 FinanceAuditEvents.FinancePostingBlockedAfterRejection,
                 asset,
                 reason: "Direct fixed asset capitalization was rejected by workflow.",
-                comment: comments);
+                comment: dto.Comments);
             throw new InvalidOperationException("Rejected fixed asset capitalization requests cannot be submitted again without updating the asset.");
+        }
+
+        var snapshot = await BuildCapitalizationApprovalSnapshotAsync(asset, dto, cancellationToken);
+        var snapshotJson = JsonSerializer.Serialize(snapshot, CapitalizationSnapshotJsonOptions);
+        var snapshotHash = HashCapitalizationEvidence(snapshotJson);
+
+        if (string.Equals(snapshot.SourceDocumentType, "FixedAsset", StringComparison.Ordinal)
+            && _fixedAssetDimensions is not null)
+        {
+            var sourceDocumentId = DirectCapitalizationDocumentId(asset);
+            var dimensionLines = BuildDirectCapitalizationDimensionLines(
+                asset, sourceDocumentId, snapshot.DebitAccountId, snapshot.CreditAccountId,
+                snapshot.TransactionAmount, snapshot.TransactionCurrencyCode,
+                snapshot.FunctionalCurrencyCode, snapshot.ExchangeRate,
+                snapshot.ExchangeRateId, snapshot.ExchangeRateDate, snapshot.Reference);
+            await _fixedAssetDimensions!.SynchronizeAsync(
+                DirectCapitalizationProducer,
+                sourceDocumentId,
+                snapshot.CapitalizationDate,
+                dimensionLines,
+                dto.FinanceDimensions,
+                inheritedAssetJournalBySourceLine: null,
+                "Fixed asset capitalization submitted for approval.",
+                cancellationToken);
+            await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                DirectCapitalizationProducer,
+                sourceDocumentId,
+                snapshot.CapitalizationDate,
+                dimensionLines,
+                cancellationToken);
         }
 
         if (_workflowService == null)
         {
+            ApplyCapitalizationApprovalSubmission(asset, snapshot, snapshotJson, snapshotHash, workflowInstanceId: null);
             asset.Status = FixedAssetStatus.Acquired;
+            asset.CapitalizationApprovalApprovedByUserId = CurrentUserGuid == Guid.Empty ? null : CurrentUserGuid;
+            asset.CapitalizationApprovalApprovedAt = DateTime.UtcNow;
             asset.UpdatedAt = DateTime.UtcNow;
             asset.UpdatedBy = UserName;
             await _context.SaveChangesAsync(cancellationToken);
@@ -1381,6 +1481,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         }
 
         asset.Status = FixedAssetStatus.PendingApproval;
+        ApplyCapitalizationApprovalSubmission(asset, snapshot, snapshotJson, snapshotHash, workflowInstanceId: null);
         asset.UpdatedAt = DateTime.UtcNow;
         asset.UpdatedBy = UserName;
         await _context.SaveChangesAsync(cancellationToken);
@@ -1393,9 +1494,19 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 asset,
                 afterValues: new { workflowResult.Status, workflowResult.Message },
                 reason: workflowResult.Message,
-                comment: comments);
+                comment: dto.Comments);
+            asset.Status = FixedAssetStatus.Draft;
+            asset.CapitalizationApprovalInvalidatedAt = DateTime.UtcNow;
+            asset.CapitalizationApprovalInvalidationReason = workflowResult.Message
+                ?? "Fixed asset capitalization workflow could not be started.";
+            asset.UpdatedAt = DateTime.UtcNow;
+            asset.UpdatedBy = UserName;
+            await _context.SaveChangesAsync(cancellationToken);
             throw new InvalidOperationException(workflowResult.Message ?? "Fixed asset capitalization workflow could not be started.");
         }
+
+        asset.CapitalizationApprovalWorkflowInstanceId = workflowResult.WorkflowInstanceId;
+        await _context.SaveChangesAsync(cancellationToken);
 
         await RecordFixedAssetAuditAsync(
             FinanceAuditEvents.FinanceWorkflowSubmitted,
@@ -1404,9 +1515,17 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             {
                 asset.Status,
                 workflowResult.WorkflowInstanceId,
-                Action = "DirectCapitalization"
+                Action = "DirectCapitalization",
+                SnapshotHash = snapshotHash,
+                snapshot.CapitalizationDate,
+                snapshot.TransactionAmount,
+                snapshot.FunctionalCurrencyCode,
+                snapshot.TransactionCurrencyCode,
+                snapshot.DebitAccountId,
+                snapshot.CreditAccountId,
+                snapshot.ExchangeRateId
             },
-            comment: comments ?? "Fixed asset direct capitalization submitted for workflow approval.");
+            comment: dto.Comments ?? "Fixed asset direct capitalization submitted for workflow approval.");
 
         return MapToDto(asset);
     }
@@ -1429,7 +1548,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             return MapToDto(asset);
         }
 
-        await EnsureDirectCapitalizationApprovedAsync(asset, dto.Reason);
+        dto = await ResolveApprovedDirectCapitalizationInstructionAsync(asset, dto, CancellationToken.None);
 
         try
         {
@@ -1462,14 +1581,47 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             // new cycle document id; otherwise the original, already-reversed event would be
             // returned as a duplicate and the corrected cost would never reach the ledger.
             var isCorrectedCapitalization = asset.CapitalizationReversalPostingEventId.HasValue;
-            var postingSourceDocumentType = isCorrectedCapitalization
-                ? "FixedAssetCapitalizationCycle"
-                : "FixedAsset";
-            var postingSourceDocumentId = isCorrectedCapitalization ? Guid.NewGuid() : asset.Id;
+            var postingSourceDocumentType = DirectCapitalizationProducer.Definition.DocumentType;
+            var postingSourceDocumentId = DirectCapitalizationDocumentId(asset);
 
-            var request = new FinancePostingRequestDto
+            var postingLines = BuildDirectCapitalizationDimensionLines(
+                asset,
+                postingSourceDocumentId,
+                assetAccount.Id,
+                creditAccountId,
+                transactionAmount,
+                transactionCurrency,
+                functionalCurrency,
+                exchangeRate,
+                dto.ExchangeRateId ?? asset.ExchangeRateId,
+                dto.ExchangeRateDate ?? asset.ExchangeRateDate ?? dto.CapitalizationDate.Date,
+                dto.Reference ?? asset.AssetCode);
+            if (_fixedAssetDimensions is not null)
             {
-                SourceModule = "FA",
+                var existingDimensionAssignments = await _context.FinanceSourceDimensionAssignments
+                    .AsNoTracking().AnyAsync(item => item.TenantId == TenantId
+                        && item.RouteId == DirectCapitalizationProducer.RouteId
+                        && item.SourceDocumentId == postingSourceDocumentId && !item.IsDeleted);
+                if (!existingDimensionAssignments)
+                    await _fixedAssetDimensions.SynchronizeAsync(
+                        DirectCapitalizationProducer,
+                        postingSourceDocumentId,
+                        dto.CapitalizationDate.Date,
+                        postingLines,
+                        dto.FinanceDimensions,
+                        inheritedAssetJournalBySourceLine: null,
+                        "Fixed asset capitalization prepared for posting.");
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DirectCapitalizationProducer,
+                    postingSourceDocumentId,
+                    dto.CapitalizationDate.Date,
+                    postingLines);
+            }
+
+            var request = new FinancePostingRequestV2Dto
+            {
+                SourceModule = DirectCapitalizationProducer.Definition.PostingSourceModule,
+                OriginModuleCode = FinanceModuleLockCatalog.Finance,
                 SourceDocumentType = postingSourceDocumentType,
                 SourceDocumentId = postingSourceDocumentId,
                 SourceDocumentTenantId = asset.TenantId,
@@ -1478,46 +1630,16 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                 Description = $"Fixed asset capitalization - {asset.AssetCode} - {asset.Name}",
                 PostingDate = dto.CapitalizationDate.Date,
                 JournalType = "Fixed Asset Capitalization",
-                BookClassification = "IFRS",
+                AccountingBookCode = "IFRS",
                 FunctionalCurrencyCode = functionalCurrency,
                 IdempotencyKey = isCorrectedCapitalization
                     ? $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize:{postingSourceDocumentId:N}"
                     : $"FA:FixedAsset:{asset.TenantId:N}:{asset.Id:N}:Capitalize",
                 ReturnExistingOnDuplicate = true,
-                Lines = new[]
-                {
-                    BuildCapitalizationPostingLine(
-                        assetAccount.Id,
-                        $"Capitalize fixed asset {asset.AssetCode}",
-                        transactionAmount,
-                        0m,
-                        transactionCurrency,
-                        functionalCurrency,
-                        exchangeRate,
-                        dto.ExchangeRateId ?? asset.ExchangeRateId,
-                        dto.ExchangeRateDate ?? asset.ExchangeRateDate ?? dto.CapitalizationDate.Date,
-                        dto.Reference ?? asset.AssetCode,
-                        1,
-                        $"FixedAssetId={asset.Id:N}",
-                        "FA-Capitalization"),
-                    BuildCapitalizationPostingLine(
-                        creditAccountId,
-                        $"Clear capitalization source for fixed asset {asset.AssetCode}",
-                        0m,
-                        transactionAmount,
-                        transactionCurrency,
-                        functionalCurrency,
-                        exchangeRate,
-                        dto.ExchangeRateId ?? asset.ExchangeRateId,
-                        dto.ExchangeRateDate ?? asset.ExchangeRateDate ?? dto.CapitalizationDate.Date,
-                        dto.Reference ?? asset.AssetCode,
-                        2,
-                        $"FixedAssetId={asset.Id:N}",
-                        "FA-Capitalization-Clearing")
-                }
+                Lines = postingLines
             };
 
-            var postingResult = await _financePostingEngine.PostAsync(request);
+            var postingResult = await _financePostingEngine.PostAsync(request, DirectCapitalizationProducer);
 
             // The central posting engine clears the DbContext tracker when it recovers from a
             // concurrent/idempotent insert race. That recovery is correct for the ledger, but it
@@ -1622,7 +1744,26 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         if (dto.FunctionalAmount <= 0m || RoundMoney(dto.FunctionalAmount) != RoundMoney(handoff.FunctionalAmount))
             throw new InvalidOperationException("The capitalization amount does not match the reserved Procurement receipt carrying value.");
 
-        await EnsureDirectCapitalizationApprovedAsync(asset, dto.Reason);
+        var approvedSnapshot = await ResolveApprovedSourceCapitalizationSnapshotAsync(
+            asset,
+            dto.CapitalizationId,
+            dto.PurchaseOrderItemId,
+            dto.Reason,
+            cancellationToken);
+        if (approvedSnapshot != null)
+        {
+            dto = new ProcurementFixedAssetPostingInstructionDto
+            {
+                CapitalizationId = dto.CapitalizationId,
+                PurchaseOrderItemId = dto.PurchaseOrderItemId,
+                CapitalizationDate = approvedSnapshot.CapitalizationDate,
+                InventoryControlAccountId = approvedSnapshot.CreditAccountId,
+                FunctionalAmount = approvedSnapshot.TransactionAmount,
+                FunctionalCurrencyCode = approvedSnapshot.FunctionalCurrencyCode,
+                SourceReference = approvedSnapshot.Reference,
+                Reason = approvedSnapshot.Reason
+            };
+        }
         var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
         var assetAccount = await ResolveFixedAssetPostingAccountAsync(
             category.AssetAccountId,
@@ -1632,7 +1773,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
 
         var functionalCurrency = NormalizeCurrency(dto.FunctionalCurrencyCode, "GHS");
         var amount = RoundMoney(dto.FunctionalAmount);
-        var request = new FinancePostingRequestDto
+        var request = new FinancePostingRequestV2Dto
         {
             SourceModule = "FA",
             // Period locks use the canonical short code, while journal inquiry retains the
@@ -1646,7 +1787,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
             Description = $"Capitalize accepted procured asset {asset.AssetCode} - {asset.Name}",
             PostingDate = dto.CapitalizationDate.Date,
             JournalType = "Fixed Asset Capitalization",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FA:ProcurementFixedAssetCapitalization:{asset.TenantId:N}:{dto.CapitalizationId:N}:Post:v1",
             ReturnExistingOnDuplicate = true,
@@ -1903,10 +2044,19 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     policy.Reason,
                     policy.ReversalDate,
                     cancellationToken);
-                var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                var reversalLines = plan.ReversalLines.ToList();
+                if (_fixedAssetDimensions is not null)
+                    await _fixedAssetDimensions.RegisterHistoricalReversalAsync(
+                        CapitalizationReversalProducer,
+                        request.Id,
+                        plan.OriginalJournalEntryId,
+                        reversalLines,
+                        cancellationToken);
+                var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                 {
-                    SourceModule = "FA",
-                    SourceDocumentType = "FixedAssetCapitalizationReversal",
+                    SourceModule = CapitalizationReversalProducer.Definition.PostingSourceModule,
+                    OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                    SourceDocumentType = CapitalizationReversalProducer.Definition.DocumentType,
                     SourceDocumentId = request.Id,
                     SourceDocumentTenantId = request.TenantId,
                     PostingAction = "Reverse",
@@ -1914,7 +2064,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     Description = $"Reverse fixed asset capitalization - {request.FixedAsset.AssetCode}",
                     PostingDate = plan.ReversalDate,
                     JournalType = "Fixed Asset Capitalization Reversal",
-                    BookClassification = "IFRS",
+                    AccountingBookCode = "IFRS",
                     FunctionalCurrencyCode = request.FixedAsset.FunctionalCurrencyCode,
                     ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                     ReversalReason = policy.Reason,
@@ -1924,8 +2074,8 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
                     ReversalType = "FA Capitalization",
                     IdempotencyKey = $"FA:FixedAsset:{request.TenantId:N}:{request.FixedAssetId:N}:CapitalizationReverse:{request.Id:N}",
                     ReturnExistingOnDuplicate = true,
-                    Lines = plan.ReversalLines
-                }, cancellationToken);
+                    Lines = reversalLines
+                }, CapitalizationReversalProducer, cancellationToken);
 
                 // The posting engine may clear the shared DbContext tracker while resolving an
                 // idempotency race (for example, two operators posting the approved request at
@@ -2818,6 +2968,70 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         };
     }
 
+    private static Guid DirectCapitalizationDocumentId(FixedAsset asset) =>
+        asset.CapitalizationReversalPostingEventId.HasValue
+            ? FinanceSourceLineIdentity.Create(
+                asset.Id,
+                "CAPITALIZATION-CYCLE",
+                asset.CapitalizationReversalPostingEventId.Value)
+            : asset.Id;
+
+    private static List<FinancePostingLineDto> BuildDirectCapitalizationDimensionLines(
+        FixedAsset asset,
+        Guid sourceDocumentId,
+        Guid debitAccountId,
+        Guid creditAccountId,
+        decimal transactionAmount,
+        string transactionCurrency,
+        string functionalCurrency,
+        decimal exchangeRate,
+        Guid? exchangeRateId,
+        DateTime? exchangeRateDate,
+        string reference)
+    {
+        var debit = BuildCapitalizationPostingLine(
+            debitAccountId,
+            $"Capitalize fixed asset {asset.AssetCode}",
+            transactionAmount,
+            0m,
+            transactionCurrency,
+            functionalCurrency,
+            exchangeRate,
+            exchangeRateId,
+            exchangeRateDate,
+            reference,
+            1,
+            $"FixedAssetId={asset.Id:N}",
+            "FA-Capitalization");
+        debit.SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+            sourceDocumentId, "ASSET-COST", asset.Id);
+
+        var credit = BuildCapitalizationPostingLine(
+            creditAccountId,
+            $"Clear capitalization source for fixed asset {asset.AssetCode}",
+            0m,
+            transactionAmount,
+            transactionCurrency,
+            functionalCurrency,
+            exchangeRate,
+            exchangeRateId,
+            exchangeRateDate,
+            reference,
+            2,
+            $"FixedAssetId={asset.Id:N}",
+            "FA-Capitalization-Clearing");
+        credit.SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+            sourceDocumentId, "CAPITALIZATION-CLEARING", asset.Id);
+        return [debit, credit];
+    }
+
+    private void EnsureFixedAssetDimensionsConfigured()
+    {
+        if (_fixedAssetDimensions is null)
+            throw new InvalidOperationException(
+                "Finance fixed-asset dimensions are not configured for this posting route.");
+    }
+
     private static bool IsFixedAssetLine(VendorInvoiceLineItem line)
         => string.Equals(line.LineItemType, "FixedAsset", StringComparison.OrdinalIgnoreCase)
             || string.Equals(line.LineItemType, "Fixed Asset", StringComparison.OrdinalIgnoreCase)
@@ -3028,42 +3242,450 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets
         FailureReason = request.FailureReason
     };
 
-    private async Task EnsureDirectCapitalizationApprovedAsync(FixedAsset asset, string? reason)
+    private async Task<CapitalizeFixedAssetDto> ResolveApprovedDirectCapitalizationInstructionAsync(
+        FixedAsset asset,
+        CapitalizeFixedAssetDto requested,
+        CancellationToken cancellationToken)
     {
         if (_workflowService == null)
         {
-            return;
+            return requested;
         }
+
+        if (asset.Status != FixedAssetStatus.Acquired)
+        {
+            var message = asset.Status switch
+            {
+                FixedAssetStatus.PendingApproval => "Direct fixed asset capitalization is pending workflow approval.",
+                FixedAssetStatus.Rejected => "Direct fixed asset capitalization was rejected and cannot be posted.",
+                _ => "Direct fixed asset capitalization must be submitted and approved before posting."
+            };
+
+            await RecordFixedAssetAuditAsync(
+                asset.Status == FixedAssetStatus.Rejected
+                    ? FinanceAuditEvents.FinancePostingBlockedAfterRejection
+                    : FinanceAuditEvents.FinancePostingBlockedPendingApproval,
+                asset,
+                afterValues: new { asset.Status },
+                reason: message,
+                comment: requested.Reason);
+            throw new InvalidOperationException(message);
+        }
+
+        var snapshot = ReadVerifiedCapitalizationApprovalSnapshot(asset);
+        if (!string.Equals(snapshot.SourceDocumentType, "FixedAsset", StringComparison.Ordinal) ||
+            snapshot.SourceDocumentId != asset.Id)
+        {
+            throw new InvalidOperationException(
+                "This approval snapshot belongs to a source-owned capitalization. Post it through the owning Finance adapter.");
+        }
+        if (!asset.CapitalizationApprovalApprovedAt.HasValue ||
+            !asset.CapitalizationApprovalApprovedByUserId.HasValue ||
+            asset.CapitalizationApprovalInvalidatedAt.HasValue)
+        {
+            throw new InvalidOperationException(
+                "Direct fixed asset capitalization does not have a valid immutable approval snapshot.");
+        }
+
+        var currentEvidenceHash = BuildAssetCapitalizationEvidenceHash(asset);
+        if (!string.Equals(currentEvidenceHash, snapshot.AssetEvidenceHash, StringComparison.Ordinal))
+        {
+            await InvalidateCapitalizationApprovalAsync(
+                asset,
+                "The asset's accounting evidence changed after capitalization approval.",
+                cancellationToken);
+        }
+
+        var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+        if (category.AssetAccountId != snapshot.DebitAccountId ||
+            (snapshot.UsesCategoryAucAccount && category.AucAccountId != snapshot.CreditAccountId))
+        {
+            await InvalidateCapitalizationApprovalAsync(
+                asset,
+                "The fixed-asset category posting-account configuration changed after capitalization approval.",
+                cancellationToken);
+        }
+
+        // Posting deliberately reconstructs the instruction from checker-approved evidence. The
+        // caller can provide an operational comment, but cannot replace the date, amount, account,
+        // currency, rate or reference after approval.
+        return new CapitalizeFixedAssetDto
+        {
+            CapitalizationDate = snapshot.CapitalizationDate,
+            CreditAccountId = snapshot.CreditAccountId,
+            Reference = snapshot.Reference,
+            Reason = snapshot.Reason,
+            Amount = snapshot.TransactionAmount,
+            TransactionCurrencyCode = snapshot.TransactionCurrencyCode,
+            ExchangeRate = snapshot.ExchangeRate,
+            ExchangeRateId = snapshot.ExchangeRateId,
+            ExchangeRateDate = snapshot.ExchangeRateDate
+        };
+    }
+
+    private async Task<FixedAssetCapitalizationApprovalSnapshotDto?> ResolveApprovedSourceCapitalizationSnapshotAsync(
+        FixedAsset asset,
+        Guid capitalizationId,
+        Guid purchaseOrderItemId,
+        string? reason,
+        CancellationToken cancellationToken)
+    {
+        if (_workflowService == null)
+            return null;
 
         if (asset.Status == FixedAssetStatus.Acquired)
         {
-            return;
+            var snapshot = ReadVerifiedCapitalizationApprovalSnapshot(asset);
+            if (!asset.CapitalizationApprovalApprovedAt.HasValue ||
+                !asset.CapitalizationApprovalApprovedByUserId.HasValue ||
+                asset.CapitalizationApprovalInvalidatedAt.HasValue)
+                throw new InvalidOperationException("The source-owned fixed asset does not have a valid immutable approval snapshot.");
+            if (!string.Equals(snapshot.SourceDocumentType, "ProcurementFixedAssetCapitalization", StringComparison.Ordinal) ||
+                snapshot.SourceDocumentId != capitalizationId || snapshot.SourceDocumentLineId != purchaseOrderItemId)
+                throw new InvalidOperationException("The approved capitalization evidence does not match this Procurement handoff.");
+            if (!string.Equals(BuildAssetCapitalizationEvidenceHash(asset), snapshot.AssetEvidenceHash, StringComparison.Ordinal))
+                await InvalidateCapitalizationApprovalAsync(
+                    asset,
+                    "The asset's accounting evidence changed after Procurement capitalization approval.",
+                    cancellationToken);
+
+            var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+            var settings = await GetFinanceSettingsAsync();
+            if (category.AssetAccountId != snapshot.DebitAccountId ||
+                settings.ControlAccountInventoryId != snapshot.CreditAccountId)
+                await InvalidateCapitalizationApprovalAsync(
+                    asset,
+                    "The asset or inventory-control account configuration changed after Procurement capitalization approval.",
+                    cancellationToken);
+            return snapshot;
         }
 
         var message = asset.Status switch
         {
-            FixedAssetStatus.PendingApproval => "Direct fixed asset capitalization is pending workflow approval.",
-            FixedAssetStatus.Rejected => "Direct fixed asset capitalization was rejected and cannot be posted.",
-            _ => "Direct fixed asset capitalization must be submitted and approved before posting."
+            FixedAssetStatus.PendingApproval => "Fixed asset capitalization is pending workflow approval.",
+            FixedAssetStatus.Rejected => "Fixed asset capitalization was rejected and cannot be posted.",
+            _ => "Fixed asset capitalization must be submitted and approved before posting."
         };
-
         await RecordFixedAssetAuditAsync(
             asset.Status == FixedAssetStatus.Rejected
                 ? FinanceAuditEvents.FinancePostingBlockedAfterRejection
                 : FinanceAuditEvents.FinancePostingBlockedPendingApproval,
             asset,
-            afterValues: new { asset.Status },
+            afterValues: new { asset.Status, SourceOwnedCapitalization = true },
             reason: message,
             comment: reason);
-
         throw new InvalidOperationException(message);
+    }
+
+    private static FixedAssetCapitalizationApprovalSnapshotDto? TryReadCapitalizationApprovalSnapshot(FixedAsset asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            return null;
+
+        try
+        {
+            return ReadVerifiedCapitalizationApprovalSnapshot(asset);
+        }
+        catch (InvalidOperationException)
+        {
+            // The API still returns the asset so operators can investigate corrupt historical
+            // evidence. Posting and approval remain fail-closed through the strict reader.
+            return null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private async Task<FixedAssetCapitalizationApprovalSnapshotDto> BuildCapitalizationApprovalSnapshotAsync(
+        FixedAsset asset,
+        SubmitFixedAssetCapitalizationDto dto,
+        CancellationToken cancellationToken)
+    {
+        var procurementHandoff = await _context.Set<ProcurementFixedAssetCapitalization>()
+            .AsNoTracking()
+            .SingleOrDefaultAsync(value =>
+                value.TenantId == TenantId && value.FixedAssetId == asset.Id &&
+                value.Status == ProcurementFixedAssetCapitalizationStatus.Draft && !value.IsDeleted,
+                cancellationToken);
+        if (procurementHandoff != null)
+            return await BuildProcurementCapitalizationApprovalSnapshotAsync(
+                asset,
+                procurementHandoff,
+                dto,
+                cancellationToken);
+
+        var capitalizationDate = dto.CapitalizationDate.Date;
+        if (capitalizationDate == default)
+            throw new InvalidOperationException("Capitalization date is required.");
+
+        var reason = NormalizeRequiredText(dto.Reason);
+        if (reason.Length < 5)
+            throw new InvalidOperationException("A substantive capitalization reason is required.");
+        if (reason.Length > 1000)
+            throw new InvalidOperationException("Capitalization reason cannot exceed 1000 characters.");
+
+        var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+        var debitAccount = await ResolveFixedAssetPostingAccountAsync(
+            category.AssetAccountId,
+            "fixed asset cost account",
+            AccountType.Asset);
+        var usesCategoryAuc = !dto.CreditAccountId.HasValue;
+        var creditAccountId = dto.CreditAccountId ?? category.AucAccountId
+            ?? throw new InvalidOperationException(
+                "Direct fixed asset capitalization requires a category AUC/CIP clearing account or an explicit credit account.");
+        await ResolveFixedAssetPostingAccountAsync(
+            creditAccountId,
+            "fixed asset capitalization credit account",
+            AccountType.Asset,
+            AccountType.Liability,
+            AccountType.Equity);
+
+        var settings = await GetFinanceSettingsAsync();
+        var functionalCurrency = NormalizeCurrency(settings.BaseCurrency, "GHS");
+        var transactionCurrency = NormalizeCurrency(
+            dto.TransactionCurrencyCode ?? asset.TransactionCurrencyCode,
+            functionalCurrency);
+        if (transactionCurrency.Length != 3)
+            throw new InvalidOperationException("Transaction currency must be a three-character ISO currency code.");
+
+        var transactionAmount = RoundMoney(dto.Amount ?? asset.AcquisitionCost);
+        if (transactionAmount <= 0m)
+            throw new InvalidOperationException("Fixed asset capitalization amount must be greater than zero.");
+
+        var exchangeRateDate = (dto.ExchangeRateDate ?? capitalizationDate).Date;
+        decimal exchangeRate;
+        Guid? exchangeRateId;
+        if (string.Equals(transactionCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
+        {
+            exchangeRate = 1m;
+            exchangeRateId = null;
+            exchangeRateDate = capitalizationDate;
+        }
+        else
+        {
+            exchangeRate = dto.ExchangeRate
+                ?? throw new InvalidOperationException("Foreign-currency capitalization requires an approved exchange-rate value.");
+            if (exchangeRate <= 0m)
+                throw new InvalidOperationException("Foreign-currency capitalization exchange rate must be greater than zero.");
+            exchangeRateId = dto.ExchangeRateId
+                ?? throw new InvalidOperationException("Foreign-currency capitalization requires an approved exchange-rate record ID.");
+
+            var rate = await _context.ExchangeRates.AsNoTracking().SingleOrDefaultAsync(value =>
+                value.TenantId == TenantId && value.Id == exchangeRateId.Value && !value.IsDeleted,
+                cancellationToken)
+                ?? throw new InvalidOperationException("The selected exchange rate was not found for this tenant.");
+            if (!rate.IsActive || rate.ApprovalStatus is not (RateApprovalStatus.Approved or RateApprovalStatus.AutoApproved))
+                throw new InvalidOperationException("The selected exchange rate must be active and approved.");
+            if (!string.Equals(rate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(rate.TargetCurrencyCode, transactionCurrency, StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("The selected exchange rate currency pair does not match the capitalization currencies.");
+            if (rate.EffectiveDate.Date > exchangeRateDate ||
+                (rate.EndDate.HasValue && rate.EndDate.Value.Date < exchangeRateDate))
+                throw new InvalidOperationException("The selected exchange rate is not effective for the capitalization rate date.");
+            if (decimal.Round(rate.Rate, 6) != decimal.Round(exchangeRate, 6))
+                throw new InvalidOperationException("The supplied exchange-rate value does not match the selected approved record.");
+        }
+
+        var reference = NormalizeRequiredText(dto.Reference);
+        if (string.IsNullOrWhiteSpace(reference))
+            reference = asset.AssetCode;
+        if (reference.Length > 100)
+            throw new InvalidOperationException("Capitalization reference cannot exceed 100 characters.");
+
+        return new FixedAssetCapitalizationApprovalSnapshotDto
+        {
+            Version = 1,
+            FixedAssetId = asset.Id,
+            AssetCode = asset.AssetCode,
+            FixedAssetCategoryId = asset.FixedAssetCategoryId,
+            DebitAccountId = debitAccount.Id,
+            CreditAccountId = creditAccountId,
+            UsesCategoryAucAccount = usesCategoryAuc,
+            CapitalizationDate = capitalizationDate,
+            TransactionAmount = transactionAmount,
+            FunctionalCurrencyCode = functionalCurrency,
+            TransactionCurrencyCode = transactionCurrency,
+            ExchangeRate = decimal.Round(exchangeRate, 6),
+            ExchangeRateId = exchangeRateId,
+            ExchangeRateDate = exchangeRateDate,
+            Reference = reference,
+            Reason = reason,
+            SourceDocumentType = "FixedAsset",
+            SourceDocumentId = asset.Id,
+            SourceDocumentLineId = null,
+            AssetEvidenceHash = BuildAssetCapitalizationEvidenceHash(asset)
+        };
+    }
+
+    private async Task<FixedAssetCapitalizationApprovalSnapshotDto> BuildProcurementCapitalizationApprovalSnapshotAsync(
+        FixedAsset asset,
+        ProcurementFixedAssetCapitalization handoff,
+        SubmitFixedAssetCapitalizationDto dto,
+        CancellationToken cancellationToken)
+    {
+        var category = await ResolveAssetCategoryAsync(asset.FixedAssetCategoryId);
+        var debitAccount = await ResolveFixedAssetPostingAccountAsync(
+            category.AssetAccountId,
+            "fixed asset cost account",
+            AccountType.Asset);
+        var settings = await GetFinanceSettingsAsync();
+        var inventoryControlAccountId = settings.ControlAccountInventoryId
+            ?? throw new InvalidOperationException("Inventory Control Account is not configured in Finance Settings.");
+        await ResolveProcurementInventoryControlAccountAsync(inventoryControlAccountId, cancellationToken);
+
+        var reason = NormalizeRequiredText(dto.Reason);
+        if (string.IsNullOrWhiteSpace(reason))
+            reason = NormalizeRequiredText(dto.Comments);
+        if (string.IsNullOrWhiteSpace(reason))
+            reason = $"Capitalize accepted Procurement supply {handoff.AcceptedSupplyReference}.";
+        if (reason.Length > 1000)
+            throw new InvalidOperationException("Capitalization reason cannot exceed 1000 characters.");
+
+        return new FixedAssetCapitalizationApprovalSnapshotDto
+        {
+            Version = 1,
+            FixedAssetId = asset.Id,
+            AssetCode = asset.AssetCode,
+            FixedAssetCategoryId = asset.FixedAssetCategoryId,
+            DebitAccountId = debitAccount.Id,
+            CreditAccountId = inventoryControlAccountId,
+            UsesCategoryAucAccount = false,
+            CapitalizationDate = handoff.CapitalizationDate.Date,
+            TransactionAmount = RoundMoney(handoff.FunctionalAmount),
+            FunctionalCurrencyCode = NormalizeCurrency(handoff.FunctionalCurrencyCode, "GHS"),
+            TransactionCurrencyCode = NormalizeCurrency(handoff.FunctionalCurrencyCode, "GHS"),
+            ExchangeRate = 1m,
+            ExchangeRateId = null,
+            ExchangeRateDate = handoff.CapitalizationDate.Date,
+            Reference = handoff.AcceptedSupplyReference,
+            Reason = reason,
+            SourceDocumentType = "ProcurementFixedAssetCapitalization",
+            SourceDocumentId = handoff.Id,
+            SourceDocumentLineId = handoff.PurchaseOrderItemId,
+            AssetEvidenceHash = BuildAssetCapitalizationEvidenceHash(asset)
+        };
+    }
+
+    private void ApplyCapitalizationApprovalSubmission(
+        FixedAsset asset,
+        FixedAssetCapitalizationApprovalSnapshotDto snapshot,
+        string snapshotJson,
+        string snapshotHash,
+        Guid? workflowInstanceId)
+    {
+        var now = DateTime.UtcNow;
+        asset.CapitalizationApprovalSnapshotJson = snapshotJson;
+        asset.CapitalizationApprovalSnapshotHash = snapshotHash;
+        asset.CapitalizationApprovalExchangeRateId = snapshot.ExchangeRateId;
+        asset.CapitalizationApprovalWorkflowInstanceId = workflowInstanceId;
+        asset.CapitalizationApprovalSubmittedByUserId = CurrentUserGuid == Guid.Empty ? null : CurrentUserGuid;
+        asset.CapitalizationApprovalSubmittedAt = now;
+        asset.CapitalizationApprovalApprovedByUserId = null;
+        asset.CapitalizationApprovalApprovedAt = null;
+        asset.CapitalizationApprovalInvalidatedAt = null;
+        asset.CapitalizationApprovalInvalidationReason = null;
+    }
+
+    private static void ClearCapitalizationApproval(FixedAsset asset)
+    {
+        asset.CapitalizationApprovalSnapshotJson = null;
+        asset.CapitalizationApprovalSnapshotHash = null;
+        asset.CapitalizationApprovalExchangeRateId = null;
+        asset.CapitalizationApprovalWorkflowInstanceId = null;
+        asset.CapitalizationApprovalSubmittedByUserId = null;
+        asset.CapitalizationApprovalSubmittedAt = null;
+        asset.CapitalizationApprovalApprovedByUserId = null;
+        asset.CapitalizationApprovalApprovedAt = null;
+        asset.CapitalizationApprovalInvalidatedAt = null;
+        asset.CapitalizationApprovalInvalidationReason = null;
+    }
+
+    private static FixedAssetCapitalizationApprovalSnapshotDto ReadVerifiedCapitalizationApprovalSnapshot(FixedAsset asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            throw new InvalidOperationException("Direct fixed asset capitalization is missing its immutable approval snapshot.");
+
+        var currentHash = HashCapitalizationEvidence(asset.CapitalizationApprovalSnapshotJson);
+        if (!FixedTimeHashEquals(currentHash, asset.CapitalizationApprovalSnapshotHash))
+            throw new InvalidOperationException("Direct fixed asset capitalization approval evidence failed its integrity check.");
+
+        var snapshot = JsonSerializer.Deserialize<FixedAssetCapitalizationApprovalSnapshotDto>(
+            asset.CapitalizationApprovalSnapshotJson,
+            CapitalizationSnapshotJsonOptions)
+            ?? throw new InvalidOperationException("Direct fixed asset capitalization approval evidence is invalid.");
+        if (snapshot.Version != 1 || snapshot.FixedAssetId != asset.Id)
+            throw new InvalidOperationException("Direct fixed asset capitalization approval evidence does not match this asset.");
+        return snapshot;
+    }
+
+    private static string BuildAssetCapitalizationEvidenceHash(FixedAsset asset)
+        => HashCapitalizationEvidence(JsonSerializer.Serialize(new
+        {
+            asset.Id,
+            asset.AssetCode,
+            asset.FixedAssetCategoryId,
+            PurchaseDate = asset.PurchaseDate.Date,
+            PurchasePrice = RoundMoney(asset.PurchasePrice),
+            InstallationCost = RoundMoney(asset.InstallationCost),
+            TaxAmount = RoundMoney(asset.TaxAmount),
+            AcquisitionCost = RoundMoney(asset.AcquisitionCost),
+            asset.TransactionCurrencyCode,
+            asset.ExchangeRate,
+            asset.ExchangeRateId,
+            ExchangeRateDate = asset.ExchangeRateDate?.Date,
+            asset.SourceDocumentType,
+            asset.SourceDocumentId,
+            asset.SourceDocumentLineId
+        }, CapitalizationSnapshotJsonOptions));
+
+    private async Task InvalidateCapitalizationApprovalAsync(
+        FixedAsset asset,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        asset.Status = FixedAssetStatus.Draft;
+        asset.CapitalizationApprovalInvalidatedAt = DateTime.UtcNow;
+        asset.CapitalizationApprovalInvalidationReason = reason;
+        asset.UpdatedAt = DateTime.UtcNow;
+        asset.UpdatedBy = UserName;
+        await _context.SaveChangesAsync(cancellationToken);
+        await RecordFixedAssetAuditAsync(
+            FinanceAuditEvents.FinancePostingBlockedPendingApproval,
+            asset,
+            afterValues: new
+            {
+                asset.Status,
+                asset.CapitalizationApprovalSnapshotHash,
+                asset.CapitalizationApprovalInvalidatedAt
+            },
+            reason: reason,
+            comment: "The stale capitalization approval was retired; submit current evidence for a new decision.");
+        throw new InvalidOperationException($"{reason} The stale approval was retired; submit the current capitalization evidence again.");
+    }
+
+    private static string HashCapitalizationEvidence(string value)
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private static bool FixedTimeHashEquals(string left, string right)
+    {
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left), Convert.FromHexString(right));
+        }
+        catch (FormatException)
+        {
+            return false;
+        }
     }
 
     private static bool HasOpeningImportBasis(FixedAsset asset)
         => asset.BookValues.Any(value =>
             !value.IsDeleted &&
-            (value.OpeningPostedToGl ||
-             value.OpeningSource.Contains("Opening", StringComparison.OrdinalIgnoreCase)));
+            value.OpeningPostedToGl);
 
     private static void ValidateCapitalizedAssetUpdate(
         FixedAsset asset,

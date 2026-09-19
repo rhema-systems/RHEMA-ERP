@@ -19,11 +19,16 @@ import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.ser
 import { maintenanceDataService, Employee } from '@/services/maintenanceDataService';
 import { AssetTransfer, AssetTransferStatus, AssetTransferType, RequestAssetTransferDto, FixedAsset, FixedAssetCategory } from '@/types/fixed-assets';
 import { useToast } from "@/components/ui/use-toast";
+import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
+import type { FixedAssetLocationOption } from '@/types/fixed-assets';
 
 export default function AssetTransfersPage() {
     const [transfers, setTransfers] = useState<AssetTransfer[]>([]);
     const [assets, setAssets] = useState<FixedAsset[]>([]);
     const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
+    const [locationOptions, setLocationOptions] = useState<FixedAssetLocationOption[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
@@ -31,6 +36,7 @@ export default function AssetTransfersPage() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [assetComboOpen, setAssetComboOpen] = useState(false);
     const { toast } = useToast();
+    const [dimensionDefaults, setDimensionDefaults] = useState<Record<string, string>>({});
 
     // Form state
     const [formData, setFormData] = useState<Partial<RequestAssetTransferDto>>({
@@ -72,6 +78,12 @@ export default function AssetTransfersPage() {
             console.error('Failed to load fixed asset categories:', error);
         }
         try {
+            const locationsData = await fixedAssetsDataService.getLocationOptions();
+            setLocationOptions(locationsData || []);
+        } catch (error) {
+            console.error('Failed to load organization locations:', error);
+        }
+        try {
             const employeesData = await maintenanceDataService.getEmployees();
             setEmployees(employeesData || []);
         } catch (error) {
@@ -102,7 +114,14 @@ export default function AssetTransfersPage() {
 
         try {
             setIsSubmitting(true);
-            await fixedAssetsDataService.requestTransfer(formData as RequestAssetTransferDto);
+            await fixedAssetsDataService.requestTransfer({
+                ...formData,
+                financeDimensions: isGlReclassification ? {
+                    defaultDimensions: toFinancePostingDimensionValues(dimensionDefaults),
+                    lines: [],
+                    applyDefaultToEligibleLines: true,
+                } : undefined,
+            } as RequestAssetTransferDto);
             toast({
                 title: "Success",
                 description: "Asset transfer request submitted successfully.",
@@ -113,6 +132,7 @@ export default function AssetTransfersPage() {
                 transferDate: new Date().toISOString().split('T')[0],
                 bookClassification: 'IFRS',
             });
+            setDimensionDefaults({});
             loadData();
         } catch (error) {
             console.error('Failed to submit transfer request:', error);
@@ -351,7 +371,13 @@ export default function AssetTransfersPage() {
                                     <>
                                         <div className="space-y-2">
                                             <Label htmlFor="toLocation">Destination Location <span className="text-red-500">*</span></Label>
-                                            <Input id="toLocation" placeholder="Building, Floor, Room..." value={formData.toLocation || ''} onChange={(e) => setFormData({ ...formData, toLocation: e.target.value })} />
+                                            <AssetLocationCombobox
+                                                id="toLocation"
+                                                options={locationOptions}
+                                                value={locationOptions.find(option => option.displayName === formData.toLocation)?.id}
+                                                allowClear={false}
+                                                onValueChange={(location) => setFormData({ ...formData, toLocation: location?.displayName || '' })}
+                                            />
                                         </div>
                                         <div className="space-y-2">
                                             <Label htmlFor="custodian">New Custodian</Label>
@@ -380,6 +406,14 @@ export default function AssetTransfersPage() {
                                     onChange={(e) => setFormData({ ...formData, reason: e.target.value })}
                                 />
                             </div>
+                            {isGlReclassification && (
+                                <SourceDocumentDimensionDefaultsPanel
+                                    effectiveDate={formData.accountingDate || formData.transferDate || new Date().toISOString().slice(0, 10)}
+                                    values={dimensionDefaults}
+                                    onChange={setDimensionDefaults}
+                                    disabled={isSubmitting}
+                                />
+                            )}
                             <DialogFooter>
                                 <Button type="button" variant="outline" onClick={() => setIsDialogOpen(false)}>Cancel</Button>
                                 <Button type="submit" className="bg-blue-600 hover:bg-blue-700" disabled={isSubmitting}>

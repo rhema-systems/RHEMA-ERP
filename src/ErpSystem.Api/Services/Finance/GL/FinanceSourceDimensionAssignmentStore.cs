@@ -34,6 +34,80 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
         CancellationToken cancellationToken = default) =>
         UpsertAsync(producer, sourceDocumentId, null, null, null, cancellationToken);
 
+    public async Task RegisterDocumentContextAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        DateTime documentDate,
+        IReadOnlyList<FinanceSourceDocumentLineContext> authoritativeLines,
+        CancellationToken cancellationToken = default)
+    {
+        if (documentDate == default)
+            throw new InvalidOperationException("The source document date is required for Finance dimension evidence.");
+        if (authoritativeLines.Count == 0)
+            throw new InvalidOperationException("At least one authoritative Finance source line is required.");
+        if (authoritativeLines.Any(item => item.SourceLineId == Guid.Empty || item.AccountId == Guid.Empty)
+            || authoritativeLines.Select(item => item.SourceLineId).Distinct().Count() != authoritativeLines.Count)
+            throw new InvalidOperationException("Finance source-line context must contain unique, non-empty line and account IDs.");
+
+        var (tenantId, route) = ValidateKey(producer, sourceDocumentId, null, validateLineId: false);
+        await RegisterDocumentAsync(producer, sourceDocumentId, cancellationToken);
+        var header = await _context.FinanceSourceDimensionAssignments.SingleAsync(item =>
+            item.TenantId == tenantId
+            && item.SourceDocumentType == route.DocumentType
+            && item.SourceDocumentId == sourceDocumentId
+            && !item.SourceLineId.HasValue
+            && !item.IsDeleted, cancellationToken);
+        EnsureSameProducer(header, route);
+        header.SourceDocumentDate = documentDate.Date;
+        header.ExpectedSourceLineCount = authoritativeLines.Count;
+        header.SourceLineManifestHash = FinanceSourceLineManifest.Compute(
+            authoritativeLines.Select(item => (item.SourceLineId, item.AccountId)));
+        header.UpdatedAt = DateTime.UtcNow;
+        header.UpdatedBy = _currentUser.UserName;
+        header.LastModifiedById = UserId;
+
+        foreach (var line in authoritativeLines)
+        {
+            var assignment = await _context.FinanceSourceDimensionAssignments.SingleOrDefaultAsync(item =>
+                item.TenantId == tenantId
+                && item.SourceDocumentType == route.DocumentType
+                && item.SourceDocumentId == sourceDocumentId
+                && item.SourceLineId == line.SourceLineId
+                && !item.IsDeleted, cancellationToken);
+            if (assignment is null)
+            {
+                assignment = new FinanceSourceDimensionAssignment
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    RouteId = route.Id,
+                    ProducerModule = route.ProducerModule,
+                    SourceRoute = route.SourceRoute,
+                    SourceDocumentType = route.DocumentType,
+                    ContractVersion = route.ContractVersion,
+                    SourceDocumentId = sourceDocumentId,
+                    SourceLineId = line.SourceLineId,
+                    ResolvedAccountId = line.AccountId,
+                    CreatedAt = DateTime.UtcNow,
+                    CreatedBy = _currentUser.UserName,
+                    CreatedById = UserId
+                };
+                _context.FinanceSourceDimensionAssignments.Add(assignment);
+                continue;
+            }
+
+            EnsureSameProducer(assignment, route);
+            if (assignment.EvidenceFrozenAt.HasValue && assignment.ResolvedAccountId != line.AccountId)
+                throw new InvalidOperationException("A frozen Finance source line cannot be rebound to another account.");
+            assignment.ResolvedAccountId = line.AccountId;
+            assignment.ContractVersion = route.ContractVersion;
+            assignment.UpdatedAt = DateTime.UtcNow;
+            assignment.UpdatedBy = _currentUser.UserName;
+            assignment.LastModifiedById = UserId;
+        }
+        await _context.SaveChangesAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<FinanceSourceDimensionAssignmentDto>> GetDocumentAssignmentsAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
@@ -261,6 +335,10 @@ public sealed class FinanceSourceDimensionAssignmentStore : IFinanceSourceDimens
         ContractVersion = item.ContractVersion,
         SourceDocumentId = item.SourceDocumentId,
         SourceLineId = item.SourceLineId,
+        ResolvedAccountId = item.ResolvedAccountId,
+        SourceDocumentDate = item.SourceDocumentDate,
+        ExpectedSourceLineCount = item.ExpectedSourceLineCount,
+        SourceLineManifestHash = item.SourceLineManifestHash,
         FinanceDimensionSetId = item.FinanceDimensionSetId,
         FinanceDimensionSnapshotId = item.FinanceDimensionSnapshotId,
         EvidenceFrozenAt = item.EvidenceFrozenAt,

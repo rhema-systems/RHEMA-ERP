@@ -1,12 +1,14 @@
 using System.Reflection;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Data.Seeders;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
@@ -28,6 +30,7 @@ public sealed class ProcurementSupplierOnboardingTestSeederPolicyTests
 
         var seeder = new ProcurementSupplierOnboardingTestSeeder(
             context,
+            Mock.Of<IFinanceAccountProvisioningService>(),
             NullLogger<ProcurementSupplierOnboardingTestSeeder>.Instance);
 
         var selected = await SelectEffectivePolicyAsync(seeder, tenantId, profile, Guid.NewGuid());
@@ -68,6 +71,7 @@ public sealed class ProcurementSupplierOnboardingTestSeederPolicyTests
         context.ChangeTracker.Clear();
         var seeder = new ProcurementSupplierOnboardingTestSeeder(
             context,
+            Mock.Of<IFinanceAccountProvisioningService>(),
             NullLogger<ProcurementSupplierOnboardingTestSeeder>.Instance);
 
         var act = () => SelectEffectivePolicyAsync(seeder, tenantId, profile, Guid.NewGuid());
@@ -96,6 +100,7 @@ public sealed class ProcurementSupplierOnboardingTestSeederPolicyTests
         context.ChangeTracker.Clear();
         var seeder = new ProcurementSupplierOnboardingTestSeeder(
             context,
+            Mock.Of<IFinanceAccountProvisioningService>(),
             NullLogger<ProcurementSupplierOnboardingTestSeeder>.Instance);
 
         var selected = await SelectEffectivePolicyAsync(seeder, tenantId, profile, Guid.NewGuid());

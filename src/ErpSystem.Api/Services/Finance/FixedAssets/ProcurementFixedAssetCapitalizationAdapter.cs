@@ -270,7 +270,7 @@ public sealed class ProcurementFixedAssetCapitalizationAdapter : IProcurementFix
             entity.PostingEventId = asset.PostingEventId;
             entity.JournalEntryId = asset.JournalEntryId;
             entity.PostedAt = DateTime.UtcNow;
-            entity.CapitalizationDate = dto.CapitalizationDate.Date;
+            entity.CapitalizationDate = asset.CapitalizationDate?.Date ?? entity.CapitalizationDate;
             entity.FailureReason = null;
             entity.UpdatedAt = DateTime.UtcNow;
             entity.UpdatedBy = UserName;

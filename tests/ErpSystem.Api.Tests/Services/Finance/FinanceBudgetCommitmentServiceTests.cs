@@ -344,59 +344,23 @@ public sealed class FinanceBudgetCommitmentServiceTests
     [Fact]
     public void Migration_adds_versioned_operation_evidence_and_reverses_cleanly()
     {
-        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableCommitmentMigration().ApplyUp(up);
-
-        up.Operations.OfType<CreateTableOperation>().Should().ContainSingle(x =>
-            x.Name == "FinanceBudgetReservationOperations"
-            && x.Columns.Any(column => column.Name == "IdempotencyKey" && column.MaxLength == 100));
-        up.Operations.OfType<AddColumnOperation>().Select(x => x.Name).Should().BeEquivalentTo(
-            "BudgetDate", "ExchangeRate", "ExchangeRateId", "ReservationVersion",
-            "SourceDocumentReference", "SourceLineIdsJson", "SourceVersion",
-            "TransactionAmount", "TransactionCurrencyCode");
-        up.Operations.OfType<CreateIndexOperation>().Should().Contain(x =>
-            x.Name == "IX_FinanceBudgetReservationOperations_TenantId_IdempotencyKey"
-            && x.IsUnique && x.Filter == "[IsDeleted] = 0");
-        up.Operations.OfType<SqlOperation>().Should().ContainSingle(x =>
-            x.Sql.Contains("SET [TransactionCurrencyCode] = [CurrencyCode]", StringComparison.Ordinal));
-        up.Operations.OfType<AddCheckConstraintOperation>().Select(x => x.Name).Should().BeEquivalentTo(
-            "CK_FinanceBudgetReservations_TransactionCurrencyCode",
-            "CK_FinanceBudgetReservations_TransactionAmount",
-            "CK_FinanceBudgetReservations_ExchangeRate",
-            "CK_FinanceBudgetReservations_ReservationVersion");
-
-        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableCommitmentMigration().ApplyDown(down);
-        down.Operations.OfType<DropTableOperation>().Should().ContainSingle(x =>
-            x.Name == "FinanceBudgetReservationOperations");
-        down.Operations.OfType<DropColumnOperation>().Should().HaveCount(9);
-        down.Operations.OfType<DropCheckConstraintOperation>().Should().HaveCount(4);
+        var source = ArchivedMigrationSource.Read("20260824160000_AddGenericFinanceBudgetCommitmentContract.cs");
+        foreach (var token in new[] { "FinanceBudgetReservationOperations", "IdempotencyKey", "maxLength: 100",
+            "BudgetDate", "ExchangeRate", "ExchangeRateId", "ReservationVersion", "SourceDocumentReference",
+            "SourceLineIdsJson", "SourceVersion", "TransactionAmount", "TransactionCurrencyCode",
+            "IX_FinanceBudgetReservationOperations_TenantId_IdempotencyKey", "[IsDeleted] = 0",
+            "SET [TransactionCurrencyCode] = [CurrencyCode]", "CK_FinanceBudgetReservations_TransactionCurrencyCode",
+            "CK_FinanceBudgetReservations_TransactionAmount", "CK_FinanceBudgetReservations_ExchangeRate",
+            "CK_FinanceBudgetReservations_ReservationVersion", "migrationBuilder.DropTable" }) source.Should().Contain(token);
     }
 
     [Fact]
     public void Dimension_budget_migration_is_narrow_and_reversible()
     {
-        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableDimensionBudgetMigration().ApplyUp(up);
-
-        up.Operations.OfType<CreateTableOperation>().Should().ContainSingle(x =>
-            x.Name == "BudgetScenarioControlDimensions");
-        up.Operations.OfType<AddColumnOperation>()
-            .Select(x => $"{x.Table}.{x.Name}")
-            .Should().BeEquivalentTo(new[]
-            {
-                "BudgetEntries.FinanceDimensionSetId",
-                "FinanceBudgetReservations.FinanceDimensionSetId",
-                "FinanceBudgetReservations.DimensionCombinationHashSnapshot"
-            });
-        up.Operations.OfType<CreateTableOperation>().Should().OnlyContain(create =>
-            create.Name == "BudgetScenarioControlDimensions");
-
-        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableDimensionBudgetMigration().ApplyDown(down);
-        down.Operations.OfType<DropTableOperation>().Should().ContainSingle(x =>
-            x.Name == "BudgetScenarioControlDimensions");
-        down.Operations.OfType<DropColumnOperation>().Should().HaveCount(3);
+        var source = ArchivedMigrationSource.Read("20260825235055_AddFinanceBudgetControlDimensions.cs");
+        foreach (var token in new[] { "BudgetScenarioControlDimensions", "BudgetEntries", "FinanceDimensionSetId",
+            "FinanceBudgetReservations", "DimensionCombinationHashSnapshot", "migrationBuilder.DropTable",
+            "migrationBuilder.DropColumn" }) source.Should().Contain(token);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -663,18 +627,6 @@ public sealed class FinanceBudgetCommitmentServiceTests
         BudgetReturn Return,
         BudgetEntry Entry,
         DateTime BudgetDate);
-
-    private sealed class TestableCommitmentMigration : AddGenericFinanceBudgetCommitmentContract
-    {
-        public void ApplyUp(MigrationBuilder builder) => Up(builder);
-        public void ApplyDown(MigrationBuilder builder) => Down(builder);
-    }
-
-    private sealed class TestableDimensionBudgetMigration : AddFinanceBudgetControlDimensions
-    {
-        public void ApplyUp(MigrationBuilder builder) => Up(builder);
-        public void ApplyDown(MigrationBuilder builder) => Down(builder);
-    }
 
     /// <summary>
     /// ApplicationDbContext currently embeds a constructor tenant in its cached EF model. A

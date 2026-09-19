@@ -470,6 +470,19 @@ Expected:
 
 Evidence: request to `GET /api/ap/invoices/budget-cells`, response, and selected BudgetEntry ID.
 
+Execution evidence — 30 August 2026: **Pass**.
+
+- The controlled account `100-6000-0000` on `15 September 2026` returned exactly the two adopted
+  September cells for `DEPT: FIN / PROJECT: P100` and `DEPT: OPS / PROJECT: P200`.
+- The selector displayed period, Approved, Actual, Reserved, and Available functional-currency
+  amounts. The observed FIN/P100 position was `GHS 10,000 / GHS 500 / GHS 0 / GHS 9,500`; the
+  observed OPS/P200 position was `GHS 4,000 / GHS 5,500 / GHS 0 / -GHS 1,500`.
+- FIN/P100 resolved to BudgetEntry `41f00c0f-e1e0-421a-a4bb-deb78fecaf7f`.
+- Changing the invoice date after selection removed the prior BudgetEntry selector and evidence.
+- The controlled date input retained `15 September 2026` through the account-selection rerender.
+  Its focused component suite passed `4/4`, and targeted ESLint passed.
+- No supplier invoice, workflow, reservation, journal, or posting event was created during this case.
+
 ### UAT-APB-002: fail closed without a required budget cell
 
 Submit a direct expense invoice on the budget-tracked account without selecting a BudgetEntry, then
@@ -481,6 +494,25 @@ Expected:
 - no active reservation, journal, or posting event is created;
 - the controlled error distinguishes missing selection from account/period/dimension mismatch.
 
+Execution evidence — 31 August 2026: **Pass**.
+
+- Draft invoice `VI-2026-00005` (`bb0bd8ac-5ea7-440c-bfb7-005444400ac8`) was created for
+  `GHS 500` on `15 September 2026` against `100-6000-0000`, deliberately without a BudgetEntry.
+- Submission failed with: `AP expense line 'UAT missing required budget cell' requires an adopted
+  Finance budget cell before submission.` The invoice remained `Draft`; no workflow, reservation,
+  journal, or posting event was started.
+- The canonical mismatch path is covered by the focused Finance commitment regression, which
+  returns `BUDGET_CELL_MISMATCH` when the producer account/period/dimension evidence does not match
+  the selected cell. The mismatch and valid AP reservation tests passed `2/2`.
+- UAT also exposed and corrected a supplier-identity defect: manual AP entry now loads the
+  tenant-scoped `/api/ap/invoices/suppliers` projection and submits `Supplier.Id`, never a
+  `BusinessPartner.Id`. The first rejected identity attempt made no database write.
+- The draft list exposed an `Edit Invoice` action whose `/finance/ap/invoices/{id}/edit` route did
+  not exist. The route now reuses the controlled AP form in edit mode, loads the full saved draft,
+  preserves hidden payment/WHT/matching/rate evidence, keeps supplier identity immutable, and
+  refuses non-Draft/non-Rejected documents. Browser verification loaded `VI-2026-00005` with its
+  saved supplier, dates, account, description and `GHS 500` amount; no update was submitted.
+
 ### UAT-APB-003: reserve on submission
 
 Create a `GHS 2,000` direct expense invoice against the `GHS 10,000` cell and submit it.
@@ -489,9 +521,23 @@ Expected:
 
 - the invoice becomes pending approval;
 - exactly one active reservation exists for the invoice and BudgetEntry;
-- reserved amount is `GHS 2,000`, available amount becomes `GHS 8,000`, and the idempotency key is
-  stable;
+- reserved amount is `GHS 2,000`; from an otherwise unused `GHS 10,000` cell, available becomes
+  `GHS 8,000` (subtract any pre-existing posted actual or active reservation from that clean
+  baseline), and the idempotency key is stable;
 - retrying submission does not create a second reservation or workflow.
+
+Execution evidence — 31 August 2026: **Pass**.
+
+- Invoice `VI-2026-00006` (`36bed279-ee5d-40e3-a440-f02154c1d51a`) was created for `GHS 2,000`
+  against FIN/P100 and submitted successfully.
+- The invoice moved to `PendingApproval`. The live cell moved from `GHS 500` posted / `GHS 0`
+  reserved / `GHS 9,500` available to `GHS 500` posted / `GHS 2,000` reserved / `GHS 7,500`
+  available.
+- A second submission attempt was rejected after the invoice had left Draft; the cell still showed
+  exactly one `GHS 2,000` reservation and the workflow remained at its first pending stage.
+- The invoice-list action no longer bubbles into row navigation. Submission now invalidates list,
+  detail, and workflow-summary queries, preventing a stale Draft action from being rendered after a
+  successful submit.
 
 ### UAT-APB-004: reject and release
 
@@ -502,6 +548,22 @@ Expected:
 - the reservation becomes `Released` with reason, actor, and timestamp;
 - available amount returns to `GHS 10,000`;
 - no journal or posted actual exists.
+
+Execution checkpoint — 31 August 2026: **Retest required**.
+
+- Adwoa Reviewer rejected `VI-2026-00006` through the shared Finance approval workbench with the
+  controlled reason `UAT APB-004 rejection to verify the Finance budget reservation is released.`
+- The invoice and workflow reached `Rejected`, and no journal or posting event was created, but the
+  GHS 2,000 reservation remained `Reserved`; FIN/P100 therefore remained at GHS 500 actual,
+  GHS 2,000 reserved and GHS 7,500 available.
+- Root cause: the shared approval controller applied the terminal VendorInvoice status directly and
+  bypassed AP's authoritative budget-release operation. It now delegates the terminal outcome to
+  `IVendorInvoiceService.ApplyRejectedWorkflowOutcomeAsync`, which releases the reservation before
+  changing status. An idempotent retry also repairs a pre-fix rejected invoice with stranded active
+  evidence without replaying the workflow or duplicate rejection audit.
+- Focused direct-rejection and stranded-retry regressions pass 2/2. The pre-fix live reservation is
+  retained as defect evidence and must not be represented as released; execute a fresh rejection
+  cycle on the rebuilt API before marking this case Pass.
 
 ### UAT-APB-005: approve, post, and consume atomically
 

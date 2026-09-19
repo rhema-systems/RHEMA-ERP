@@ -119,6 +119,15 @@ public class FixedAssetDto
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public DateTime? CapitalizedAt { get; set; }
+    public FixedAssetCapitalizationApprovalSnapshotDto? CapitalizationApprovalSnapshot { get; set; }
+    public string? CapitalizationApprovalSnapshotHash { get; set; }
+    public Guid? CapitalizationApprovalWorkflowInstanceId { get; set; }
+    public Guid? CapitalizationApprovalSubmittedByUserId { get; set; }
+    public DateTime? CapitalizationApprovalSubmittedAt { get; set; }
+    public Guid? CapitalizationApprovalApprovedByUserId { get; set; }
+    public DateTime? CapitalizationApprovalApprovedAt { get; set; }
+    public DateTime? CapitalizationApprovalInvalidatedAt { get; set; }
+    public string? CapitalizationApprovalInvalidationReason { get; set; }
     public Guid? CapitalizationReversalJournalEntryId { get; set; }
     public Guid? CapitalizationReversalPostingEventId { get; set; }
     public DateTime? CapitalizationReversedAt { get; set; }
@@ -130,6 +139,23 @@ public class FixedAssetDto
     public DateTime? UpdatedAt { get; set; }
     public string? UpdatedBy { get; set; }
     public List<FixedAssetBookValueDto> BookValues { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
+}
+
+/// <summary>
+/// Tenant-scoped organization-location option exposed through Finance. The underlying location
+/// hierarchy remains owned and configured by HR/Payroll.
+/// </summary>
+public sealed class FixedAssetLocationOptionDto
+{
+    public Guid Id { get; set; }
+    public Guid LocationLevelId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public string DisplayName { get; set; } = string.Empty;
+    public string? LevelName { get; set; }
+    public Guid? ParentLocationId { get; set; }
+    public bool IsLeaf { get; set; }
 }
 
 /// <summary>
@@ -281,6 +307,53 @@ public class CapitalizeFixedAssetDto
     public decimal? ExchangeRate { get; set; }
     public Guid? ExchangeRateId { get; set; }
     public DateTime? ExchangeRateDate { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
+}
+
+/// <summary>
+/// Exact direct-capitalization journal proposal submitted for independent approval. Posting does
+/// not accept replacement accounting values; it consumes the immutable snapshot created here.
+/// </summary>
+public sealed class SubmitFixedAssetCapitalizationDto
+{
+    public DateTime CapitalizationDate { get; set; } = DateTime.UtcNow.Date;
+    public Guid? CreditAccountId { get; set; }
+    public string? Reference { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string? Comments { get; set; }
+    public decimal? Amount { get; set; }
+    public string? TransactionCurrencyCode { get; set; }
+    public decimal? ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public DateTime? ExchangeRateDate { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
+}
+
+/// <summary>
+/// Canonical evidence shown to the checker and later consumed by the posting service.
+/// </summary>
+public sealed class FixedAssetCapitalizationApprovalSnapshotDto
+{
+    public int Version { get; set; } = 1;
+    public Guid FixedAssetId { get; set; }
+    public string AssetCode { get; set; } = string.Empty;
+    public Guid FixedAssetCategoryId { get; set; }
+    public Guid DebitAccountId { get; set; }
+    public Guid CreditAccountId { get; set; }
+    public bool UsesCategoryAucAccount { get; set; }
+    public DateTime CapitalizationDate { get; set; }
+    public decimal TransactionAmount { get; set; }
+    public string FunctionalCurrencyCode { get; set; } = string.Empty;
+    public string TransactionCurrencyCode { get; set; } = string.Empty;
+    public decimal ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public DateTime ExchangeRateDate { get; set; }
+    public string Reference { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string SourceDocumentType { get; set; } = "FixedAsset";
+    public Guid SourceDocumentId { get; set; }
+    public Guid? SourceDocumentLineId { get; set; }
+    public string AssetEvidenceHash { get; set; } = string.Empty;
 }
 
 public sealed class RequestFixedAssetCapitalizationReversalDto
@@ -328,6 +401,7 @@ public class RunDepreciationDto
     public string? BookClassification { get; set; }
     public bool PostToGl { get; set; } = true;
     public DateTime? PostingDate { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 
     /// <summary>
     /// Verified output/usage evidence for units-of-production assets included in this run. The
@@ -372,6 +446,15 @@ public class AssetDepreciationScheduleDto
     public string? ProductionEvidenceReference { get; set; }
     public string? ProductionEvidenceNotes { get; set; }
     public DateTime? PlacedInServiceDateSnapshot { get; set; }
+    public DepreciationConvention DepreciationConventionSnapshot { get; set; }
+    public decimal ConventionFactor { get; set; }
+    public string ConventionBasis { get; set; } = string.Empty;
+    public DateTime? ConventionEligibleFromDate { get; set; }
+    public DateTime? ConventionEligibleToDate { get; set; }
+    public DateTime? FiscalPeriodStartDateSnapshot { get; set; }
+    public DateTime? FiscalPeriodEndDateSnapshot { get; set; }
+    public DateTime? FiscalYearStartDateSnapshot { get; set; }
+    public DateTime? FiscalYearEndDateSnapshot { get; set; }
     public bool IsPosted { get; set; }
     public DateTime? PostedDate { get; set; }
     public DateTime? PostingDate { get; set; }
@@ -402,7 +485,10 @@ public class FixedAssetDepreciationRunDto
     public DateTime? PostedAt { get; set; }
     public DateTime? FailedAt { get; set; }
     public string? FailureReason { get; set; }
+    public int AssetCount { get; set; }
+    public string? PreparedBy { get; set; }
     public List<AssetDepreciationScheduleDto> Lines { get; set; } = new();
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 public sealed class RequestFixedAssetDepreciationReversalDto
@@ -528,6 +614,7 @@ public class AssetTransferDto
     public Guid? JournalEntryId { get; set; }
     public Guid? PostingEventId { get; set; }
     public DateTime CreatedAt { get; set; }
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 public class RequestAssetTransferDto
@@ -550,6 +637,7 @@ public class RequestAssetTransferDto
     public string? Reason { get; set; }
     public decimal? TransferCost { get; set; }
     public string? IdempotencyKey { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class ApproveAssetTransferDto
@@ -602,6 +690,8 @@ public class AssetDisposalDto
     public int FinalDepreciationPeriodDays { get; set; }
     public int FinalDepreciationEligibleDays { get; set; }
     public string? FinalDepreciationProrationBasis { get; set; }
+    public DepreciationConvention? FinalDepreciationConventionSnapshot { get; set; }
+    public decimal FinalDepreciationConventionFactor { get; set; }
     public DepreciationMethod? FinalDepreciationMethodSnapshot { get; set; }
     public Guid? FinalDepreciationScheduleId { get; set; }
     public decimal FinalDepreciationProductionUnits { get; set; }
@@ -653,6 +743,7 @@ public class AssetDisposalDto
     public Guid? WorkflowInstanceId { get; set; }
     public string? IdempotencyKey { get; set; }
     public DateTime CreatedAt { get; set; }
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 public class RequestAssetDisposalDto
@@ -699,6 +790,7 @@ public class RequestAssetDisposalDto
     public decimal? FinalDepreciationProductionUnits { get; set; }
     public string? FinalDepreciationEvidenceReference { get; set; }
     public string? FinalDepreciationEvidenceNotes { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class ApproveAssetDisposalDto

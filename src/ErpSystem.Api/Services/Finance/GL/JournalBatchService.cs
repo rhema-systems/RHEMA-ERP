@@ -224,6 +224,97 @@ public sealed class JournalBatchService : IJournalBatchService
         return await RequireDetailAsync(id, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<EligibleJournalBatchDraftDto>> GetEligibleDraftJournalsAsync(
+        Guid id,
+        string? search,
+        int take = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var batch = await RequireBatchAsync(id, cancellationToken);
+        EnsureDraft(batch);
+
+        var activeWorkflowJournalIds = _context.WorkflowInstances
+            .Where(instance =>
+                instance.TenantId == TenantId &&
+                instance.EntityType.Code == "JournalEntry" &&
+                instance.Status != WorkflowInstanceStatus.Completed &&
+                instance.Status != WorkflowInstanceStatus.Cancelled &&
+                instance.Status != WorkflowInstanceStatus.Failed)
+            .Select(instance => instance.EntityId);
+
+        var attachedJournalIds = _context.JournalBatchItems
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted)
+            .Select(item => item.JournalEntryId);
+
+        var normalizedBook = batch.BookClassification.ToUpper();
+
+        var query = _context.JournalEntries
+            .AsNoTracking()
+            .Where(journal =>
+                journal.TenantId == TenantId &&
+                !journal.IsDeleted &&
+                journal.PostingStatus == "Draft" &&
+                journal.FiscalPeriodId == batch.FiscalPeriodId &&
+                journal.BookClassification.ToUpper() == normalizedBook &&
+                !attachedJournalIds.Contains(journal.Id) &&
+                !activeWorkflowJournalIds.Contains(journal.Id));
+
+        if (batch.BatchType == JournalBatchType.Reversal)
+        {
+            var sourceJournalIds = _context.JournalBatchItems
+                .Where(item =>
+                    item.TenantId == TenantId &&
+                    item.JournalBatchId == batch.ReversalOfJournalBatchId &&
+                    item.PostingStatus == JournalBatchItemPostingStatus.Posted &&
+                    !item.IsDeleted)
+                .Select(item => item.JournalEntryId);
+
+            query = query.Where(journal =>
+                journal.SourceModule != null && journal.SourceModule.ToUpper() == "GL" &&
+                journal.SourceDocumentType == "JournalBatchReversal" &&
+                journal.SourceDocumentId.HasValue &&
+                sourceJournalIds.Contains(journal.SourceDocumentId.Value) &&
+                (!journal.OriginalJournalEntryId.HasValue || journal.OriginalJournalEntryId == journal.SourceDocumentId));
+        }
+        else
+        {
+            query = query.Where(journal =>
+                (journal.SourceModule == null || journal.SourceModule == "" || journal.SourceModule.ToUpper() == "GL" || journal.SourceModule.ToUpper() == "MANUAL") &&
+                !journal.IsRecurring &&
+                !journal.IsRevaluationEntry &&
+                !journal.IsAutoReversalEntry &&
+                !journal.OriginalJournalEntryId.HasValue);
+        }
+
+        var normalizedSearch = search?.Trim();
+        if (normalizedSearch?.Length > 100)
+            normalizedSearch = normalizedSearch[..100];
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            query = query.Where(journal =>
+                journal.JournalEntryNumber.Contains(normalizedSearch) ||
+                journal.Description.Contains(normalizedSearch) ||
+                journal.ReferenceNumber != null && journal.ReferenceNumber.Contains(normalizedSearch));
+        }
+
+        return await query
+            .OrderByDescending(journal => journal.EntryDate)
+            .ThenBy(journal => journal.JournalEntryNumber)
+            .Take(Math.Clamp(take, 1, 100))
+            .Select(journal => new EligibleJournalBatchDraftDto
+            {
+                Id = journal.Id,
+                JournalEntryNumber = journal.JournalEntryNumber,
+                EntryDate = journal.EntryDate,
+                Description = journal.Description,
+                ReferenceNumber = journal.ReferenceNumber,
+                TotalDebit = journal.TotalDebitAmount,
+                TotalCredit = journal.TotalCreditAmount,
+                LineCount = journal.Transactions.Count(transaction => !transaction.IsDeleted)
+            })
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<JournalBatchDetailDto> CreateJournalAsync(
         Guid id,
         CreateJournalEntryDto dto,

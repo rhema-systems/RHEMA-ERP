@@ -14,18 +14,19 @@ public sealed class ApInvoiceSupplierDto
 }
 
 /// <summary>
-/// Invoice-entry identity: Id is a canonical Supplier id when one exists, otherwise an
-/// approved BusinessPartner id accepted by the existing invoice command resolver.
-/// BusinessPartnerId is the Procurement identity used to filter linked purchase orders.
-/// This is not a report-filter identity and reading it never creates a Supplier.
+/// Finance-owned entry option spanning Procurement's approved Business Partner identities and
+/// canonical Supplier identities. <see cref="Id"/> is safe to submit to the vendor-invoice
+/// command, which resolves either identity to the persisted Supplier foreign key.
 /// </summary>
-public sealed class ApInvoiceSupplierEntryDto
+public sealed class ApInvoiceSupplierEntryOptionDto
 {
     public Guid Id { get; set; }
+    public Guid? SupplierId { get; set; }
     public Guid? BusinessPartnerId { get; set; }
     public string Code { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public Guid? PaymentTermId { get; set; }
+    public string? Currency { get; set; }
 }
 
 public sealed class ApGoodsInvoiceEntryDto

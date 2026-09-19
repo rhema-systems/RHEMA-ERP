@@ -1,6 +1,7 @@
 import { apiService } from '@/services/api.service';
 import type {
     CreateFinancialStatementLayoutVersionDto,
+    CloneFinancialStatementLayoutDto,
     FinancialStatementLayoutAuditEventDto,
     FinancialStatementLayoutDto,
     FinancialStatementLayoutExecutionDto,
@@ -9,6 +10,7 @@ import type {
     FinancialStatementLayoutImportResultDto,
     FinancialStatementLayoutSummaryDto,
     FinancialStatementLayoutValidationResultDto,
+    FinancialStatementRowInputDto,
     FinancialStatementType,
     LegacyFinancialStatementLayoutMigrationRequestDto,
     PublishFinancialStatementLayoutVersionDto,
@@ -55,6 +57,17 @@ class FinancialStatementLayoutDataService {
         );
     }
 
+    cloneLayout(layoutId: string, request: CloneFinancialStatementLayoutDto) {
+        return apiService.post<FinancialStatementLayoutDto>(`${root}/${layoutId}/clone`, request);
+    }
+
+    replaceDraftRows(versionId: string, expectedVersionRevision: number, rows: FinancialStatementRowInputDto[]) {
+        return apiService.put<FinancialStatementLayoutDto['versions'][number]>(
+            `${root}/versions/${versionId}/rows`,
+            { expectedVersionRevision, rows },
+        );
+    }
+
     validateVersion(versionId: string) {
         return apiService.post<FinancialStatementLayoutValidationResultDto>(
             `${root}/versions/${versionId}/validate`,
@@ -90,6 +103,15 @@ class FinancialStatementLayoutDataService {
         return apiService.get<FinancialStatementLayoutAuditEventDto[]>(
             `${root}/${layoutId}/audit-trail`,
         );
+    }
+
+    async downloadExportJson(versionId: string, fileName: string) {
+        const definition = await apiService.get<FinancialStatementLayoutImportDefinitionDto>(`${root}/versions/${versionId}/exports/json`);
+        download(new Blob([JSON.stringify(definition, null, 2)], { type: 'application/json' }), fileName);
+    }
+
+    async downloadExportWorkbook(versionId: string, fileName: string) {
+        download(await apiService.downloadBlob(`${root}/versions/${versionId}/exports/workbook`), fileName);
     }
 
     async downloadImportTemplate() {

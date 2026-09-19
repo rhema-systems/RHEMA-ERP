@@ -21,10 +21,39 @@ public sealed class FinanceAdHocReportBuilderTests
     public void Catalogue_ExposesCuratedFinanceDatasetsWithoutBrowserSuppliedSql()
     {
         FinanceAdHocReportCatalog.All.Select(item => item.Code).Should().BeEquivalentTo(
-            "gl-lines", "ap-invoices", "ar-invoices", "fixed-assets", "chart-of-accounts");
+            "gl-lines", "ap-invoices", "ar-invoices", "fixed-assets", "chart-of-accounts", "book-balances");
         FinanceAdHocReportCatalog.All.Should().OnlyContain(dataset =>
             dataset.Fields.Count > 0 && dataset.Fields.Values.All(field =>
                 !string.IsNullOrWhiteSpace(field.SqlExpression)));
+    }
+
+    [Fact]
+    public void ChartOfAccountsCatalogue_UsesOneExactActiveDefaultBookAndTenantSafeClassificationLineage()
+    {
+        var dataset = FinanceAdHocReportCatalog.Required("chart-of-accounts");
+
+        dataset.FromSql.Should().NotContain("TOP (1)");
+        dataset.FromSql.Should().Contain("COUNT_BIG(*)").And.Contain(") = 1");
+        dataset.FromSql.Should().Contain("[ab].[TenantId] = [a].[TenantId]")
+            .And.Contain("[ab].[IsActive] = 1")
+            .And.Contain("[ab].[AllowsPosting] = 1")
+            .And.Contain("[ac].[TenantId] = [a].[TenantId]")
+            .And.Contain("[ac].[AccountingBookId] = [ab].[Id]")
+            .And.Contain("[ac].[Status] = 2")
+            .And.Contain("[parent].[TenantId] = [a].[TenantId]")
+            .And.Contain("[parent].[AccountingBookId] = [ab].[Id]");
+    }
+
+    [Fact]
+    public void BookBalancesCatalogue_ExposesOnlyBookScopedBalances()
+    {
+        var dataset = FinanceAdHocReportCatalog.Required("book-balances");
+
+        dataset.FromSql.Should().Contain("[b].[AccountingBookId]")
+            .And.Contain("[b].[FiscalPeriodId]")
+            .And.Contain("[a].[TenantId] = [b].[TenantId]");
+        dataset.Fields.Should().ContainKey("closingBalance");
+        FinanceAdHocReportCatalog.Required("chart-of-accounts").Fields.Should().NotContainKey("balance");
     }
 
     [Fact]

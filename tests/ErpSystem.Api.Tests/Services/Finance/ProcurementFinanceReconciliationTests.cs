@@ -861,6 +861,16 @@ public sealed class ProcurementFinanceReconciliationTests
             BaseCurrency = "GHS"
         });
 
+        var accountingBookId = Guid.NewGuid();
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = accountingBookId,
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS",
+            IsDefault = true
+        });
+
         var requisitionId = Guid.NewGuid();
         var contractId = Guid.NewGuid();
         var po = new PurchaseOrder
@@ -933,7 +943,7 @@ public sealed class ProcurementFinanceReconciliationTests
         };
         db.ProcurementBudgetCommitments.Add(commitment);
 
-        var invoiceJournal = Journal(tenantId, "JE-INV-0508", "VendorInvoice", 100m);
+        var invoiceJournal = Journal(tenantId, accountingBookId, "JE-INV-0508", "VendorInvoice", 100m);
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(),
@@ -956,12 +966,12 @@ public sealed class ProcurementFinanceReconciliationTests
             CreatedAt = new DateTime(2026, 7, 3),
             CreatedBy = "seed"
         };
-        var invoicePosting = Posting(tenantId, invoice.Id, "VendorInvoice", invoiceJournal.Id, 100m);
+        var invoicePosting = Posting(tenantId, accountingBookId, invoice.Id, "VendorInvoice", invoiceJournal.Id, 100m);
         db.JournalEntries.Add(invoiceJournal);
         db.FinancePostingEvents.Add(invoicePosting);
         db.VendorInvoices.Add(invoice);
 
-        var paymentJournal = Journal(tenantId, "JE-PAY-0508", "VendorPayment", 100m);
+        var paymentJournal = Journal(tenantId, accountingBookId, "JE-PAY-0508", "VendorPayment", 100m);
         var payment = new VendorPayment
         {
             Id = Guid.NewGuid(),
@@ -990,7 +1000,7 @@ public sealed class ProcurementFinanceReconciliationTests
             CreatedBy = "seed"
         };
         payment.Allocations.Add(allocation);
-        var paymentPosting = Posting(tenantId, payment.Id, "VendorPayment", paymentJournal.Id, 100m);
+        var paymentPosting = Posting(tenantId, accountingBookId, payment.Id, "VendorPayment", paymentJournal.Id, 100m);
         db.JournalEntries.Add(paymentJournal);
         db.FinancePostingEvents.Add(paymentPosting);
         db.Set<VendorPayment>().Add(payment);
@@ -1052,12 +1062,14 @@ public sealed class ProcurementFinanceReconciliationTests
 
     private static JournalEntry Journal(
         Guid tenantId,
+        Guid accountingBookId,
         string number,
         string sourceDocumentType,
         decimal amount) => new()
     {
         Id = Guid.NewGuid(),
         TenantId = tenantId,
+        AccountingBookId = accountingBookId,
         JournalEntryNumber = number,
         JournalType = "System Generated",
         EntryDate = new DateTime(2026, 7, 4),
@@ -1074,6 +1086,7 @@ public sealed class ProcurementFinanceReconciliationTests
 
     private static FinancePostingEvent Posting(
         Guid tenantId,
+        Guid accountingBookId,
         Guid sourceId,
         string sourceDocumentType,
         Guid journalId,
@@ -1081,6 +1094,7 @@ public sealed class ProcurementFinanceReconciliationTests
     {
         Id = Guid.NewGuid(),
         TenantId = tenantId,
+        AccountingBookId = accountingBookId,
         SourceModule = "AP",
         SourceDocumentType = sourceDocumentType,
         SourceDocumentId = sourceId,

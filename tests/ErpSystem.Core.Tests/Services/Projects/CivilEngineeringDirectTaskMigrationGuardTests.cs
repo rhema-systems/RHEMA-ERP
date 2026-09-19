@@ -9,7 +9,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     public void Migration_enforces_project_work_item_assignee_policy_dms_and_append_only_task_controls()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821170000_AddCivilEngineeringDirectTaskControls.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821170000_AddCivilEngineeringDirectTaskControls.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDirectTaskControls_Lineage")
             .And.Contain("TR_ProjectCivilDirectTaskControls_Lifecycle")
@@ -29,7 +29,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     public void Feedback_migration_enforces_append_only_events_dms_lineage_idempotency_and_lifecycle_transitions()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821180000_AddCivilEngineeringDirectTaskFeedbackWorkflow.cs"));
 
         sql.Should().Contain("ProjectCivilDirectTaskFeedbackEntries")
             .And.Contain("IX_ProjectCivilDirectTaskFeedbackEntries_TenantId_TaskId_ClientRequestId")
@@ -50,7 +50,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     public void Urgent_task_migration_enforces_frozen_sla_controlled_escalation_and_single_escalation_lineage()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821190000_AddCivilEngineeringUrgentTaskControls.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821190000_AddCivilEngineeringUrgentTaskControls.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDirectTaskControls_UrgentPath")
             .And.Contain("UrgentEscalationClientRequestId")
@@ -66,7 +66,7 @@ public sealed class CivilEngineeringDirectTaskMigrationGuardTests
     public void Mobile_field_feedback_migration_enforces_tenant_owned_measurements_and_offline_capture_bounds()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821200000_AddCivilEngineeringMobileFieldFeedback.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821200000_AddCivilEngineeringMobileFieldFeedback.cs"));
 
         sql.Should().Contain("MeasurementValue decimal(18,4)")
             .And.Contain("MeasurementUnitId uniqueidentifier")

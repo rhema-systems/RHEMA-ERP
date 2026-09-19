@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Reporting;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
@@ -50,9 +51,9 @@ public sealed class FinancialStatementLayoutExecutionService
             version.FinancialStatementLayout.StatementType,
             request.PeriodStart,
             request.PeriodEnd);
-        var validation = await _layoutService.ValidateVersionAsync(
-            version.Id,
-            cancellationToken);
+        var validation = version.Status == FinancialStatementLayoutVersionStatus.Draft
+            ? await _layoutService.ValidateVersionAsync(version.Id, cancellationToken)
+            : ValidatePublishedSnapshot(version);
         ThrowForValidationErrors(validation);
 
         return await ExecuteVersionAsync(
@@ -97,6 +98,10 @@ public sealed class FinancialStatementLayoutExecutionService
                     layout.AccountingBookId == request.AccountingBookId &&
                     layout.StatementType == request.StatementType &&
                     layout.IsActive &&
+                    layout.AccountingBook.TenantId == tenantId &&
+                    !layout.AccountingBook.IsDeleted &&
+                    layout.AccountingBook.IsActive &&
+                    layout.AccountingBook.AllowsPosting &&
                     !layout.IsDeleted);
 
         FinancialStatementLayout? layout;
@@ -114,15 +119,18 @@ public sealed class FinancialStatementLayoutExecutionService
         }
         else
         {
-            layout = await layoutQuery
+            var defaults = await layoutQuery
                 .Where(candidate => candidate.IsDefault)
                 .OrderBy(candidate => candidate.Code)
-                .FirstOrDefaultAsync(cancellationToken);
-            if (layout == null)
+                .Take(2)
+                .ToListAsync(cancellationToken);
+            if (defaults.Count != 1)
             {
-                throw new KeyNotFoundException(
-                    "No active default financial statement layout is configured for the selected statement type and accounting book.");
+                throw new InvalidOperationException(defaults.Count == 0
+                    ? "No active default financial statement layout is configured for the selected statement type and accounting book."
+                    : "More than one active default layout exists for the selected statement type and accounting book; choose a layout explicitly.");
             }
+            layout = defaults[0];
         }
 
         var effectiveDate = period.End;
@@ -150,9 +158,9 @@ public sealed class FinancialStatementLayoutExecutionService
         var version = await LoadVersionAsync(versionId.Value, cancellationToken)
             ?? throw new KeyNotFoundException(
                 "The effective financial statement layout version was not found.");
-        var validation = await _layoutService.ValidateVersionAsync(
-            version.Id,
-            cancellationToken);
+        if (version.PublishedAccountingBookId != request.AccountingBookId)
+            throw new InvalidOperationException("The published snapshot does not belong to the requested accounting book.");
+        var validation = ValidatePublishedSnapshot(version);
         ThrowForValidationErrors(validation);
 
         return await ExecuteVersionAsync(
@@ -182,14 +190,7 @@ public sealed class FinancialStatementLayoutExecutionService
     {
         var layout = version.FinancialStatementLayout;
         var tenantId = TenantId;
-        var enabledAccountIds = _context.AccountAccountingBooks
-            .AsNoTracking()
-            .Where(mapping =>
-                mapping.TenantId == tenantId &&
-                mapping.AccountingBookId == layout.AccountingBookId &&
-                mapping.IsEnabled &&
-                !mapping.IsDeleted)
-            .Select(mapping => mapping.AccountId);
+        var useSnapshot = version.Status != FinancialStatementLayoutVersionStatus.Draft;
 
         var selectedAccountIds = accountIds?
             .Where(accountId => accountId != Guid.Empty)
@@ -203,48 +204,57 @@ public sealed class FinancialStatementLayoutExecutionService
             dimensionFilters,
             cancellationToken);
 
-        IQueryable<Account> accountQuery = _context.Accounts
-            .AsNoTracking()
-            .Where(account =>
-                account.TenantId == tenantId &&
-                !account.IsDeleted &&
-                enabledAccountIds.Contains(account.Id));
-
-        if (selectedAccountIds.Length > 0)
+        List<ExecutionAccount> accounts;
+        if (useSnapshot)
         {
-            var ownedCount = await accountQuery.CountAsync(
-                account => selectedAccountIds.Contains(account.Id),
-                cancellationToken);
-            if (ownedCount != selectedAccountIds.Length)
+            accounts = version.PublicationAccounts.Where(item => !item.IsDeleted)
+                .Select(item => new ExecutionAccount(item.AccountId, item.AccountNumber, item.AccountName, item.AccountType, null, item.AccountClassificationId))
+                .DistinctBy(item => item.Id).OrderBy(item => item.AccountNumber).ToList();
+            if (selectedAccountIds.Length > 0 && selectedAccountIds.Any(id => accounts.All(item => item.Id != id)))
+                throw new InvalidOperationException("One or more report account filters are outside the immutable publication snapshot.");
+            if (selectedAccountIds.Length > 0)
+                accounts = accounts.Where(item => selectedAccountIds.Contains(item.Id)).ToList();
+            foreach (var filter in resolvedSegmentFilters)
             {
-                throw new InvalidOperationException(
-                    "One or more report account filters do not belong to the current tenant or are not enabled for the selected accounting book.");
+                var matchingIds = await _context.AccountSegmentValues.AsNoTracking()
+                    .Where(item => item.TenantId == tenantId && !item.IsDeleted
+                        && item.SegmentStructureId == filter.SegmentStructureId
+                        && item.SegmentValue == filter.SegmentValue)
+                    .Select(item => item.AccountId).ToListAsync(cancellationToken);
+                accounts = accounts.Where(item => matchingIds.Contains(item.Id)).ToList();
             }
-
-            accountQuery = accountQuery.Where(
-                account => selectedAccountIds.Contains(account.Id));
         }
-
-        foreach (var filter in resolvedSegmentFilters)
+        else
         {
-            accountQuery = accountQuery.Where(account =>
-                account.SegmentValues.Any(segmentValue =>
-                    segmentValue.TenantId == tenantId &&
-                    segmentValue.SegmentStructureId ==
-                        filter.SegmentStructureId &&
-                    segmentValue.SegmentValue == filter.SegmentValue &&
-                    !segmentValue.IsDeleted));
+            var enabledAccountIds = _context.AccountAccountingBooks.AsNoTracking()
+                .Where(mapping => mapping.TenantId == tenantId && mapping.AccountingBookId == layout.AccountingBookId
+                    && mapping.IsEnabled && !mapping.IsDeleted).Select(mapping => mapping.AccountId);
+            IQueryable<Account> accountQuery = _context.Accounts.AsNoTracking()
+                .Where(account => account.TenantId == tenantId && !account.IsDeleted && enabledAccountIds.Contains(account.Id));
+            if (selectedAccountIds.Length > 0)
+            {
+                var ownedCount = await accountQuery.CountAsync(account => selectedAccountIds.Contains(account.Id), cancellationToken);
+                if (ownedCount != selectedAccountIds.Length)
+                    throw new InvalidOperationException("One or more report account filters do not belong to the current tenant or are not enabled for the selected accounting book.");
+                accountQuery = accountQuery.Where(account => selectedAccountIds.Contains(account.Id));
+            }
+            foreach (var filter in resolvedSegmentFilters)
+                accountQuery = accountQuery.Where(account => account.SegmentValues.Any(segmentValue =>
+                    segmentValue.TenantId == tenantId && segmentValue.SegmentStructureId == filter.SegmentStructureId
+                    && segmentValue.SegmentValue == filter.SegmentValue && !segmentValue.IsDeleted));
+            accounts = await accountQuery.OrderBy(account => account.AccountNumber)
+                .Select(account => new ExecutionAccount(account.Id, account.AccountNumber, account.AccountName,
+                    account.AccountType, account.ParentAccountId, null)).ToListAsync(cancellationToken);
+            var resolvedAccountIds = accounts.Select(account => account.Id).ToArray();
+            var classificationIds = await _context.AccountAccountingBooks.AsNoTracking()
+                .Where(mapping => mapping.TenantId == tenantId && mapping.AccountingBookId == layout.AccountingBookId
+                    && mapping.IsEnabled && !mapping.IsDeleted && resolvedAccountIds.Contains(mapping.AccountId))
+                .ToDictionaryAsync(mapping => mapping.AccountId, mapping => mapping.AccountClassificationId, cancellationToken);
+            accounts = accounts.Select(account => account with
+            {
+                AccountClassificationId = classificationIds.GetValueOrDefault(account.Id)
+            }).ToList();
         }
-
-        var accounts = await accountQuery
-            .OrderBy(account => account.AccountNumber)
-            .Select(account => new ExecutionAccount(
-                account.Id,
-                account.AccountNumber,
-                account.AccountName,
-                account.AccountType,
-                account.ParentAccountId))
-            .ToListAsync(cancellationToken);
 
         var accountsById = accounts.ToDictionary(account => account.Id);
         var childAccounts = accounts
@@ -253,9 +263,21 @@ public sealed class FinancialStatementLayoutExecutionService
             .ToDictionary(
                 group => group.Key,
                 group => group.Select(account => account.Id).ToList());
+        IReadOnlyDictionary<Guid, List<Guid>> childClassifications = new Dictionary<Guid, List<Guid>>();
+        if (!useSnapshot)
+        {
+            var classificationEdges = await _context.AccountClassifications.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.AccountingBookId == layout.AccountingBookId
+                    && !item.IsDeleted && item.ParentClassificationId.HasValue)
+                .Select(item => new { item.Id, ParentId = item.ParentClassificationId!.Value })
+                .ToListAsync(cancellationToken);
+            childClassifications = classificationEdges
+                .GroupBy(item => item.ParentId)
+                .ToDictionary(group => group.Key, group => group.Select(item => item.Id).ToList());
+        }
         var normalBalances = await LoadNormalBalancesAsync(
             accounts,
-            layout.AccountingBook.Code,
+            useSnapshot ? version.PublishedAccountingBookCode! : layout.AccountingBook.Code,
             layout.StatementType,
             period,
             resolvedDimensionFilters,
@@ -276,14 +298,18 @@ public sealed class FinancialStatementLayoutExecutionService
         foreach (var row in orderedRows.Where(
                      candidate => candidate.RowType == FinancialStatementRowType.Account))
         {
-            var mappedIds = new HashSet<Guid>();
-            foreach (var mapping in row.Mappings.Where(candidate => !candidate.IsDeleted))
+            var mappedIds = useSnapshot
+                ? version.PublicationAccounts.Where(item => !item.IsDeleted && item.FinancialStatementRowId == row.Id)
+                    .Select(item => item.AccountId).Where(accountsById.ContainsKey).ToHashSet()
+                : new HashSet<Guid>();
+            if (!useSnapshot) foreach (var mapping in row.Mappings.Where(candidate => !candidate.IsDeleted))
             {
                 foreach (var accountId in ResolveMapping(
                              mapping,
                              accounts,
                              accountsById,
-                             childAccounts))
+                             childAccounts,
+                             childClassifications))
                 {
                     mappedIds.Add(accountId);
                 }
@@ -485,9 +511,9 @@ public sealed class FinancialStatementLayoutExecutionService
             VersionNumber = version.VersionNumber,
             VersionStatus = version.Status,
             StatementType = layout.StatementType,
-            AccountingBookId = layout.AccountingBookId,
-            AccountingBookCode = layout.AccountingBook.Code,
-            AccountingBookName = layout.AccountingBook.Name,
+            AccountingBookId = useSnapshot ? version.PublishedAccountingBookId!.Value : layout.AccountingBookId,
+            AccountingBookCode = useSnapshot ? version.PublishedAccountingBookCode! : layout.AccountingBook.Code,
+            AccountingBookName = useSnapshot ? version.PublishedAccountingBookName! : layout.AccountingBook.Name,
             CompanyName = companyName,
             CurrencyCode = currencyCode,
             PeriodStart = period.Start,
@@ -744,6 +770,7 @@ public sealed class FinancialStatementLayoutExecutionService
                 .ThenInclude(layout => layout.AccountingBook)
             .Include(version => version.Rows.Where(row => !row.IsDeleted))
                 .ThenInclude(row => row.Mappings.Where(mapping => !mapping.IsDeleted))
+            .Include(version => version.PublicationAccounts.Where(item => !item.IsDeleted))
             .SingleOrDefaultAsync(version =>
                 version.Id == versionId &&
                 version.TenantId == TenantId &&
@@ -751,11 +778,48 @@ public sealed class FinancialStatementLayoutExecutionService
                 !version.FinancialStatementLayout.IsDeleted,
                 cancellationToken);
 
+    private static FinancialStatementLayoutValidationResultDto ValidatePublishedSnapshot(
+        FinancialStatementLayoutVersion version)
+    {
+        var result = new FinancialStatementLayoutValidationResultDto();
+        if (version.PublishedAccountingBookId is null
+            || string.IsNullOrWhiteSpace(version.PublishedAccountingBookCode)
+            || string.IsNullOrWhiteSpace(version.PublishedAccountingBookName)
+            || string.IsNullOrWhiteSpace(version.HierarchyFingerprint)
+            || string.IsNullOrWhiteSpace(version.ResolutionFingerprint)
+            || version.PublicationSnapshotSchemaVersion != FinancialStatementPublicationFingerprint.SnapshotSchemaVersion)
+        {
+            result.Issues.Add(new FinancialStatementLayoutValidationIssueDto
+            {
+                Severity = FinancialStatementLayoutValidationSeverity.Error,
+                Code = "PUBLICATION_SNAPSHOT_MISSING",
+                Message = "The published layout version has no complete immutable publication snapshot."
+            });
+            return result;
+        }
+        var actual = FinancialStatementPublicationFingerprint.Resolution(
+            version.TenantId, version.Id, version.PublishedAccountingBookId.Value,
+            version.PublishedAccountingBookCode, version.PublishedAccountingBookName,
+            version.HierarchyFingerprint,
+            version.PublicationAccounts.Where(item => !item.IsDeleted));
+        if (!actual.Equals(version.ResolutionFingerprint, StringComparison.Ordinal))
+        {
+            result.Issues.Add(new FinancialStatementLayoutValidationIssueDto
+            {
+                Severity = FinancialStatementLayoutValidationSeverity.Error,
+                Code = "PUBLICATION_SNAPSHOT_TAMPERED",
+                Message = "The immutable publication snapshot failed its deterministic resolution fingerprint check."
+            });
+        }
+        return result;
+    }
+
     private static IReadOnlyCollection<Guid> ResolveMapping(
         FinancialStatementRowMapping mapping,
         IReadOnlyCollection<ExecutionAccount> accounts,
         IReadOnlyDictionary<Guid, ExecutionAccount> accountsById,
-        IReadOnlyDictionary<Guid, List<Guid>> childAccounts)
+        IReadOnlyDictionary<Guid, List<Guid>> childAccounts,
+        IReadOnlyDictionary<Guid, List<Guid>> childClassifications)
         => mapping.MappingType switch
         {
             FinancialStatementRowMappingType.Account when
@@ -779,6 +843,13 @@ public sealed class FinancialStatementLayoutExecutionService
                                 mapping.ToAccountNumber) <= 0)
                         .Select(account => account.Id)
                         .ToList(),
+            FinancialStatementRowMappingType.Classification when mapping.AccountClassificationId.HasValue =>
+                accounts.Where(account => account.AccountClassificationId.HasValue
+                        && (mapping.IncludeClassificationDescendants
+                            ? ResolveHierarchy(mapping.AccountClassificationId.Value, childClassifications)
+                            : new HashSet<Guid> { mapping.AccountClassificationId.Value })
+                        .Contains(account.AccountClassificationId.Value))
+                    .Select(account => account.Id).ToList(),
             _ => Array.Empty<Guid>()
         };
 
@@ -892,7 +963,8 @@ public sealed class FinancialStatementLayoutExecutionService
         string AccountNumber,
         string AccountName,
         AccountType AccountType,
-        Guid? ParentAccountId);
+        Guid? ParentAccountId,
+        Guid? AccountClassificationId);
 
     private sealed record NormalizedSegmentFilter(
         Guid SegmentStructureId,

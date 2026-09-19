@@ -8,7 +8,7 @@ public sealed class QuantitySurveySubcontractGuardTests
     [Fact]
     public void Migration_is_scoped_and_enforces_lineage_terminal_immutability_and_append_only_evidence()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260811050412_AddQuantitySurveySubcontractLifecycle.cs");
 
         source.Should().Contain("QuantitySurveySubcontracts")
@@ -29,7 +29,7 @@ public sealed class QuantitySurveySubcontractGuardTests
             .And.NotContain("name: \"VendorInvoices\"")
             .And.NotContain("name: \"CentralDocumentRecords\"");
 
-        var certificateGuard = Source("src", "ErpSystem.Data", "Migrations",
+        var certificateGuard = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260811061000_HardenQuantitySurveySubcontractCertificates.cs");
         certificateGuard.Should().Contain("TR_QS0521_SubcontractCertificates_Governance")
             .And.Contain("QuantitySurveySubcontractValuationId")

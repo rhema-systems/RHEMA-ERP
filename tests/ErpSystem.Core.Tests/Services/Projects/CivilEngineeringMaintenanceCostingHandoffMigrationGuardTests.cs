@@ -9,7 +9,7 @@ public sealed class CivilEngineeringMaintenanceCostingHandoffMigrationGuardTests
     public void Migration_enforces_cross_owner_lineage_lifecycle_and_append_only_history()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs.cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs.cs"));
         migration.Should().Contain("QuantitySurveyEstimateVersions")
             .And.Contain("ProjectBudgetRevisions")
             .And.Contain("PurchaseRequisitions")

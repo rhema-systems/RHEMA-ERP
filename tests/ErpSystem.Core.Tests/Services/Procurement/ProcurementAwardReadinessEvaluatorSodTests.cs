@@ -86,7 +86,7 @@ public sealed class ProcurementAwardReadinessEvaluatorSodTests
         var workflow = new WorkflowInstance
         {
             Id = Guid.NewGuid(), TenantId = fixture.TenantId,
-            WorkflowDefinitionId = scenario == "wrong-definition" ? Guid.NewGuid() : control.WorkflowDefinitionId,
+            WorkflowDefinitionId = scenario == "wrong-definition" ? Guid.NewGuid() : control.WorkflowDefinitionId!.Value,
             EntityId = scenario == "wrong-source" ? Guid.NewGuid() : source.Id,
             EntityTypeId = Guid.NewGuid(),
             InitiatedById = scenario == "wrong-initiator" ? Guid.NewGuid() : submitterId,

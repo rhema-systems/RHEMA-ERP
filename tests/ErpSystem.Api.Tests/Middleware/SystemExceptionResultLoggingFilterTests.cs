@@ -18,6 +18,44 @@ namespace ErpSystem.Api.Tests.Middleware;
 public sealed class SystemExceptionResultLoggingFilterTests
 {
     [Fact]
+    public async Task SuccessfulImplicitObjectResultIsNotConvertedToServerFailure()
+    {
+        var provider = new ServiceCollection().BuildServiceProvider();
+        var http = new DefaultHttpContext
+        {
+            RequestServices = provider,
+            TraceIdentifier = "successful-object-result-1"
+        };
+        http.Request.Method = HttpMethods.Get;
+        http.Request.Path = "/api/finance/journal-batches";
+        var actionContext = new ActionContext(
+            http,
+            new RouteData(),
+            new ActionDescriptor { DisplayName = "Get journal batches" });
+        var payload = new { totalCount = 1 };
+        var result = new ObjectResult(payload);
+        var executing = new ResultExecutingContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            result,
+            new object());
+        var filter = new SystemExceptionResultLoggingFilter(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<SystemExceptionResultLoggingFilter>.Instance);
+
+        await filter.OnResultExecutionAsync(executing, () =>
+            Task.FromResult(new ResultExecutedContext(
+                actionContext,
+                new List<IFilterMetadata>(),
+                executing.Result,
+                new object())));
+
+        executing.Result.Should().BeSameAs(result);
+        result.StatusCode.Should().BeNull();
+        result.Value.Should().BeSameAs(payload);
+    }
+
+    [Fact]
     public async Task LegacyServerErrorStringIsNormalizedWithoutLeakingControllerText()
     {
         var provider = new ServiceCollection().BuildServiceProvider();

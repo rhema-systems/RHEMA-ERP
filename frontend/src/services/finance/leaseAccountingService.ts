@@ -3,6 +3,7 @@
  */
 
 import { apiService } from '@/services/api.service';
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from '@/types/finance';
 
 // ── Types ──────────────────────────────────────────────────────────
 
@@ -32,6 +33,7 @@ export interface LeaseScheduleLine {
   principalReduction: number;
   remainingLiability: number;
   isPosted: boolean;
+  financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface LeaseContractDetail extends LeaseContractList {
@@ -43,6 +45,7 @@ export interface LeaseContractDetail extends LeaseContractList {
   updatedAt?: string;
   updatedBy?: string;
   scheduleLines: LeaseScheduleLine[];
+  recognitionFinanceDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface CreateLeaseContractDto {
@@ -75,12 +78,12 @@ class LeaseAccountingService {
     return apiService.post<LeaseContractDetail>('/finance/leases', dto);
   }
 
-  async activate(id: string): Promise<LeaseContractDetail> {
-    return apiService.post<LeaseContractDetail>(`/finance/leases/${id}/activate`);
+  async activate(id: string, financeDimensions?: FinanceSourceDocumentDimensionInput): Promise<LeaseContractDetail> {
+    return apiService.post<LeaseContractDetail>(`/finance/leases/${id}/activate`, { financeDimensions });
   }
 
-  async postPeriodJournal(id: string, lineId: string): Promise<LeaseContractDetail> {
-    return apiService.post<LeaseContractDetail>(`/finance/leases/${id}/schedule-lines/${lineId}/post`);
+  async postPeriodJournal(id: string, lineId: string, financeDimensions?: FinanceSourceDocumentDimensionInput): Promise<LeaseContractDetail> {
+    return apiService.post<LeaseContractDetail>(`/finance/leases/${id}/schedule-lines/${lineId}/post`, { financeDimensions });
   }
 }
 

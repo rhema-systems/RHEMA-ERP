@@ -13,18 +13,25 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { Layers, Plus, Edit, Trash2, List, Settings2, Upload, FileSpreadsheet, Download, ArrowUp, ArrowDown } from 'lucide-react';
+import { Layers, Plus, Edit, Trash2, List, Settings2, Upload, FileSpreadsheet, Download, ArrowUp, ArrowDown, Loader2, TriangleAlert } from 'lucide-react';
 import type { SegmentStructure, SegmentLookupValue } from '@/types/finance';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { toast } from 'sonner';
+import Link from 'next/link';
+import { useAuth } from '@/hooks/use-auth';
+import { getSegmentAccess } from '@/components/finance/segments/segment-access';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 
 
 
 function SegmentConfigurationContent() {
+    const { hasPermission, isLoading: authLoading } = useAuth();
+    const { canRead, canManage } = getSegmentAccess(hasPermission);
     const [segments, setSegments] = useState<SegmentStructure[]>([]);
     const [selectedSegmentId, setSelectedSegmentId] = useState<string>('');
     const [lookupValues, setLookupValues] = useState<Record<string, SegmentLookupValue[]>>({});
     const [isLoading, setIsLoading] = useState(true);
+    const [loadError, setLoadError] = useState<string | null>(null);
 
     // Dialog states
     const [isSegmentDialogOpen, setIsSegmentDialogOpen] = useState(false);
@@ -40,12 +47,14 @@ function SegmentConfigurationContent() {
     const [pendingReorder, setPendingReorder] = useState<{ segmentId: string; direction: 'up' | 'down' } | null>(null);
 
     React.useEffect(() => {
-        loadData();
-    }, []);
+        if (!authLoading && canRead) void loadData();
+    }, [authLoading, canRead]);
 
     const loadData = async () => {
+        if (!canRead) return;
         try {
             setIsLoading(true);
+            setLoadError(null);
             const data = await financeDataService.getSegmentStructures();
             // Sort by position
             data.sort((a, b) => a.segmentPosition - b.segmentPosition);
@@ -59,7 +68,7 @@ function SegmentConfigurationContent() {
             }
         } catch (error) {
             console.error('Failed to load segments:', error);
-            toast.error('Failed to load segments');
+            setLoadError(error instanceof Error ? error.message : 'Failed to load account-number structure.');
         } finally {
             setIsLoading(false);
         }
@@ -145,7 +154,8 @@ function SegmentConfigurationContent() {
         // Create full payload
         const reorderList = updatedSegments.map(s => ({
             segmentId: s.id,
-            newPosition: s.segmentPosition
+            newPosition: s.segmentPosition,
+            rowVersion: s.rowVersion,
         }));
 
         console.log('Sending Reorder Payload:', JSON.stringify(reorderList, null, 2));
@@ -155,7 +165,7 @@ function SegmentConfigurationContent() {
             setSegments(updatedSegments);
 
             await financeDataService.reorderSegmentStructures(reorderList);
-            toast.success('Segments reordered and account codes updated');
+            toast.success('Draft account-number segments reordered');
 
             // Reload to ensure sync
             await loadData();
@@ -178,8 +188,6 @@ function SegmentConfigurationContent() {
         segmentLength: 3,
         dataType: 'Numeric',
         separatorCharacter: '-',
-        isMandatory: true,
-        isReportingDimension: true,
         description: '',
     });
 
@@ -198,8 +206,6 @@ function SegmentConfigurationContent() {
             segmentLength: segment.segmentLength,
             dataType: segment.dataType,
             separatorCharacter: segment.separatorCharacter || '-',
-            isMandatory: segment.isMandatory || false,
-            isReportingDimension: segment.isReportingDimension || false,
             description: segment.description || '',
         });
         setIsSegmentDialogOpen(true);
@@ -213,9 +219,7 @@ function SegmentConfigurationContent() {
                     id: editingSegment.id,
                     segmentName: segmentForm.segmentName,
                     description: segmentForm.description,
-                    isReportingDimension: segmentForm.isReportingDimension,
-                    isMandatory: segmentForm.isMandatory,
-                    isActive: editingSegment.isActive,
+                    rowVersion: editingSegment.rowVersion,
                     // Other fields might be read-only on backend for updates, but sending what we can
                 };
 
@@ -231,10 +235,7 @@ function SegmentConfigurationContent() {
                     dataType: segmentForm.dataType,
                     separatorCharacter: segmentForm.separatorCharacter,
                     lookupTableRequired: true,
-                    isMandatory: segmentForm.isMandatory,
-                    isReportingDimension: segmentForm.isReportingDimension,
                     isNaturalAccount: false,
-                    isActive: true,
                     description: segmentForm.description,
                 };
                 await financeDataService.createSegmentStructure(newSegmentDto);
@@ -347,8 +348,6 @@ function SegmentConfigurationContent() {
             segmentLength: 3,
             dataType: 'Numeric',
             separatorCharacter: '-',
-            isMandatory: true,
-            isReportingDimension: true,
             description: '',
         });
         setEditingSegment(null);
@@ -356,8 +355,19 @@ function SegmentConfigurationContent() {
 
 
 
-    const getDataTypeBadge = (type: string) => {
-        return <Badge variant="outline">{type}</Badge>;
+    const transitionSegment = async (segment: SegmentStructure, action: 'activate' | 'freeze') => {
+        try {
+            setIsLoading(true);
+            if (action === 'activate') await financeDataService.activateSegmentStructure(segment.id, segment.rowVersion);
+            else await financeDataService.freezeSegmentStructure(segment.id, segment.rowVersion);
+            toast.success(`Segment ${action === 'activate' ? 'activated' : 'frozen'}`);
+            await loadData();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : `Failed to ${action} segment`);
+            await loadData();
+        } finally {
+            setIsLoading(false);
+        }
     };
 
     const searchParams = useSearchParams();
@@ -370,6 +380,11 @@ function SegmentConfigurationContent() {
         }
     }, [tabParam]);
 
+    if (authLoading) return <div className="flex min-h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    if (!canRead) return <Alert variant="destructive"><TriangleAlert className="h-4 w-4" /><AlertTitle>Permission denied</AlertTitle><AlertDescription>Finance.Read is required to view account-number structure.</AlertDescription></Alert>;
+    if (isLoading && segments.length === 0) return <div className="flex min-h-48 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>;
+    if (loadError) return <Alert variant="destructive"><TriangleAlert className="h-4 w-4" /><AlertTitle>Unable to load account-number structure</AlertTitle><AlertDescription>{loadError}<Button className="ml-3" size="sm" variant="outline" onClick={loadData}>Retry</Button></AlertDescription></Alert>;
+
     // ... (rest of local state)
 
     return (
@@ -379,13 +394,13 @@ function SegmentConfigurationContent() {
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight flex items-center gap-2">
                         <Layers className="h-8 w-8" />
-                        Segment Configuration
+                        Account Number Structure
                     </h1>
                     <p className="text-muted-foreground">
-                        Define Chart of Accounts structure and segments
+                        Configure the identity carried permanently by every GL account. Every active segment is required.
                     </p>
                 </div>
-                <Button variant="outline" onClick={handleRegenerate} disabled={isLoading}>
+                <Button variant="outline" onClick={handleRegenerate} disabled={isLoading || !canManage}>
                     <Settings2 className="mr-2 h-4 w-4" />
                     Regenerate COA
                 </Button>
@@ -412,6 +427,15 @@ function SegmentConfigurationContent() {
                 </BreadcrumbList>
             </Breadcrumb>
 
+            <Alert>
+                <Layers className="h-4 w-4" />
+                <AlertTitle>Identity is separate from transaction coding</AlertTitle>
+                <AlertDescription>
+                    COMPANY and NATURAL_ACCOUNT identify the GL account. Department, project, estate, contract, funding source and activity belong in{' '}
+                    <Link className="underline" href="/finance/settings/dimensions">Transaction coding dimensions</Link>.
+                </AlertDescription>
+            </Alert>
+
             <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
                 <TabsList>
                     <TabsTrigger value="structure" className="flex items-center gap-2">
@@ -427,6 +451,8 @@ function SegmentConfigurationContent() {
                 {/* Structure Tab */}
                 <TabsContent value="structure" className="space-y-4">
                     <div className="flex justify-end">
+                        {!canManage && <span className="text-sm text-muted-foreground">Read-only</span>}
+                        {canManage && (
                         <Dialog open={isSegmentDialogOpen} onOpenChange={setIsSegmentDialogOpen}>
                             <DialogTrigger asChild>
                                 <Button onClick={resetSegmentForm}>
@@ -499,28 +525,7 @@ function SegmentConfigurationContent() {
                                             onChange={(e) => setSegmentForm({ ...segmentForm, description: e.target.value })}
                                         />
                                     </div>
-                                    <div className="flex flex-col gap-2">
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox
-                                                id="isMandatory"
-                                                checked={segmentForm.isMandatory}
-                                                onCheckedChange={(checked) =>
-                                                    setSegmentForm({ ...segmentForm, isMandatory: checked as boolean })
-                                                }
-                                            />
-                                            <Label htmlFor="isMandatory">Mandatory Segment</Label>
-                                        </div>
-                                        <div className="flex items-center space-x-2">
-                                            <Checkbox
-                                                id="isReportingDimension"
-                                                checked={segmentForm.isReportingDimension}
-                                                onCheckedChange={(checked) =>
-                                                    setSegmentForm({ ...segmentForm, isReportingDimension: checked as boolean })
-                                                }
-                                            />
-                                            <Label htmlFor="isReportingDimension">Use for Reporting</Label>
-                                        </div>
-                                    </div>
+                                    <Alert><AlertDescription>Every active account-number segment is mandatory. Transaction reporting fields are configured separately as dimensions.</AlertDescription></Alert>
                                 </div>
                                 <DialogFooter>
                                     <Button variant="outline" onClick={() => setIsSegmentDialogOpen(false)}>Cancel</Button>
@@ -528,7 +533,10 @@ function SegmentConfigurationContent() {
                                 </DialogFooter>
                             </DialogContent>
                         </Dialog>
+                        )}
                     </div>
+
+                    {segments.length === 0 && <Card><CardContent className="py-10 text-center text-muted-foreground">No account-number segments are configured.</CardContent></Card>}
 
                     <div className="grid gap-4">
                         {segments.map((segment) => (
@@ -552,7 +560,7 @@ function SegmentConfigurationContent() {
                                                 size="sm"
                                                 className="h-6 w-6 p-0"
                                                 onClick={() => handleReorderClick(segment.id, 'up')}
-                                                disabled={segment.segmentPosition === 1}
+                                                disabled={!canManage || segment.lifecycleStatus !== 'Draft' || segment.segmentPosition === 1}
                                             >
                                                 <ArrowUp className="h-4 w-4" />
                                             </Button>
@@ -561,14 +569,16 @@ function SegmentConfigurationContent() {
                                                 size="sm"
                                                 className="h-6 w-6 p-0"
                                                 onClick={() => handleReorderClick(segment.id, 'down')}
-                                                disabled={segment.segmentPosition === segments.length}
+                                                disabled={!canManage || segment.lifecycleStatus !== 'Draft' || segment.segmentPosition === segments.length}
                                             >
                                                 <ArrowDown className="h-4 w-4" />
                                             </Button>
                                         </div>
-                                        <Button variant="ghost" size="sm" onClick={() => handleEditSegment(segment)}>
+                                        <Button variant="ghost" size="sm" onClick={() => handleEditSegment(segment)} disabled={!canManage || segment.lifecycleStatus === 'Frozen' || segment.lifecycleStatus === 'Retired'}>
                                             <Edit className="h-4 w-4" />
                                         </Button>
+                                        {canManage && segment.canActivate && <Button size="sm" onClick={() => transitionSegment(segment, 'activate')}>Activate</Button>}
+                                        {canManage && segment.canFreeze && <Button size="sm" variant="outline" onClick={() => transitionSegment(segment, 'freeze')}>Freeze</Button>}
                                     </div>
                                 </CardHeader>
                                 <CardContent>
@@ -588,13 +598,13 @@ function SegmentConfigurationContent() {
                                         <div>
                                             <p className="text-muted-foreground">Status</p>
                                             <Badge variant={segment.isActive ? 'outline' : 'secondary'}>
-                                                {segment.isActive ? 'Active' : 'Inactive'}
+                                                {segment.lifecycleStatus}
                                             </Badge>
                                         </div>
                                     </div>
                                     <div className="flex gap-2 mt-4">
-                                        {segment.isMandatory && <Badge variant="secondary">Mandatory</Badge>}
-                                        {segment.isReportingDimension && <Badge variant="secondary">Reporting Dimension</Badge>}
+                                        <Badge variant="secondary">Required</Badge>
+                                        <Badge variant="outline">{segment.accountUsageCount ?? 0} account uses</Badge>
                                     </div>
                                 </CardContent>
                             </Card>
@@ -662,7 +672,7 @@ function SegmentConfigurationContent() {
                                 <div className="flex gap-2">
                                     <Dialog open={isUploadDialogOpen} onOpenChange={setIsUploadDialogOpen}>
                                         <DialogTrigger asChild>
-                                            <Button variant="outline">
+                                            <Button variant="outline" disabled={!canManage}>
                                                 <Upload className="mr-2 h-4 w-4" />
                                                 Import
                                             </Button>
@@ -700,7 +710,7 @@ function SegmentConfigurationContent() {
 
                                     <Dialog open={isValueDialogOpen} onOpenChange={setIsValueDialogOpen}>
                                         <DialogTrigger asChild>
-                                            <Button onClick={resetValueForm}>
+                                            <Button onClick={resetValueForm} disabled={!canManage}>
                                                 <Plus className="mr-2 h-4 w-4" />
                                                 Add Value
                                             </Button>
@@ -782,7 +792,7 @@ function SegmentConfigurationContent() {
                                                         </Badge>
                                                     </td>
                                                     <td className="p-3 text-right">
-                                                        <Button variant="ghost" size="sm" onClick={() => handleEditValue(value)} title="Edit value">
+                                                        <Button variant="ghost" size="sm" onClick={() => handleEditValue(value)} title="Edit value" disabled={!canManage}>
                                                             <Edit className="h-4 w-4" />
                                                         </Button>
                                                         <Button
@@ -791,6 +801,7 @@ function SegmentConfigurationContent() {
                                                             className="text-destructive hover:text-destructive"
                                                             onClick={() => setLookupValueToDelete(value)}
                                                             title="Delete value"
+                                                            disabled={!canManage}
                                                         >
                                                             <Trash2 className="h-4 w-4" />
                                                         </Button>

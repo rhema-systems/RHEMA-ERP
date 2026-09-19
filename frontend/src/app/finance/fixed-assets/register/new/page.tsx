@@ -10,11 +10,14 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/components/ui/use-toast';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
-import type { CreateFixedAssetDto, DepreciationConvention, DepreciationMethod, FixedAssetCategory } from '@/types/fixed-assets';
+import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
+import { DepreciationConventionField } from '@/components/finance/fixed-assets/DepreciationConventionField';
+import type { CreateFixedAssetDto, DepreciationMethod, FixedAssetCategory, FixedAssetLocationOption } from '@/types/fixed-assets';
 
 export default function NewFixedAssetPage() {
   const { toast } = useToast();
   const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
+  const [locationOptions, setLocationOptions] = useState<FixedAssetLocationOption[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState<CreateFixedAssetDto>({
     assetCode: '',
@@ -39,16 +42,20 @@ export default function NewFixedAssetPage() {
   });
 
   useEffect(() => {
-    const loadCategories = async () => {
+    const loadLookups = async () => {
       try {
-        const data = await fixedAssetsDataService.getCategories();
-        setCategories(data);
+        const [categoryData, locationData] = await Promise.all([
+          fixedAssetsDataService.getCategories(),
+          fixedAssetsDataService.getLocationOptions(),
+        ]);
+        setCategories(categoryData);
+        setLocationOptions(locationData);
       } catch (error) {
-        console.error('Failed to load categories:', error);
+        console.error('Failed to load fixed asset lookups:', error);
       }
     };
 
-    loadCategories();
+    void loadLookups();
   }, []);
 
   const handleSave = async () => {
@@ -181,10 +188,11 @@ export default function NewFixedAssetPage() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="location">Location</Label>
-            <Input
+            <AssetLocationCombobox
               id="location"
-              value={formData.location || ''}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              options={locationOptions}
+              value={locationOptions.find(option => option.displayName === formData.location)?.id}
+              onValueChange={(location) => setFormData({ ...formData, location: location?.displayName || '' })}
             />
           </div>
           <div className="space-y-2">
@@ -264,23 +272,11 @@ export default function NewFixedAssetPage() {
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="convention">Depreciation Convention</Label>
-            <Select
-              value={formData.depreciationConvention}
-              onValueChange={(value) => setFormData({ ...formData, depreciationConvention: value as DepreciationConvention })}
-            >
-              <SelectTrigger id="convention">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="FullMonth">Full Month</SelectItem>
-                <SelectItem value="MidMonth">Mid Month</SelectItem>
-                <SelectItem value="HalfYear">Half Year</SelectItem>
-                <SelectItem value="ActualDays">Actual Days</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <DepreciationConventionField
+            value={formData.depreciationConvention}
+            method={formData.depreciationMethod}
+            onChange={(depreciationConvention) => setFormData({ ...formData, depreciationConvention })}
+          />
           {(formData.depreciationMethod === 'DecliningBalance' ||
             formData.depreciationMethod === 'DoubleDecliningBalance') && (
             <div className="space-y-2">

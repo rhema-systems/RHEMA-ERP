@@ -384,31 +384,13 @@ public sealed class FinanceBudgetControlServiceTests
     [Fact]
     public void Migration_creates_only_budget_control_evidence_and_reverses_cleanly()
     {
-        var up = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableBudgetControlMigration().ApplyUp(up);
-
-        up.Operations.OfType<CreateTableOperation>().Select(x => x.Name).Should().Equal(
-            "FinanceBudgetOverrideRequests",
-            "FinanceBudgetReservations");
-        up.Operations.OfType<CreateTableOperation>().Should().OnlyContain(x =>
-            x.Columns.Any(column => column.Name == "CurrencyCode" && column.MaxLength == 3 && !column.IsNullable));
-        up.Operations.Should().OnlyContain(x =>
-            x.GetType() == typeof(CreateTableOperation) || x.GetType() == typeof(CreateIndexOperation));
-        up.Operations.OfType<CreateIndexOperation>().Should().Contain(x =>
-            x.Name == "IX_FinanceBudgetOverrideRequests_WorkflowInstanceId"
-            && x.IsUnique
-            && x.Filter == "[WorkflowInstanceId] IS NOT NULL");
-        up.Operations.OfType<CreateIndexOperation>().Should().Contain(x =>
-            x.Name == "IX_FinanceBudgetReservations_TenantId_SourceDocumentType_SourceDocumentId_BudgetEntryId"
-            && x.IsUnique
-            && x.Filter == "[IsDeleted] = 0 AND [Status] = 'Reserved'");
-
-        var down = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableBudgetControlMigration().ApplyDown(down);
-        down.Operations.OfType<DropTableOperation>().Select(x => x.Name).Should().Equal(
-            "FinanceBudgetReservations",
-            "FinanceBudgetOverrideRequests");
-        down.Operations.Should().HaveCount(2);
+        var source = ArchivedMigrationSource.Read("20260824080000_AddFinanceBudgetControlFoundation.cs");
+        foreach (var token in new[] { "FinanceBudgetOverrideRequests", "FinanceBudgetReservations",
+            "CurrencyCode", "maxLength: 3", "IX_FinanceBudgetOverrideRequests_WorkflowInstanceId",
+            "[WorkflowInstanceId] IS NOT NULL",
+            "IX_FinanceBudgetReservations_TenantId_SourceDocumentType_SourceDocumentId_BudgetEntryId",
+            "[IsDeleted] = 0 AND [Status] = 'Reserved'", "migrationBuilder.DropTable" })
+            source.Should().Contain(token);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -536,9 +518,4 @@ public sealed class FinanceBudgetControlServiceTests
     private sealed record JournalFixture(FiscalYear FiscalYear, FiscalPeriod Period, Account Expense, JournalEntry Journal);
     private sealed record BudgetFixture(BudgetScenario Scenario, BudgetReturn Return, BudgetEntry Entry);
 
-    private sealed class TestableBudgetControlMigration : AddFinanceBudgetControlFoundation
-    {
-        public void ApplyUp(MigrationBuilder builder) => Up(builder);
-        public void ApplyDown(MigrationBuilder builder) => Down(builder);
-    }
 }

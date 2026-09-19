@@ -197,6 +197,10 @@ public class AccountTransaction : BusinessEntity
     [MaxLength(20)]
     public string BookClassification { get; set; } = "IFRS";
 
+    /// <summary>Stable accounting-book identity paired with the immutable code snapshot.</summary>
+    [Required]
+    public Guid AccountingBookId { get; set; }
+
     // ========================================================================
     // PERIOD MANAGEMENT AND POSTING CONTROLS
     // ========================================================================
@@ -346,6 +350,9 @@ public class AccountTransaction : BusinessEntity
     /// </summary>
     [ForeignKey(nameof(JournalEntryId))]
     public virtual JournalEntry JournalEntry { get; set; } = null!;
+
+    [ForeignKey(nameof(AccountingBookId))]
+    public virtual AccountingBook AccountingBook { get; set; } = null!;
 
     /// <summary>
     /// The fiscal period this transaction belongs to.

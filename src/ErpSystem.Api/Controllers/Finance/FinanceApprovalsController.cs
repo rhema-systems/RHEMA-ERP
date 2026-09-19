@@ -7,6 +7,7 @@ using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Finance.Integration;
@@ -15,11 +16,13 @@ using ErpSystem.Core.Interfaces.Workflow;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
+using ErpSystem.Api.Services.Finance.MultiCurrency;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Data;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -65,6 +68,9 @@ public class FinanceApprovalsController : ControllerBase
         Normalize("AllocationRunBatch"),
         Normalize("CashTransaction"),
         Normalize("BankReconciliation"),
+        // Exchange-rate changes already use the Finance workflow and outcome handlers below.
+        // Keep them in this allowlist so assigned reviewers can actually see and action them.
+        Normalize("ExchangeRate"),
         Normalize("OpeningBalanceBatch"),
         Normalize("FixedAsset"),
         Normalize("AssetDepreciationSchedule"),
@@ -159,6 +165,12 @@ public class FinanceApprovalsController : ControllerBase
             .AuthorizeAsync(User, FinancePermissions.ApproveApPayments)).Succeeded;
         var canRejectByPermission = (await _authorizationService
             .AuthorizeAsync(User, FinancePermissions.WorkflowReject)).Succeeded;
+        var canApproveBookTransitions = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookTransitions)).Succeeded;
+        var canApproveBookPeriods = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookPeriods)).Succeeded;
+        var canApproveBookInitialization = (await _authorizationService
+            .AuthorizeAsync(User, FinancePermissions.ApproveAccountingBookInitialization)).Succeeded;
 
         var currentRoles = roleSet.ToArray();
         var pageRows = await QueryPendingApprovals(tenantId)
@@ -178,7 +190,7 @@ public class FinanceApprovalsController : ControllerBase
         var approvals = pageRows
             .Take(pageSize)
             .Where(approval => CanActOnApproval(approval, currentUserId.Value, roleSet))
-            .Where(approval => IsFinanceEntity(
+            .Where(approval => IsFinanceQueueEntity(
                 approval.StepInstance.WorkflowInstance.EntityType.Code ??
                 approval.StepInstance.WorkflowInstance.EntityType.Name))
             .ToList();
@@ -225,6 +237,143 @@ public class FinanceApprovalsController : ControllerBase
         {
             var instance = approval.StepInstance.WorkflowInstance;
             var entityType = instance.EntityType.Code ?? instance.EntityType.Name;
+            if (IsAccountingBookLifecycle(entityType))
+            {
+                // Book decisions must go through AccountingBookService.DecideAsync. Generic
+                // workflow approval would skip lifecycle validation, mapping changes and audit.
+                if (!canApproveBookTransitions || instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var book = await _db.AccountingBooks.AsNoTracking().FirstOrDefaultAsync(item =>
+                    item.TenantId == tenantId && !item.IsDeleted && item.Id == instance.EntityId &&
+                    item.TransitionWorkflowInstanceId == instance.Id &&
+                    item.PendingLifecycleStatus.HasValue &&
+                    item.TransitionRequestedByUserId.HasValue &&
+                    item.TransitionRequestedByUserId != currentUserId.Value,
+                    cancellationToken);
+                if (book == null || !await _workflowService.CanUserApproveAsync(
+                        "AccountingBookLifecycle", book.Id, currentUserId.Value))
+                    continue;
+
+                results.Add(new FinanceApprovalQueueItemDto
+                {
+                    ApprovalId = approval.Id,
+                    EntityId = book.Id,
+                    EntityType = "AccountingBookLifecycle",
+                    Reference = book.Code,
+                    Title = $"{book.Name}: {book.LifecycleStatus} to {book.PendingLifecycleStatus}",
+                    DetailHref = "/finance/settings/accounting-books",
+                    DocumentType = "Accounting Book",
+                    Module = "Finance Settings",
+                    CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
+                    StatusLabel = "Pending transition",
+                    SubmittedAt = book.TransitionRequestedAtUtc ?? instance.StartedDate ?? instance.CreatedDate,
+                    SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
+                        new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
+                            .Where(value => !string.IsNullOrWhiteSpace(value))),
+                    ApproverRole = approval.ApproverRole,
+                    WorkflowName = instance.WorkflowDefinition?.Name,
+                    DecisionOnDetailPage = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Target state"] = book.PendingLifecycleStatus!.Value.ToString()
+                    }
+                });
+                continue;
+            }
+
+            if (IsAccountingBookPeriodLifecycle(entityType))
+            {
+                // Period decisions must revalidate the tenant calendar and book-specific
+                // authority through AccountingBookPeriodService, not the generic inbox action.
+                if (!canApproveBookPeriods || instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var period = await _db.AccountingBookPeriods.AsNoTracking()
+                    .Include(item => item.AccountingBook).Include(item => item.FiscalPeriod)
+                    .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted &&
+                        item.Id == instance.EntityId && item.WorkflowInstanceId == instance.Id &&
+                        item.PendingStatus.HasValue && item.RequestedByUserId.HasValue &&
+                        item.RequestedByUserId != currentUserId.Value, cancellationToken);
+                if (period?.AccountingBook == null || period.FiscalPeriod == null ||
+                    !await _workflowService.CanUserApproveAsync(
+                        "AccountingBookPeriodLifecycle", period.Id, currentUserId.Value))
+                    continue;
+
+                results.Add(new FinanceApprovalQueueItemDto
+                {
+                    ApprovalId = approval.Id,
+                    EntityId = period.Id,
+                    EntityType = "AccountingBookPeriodLifecycle",
+                    Reference = $"{period.AccountingBook.Code}/{period.FiscalPeriod.PeriodCode}",
+                    Title = $"{period.AccountingBook.Name}: {period.FiscalPeriod.PeriodCode} {period.PeriodStatus} to {period.PendingStatus}",
+                    DetailHref = $"/finance/settings/accounting-books/{period.AccountingBookId:D}/readiness",
+                    DocumentType = "Accounting Book Period",
+                    Module = "Finance Settings",
+                    CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
+                    StatusLabel = "Pending period transition",
+                    SubmittedAt = period.RequestedAtUtc ?? instance.StartedDate ?? instance.CreatedDate,
+                    SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
+                        new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
+                            .Where(value => !string.IsNullOrWhiteSpace(value))),
+                    ApproverRole = approval.ApproverRole,
+                    WorkflowName = instance.WorkflowDefinition?.Name,
+                    DecisionOnDetailPage = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Book"] = period.AccountingBook.Code,
+                        ["Target state"] = period.PendingStatus!.Value.ToString()
+                    }
+                });
+                continue;
+            }
+
+            if (IsAccountingBookInitialization(entityType))
+            {
+                // The initialization service verifies current immutable opening evidence
+                // and maker/checker separation before accepting a decision.
+                if (!canApproveBookInitialization || instance.InitiatedById == currentUserId.Value)
+                    continue;
+
+                var initialization = await _db.AccountingBookInitializations.AsNoTracking()
+                    .Include(item => item.AccountingBook)
+                    .FirstOrDefaultAsync(item => item.TenantId == tenantId && !item.IsDeleted &&
+                        item.Id == instance.EntityId && item.WorkflowInstanceId == instance.Id &&
+                        item.InitializationStatus == AccountingBookInitializationStatus.PendingApproval &&
+                        item.PreparedByUserId != currentUserId.Value, cancellationToken);
+                if (initialization?.AccountingBook == null ||
+                    !await _workflowService.CanUserApproveAsync(
+                        "AccountingBookInitialization", initialization.Id, currentUserId.Value))
+                    continue;
+
+                results.Add(new FinanceApprovalQueueItemDto
+                {
+                    ApprovalId = approval.Id,
+                    EntityId = initialization.Id,
+                    EntityType = "AccountingBookInitialization",
+                    Reference = $"{initialization.AccountingBook.Code}/V{initialization.Version}",
+                    Title = $"{initialization.AccountingBook.Name}: opening evidence at {initialization.CutoffDate:yyyy-MM-dd}",
+                    DetailHref = $"/finance/settings/accounting-books/{initialization.AccountingBookId:D}/readiness",
+                    DocumentType = "Accounting Book Initialization",
+                    Module = "Finance Settings",
+                    CurrentStep = approval.StepInstance.WorkflowStep?.Name ?? "Approval",
+                    StatusLabel = "Pending initialization approval",
+                    SubmittedAt = instance.StartedDate ?? instance.CreatedDate,
+                    SubmittedBy = instance.InitiatedBy == null ? null : string.Join(" ",
+                        new[] { instance.InitiatedBy.FirstName, instance.InitiatedBy.LastName }
+                            .Where(value => !string.IsNullOrWhiteSpace(value))),
+                    ApproverRole = approval.ApproverRole,
+                    WorkflowName = instance.WorkflowDefinition?.Name,
+                    DecisionOnDetailPage = true,
+                    Metadata = new Dictionary<string, string>
+                    {
+                        ["Book"] = initialization.AccountingBook.Code,
+                        ["Version"] = initialization.Version.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                    }
+                });
+                continue;
+            }
+
             if (!IsFinanceEntity(entityType))
             {
                 continue;
@@ -407,6 +556,35 @@ public class FinanceApprovalsController : ControllerBase
                     entityType,
                     instance.EntityId,
                     FinanceAuditEvents.ApPaymentEvidenceApprovalBlocked,
+                    new { approvalId, currentUserId, reason = evidenceError },
+                    comments,
+                    cancellationToken);
+                return BadRequest(new WorkflowExecutionResult
+                {
+                    Success = false,
+                    Status = instance.Status,
+                    WorkflowInstanceId = instance.Id,
+                    CurrentStepId = instance.CurrentStepId,
+                    Message = evidenceError
+                });
+            }
+        }
+
+        if (string.Equals(action, "Approve", StringComparison.OrdinalIgnoreCase) &&
+            Normalize(entityType) == Normalize("FixedAsset"))
+        {
+            var evidenceError = await ValidateFixedAssetCapitalizationEvidenceForApprovalAsync(
+                tenantId,
+                instance,
+                cancellationToken);
+            if (evidenceError != null)
+            {
+                await RecordFinanceWorkflowAuditAsync(
+                    tenantId,
+                    "FA",
+                    entityType,
+                    instance.EntityId,
+                    FinanceAuditEvents.FinanceWorkflowApprovalFailed,
                     new { approvalId, currentUserId, reason = evidenceError },
                     comments,
                     cancellationToken);
@@ -641,6 +819,72 @@ public class FinanceApprovalsController : ControllerBase
         }
     }
 
+    private async Task<string?> ValidateFixedAssetCapitalizationEvidenceForApprovalAsync(
+        Guid tenantId,
+        WorkflowInstance instance,
+        CancellationToken cancellationToken)
+    {
+        var asset = await _db.FixedAssets.AsNoTracking().SingleOrDefaultAsync(item =>
+            item.TenantId == tenantId && item.Id == instance.EntityId && !item.IsDeleted,
+            cancellationToken);
+        if (asset == null)
+            return "The fixed asset no longer exists for this tenant.";
+        if (asset.Status != FixedAssetStatus.PendingApproval)
+            return $"The fixed asset is in '{asset.Status}' status rather than Pending Approval.";
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            return "The fixed asset has no immutable capitalization journal snapshot. Return it to Draft and resubmit the exact posting proposal.";
+
+        var calculatedHash = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(asset.CapitalizationApprovalSnapshotJson)));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(calculatedHash),
+                TryDecodeHex(asset.CapitalizationApprovalSnapshotHash)))
+            return "The fixed-asset capitalization snapshot integrity check failed. Controlled resubmission is required.";
+
+        try
+        {
+            var snapshot = JsonSerializer.Deserialize<FixedAssetCapitalizationApprovalSnapshotDto>(
+                asset.CapitalizationApprovalSnapshotJson,
+                PaymentControlJsonOptions);
+            if (snapshot == null || snapshot.Version != 1 || snapshot.FixedAssetId != asset.Id ||
+                snapshot.TransactionAmount <= 0m || snapshot.DebitAccountId == Guid.Empty ||
+                snapshot.CreditAccountId == Guid.Empty)
+                return "The fixed-asset capitalization snapshot is incomplete or does not match this asset.";
+        }
+        catch (JsonException)
+        {
+            return "The fixed-asset capitalization snapshot is invalid and requires controlled resubmission.";
+        }
+
+        return null;
+    }
+
+    private static FixedAssetCapitalizationApprovalSnapshotDto? TryReadFixedAssetCapitalizationSnapshot(FixedAsset asset)
+    {
+        if (string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotJson) ||
+            string.IsNullOrWhiteSpace(asset.CapitalizationApprovalSnapshotHash))
+            return null;
+
+        var calculatedHash = Convert.ToHexString(SHA256.HashData(
+            Encoding.UTF8.GetBytes(asset.CapitalizationApprovalSnapshotJson)));
+        if (!CryptographicOperations.FixedTimeEquals(
+                Convert.FromHexString(calculatedHash),
+                TryDecodeHex(asset.CapitalizationApprovalSnapshotHash)))
+            return null;
+
+        try
+        {
+            return JsonSerializer.Deserialize<FixedAssetCapitalizationApprovalSnapshotDto>(
+                asset.CapitalizationApprovalSnapshotJson,
+                PaymentControlJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
     private async Task<WorkflowExecutionResult> ProcessWorkflowAndOutcomeAtomicallyAsync(
         Guid tenantId,
         string entityType,
@@ -688,7 +932,12 @@ public class FinanceApprovalsController : ControllerBase
         var strategy = _db.Database.CreateExecutionStrategy();
         return await strategy.ExecuteAsync(async () =>
         {
-            await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+            var isolationLevel = Normalize(entityType) == Normalize("ExchangeRate")
+                ? IsolationLevel.Serializable
+                : IsolationLevel.ReadCommitted;
+            await using var transaction = await _db.Database.BeginTransactionAsync(
+                isolationLevel,
+                cancellationToken);
             try
             {
                 var result = await ProcessAndApplyAsync();
@@ -709,6 +958,24 @@ public class FinanceApprovalsController : ControllerBase
                 throw;
             }
         });
+    }
+
+    internal static BusinessRuleException CreateInvoicePostingBusinessRuleException(
+        string entityType,
+        InvalidOperationException exception)
+    {
+        var isVendorInvoice = Normalize(entityType) == Normalize("VendorInvoice");
+        var code = isVendorInvoice
+            ? "AP_INVOICE_POSTING_BLOCKED"
+            : "AR_INVOICE_POSTING_BLOCKED";
+        var fallback = isVendorInvoice
+            ? "The vendor invoice could not be posted after final approval."
+            : "The customer invoice could not be posted after final approval.";
+
+        return new BusinessRuleException(
+            code,
+            string.IsNullOrWhiteSpace(exception.Message) ? fallback : exception.Message,
+            StatusCodes.Status422UnprocessableEntity);
     }
 
     internal IQueryable<WorkflowApproval> QueryPendingApprovals(Guid tenantId)
@@ -992,7 +1259,29 @@ public class FinanceApprovalsController : ControllerBase
         if (key == Normalize("FixedAsset"))
         {
             var item = await _db.FixedAssets.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            return item == null ? FinanceApprovalFacts.Empty : new(item.AssetCode, item.Name, item.Status.ToString(), item.PurchaseDate, item.AcquisitionCost, null);
+            if (item == null)
+                return FinanceApprovalFacts.Empty;
+
+            var snapshot = TryReadFixedAssetCapitalizationSnapshot(item);
+            return new FinanceApprovalFacts(
+                item.AssetCode,
+                item.Name,
+                item.Status.ToString(),
+                snapshot?.CapitalizationDate ?? item.PurchaseDate,
+                snapshot?.TransactionAmount ?? item.AcquisitionCost,
+                snapshot?.TransactionCurrencyCode ?? item.FunctionalCurrencyCode)
+            {
+                Metadata = snapshot == null
+                    ? new Dictionary<string, string>()
+                    : new Dictionary<string, string>
+                    {
+                        ["debitAccountId"] = snapshot.DebitAccountId.ToString(),
+                        ["creditAccountId"] = snapshot.CreditAccountId.ToString(),
+                        ["reference"] = snapshot.Reference,
+                        ["reason"] = snapshot.Reason,
+                        ["snapshotHash"] = item.CapitalizationApprovalSnapshotHash ?? string.Empty
+                    }
+            };
         }
 
         if (key == Normalize("FixedAssetDepreciationRun") || key == Normalize("AssetDepreciationSchedule"))
@@ -1083,42 +1372,56 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("Invoice"))
         {
-            var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
-            if (invoice?.Status == InvoiceStatus.PendingApproval)
+            try
             {
-                await RecordCustomerInvoiceAuditAsync(
-                    tenantId,
-                    invoice,
-                    FinanceAuditEvents.ArInvoiceApproved,
-                    new
-                    {
-                        invoice.Status,
-                        approvedByUserId = userId,
-                        approvedAt = now
-                    },
-                    comments,
-                    cancellationToken);
-
-                var trustedManualRoute = await HasTrustedDimensionRouteAsync(
-                    tenantId,
-                    "CustomerInvoice",
-                    entityId,
-                    FinanceDimensionRouteId.FinanceArCustomerInvoice,
-                    cancellationToken);
-                if (trustedManualRoute)
-                    await _invoiceService.SendInvoiceAsync(
-                        entityId,
-                        new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice),
+                var invoice = await _db.Invoices.AsNoTracking().FirstOrDefaultAsync(x => x.TenantId == tenantId && x.Id == entityId, cancellationToken);
+                if (invoice?.Status == InvoiceStatus.PendingApproval)
+                {
+                    await RecordCustomerInvoiceAuditAsync(
+                        tenantId,
+                        invoice,
+                        FinanceAuditEvents.ArInvoiceApproved,
+                        new
+                        {
+                            invoice.Status,
+                            approvedByUserId = userId,
+                            approvedAt = now
+                        },
+                        comments,
                         cancellationToken);
-                else
-                    await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
+
+                    var trustedManualRoute = await HasTrustedDimensionRouteAsync(
+                        tenantId,
+                        "CustomerInvoice",
+                        entityId,
+                        FinanceDimensionRouteId.FinanceArCustomerInvoice,
+                        cancellationToken);
+                    if (trustedManualRoute)
+                        await _invoiceService.SendInvoiceAsync(
+                            entityId,
+                            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice),
+                            cancellationToken);
+                    else
+                        await _invoiceService.SendInvoiceAsync(entityId, cancellationToken);
+                }
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw CreateInvoicePostingBusinessRuleException(entityType, exception);
             }
             return;
         }
 
         if (key == Normalize("VendorInvoice"))
         {
-            await FinalizeVendorInvoiceApprovalAsync(tenantId, entityId, userId, comments, cancellationToken);
+            try
+            {
+                await FinalizeVendorInvoiceApprovalAsync(tenantId, entityId, userId, comments, cancellationToken);
+            }
+            catch (InvalidOperationException exception)
+            {
+                throw CreateInvoicePostingBusinessRuleException(entityType, exception);
+            }
             return;
         }
 
@@ -1487,28 +1790,32 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("ExchangeRate"))
         {
-            var rate = await _db.ExchangeRates.FirstOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted,
+            var scheduleResult = await ExchangeRateScheduleLifecycle.ApproveAsync(
+                _db,
+                tenantId,
+                entityId,
+                userId,
+                comments,
+                now,
                 cancellationToken);
-            if (rate == null || rate.ApprovalStatus == RateApprovalStatus.Approved)
+            if (scheduleResult == null)
             {
                 return;
             }
 
-            rate.ApprovalStatus = RateApprovalStatus.Approved;
-            rate.ApprovalDate = now;
-            rate.ApprovedByUserId = userId;
-            rate.Comments = comments ?? rate.Comments;
-            rate.ModifiedDate = now;
-            rate.ModifiedByUserId = userId;
-            await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FX",
                 "ExchangeRate",
-                rate.Id,
+                entityId,
                 FinanceAuditEvents.FinanceWorkflowApproved,
-                new { rate.ApprovalStatus, rate.ApprovalDate, rate.ApprovedByUserId },
+                new
+                {
+                    ApprovalStatus = RateApprovalStatus.Approved,
+                    ApprovalDate = now,
+                    ApprovedByUserId = userId,
+                    Schedule = scheduleResult
+                },
                 comments,
                 cancellationToken);
             return;
@@ -1546,6 +1853,10 @@ public class FinanceApprovalsController : ControllerBase
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
                     item.Status = FixedAssetStatus.Acquired;
+                    item.CapitalizationApprovalApprovedByUserId = userId;
+                    item.CapitalizationApprovalApprovedAt = now;
+                    item.CapitalizationApprovalInvalidatedAt = null;
+                    item.CapitalizationApprovalInvalidationReason = null;
                     item.UpdatedAt = now;
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }
@@ -1556,7 +1867,13 @@ public class FinanceApprovalsController : ControllerBase
                 "FixedAsset",
                 entityId,
                 FinanceAuditEvents.FinanceWorkflowApproved,
-                new { Status = FixedAssetStatus.Acquired },
+                new
+                {
+                    Status = FixedAssetStatus.Acquired,
+                    ApprovedByUserId = userId,
+                    ApprovedAt = now,
+                    Evidence = "Immutable direct-capitalization journal snapshot"
+                },
                 comments,
                 cancellationToken);
             return;
@@ -2004,26 +2321,26 @@ public class FinanceApprovalsController : ControllerBase
 
         if (key == Normalize("ExchangeRate"))
         {
-            var rate = await _db.ExchangeRates.FirstOrDefaultAsync(
-                x => x.TenantId == tenantId && x.Id == entityId && !x.IsDeleted,
+            var rejected = await ExchangeRateScheduleLifecycle.RejectAsync(
+                _db,
+                tenantId,
+                entityId,
+                userId,
+                reason ?? "Exchange rate rejected without a recorded reason.",
+                now,
                 cancellationToken);
-            if (rate == null)
+            if (!rejected)
             {
                 return;
             }
 
-            rate.ApprovalStatus = RateApprovalStatus.Rejected;
-            rate.Comments = AppendReason(rate.Comments, reason);
-            rate.ModifiedDate = now;
-            rate.ModifiedByUserId = userId;
-            await _db.SaveChangesAsync(cancellationToken);
             await RecordFinanceWorkflowAuditAsync(
                 tenantId,
                 "FX",
                 "ExchangeRate",
-                rate.Id,
+                entityId,
                 FinanceAuditEvents.FinanceWorkflowRejected,
-                new { rate.ApprovalStatus, rate.Comments },
+                new { ApprovalStatus = RateApprovalStatus.Rejected, Reason = reason },
                 reason,
                 cancellationToken);
             return;
@@ -2061,6 +2378,8 @@ public class FinanceApprovalsController : ControllerBase
                 if (item.Status == FixedAssetStatus.PendingApproval)
                 {
                     item.Status = FixedAssetStatus.Rejected;
+                    item.CapitalizationApprovalApprovedByUserId = null;
+                    item.CapitalizationApprovalApprovedAt = null;
                     item.UpdatedAt = now;
                     item.UpdatedBy = _currentUserService.UserName ?? "system";
                 }
@@ -2494,8 +2813,21 @@ public class FinanceApprovalsController : ControllerBase
         => (approval.ApproverId.HasValue && approval.ApproverId.Value == currentUserId)
            || (!string.IsNullOrWhiteSpace(approval.ApproverRole) && roles.Contains(approval.ApproverRole));
 
-    private static bool IsFinanceEntity(string? entityType)
+    internal static bool IsFinanceEntity(string? entityType)
         => FinanceWorkflowEntityKeys.Contains(Normalize(entityType));
+
+    internal static bool IsFinanceQueueEntity(string? entityType)
+        => IsFinanceEntity(entityType) || IsAccountingBookLifecycle(entityType) ||
+           IsAccountingBookPeriodLifecycle(entityType) || IsAccountingBookInitialization(entityType);
+
+    private static bool IsAccountingBookLifecycle(string? entityType)
+        => Normalize(entityType) == "ACCOUNTINGBOOKLIFECYCLE";
+
+    private static bool IsAccountingBookPeriodLifecycle(string? entityType)
+        => Normalize(entityType) == "ACCOUNTINGBOOKPERIODLIFECYCLE";
+
+    private static bool IsAccountingBookInitialization(string? entityType)
+        => Normalize(entityType) == "ACCOUNTINGBOOKINITIALIZATION";
 
     internal static string ResolveDetailHref(string? entityType, Guid entityId, string? displayUrl)
     {
@@ -2684,6 +3016,7 @@ public class FinanceApprovalsController : ControllerBase
         public string? WorkflowName { get; set; }
         public bool CanApprove { get; set; }
         public bool CanReject { get; set; }
+        public bool DecisionOnDetailPage { get; set; }
         public string? ApproveDisabledReason { get; set; }
         public string? RejectDisabledReason { get; set; }
         public Dictionary<string, string> Metadata { get; set; } = new();

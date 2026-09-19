@@ -103,6 +103,28 @@ public sealed class FinanceRouteContractTests
             .Should().Be("/finance/approvals");
     }
 
+    [Theory]
+    [Trait("Category", "RouteContract")]
+    [Trait("Batch", "FinanceGoLive-ExchangeRates")]
+    [InlineData("ExchangeRate")]
+    [InlineData("exchange-rate")]
+    [InlineData("EXCHANGE_RATE")]
+    public void ExchangeRateWorkflow_ShouldBeVisibleInFinanceApprovalQueue(string entityType)
+    {
+        FinanceApprovalsController.IsFinanceEntity(entityType).Should().BeTrue(
+            "exchange-rate facts, decisions, and approval outcomes are handled by the Finance workbench");
+    }
+
+    [Theory]
+    [InlineData("AccountingBookLifecycle")]
+    [InlineData("accounting_book_lifecycle")]
+    public void AccountingBookLifecycle_ShouldBeVisibleButNotUseGenericApprovalAction(string entityType)
+    {
+        FinanceApprovalsController.IsFinanceQueueEntity(entityType).Should().BeTrue();
+        FinanceApprovalsController.IsFinanceEntity(entityType).Should().BeFalse(
+            "book lifecycle decisions must run through AccountingBookService");
+    }
+
     private sealed record FrontendCall(string Verb, string Route, string File);
 
     private static bool MatchesAnyBackendRoute(FrontendCall call, IReadOnlyList<(string Verb, string[] Segments)> backendRoutes)

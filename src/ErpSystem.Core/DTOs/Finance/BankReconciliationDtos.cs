@@ -78,6 +78,7 @@ public class CreateReconciliationAdjustmentDto
     public string? Description { get; set; }
     public string? Notes { get; set; }
     public string? IdempotencyKey { get; set; }
+    public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class ReconciliationAdjustmentDto
@@ -94,6 +95,14 @@ public class ReconciliationAdjustmentDto
     public string? ReferenceNumber { get; set; }
     public DateTime TransactionDate { get; set; }
     public bool WasDuplicate { get; set; }
+    public string Currency { get; set; } = string.Empty;
+    public decimal BaseAmount { get; set; }
+    public decimal ExchangeRate { get; set; }
+    public Guid? ExchangeRateId { get; set; }
+    public string? ExchangeRateSource { get; set; }
+    public DateTime? ExchangeRateDate { get; set; }
+    public string? ExchangeRateQuoteSide { get; set; }
+    public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
 }
 
 public class CancelReconciliationDto

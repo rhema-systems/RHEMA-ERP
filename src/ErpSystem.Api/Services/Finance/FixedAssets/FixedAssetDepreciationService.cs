@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Data;
@@ -12,7 +14,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
 public partial class FixedAssetDepreciationService : IFixedAssetDepreciationService
 {
-    private const string SourceModule = "FixedAssets";
+    private const string SourceModule = "FA";
     private const string SourceDocumentType = "FixedAssetDepreciationRun";
     private const string PostingAction = "Depreciation";
 
@@ -23,6 +25,12 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IWorkflowService? _workflowService;
     private readonly IFinanceReversalPolicyService? _financeReversalPolicyService;
+    private readonly IFixedAssetDimensionService? _fixedAssetDimensions;
+
+    private static readonly FinancePostingProducerContext DepreciationProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetDepreciation);
+    private static readonly FinancePostingProducerContext DepreciationReversalProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetDepreciationReversal);
 
     public FixedAssetDepreciationService(
         ApplicationDbContext context,
@@ -32,7 +40,8 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         IFinancePostingEngine? financePostingEngine = null,
         IFinanceAuditService? financeAuditService = null,
         IWorkflowService? workflowService = null,
-        IFinanceReversalPolicyService? financeReversalPolicyService = null)
+        IFinanceReversalPolicyService? financeReversalPolicyService = null,
+        IFixedAssetDimensionService? fixedAssetDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -41,6 +50,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         _financeAuditService = financeAuditService;
         _workflowService = workflowService;
         _financeReversalPolicyService = financeReversalPolicyService;
+        _fixedAssetDimensions = fixedAssetDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -52,8 +62,11 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
     {
         var tenantId = TenantId;
         var fiscalPeriod = await _context.FiscalPeriods
+            .Include(p => p.FiscalYear)
             .FirstOrDefaultAsync(p => p.TenantId == tenantId && p.Id == dto.FiscalPeriodId, cancellationToken)
             ?? throw new KeyNotFoundException("Fiscal period not found.");
+        var fiscalYear = fiscalPeriod.FiscalYear
+            ?? throw new InvalidOperationException("Fiscal period is not linked to an authoritative fiscal year.");
 
         var postingDate = (dto.PostingDate ?? fiscalPeriod.EndDate).Date;
         if (fiscalPeriod.IsLocked || !fiscalPeriod.IsOpen)
@@ -82,6 +95,11 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         var activeBooks = await GetActivePostingBooksAsync(cancellationToken);
         var defaultBook = GetDefaultBook(activeBooks);
         var postAllBooks = requestedBook == "ALL_ACTIVE_BOOKS";
+        if (dto.PostToGl && postAllBooks)
+        {
+            throw new InvalidOperationException(
+                "Posted depreciation must be orchestrated as one request per concrete accounting book; ALL_ACTIVE_BOOKS is projection-only.");
+        }
         var runBookClassification = postAllBooks
             ? "ALL_ACTIVE_BOOKS"
             : requestedBook ?? defaultBook.Code;
@@ -153,7 +171,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         }
 
         var existingScheduleKeys = await _context.AssetDepreciationSchedules
-            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed
+            .Where(s => s.TenantId == tenantId && s.FiscalPeriodId == fiscalPeriod.Id && !s.IsDeleted && !s.IsReversed && !s.IsProjected
                 // A disposal-linked partial charge belongs only to the portion that left service;
                 // the retained asset still needs its ordinary depreciation for this period.
                 && (s.AssetDisposalId == null || s.AssetDisposal!.DisposalScope == AssetDisposalScope.WholeAsset))
@@ -208,7 +226,18 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                     throw new InvalidOperationException("Units-of-production depreciation requires the configured depreciation-run approval workflow before GL posting.");
                 }
                 var productionUsage = ResolveProductionUsage(dto, asset, bookValue);
-                var calculation = FixedAssetDepreciationCalculator.Calculate(bookValue, productionUsage);
+                var placedInServiceDate = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate
+                    ?? throw new InvalidOperationException("Fixed asset book value must have a placed-in-service date before depreciation can run.");
+                var calculation = FixedAssetDepreciationCalculator.Calculate(
+                    bookValue,
+                    productionUsage,
+                    new DepreciationTimingContext(
+                        fiscalPeriod.StartDate,
+                        fiscalPeriod.EndDate,
+                        fiscalYear.StartDate,
+                        fiscalYear.EndDate,
+                        placedInServiceDate,
+                        bookValue.LastDepreciationDate));
                 var depreciationAmount = calculation.DepreciationAmount;
                 if (depreciationAmount <= 0m)
                 {
@@ -258,6 +287,15 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                     ProductionEvidenceNotes = calculation.ProductionEvidenceNotes,
                     CorrectionSequence = correctionSequence,
                     PlacedInServiceDateSnapshot = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate,
+                    DepreciationConventionSnapshot = calculation.Convention,
+                    ConventionFactor = calculation.ConventionFactor,
+                    ConventionBasis = calculation.ConventionBasis,
+                    ConventionEligibleFromDate = calculation.EligibleFromDate,
+                    ConventionEligibleToDate = calculation.EligibleToDate,
+                    FiscalPeriodStartDateSnapshot = fiscalPeriod.StartDate.Date,
+                    FiscalPeriodEndDateSnapshot = fiscalPeriod.EndDate.Date,
+                    FiscalYearStartDateSnapshot = fiscalYear.StartDate.Date,
+                    FiscalYearEndDateSnapshot = fiscalYear.EndDate.Date,
                     IsPosted = false,
                     IsProjected = !dto.PostToGl,
                     PostingDate = postingDate,
@@ -304,6 +342,16 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         _context.FixedAssetDepreciationRuns.Add(run);
         await _context.SaveChangesAsync(cancellationToken);
 
+        FinancePostingRequestV2Dto? preparedPostingRequest = null;
+        if (dto.PostToGl)
+        {
+            var functionalCurrency = await GetFunctionalCurrencyAsync(cancellationToken);
+            preparedPostingRequest = BuildPostingRequest(run, fiscalPeriod, depreciationLines, functionalCurrency);
+            await SynchronizeDepreciationDimensionsAsync(
+                run, preparedPostingRequest.Lines.ToList(), depreciationLines,
+                dto.FinanceDimensions, cancellationToken);
+        }
+
         await RecordDepreciationAuditAsync(
             FinanceAuditEvents.FixedAssetDepreciationRunCreated,
             run.Id,
@@ -319,6 +367,13 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
 
         if (dto.PostToGl && _workflowService != null)
         {
+            if (_fixedAssetDimensions is not null)
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DepreciationProducer,
+                    run.Id,
+                    run.PostingDate,
+                    preparedPostingRequest!.Lines.ToList(),
+                    cancellationToken);
             run.Status = "PendingApproval";
             run.UpdatedAt = DateTime.UtcNow;
             run.UpdatedBy = _currentUser.UserName;
@@ -382,9 +437,17 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
 
         try
         {
-            var functionalCurrency = await GetFunctionalCurrencyAsync(cancellationToken);
-            var request = BuildPostingRequest(run, fiscalPeriod, depreciationLines, functionalCurrency);
-            var postingResult = await _financePostingEngine!.PostAsync(request, cancellationToken);
+            var request = preparedPostingRequest
+                ?? BuildPostingRequest(
+                    run, fiscalPeriod, depreciationLines,
+                    await GetFunctionalCurrencyAsync(cancellationToken));
+            var mutableLines = request.Lines.ToList();
+            if (_fixedAssetDimensions is not null)
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DepreciationProducer, run.Id, run.PostingDate, mutableLines, cancellationToken);
+            request.Lines = mutableLines;
+            var postingResult = await _financePostingEngine!.PostAsync(
+                request, DepreciationProducer, cancellationToken);
 
             run.Status = "Posted";
             run.JournalEntryId = postingResult.JournalEntryId;
@@ -463,6 +526,42 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         return schedules;
     }
 
+    public async Task<IReadOnlyList<FixedAssetDepreciationRunDto>> GetRunsAsync(
+        Guid? fiscalPeriodId = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = _context.FixedAssetDepreciationRuns
+            .AsNoTracking()
+            .Include(run => run.Lines)
+            .Where(run => run.TenantId == TenantId && !run.IsDeleted);
+        if (fiscalPeriodId.HasValue)
+            query = query.Where(run => run.FiscalPeriodId == fiscalPeriodId.Value);
+
+        return await query
+            .OrderByDescending(run => run.PostingDate)
+            .ThenByDescending(run => run.CreatedAt)
+            .Select(run => new FixedAssetDepreciationRunDto
+            {
+                Id = run.Id,
+                FiscalPeriodId = run.FiscalPeriodId,
+                FixedAssetId = run.FixedAssetId,
+                BookClassification = run.BookClassification,
+                PostingDate = run.PostingDate,
+                Status = run.Status,
+                TotalDepreciationAmount = run.TotalDepreciationAmount,
+                CorrectionSequence = run.CorrectionSequence,
+                JournalEntryId = run.JournalEntryId,
+                PostingEventId = run.PostingEventId,
+                CalculatedAt = run.CalculatedAt,
+                PostedAt = run.PostedAt,
+                FailedAt = run.FailedAt,
+                FailureReason = run.FailureReason,
+                AssetCount = run.Lines.Select(line => line.FixedAssetId).Distinct().Count(),
+                PreparedBy = run.CreatedBy
+            })
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<IReadOnlyList<AssetDepreciationScheduleDto>> PostApprovedRunAsync(
         Guid runId,
         CancellationToken cancellationToken = default)
@@ -475,6 +574,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         var tenantId = TenantId;
         var run = await _context.FixedAssetDepreciationRuns
             .Include(r => r.FiscalPeriod)
+                .ThenInclude(period => period.FiscalYear)
             .Include(r => r.Lines)
                 .ThenInclude(line => line.AccountingBook)
             .FirstOrDefaultAsync(r => r.TenantId == tenantId && r.Id == runId && !r.IsDeleted, cancellationToken)
@@ -551,7 +651,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                      value.BookClassification.Equals(schedule.BookClassification, StringComparison.OrdinalIgnoreCase)))
                 ?? throw new InvalidOperationException("Depreciation run references a fixed asset book value that was not found for this tenant.");
 
-            ValidatePersistedCalculationStillMatchesBook(bookValue, schedule);
+            ValidatePersistedCalculationStillMatchesBook(asset, bookValue, schedule, run.FiscalPeriod);
 
             var expenseAccount = await ResolveDepreciationAccountAsync(
                 asset.Category.DepreciationExpenseAccountId,
@@ -571,7 +671,23 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         {
             var functionalCurrency = await GetFunctionalCurrencyAsync(cancellationToken);
             var request = BuildPostingRequest(run, run.FiscalPeriod, depreciationLines, functionalCurrency);
-            var postingResult = await _financePostingEngine.PostAsync(request, cancellationToken);
+            var mutableLines = request.Lines.ToList();
+            if (_fixedAssetDimensions is not null)
+            {
+                var hasDimensionProvenance = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+                    .AnyAsync(item => item.TenantId == TenantId
+                        && item.RouteId == DepreciationProducer.RouteId
+                        && item.SourceDocumentId == run.Id && !item.IsDeleted,
+                        cancellationToken);
+                if (!hasDimensionProvenance)
+                    await SynchronizeDepreciationDimensionsAsync(
+                        run, mutableLines, depreciationLines, input: null, cancellationToken);
+                await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                    DepreciationProducer, run.Id, run.PostingDate, mutableLines, cancellationToken);
+            }
+            request.Lines = mutableLines;
+            var postingResult = await _financePostingEngine.PostAsync(
+                request, DepreciationProducer, cancellationToken);
 
             run.Status = "Posted";
             run.JournalEntryId = postingResult.JournalEntryId;
@@ -645,41 +761,18 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
 
     private async Task<List<AccountingBook>> GetActivePostingBooksAsync(CancellationToken cancellationToken)
     {
-        if (_accountingBookService != null)
-        {
-            await _accountingBookService.EnsureTenantDefaultsAsync(cancellationToken);
-        }
-
         var books = await _context.AccountingBooks
             .Where(book => book.TenantId == TenantId && !book.IsDeleted && book.IsActive && book.AllowsPosting)
             .OrderBy(book => book.SortOrder)
             .ThenBy(book => book.Name)
             .ToListAsync(cancellationToken);
 
-        if (books.Count > 0)
-        {
-            return books;
-        }
+        // Depreciation consumes governed book authority; it cannot manufacture a posting book
+        // when setup is absent because C3 activation remains blocked pending C4 readiness.
+        if (books.Count == 0)
+            throw new InvalidOperationException("No active posting accounting book is configured for this tenant.");
 
-        var fallbackBook = new AccountingBook
-        {
-            TenantId = TenantId,
-            Code = "IFRS",
-            Name = "IFRS",
-            Description = "Primary corporate reporting book for IFRS financial statements.",
-            Purpose = "Primary",
-            IsActive = true,
-            IsDefault = true,
-            AllowsPosting = true,
-            IsSystemDefined = true,
-            SortOrder = 10,
-            CreatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUser.UserName ?? "system"
-        };
-
-        _context.AccountingBooks.Add(fallbackBook);
-        await _context.SaveChangesAsync(cancellationToken);
-        return new List<AccountingBook> { fallbackBook };
+        return books;
     }
 
     private async Task<Account> ResolveDepreciationAccountAsync(
@@ -722,7 +815,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
         return account;
     }
 
-    private FinancePostingRequestDto BuildPostingRequest(
+    private FinancePostingRequestV2Dto BuildPostingRequest(
         FixedAssetDepreciationRun run,
         FiscalPeriod fiscalPeriod,
         IReadOnlyList<DepreciationLineWorkItem> lines,
@@ -737,6 +830,9 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             postingLines.Add(new FinancePostingLineDto
             {
                 AccountId = item.ExpenseAccountId,
+                SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                    run.Id, "DEPRECIATION-EXPENSE", item.Asset.Id, item.Schedule.Id,
+                    item.Schedule.AccountingBookId ?? Guid.Empty),
                 DebitAmount = item.Schedule.DepreciationAmount,
                 CreditAmount = 0m,
                 TransactionCurrency = functionalCurrency,
@@ -752,6 +848,9 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             postingLines.Add(new FinancePostingLineDto
             {
                 AccountId = item.AccumulatedDepreciationAccountId,
+                SourceDocumentLineId = FinanceSourceLineIdentity.Create(
+                    run.Id, "ACCUMULATED-DEPRECIATION", item.Asset.Id, item.Schedule.Id,
+                    item.Schedule.AccountingBookId ?? Guid.Empty),
                 DebitAmount = 0m,
                 CreditAmount = item.Schedule.DepreciationAmount,
                 TransactionCurrency = functionalCurrency,
@@ -766,10 +865,11 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             });
         }
 
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
-            SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceModule = DepreciationProducer.Definition.PostingSourceModule,
+            OriginModuleCode = FinanceModuleLockCatalog.Finance,
+            SourceDocumentType = DepreciationProducer.Definition.DocumentType,
             SourceDocumentId = run.Id,
             SourceDocumentTenantId = run.TenantId,
             PostingAction = PostingAction,
@@ -778,12 +878,53 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             PostingDate = run.PostingDate,
             FiscalPeriodId = fiscalPeriod.Id,
             JournalType = "Fixed Asset Depreciation",
-            BookClassification = run.BookClassification == "ALL_ACTIVE_BOOKS" ? "IFRS" : run.BookClassification,
+            AccountingBookCode = run.BookClassification,
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = run.IdempotencyKey,
             ReturnExistingOnDuplicate = true,
             Lines = postingLines
         };
+    }
+
+    private async Task SynchronizeDepreciationDimensionsAsync(
+        FixedAssetDepreciationRun run,
+        IReadOnlyList<FinancePostingLineDto> postingLines,
+        IReadOnlyList<DepreciationLineWorkItem> workItems,
+        FinanceSourceDocumentDimensionInputDto? input,
+        CancellationToken cancellationToken)
+    {
+        if (_fixedAssetDimensions is null)
+            return;
+        var journalByAsset = workItems
+            .Where(item => item.Asset.JournalEntryId.HasValue)
+            .GroupBy(item => item.Asset.Id)
+            .ToDictionary(group => group.Key, group => group.First().Asset.JournalEntryId!.Value);
+        var inheritedByLine = new Dictionary<Guid, Guid>();
+        foreach (var line in postingLines)
+        {
+            if (!line.SourceDocumentLineId.HasValue) continue;
+            var item = workItems.FirstOrDefault(candidate =>
+                line.Notes?.Contains($"FixedAssetId={candidate.Asset.Id:N};", StringComparison.Ordinal) == true);
+            if (item is not null && journalByAsset.TryGetValue(item.Asset.Id, out var journalEntryId))
+                inheritedByLine[line.SourceDocumentLineId.Value] = journalEntryId;
+        }
+
+        await _fixedAssetDimensions.SynchronizeAsync(
+            DepreciationProducer,
+            run.Id,
+            run.PostingDate,
+            postingLines,
+            input,
+            inheritedByLine,
+            "Fixed asset depreciation components prepared from stable asset/book/schedule lineage.",
+            cancellationToken);
+    }
+
+    private void EnsureFixedAssetDimensionsConfigured()
+    {
+        if (_fixedAssetDimensions is null)
+            throw new InvalidOperationException(
+                "Finance fixed-asset dimensions are not configured for depreciation.");
     }
 
     private void ApplyPostedDepreciation(
@@ -1028,8 +1169,10 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
     }
 
     private static void ValidatePersistedCalculationStillMatchesBook(
+        FixedAsset asset,
         FixedAssetBookValue bookValue,
-        AssetDepreciationSchedule schedule)
+        AssetDepreciationSchedule schedule,
+        FiscalPeriod fiscalPeriod)
     {
         // Workflow approval may take time. Rechecking the calculation assumptions and usage counter
         // at posting prevents an approved schedule from being posted after another process changes
@@ -1046,6 +1189,16 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                 FixedAssetDepreciationCalculator.RoundUnits(schedule.LifetimeProductionCapacitySnapshot) ||
              FixedAssetDepreciationCalculator.RoundUnits(bookValue.AccumulatedProductionUnits) !=
                 FixedAssetDepreciationCalculator.RoundUnits(schedule.CumulativeProductionUnitsBefore));
+        var placedInServiceDate = bookValue.PlacedInServiceDate ?? asset.PlacedInServiceDate;
+        var fiscalYear = fiscalPeriod.FiscalYear;
+        var timingAssumptionsChanged =
+            bookValue.DepreciationConvention != schedule.DepreciationConventionSnapshot ||
+            placedInServiceDate?.Date != schedule.PlacedInServiceDateSnapshot?.Date ||
+            fiscalPeriod.StartDate.Date != schedule.FiscalPeriodStartDateSnapshot?.Date ||
+            fiscalPeriod.EndDate.Date != schedule.FiscalPeriodEndDateSnapshot?.Date ||
+            fiscalYear == null ||
+            fiscalYear.StartDate.Date != schedule.FiscalYearStartDateSnapshot?.Date ||
+            fiscalYear.EndDate.Date != schedule.FiscalYearEndDateSnapshot?.Date;
 
         if (bookValue.DepreciationMethod != schedule.DepreciationMethodSnapshot ||
             RoundMoney(bookValue.NetBookValue) != RoundMoney(schedule.NetBookValueBefore) ||
@@ -1053,7 +1206,8 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             RoundMoney(bookValue.ResidualValue) != RoundMoney(schedule.ResidualValueSnapshot) ||
             bookValue.UsefulLifeMonths != schedule.UsefulLifeMonthsSnapshot ||
             diminishingRateChanged ||
-            productionAssumptionsChanged)
+            productionAssumptionsChanged ||
+            timingAssumptionsChanged)
         {
             throw new InvalidOperationException("Fixed asset depreciation assumptions or carrying values changed after calculation. Reverse/cancel the pending run and recalculate before posting.");
         }
@@ -1236,6 +1390,15 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
             ProductionEvidenceReference = schedule.ProductionEvidenceReference,
             ProductionEvidenceNotes = schedule.ProductionEvidenceNotes,
             PlacedInServiceDateSnapshot = schedule.PlacedInServiceDateSnapshot,
+            DepreciationConventionSnapshot = schedule.DepreciationConventionSnapshot,
+            ConventionFactor = schedule.ConventionFactor,
+            ConventionBasis = schedule.ConventionBasis,
+            ConventionEligibleFromDate = schedule.ConventionEligibleFromDate,
+            ConventionEligibleToDate = schedule.ConventionEligibleToDate,
+            FiscalPeriodStartDateSnapshot = schedule.FiscalPeriodStartDateSnapshot,
+            FiscalPeriodEndDateSnapshot = schedule.FiscalPeriodEndDateSnapshot,
+            FiscalYearStartDateSnapshot = schedule.FiscalYearStartDateSnapshot,
+            FiscalYearEndDateSnapshot = schedule.FiscalYearEndDateSnapshot,
             IsPosted = schedule.IsPosted,
             PostedDate = schedule.PostedDate,
             PostingDate = schedule.PostingDate,
@@ -1259,8 +1422,7 @@ public partial class FixedAssetDepreciationService : IFixedAssetDepreciationServ
                !value.IsDeleted &&
                (value.CapitalizationPostingEventId.HasValue ||
                 value.CapitalizationJournalEntryId.HasValue ||
-                value.OpeningPostedToGl ||
-                value.OpeningSource.Contains("Opening", StringComparison.OrdinalIgnoreCase)));
+                value.OpeningPostedToGl));
 
     private static decimal RoundMoney(decimal value) => Math.Round(value, 2, MidpointRounding.AwayFromZero);
 

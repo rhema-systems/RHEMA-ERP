@@ -2,6 +2,8 @@ using System.Data;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
@@ -216,10 +218,19 @@ public partial class FixedAssetDepreciationService
                         policy.Reason,
                         policy.ReversalDate,
                         cancellationToken);
-                    var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+                    var reversalLines = plan.ReversalLines.ToList();
+                    if (_fixedAssetDimensions is not null)
+                        await _fixedAssetDimensions.RegisterHistoricalReversalAsync(
+                            DepreciationReversalProducer,
+                            reversal.Id,
+                            plan.OriginalJournalEntryId,
+                            reversalLines,
+                            cancellationToken);
+                    var posting = await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
                     {
-                        SourceModule = SourceModule,
-                        SourceDocumentType = "FixedAssetDepreciationReversal",
+                        SourceModule = DepreciationReversalProducer.Definition.PostingSourceModule,
+                        OriginModuleCode = FinanceModuleLockCatalog.Finance,
+                        SourceDocumentType = DepreciationReversalProducer.Definition.DocumentType,
                         SourceDocumentId = reversal.Id,
                         SourceDocumentTenantId = reversal.TenantId,
                         PostingAction = "Reverse",
@@ -227,15 +238,15 @@ public partial class FixedAssetDepreciationService
                         Description = $"Reverse fixed asset depreciation - {run.FiscalPeriod.PeriodCode} - {run.BookClassification}",
                         PostingDate = plan.ReversalDate,
                         JournalType = "Fixed Asset Depreciation Reversal",
-                        BookClassification = run.BookClassification == "ALL_ACTIVE_BOOKS" ? "IFRS" : run.BookClassification,
+                        AccountingBookCode = run.BookClassification,
                         FunctionalCurrencyCode = await GetFunctionalCurrencyAsync(cancellationToken),
                         ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
                         ReversalReason = policy.Reason,
                         ReversalType = "FA Depreciation",
                         IdempotencyKey = $"FA:DepreciationReversal:{reversal.TenantId:N}:{reversal.Id:N}",
                         ReturnExistingOnDuplicate = true,
-                        Lines = plan.ReversalLines
-                    }, cancellationToken);
+                        Lines = reversalLines
+                    }, DepreciationReversalProducer, cancellationToken);
 
                     // The posting engine can detach tracked entities while resolving an
                     // idempotency race. Reload before applying register changes so a successful

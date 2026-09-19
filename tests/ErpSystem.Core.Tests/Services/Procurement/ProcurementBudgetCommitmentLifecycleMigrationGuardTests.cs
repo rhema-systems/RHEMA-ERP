@@ -13,7 +13,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
 
         migration.Should().Contain("name: \"ReservedAmount\", table: \"ProcurementBudgets\"")
             .And.Contain("FormallyCommittedAmount")
@@ -92,7 +92,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", CorrectiveMigrationId + ".cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", CorrectiveMigrationId + ".cs"));
         var upStart = migration.IndexOf("private const string FinalExposureTriggerSql", StringComparison.Ordinal);
         var downStart = migration.IndexOf("private const string PreviousTriggerSql", StringComparison.Ordinal);
         var lifecycleUpStart = migration.IndexOf(
@@ -217,7 +217,7 @@ public sealed class ProcurementBudgetCommitmentLifecycleMigrationGuardTests
             .And.Contain("parent.Amount -")
             .And.Contain("parentRelease.FormalCommitmentEntryId = parent.Id");
         var modelSnapshot = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations",
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "ApplicationDbContextModelSnapshot.cs"));
         modelSnapshot.Should().Contain(
             "([Status] = 2 AND [ReservedAmount] >= 0) OR ([Status] IN (1, 3) AND [ReservedAmount] > 0)",
@@ -237,9 +237,9 @@ public sealed class ProcurementBudgetCommitmentLifecycleMigrationGuardTests
             .And.NotContain("b.ExpiryDate",
                 "contract-child allocations inherit an immutable active contract formal commitment");
 
-        var sourceProtection = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations",
+        var sourceProtection = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260730032601_TDC0406PurchaseOrderAmendments.cs"));
-        var commercialProtection = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations",
+        var commercialProtection = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260730204500_TDC0403CommercialCapacityHardStops.cs"));
         sourceProtection.Should().Contain("TR_PurchaseOrders_ApprovedSourceProtected")
             .And.Contain("TDC0406_PO_AMENDMENT_ID")

@@ -44,6 +44,67 @@ public class OpeningBalanceBatch : BusinessEntity
     public string? FailureReason { get; set; }
 
     public ICollection<OpeningBalanceLine> Lines { get; set; } = new List<OpeningBalanceLine>();
+    public ICollection<OpeningBalanceBatchReversal> Reversals { get; set; } = new List<OpeningBalanceBatchReversal>();
+}
+
+public sealed class OpeningBalanceBatchReversal : TenantEntity
+{
+    public Guid OpeningBalanceBatchId { get; set; }
+    public OpeningBalanceBatch OpeningBalanceBatch { get; set; } = null!;
+    public Guid OriginalPostingEventId { get; set; }
+    public Guid OriginalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+
+    [Required, MaxLength(40)]
+    public string SourceKind { get; set; } = "FreeForm";
+
+    [Required, MaxLength(30)]
+    public string BookClassification { get; set; } = "IFRS";
+
+    public DateTime OriginalOpeningDate { get; set; }
+    public decimal OriginalTotalDebit { get; set; }
+    public decimal OriginalTotalCredit { get; set; }
+
+    [Required, MaxLength(30)]
+    public string Status { get; set; } = OpeningBalanceBatchReversalStatuses.PendingApproval;
+
+    [Required, MaxLength(1000)]
+    public string Reason { get; set; } = string.Empty;
+
+    [Required, MaxLength(2000)]
+    public string ImpactAssessment { get; set; } = string.Empty;
+
+    public DateTime RequestedReversalDate { get; set; }
+    public Guid RequestedByUserId { get; set; }
+
+    [Required, MaxLength(200)]
+    public string RequestedByUserName { get; set; } = string.Empty;
+
+    public DateTime RequestedAt { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+
+    [MaxLength(200)]
+    public string? ReviewedByUserName { get; set; }
+
+    public DateTime? ReviewedAt { get; set; }
+
+    [MaxLength(2000)]
+    public string? ReviewComment { get; set; }
+
+    public DateTime? PostedAt { get; set; }
+
+    [MaxLength(2000)]
+    public string? FailureReason { get; set; }
+}
+
+public static class OpeningBalanceBatchReversalStatuses
+{
+    public const string PendingApproval = "PendingApproval";
+    public const string Approved = "Approved";
+    public const string Rejected = "Rejected";
+    public const string Posted = "Posted";
+    public const string Failed = "Failed";
 }
 
 public class OpeningBalanceLine : TenantEntity

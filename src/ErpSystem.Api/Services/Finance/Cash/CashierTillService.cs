@@ -123,61 +123,65 @@ public sealed class CashierTillService : ICashierTillService
             ?? throw new InvalidOperationException("Select an active CashTill liquidity account belonging to this tenant.");
         await ValidateEvidenceAsync(dto.OpeningEvidenceFileId, "opening", cancellationToken);
 
-        // SERIALIZABLE plus the focused account/status index closes the race in which two users
-        // attempt to take custody of the same physical till at nearly the same time.
-        await using var transaction = _context.Database.IsRelational()
-            ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
-            : null;
-        var hasActiveSession = await _context.CashierTillSessions.AnyAsync(
-            item => item.TenantId == tenantId &&
-                    item.LiquidityAccountId == till.Id &&
-                    item.Status != CashierTillSessionStatus.Closed,
-            cancellationToken);
-        if (hasActiveSession)
+        var strategy = _context.Database.CreateExecutionStrategy();
+        return await strategy.ExecuteAsync(async () =>
         {
-            throw new InvalidOperationException("This till already has an open or pending-review custody session.");
-        }
+            // SERIALIZABLE plus the focused account/status index closes the race in which two users
+            // attempt to take custody of the same physical till at nearly the same time.
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            var hasActiveSession = await _context.CashierTillSessions.AnyAsync(
+                item => item.TenantId == tenantId &&
+                        item.LiquidityAccountId == till.Id &&
+                        item.Status != CashierTillSessionStatus.Closed,
+                cancellationToken);
+            if (hasActiveSession)
+            {
+                throw new InvalidOperationException("This till already has an open or pending-review custody session.");
+            }
 
-        var now = DateTime.UtcNow;
-        var session = new CashierTillSession
-        {
-            Id = Guid.NewGuid(),
-            TenantId = tenantId,
-            SessionNumber = await _numbering.GenerateAsync(
-                DocumentNumberingModules.Finance,
-                FinanceDocumentTypes.CashTillSession,
-                tenantId,
-                dto.BusinessDate,
-                nameof(CashierTillSession),
-                cancellationToken: cancellationToken),
-            LiquidityAccountId = till.Id,
-            BusinessDate = dto.BusinessDate.Date,
-            Currency = till.Currency.ToUpperInvariant(),
-            CashierUserId = UserId,
-            CashierName = UserName,
-            Status = CashierTillSessionStatus.Open,
-            OpeningFloatAmount = RoundMoney(dto.OpeningFloatAmount),
-            OpeningNotes = Clean(dto.OpeningNotes),
-            OpeningEvidenceFileId = dto.OpeningEvidenceFileId,
-            OpenedAt = now,
-            OpenedById = UserId,
-            CreatedAt = now,
-            CreatedBy = UserName,
-            CreatedById = UserId
-        };
-        _context.CashierTillSessions.Add(session);
-        await _context.SaveChangesAsync(cancellationToken);
-        if (transaction != null)
-        {
-            await transaction.CommitAsync(cancellationToken);
-        }
-        await RecordAuditAsync("Finance.CashTill.Opened", session, null, new
-        {
-            session.OpeningFloatAmount,
-            session.BusinessDate,
-            session.OpeningEvidenceFileId
-        }, cancellationToken);
-        return await GetRequiredSessionDtoAsync(session.Id, cancellationToken);
+            var now = DateTime.UtcNow;
+            var session = new CashierTillSession
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                SessionNumber = await _numbering.GenerateAsync(
+                    DocumentNumberingModules.Finance,
+                    FinanceDocumentTypes.CashTillSession,
+                    tenantId,
+                    dto.BusinessDate,
+                    nameof(CashierTillSession),
+                    cancellationToken: cancellationToken),
+                LiquidityAccountId = till.Id,
+                BusinessDate = dto.BusinessDate.Date,
+                Currency = till.Currency.ToUpperInvariant(),
+                CashierUserId = UserId,
+                CashierName = UserName,
+                Status = CashierTillSessionStatus.Open,
+                OpeningFloatAmount = RoundMoney(dto.OpeningFloatAmount),
+                OpeningNotes = Clean(dto.OpeningNotes),
+                OpeningEvidenceFileId = dto.OpeningEvidenceFileId,
+                OpenedAt = now,
+                OpenedById = UserId,
+                CreatedAt = now,
+                CreatedBy = UserName,
+                CreatedById = UserId
+            };
+            _context.CashierTillSessions.Add(session);
+            await _context.SaveChangesAsync(cancellationToken);
+            if (transaction != null)
+            {
+                await transaction.CommitAsync(cancellationToken);
+            }
+            await RecordAuditAsync("Finance.CashTill.Opened", session, null, new
+            {
+                session.OpeningFloatAmount,
+                session.BusinessDate,
+                session.OpeningEvidenceFileId
+            }, cancellationToken);
+            return await GetRequiredSessionDtoAsync(session.Id, cancellationToken);
+        });
     }
 
     public async Task<CashierTillSessionDto> SubmitCountAsync(

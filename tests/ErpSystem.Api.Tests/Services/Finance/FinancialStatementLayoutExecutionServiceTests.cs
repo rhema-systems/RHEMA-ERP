@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Finance.Reporting;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -202,6 +203,34 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
         await using var context = CreateContext();
         var book = SeedTenantAndBook(context, tenantId);
         var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        var originalRoot = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "ASSET_ROOT", Name = "Assets", CoreAccountType = AccountType.Asset,
+            Status = AccountClassificationStatus.Active, IsPostingClassification = false
+        };
+        var replacementRoot = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "OTHER_ASSET_ROOT", Name = "Other assets", CoreAccountType = AccountType.Asset,
+            Status = AccountClassificationStatus.Active, IsPostingClassification = false
+        };
+        var originalClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            ParentClassificationId = originalRoot.Id, Code = "CASH", Name = "Cash",
+            CoreAccountType = AccountType.Asset, Status = AccountClassificationStatus.Active,
+            IsPostingClassification = true
+        };
+        var replacementClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            ParentClassificationId = replacementRoot.Id, Code = "OTHER_ASSET", Name = "Other asset",
+            CoreAccountType = AccountType.Asset, Status = AccountClassificationStatus.Active,
+            IsPostingClassification = true
+        };
+        context.AccountClassifications.AddRange(originalRoot, replacementRoot, originalClassification, replacementClassification);
+        context.AccountAccountingBooks.Local.Single(item => item.AccountId == cash.Id).AccountClassificationId = originalClassification.Id;
         var layout = new FinancialStatementLayout
         {
             Id = Guid.NewGuid(),
@@ -229,6 +258,8 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             FinancialStatementRowType.Account,
             10,
             mapping: ExactMapping(tenantId, cash.Id));
+        FreezeExactSnapshot(historical, book, cash, originalClassification,
+            new[] { originalRoot, replacementRoot, originalClassification, replacementClassification });
         var current = AddVersion(
             layout,
             tenantId,
@@ -245,8 +276,18 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             10,
             signMultiplier: -1,
             mapping: ExactMapping(tenantId, cash.Id));
+        FreezeExactSnapshot(current, book, cash, originalClassification,
+            new[] { originalRoot, replacementRoot, originalClassification, replacementClassification });
         context.FinancialStatementLayouts.Add(layout);
         SeedPostedTransaction(context, tenantId, cash.Id, new DateTime(2026, 2, 1), 100m, 0m);
+        await context.SaveChangesAsync();
+
+        cash.AccountName = "Renamed live cash account";
+        originalClassification.Name = "Renamed cash classification";
+        originalClassification.ParentClassificationId = replacementRoot.Id;
+        var liveMapping = context.AccountAccountingBooks.Single(item => item.AccountId == cash.Id);
+        liveMapping.AccountClassificationId = replacementClassification.Id;
+        liveMapping.IsEnabled = false;
         await context.SaveChangesAsync();
 
         var service = CreateService(context, tenantId);
@@ -256,7 +297,8 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
                 StatementType = FinancialStatementType.BalanceSheet,
                 AccountingBookId = book.Id,
                 PeriodEnd = new DateTime(2026, 6, 30),
-                IncludeHiddenRows = true
+                IncludeHiddenRows = true,
+                IncludeAccountDetails = true
             });
         var august = await service.ExecutePublishedAsync(
             new FinancialStatementLayoutExecutionRequestDto
@@ -264,13 +306,49 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
                 StatementType = FinancialStatementType.BalanceSheet,
                 AccountingBookId = book.Id,
                 PeriodEnd = new DateTime(2026, 8, 31),
-                IncludeHiddenRows = true
+                IncludeHiddenRows = true,
+                IncludeAccountDetails = true
             });
 
         june.VersionNumber.Should().Be(1);
         june.Rows.Single().Amount.Should().Be(100m);
+        june.Rows.Single().Accounts.Single().AccountName.Should().Be("Cash");
         august.VersionNumber.Should().Be(2);
         august.Rows.Single().Amount.Should().Be(-100m);
+        august.Rows.Single().Accounts.Single().AccountName.Should().Be("Cash");
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
+    public async Task ExecutePublished_ShouldFailClosedWhenFrozenBookEvidenceIsTampered()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var cash = SeedAccount(context, tenantId, book.Id, "1000", "Cash", AccountType.Asset);
+        var layout = SeedLayout(context, tenantId, book, FinancialStatementType.BalanceSheet,
+            FinancialStatementLayoutVersionStatus.Published);
+        var version = layout.Versions.Single();
+        AddRow(version, tenantId, "CASH", "Cash", FinancialStatementRowType.Account, 10,
+            mapping: ExactMapping(tenantId, cash.Id));
+        FreezeExactSnapshot(version, book, cash);
+        await context.SaveChangesAsync();
+
+        version.PublishedAccountingBookName = "Tampered book name";
+        await context.SaveChangesAsync();
+
+        var execute = () => CreateService(context, tenantId).ExecutePublishedAsync(
+            new FinancialStatementLayoutExecutionRequestDto
+            {
+                StatementType = FinancialStatementType.BalanceSheet,
+                AccountingBookId = book.Id,
+                PeriodEnd = new DateTime(2026, 8, 31)
+            });
+
+        var error = await execute.Should().ThrowAsync<FinancialStatementLayoutValidationException>();
+        error.Which.Validation.Issues.Should().ContainSingle(item =>
+            item.Code == "PUBLICATION_SNAPSHOT_TAMPERED"
+            && item.Severity == FinancialStatementLayoutValidationSeverity.Error);
     }
 
     [Fact]
@@ -364,6 +442,10 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             FinancialStatementRowType.Account,
             10,
             mapping: ExactMapping(tenantId, cash.Id));
+        FreezeExactSnapshot(layout.Versions.Single(), book, cash);
+        await context.SaveChangesAsync();
+        cash.AccountName = "Renamed after publication";
+        context.AccountAccountingBooks.Single(item => item.AccountId == cash.Id).IsEnabled = false;
 
         var department = new FinanceDimensionDefinition
         {
@@ -423,6 +505,7 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
                 StatementType = FinancialStatementType.BalanceSheet,
                 AccountingBookId = book.Id,
                 PeriodEnd = new DateTime(2026, 7, 31),
+                IncludeAccountDetails = true,
                 DimensionFilters =
                 {
                     new FinanceDimensionFilterDto
@@ -434,6 +517,7 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             });
 
         result.Rows.Single().Amount.Should().Be(100m);
+        result.Rows.Single().Accounts.Should().ContainSingle(item => item.AccountName == "Cash");
     }
 
     private static FinancialStatementLayoutExecutionService CreateService(
@@ -649,6 +733,47 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             ToAccountNumber = to
         };
 
+    private static void FreezeExactSnapshot(
+        FinancialStatementLayoutVersion version,
+        AccountingBook book,
+        Account account,
+        AccountClassification? classification = null,
+        IReadOnlyCollection<AccountClassification>? hierarchy = null)
+    {
+        var row = version.Rows.Single();
+        var mapping = row.Mappings.Single();
+        var snapshot = new FinancialStatementPublicationAccount
+        {
+            Id = Guid.NewGuid(), TenantId = version.TenantId,
+            FinancialStatementLayoutVersionId = version.Id,
+            FinancialStatementRowId = row.Id,
+            FinancialStatementRowMappingId = mapping.Id,
+            MappingType = mapping.MappingType,
+            AccountId = account.Id,
+            RowCode = row.RowCode,
+            AccountNumber = account.AccountNumber,
+            AccountName = account.AccountName,
+            AccountType = account.AccountType,
+            AccountingBookId = book.Id,
+            AccountingBookCode = book.Code,
+            AccountClassificationId = classification?.Id,
+            ClassificationCode = classification?.Code,
+            ClassificationName = classification?.Name,
+            ClassificationPath = classification?.Code,
+            MappingSelector = account.Id.ToString("N")
+        };
+        version.PublicationSnapshotSchemaVersion = FinancialStatementPublicationFingerprint.SnapshotSchemaVersion;
+        version.PublishedAccountingBookId = book.Id;
+        version.PublishedAccountingBookCode = book.Code;
+        version.PublishedAccountingBookName = book.Name;
+        version.HierarchyFingerprint = FinancialStatementPublicationFingerprint.Hierarchy(
+            version.TenantId, book.Id, hierarchy ?? Array.Empty<AccountClassification>());
+        version.PublicationAccounts.Add(snapshot);
+        version.ResolutionFingerprint = FinancialStatementPublicationFingerprint.Resolution(
+            version.TenantId, version.Id, book.Id, book.Code, book.Name,
+            version.HierarchyFingerprint, version.PublicationAccounts);
+    }
+
     private static void SeedPostedTransaction(
         ApplicationDbContext context,
         Guid tenantId,
@@ -659,6 +784,8 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
         Guid? financeDimensionSetId = null)
     {
         var journalId = Guid.NewGuid();
+        var accountingBookId = context.AccountingBooks.Local.Single(book =>
+            book.TenantId == tenantId && book.Code == "IFRS").Id;
         context.JournalEntries.Add(new JournalEntry
         {
             Id = journalId,
@@ -667,6 +794,7 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             EntryDate = date,
             Description = "Execution test posting",
             PostingStatus = "Posted",
+            AccountingBookId = accountingBookId,
             BookClassification = "IFRS",
             FiscalPeriodId = Guid.NewGuid(),
             TotalDebitAmount = debit,
@@ -683,6 +811,7 @@ public sealed class FinancialStatementLayoutExecutionServiceTests
             DebitAmount = debit,
             CreditAmount = credit,
             PostingStatus = "Posted",
+            AccountingBookId = accountingBookId,
             BookClassification = "IFRS",
             FiscalPeriodId = Guid.NewGuid(),
             FunctionalCurrencyCode = "GHS",

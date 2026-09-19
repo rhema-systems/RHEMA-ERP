@@ -56,7 +56,10 @@ namespace ErpSystem.Core.Interfaces.Finance
         #region Taxes
 
         Task<IReadOnlyList<TaxDto>> GetAllTaxesAsync(CancellationToken cancellationToken = default);
-        Task<IReadOnlyList<TaxDto>> GetActiveTaxesAsync(TaxApplicability? applicability = null, CancellationToken cancellationToken = default);
+        Task<IReadOnlyList<TaxDto>> GetActiveTaxesAsync(
+            TaxApplicability? applicability = null,
+            TaxCategory? category = null,
+            CancellationToken cancellationToken = default);
         Task<TaxDto?> GetTaxByIdAsync(Guid id, CancellationToken cancellationToken = default);
         Task<TaxDto?> GetTaxByCodeAsync(string code, CancellationToken cancellationToken = default);
         Task<TaxDto> CreateTaxAsync(CreateTaxDto dto, CancellationToken cancellationToken = default);

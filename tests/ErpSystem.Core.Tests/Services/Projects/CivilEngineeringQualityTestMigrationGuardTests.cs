@@ -8,7 +8,7 @@ public sealed class CivilEngineeringQualityTestMigrationGuardTests
     public void Migration_adds_only_the_quality_test_register_and_immutable_sql_guards()
     {
         var root = FindRepositoryRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260820193000_AddCivilEngineeringQualityTestRegister.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260820193000_AddCivilEngineeringQualityTestRegister.cs"));
         Assert.Contains("CREATE TABLE ProjectCivilQualityTestReports", sql, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE ProjectCivilQualityTestRevisions", sql, StringComparison.Ordinal);
         Assert.Contains("TR_ProjectCivilQualityTestReports_Lineage", sql, StringComparison.Ordinal);
