@@ -23,18 +23,25 @@ using Syncfusion.Licensing;
 // This is the controlled test/deployment database update entry point.
 if (args.Length > 0 && args[0] == "apply-migrations")
 {
+    var migrationCommandOptions = MigrationCommandOptions.Parse(args);
+
     // Migration-only deployments must keep ASP.NET Core's Production default
     // when ASPNETCORE_ENVIRONMENT is absent. Development is a convenience for
     // explicit seed commands only and could select the wrong database here.
     var tempBuilder = WebApplication.CreateBuilder(args);
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
-    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddHttpContextAccessor(); // Required by AuditInterceptor on the audited DbContext.
+    tempBuilder.Services.AddErpSystemCliDatabase(
+        tempBuilder.Configuration,
+        migrationCommandOptions.CommandTimeoutSeconds);
     var tempApp = tempBuilder.Build();
 
     using (var scope = tempApp.Services.CreateScope())
     {
         var db = scope.ServiceProvider
             .GetRequiredService<ApplicationDbContext>();
+        migrationCommandOptions.ApplyAndAssertTo(db.Database);
+        Console.WriteLine($"RHEMA_MIGRATION_COMMAND_TIMEOUT_SECONDS={migrationCommandOptions.CommandTimeoutSeconds}");
         await db.Database.MigrateAsync();
     }
 
@@ -186,11 +193,14 @@ if (args.Length > 0 && args[0] == "seed-maintenance-e2e")
 // Check for full database seeding command (roles, workflows, modules, etc.)
 if (args.Length > 0 && args[0] == "seed-db")
 {
+    var migrationCommandOptions = MigrationCommandOptions.Parse(args);
     var tempBuilder = CreateSeedBuilder(args);
 
     // Configure services for seeding
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
-    tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddErpSystemCliDatabase(
+        tempBuilder.Configuration,
+        migrationCommandOptions.CommandTimeoutSeconds);
     tempBuilder.Services.AddErpSystemIdentity();
     tempBuilder.Services.AddDatabaseSeeding();
 
@@ -200,6 +210,8 @@ if (args.Length > 0 && args[0] == "seed-db")
     {
         // Apply migrations first so seeding is safe in all environments.
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        migrationCommandOptions.ApplyAndAssertTo(db.Database);
+        Console.WriteLine($"RHEMA_MIGRATION_COMMAND_TIMEOUT_SECONDS={migrationCommandOptions.CommandTimeoutSeconds}");
         await db.Database.MigrateAsync();
 
         var seedingService = scope.ServiceProvider.GetRequiredService<IDatabaseSeedingService>();
@@ -387,6 +399,7 @@ if (args.Length > 0 && args[0] == "seed-supplier-onboarding-e2e")
 
     tempBuilder.Services.AddErpSystemLogging(tempBuilder.Configuration);
     tempBuilder.Services.AddErpSystemDatabase(tempBuilder.Configuration);
+    tempBuilder.Services.AddDatabaseSeedingFinanceBoundary();
     tempBuilder.Services.AddScoped<ProcurementSupplierOnboardingTestSeeder>();
 
     var tempApp = tempBuilder.Build();
@@ -447,7 +460,6 @@ if (args.Length > 0 && args[0] == "repair-finance-po-schema")
     {
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         await RepairFinanceSettingsSchemaAsync(db);
-        await RepairAccountingBooksSchemaAsync(db);
         await RepairCustomerPaymentSchemaAsync(db);
         await RepairFinancePurchaseOrderSchemaAsync(db);
     }
@@ -985,7 +997,6 @@ async Task InitializeDatabaseAsync(
         await RepairDevelopmentMigrationHistoryIfNeededAsync(app.Environment, context, logger, migrationCts.Token);
         await context.Database.MigrateAsync(migrationCts.Token);
         await RepairFinanceSettingsSchemaAsync(context, migrationCts.Token);
-        await RepairAccountingBooksSchemaAsync(context, migrationCts.Token);
         await RepairCustomerPaymentSchemaAsync(context, migrationCts.Token);
         await RepairFinancePurchaseOrderSchemaAsync(context, migrationCts.Token);
     }
@@ -1358,7 +1369,7 @@ BEGIN
                 ([Id], [AccountCode], [AccountNumber], [AccountName], [AccountType], [AccountCategory], [AccountSubCategory], [Description],
                  [ParentAccountId], [IsSegmented], [CurrencyCode], [IsMultiCurrency], [IsIFRSClassified], [IsBaseClassified], [IsLocalClassified],
                  [IFRSLineItem], [BaseLineItem], [LocalLineItem], [AllowDirectPosting], [IsControlAccount], [RequireDepartmentCode], [RequireProjectCode],
-                 [BudgetTrackingEnabled], [Status], [Balance], [DebitBalance], [CreditBalance], [OpeningBalance], [LastTransactionDate],
+                 [BudgetTrackingEnabled], [Status], [DebitBalance], [CreditBalance], [OpeningBalance], [LastTransactionDate],
                  [EstateModuleLinkId], [PayrollModuleLinkId], [ProcurementModuleLinkId], [TaxReportingCategory], [CashFlowClassification], [IsSystemAccount],
                  [InactivatedDate], [InactivationReason], [CreatedAt], [UpdatedAt], [CreatedBy], [UpdatedBy], [CreatedById], [LastModifiedById],
                  [IsDeleted], [DeletedAt], [DeletedBy], [TenantId], [ReferenceNumber], [EffectiveDate], [ExpirationDate], [Metadata], [Tags], [Priority])
@@ -1387,7 +1398,6 @@ BEGIN
                 0,
                 seed.[BudgetTrackingEnabled],
                 1,
-                0,
                 0,
                 0,
                 0,
@@ -1430,84 +1440,8 @@ BEGIN
                       AND ISNULL(existing.[IsDeleted], 0) = 0
                 );
 
-            IF OBJECT_ID(N'[dbo].[AccountSegmentValues]', N'U') IS NOT NULL
-               AND OBJECT_ID(N'[dbo].[AccountSegmentStructures]', N'U') IS NOT NULL
-            BEGIN
-                ;WITH SeededAccounts AS
-                (
-                    SELECT a.[Id], a.[TenantId], a.[AccountCode], a.[AccountName]
-                    FROM [dbo].[Accounts] a
-                    INNER JOIN @FinanceDefaultAccounts seed ON seed.[AccountCode] = a.[AccountCode]
-                    WHERE a.[TenantId] = @DefaultFinanceTenantId
-                      AND ISNULL(a.[IsDeleted], 0) = 0
-                ),
-                TargetSegments AS
-                (
-                    SELECT s.[Id], s.[TenantId], s.[SegmentCode], s.[SegmentPosition], s.[IsNaturalAccount]
-                    FROM [dbo].[AccountSegmentStructures] s
-                    WHERE s.[TenantId] = @DefaultFinanceTenantId
-                      AND ISNULL(s.[IsDeleted], 0) = 0
-                      AND (
-                            (s.[SegmentCode] = N'DEPT' AND s.[SegmentPosition] = 1)
-                         OR (s.[IsNaturalAccount] = 1)
-                         OR (s.[SegmentCode] = N'PROJ' AND s.[SegmentPosition] = 3)
-                      )
-                )
-                INSERT INTO [dbo].[AccountSegmentValues]
-                    ([Id], [AccountId], [SegmentStructureId], [SegmentValue], [SegmentLookupValueId], [SegmentValueDescription],
-                     [SegmentPosition], [IsLocked], [EffectiveDate], [EndDate], [CreatedAt], [UpdatedAt], [CreatedBy], [UpdatedBy],
-                     [CreatedById], [LastModifiedById], [IsDeleted], [DeletedAt], [DeletedBy], [TenantId])
-                SELECT
-                    NEWID(),
-                    account.[Id],
-                    segment.[Id],
-                    CASE
-                        WHEN segment.[SegmentCode] = N'DEPT' THEN N'000'
-                        WHEN segment.[IsNaturalAccount] = 1 THEN account.[AccountCode]
-                        WHEN segment.[SegmentCode] = N'PROJ' THEN N'0000'
-                    END,
-                    lookupValue.[Id],
-                    CASE
-                        WHEN segment.[IsNaturalAccount] = 1 THEN account.[AccountName]
-                        ELSE lookupValue.[Description]
-                    END,
-                    segment.[SegmentPosition],
-                    0,
-                    SYSUTCDATETIME(),
-                    NULL,
-                    SYSUTCDATETIME(),
-                    NULL,
-                    N'System',
-                    NULL,
-                    NULL,
-                    NULL,
-                    0,
-                    NULL,
-                    NULL,
-                    account.[TenantId]
-                FROM SeededAccounts account
-                INNER JOIN TargetSegments segment ON segment.[TenantId] = account.[TenantId]
-                OUTER APPLY
-                (
-                    SELECT TOP (1) lookup.[Id], lookup.[Description]
-                    FROM [dbo].[SegmentLookupValues] lookup
-                    WHERE lookup.[TenantId] = account.[TenantId]
-                      AND lookup.[SegmentStructureId] = segment.[Id]
-                      AND lookup.[SegmentValue] = CASE
-                            WHEN segment.[SegmentCode] = N'DEPT' THEN N'000'
-                            WHEN segment.[SegmentCode] = N'PROJ' THEN N'0000'
-                            ELSE account.[AccountCode]
-                          END
-                      AND ISNULL(lookup.[IsDeleted], 0) = 0
-                ) lookupValue
-                WHERE NOT EXISTS (
-                    SELECT 1
-                    FROM [dbo].[AccountSegmentValues] existing
-                    WHERE existing.[AccountId] = account.[Id]
-                      AND existing.[SegmentStructureId] = segment.[Id]
-                      AND ISNULL(existing.[IsDeleted], 0) = 0
-                );
-            END;
+            -- Phase 5: account-number identity is created only by the Finance segment manifest
+            -- and provisioning services. Startup repair must not fabricate DEPT/PROJ placeholders.
         END;
 
         UPDATE fs
@@ -1749,108 +1683,6 @@ END
 """, cancellationToken);
 }
 
-static async Task RepairAccountingBooksSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
-{
-    await context.Database.ExecuteSqlRawAsync("""
-IF OBJECT_ID(N'[dbo].[AccountingBooks]', N'U') IS NULL
-BEGIN
-    CREATE TABLE [dbo].[AccountingBooks] (
-        [Id] uniqueidentifier NOT NULL,
-        [Code] nvarchar(20) NOT NULL,
-        [Name] nvarchar(100) NOT NULL,
-        [Description] nvarchar(500) NULL,
-        [Purpose] nvarchar(50) NOT NULL,
-        [IsActive] bit NOT NULL,
-        [IsDefault] bit NOT NULL,
-        [AllowsPosting] bit NOT NULL,
-        [IsSystemDefined] bit NOT NULL,
-        [SortOrder] int NOT NULL,
-        [TenantId] uniqueidentifier NOT NULL,
-        [CreatedAt] datetime2 NOT NULL,
-        [CreatedBy] nvarchar(max) NULL,
-        [CreatedById] uniqueidentifier NULL,
-        [UpdatedAt] datetime2 NULL,
-        [UpdatedBy] nvarchar(max) NULL,
-        [LastModifiedById] uniqueidentifier NULL,
-        [IsDeleted] bit NOT NULL,
-        [DeletedAt] datetime2 NULL,
-        [DeletedBy] nvarchar(max) NULL,
-        CONSTRAINT [PK_AccountingBooks] PRIMARY KEY ([Id]),
-        CONSTRAINT [FK_AccountingBooks_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
-    );
-END;
-
-IF OBJECT_ID(N'[dbo].[AccountingBooks]', N'U') IS NOT NULL
-   AND NOT EXISTS (
-        SELECT 1 FROM sys.indexes
-        WHERE [name] = N'IX_AccountingBooks_TenantId_Code'
-          AND [object_id] = OBJECT_ID(N'[dbo].[AccountingBooks]')
-   )
-BEGIN
-    CREATE UNIQUE INDEX [IX_AccountingBooks_TenantId_Code]
-        ON [dbo].[AccountingBooks] ([TenantId], [Code]);
-END;
-
-IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NULL
-BEGIN
-    CREATE TABLE [dbo].[AccountAccountingBooks] (
-        [Id] uniqueidentifier NOT NULL,
-        [AccountId] uniqueidentifier NOT NULL,
-        [AccountingBookId] uniqueidentifier NOT NULL,
-        [IsEnabled] bit NOT NULL,
-        [FinancialStatementLineItem] nvarchar(100) NULL,
-        [TenantId] uniqueidentifier NOT NULL,
-        [CreatedAt] datetime2 NOT NULL,
-        [CreatedBy] nvarchar(max) NULL,
-        [CreatedById] uniqueidentifier NULL,
-        [UpdatedAt] datetime2 NULL,
-        [UpdatedBy] nvarchar(max) NULL,
-        [LastModifiedById] uniqueidentifier NULL,
-        [IsDeleted] bit NOT NULL,
-        [DeletedAt] datetime2 NULL,
-        [DeletedBy] nvarchar(max) NULL,
-        CONSTRAINT [PK_AccountAccountingBooks] PRIMARY KEY ([Id]),
-        CONSTRAINT [FK_AccountAccountingBooks_Accounts_AccountId] FOREIGN KEY ([AccountId]) REFERENCES [dbo].[Accounts] ([Id]) ON DELETE NO ACTION,
-        CONSTRAINT [FK_AccountAccountingBooks_AccountingBooks_AccountingBookId] FOREIGN KEY ([AccountingBookId]) REFERENCES [dbo].[AccountingBooks] ([Id]) ON DELETE NO ACTION,
-        CONSTRAINT [FK_AccountAccountingBooks_Tenants_TenantId] FOREIGN KEY ([TenantId]) REFERENCES [dbo].[Tenants] ([Id]) ON DELETE NO ACTION
-    );
-END;
-
-IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NOT NULL
-   AND NOT EXISTS (
-        SELECT 1 FROM sys.indexes
-        WHERE [name] = N'IX_AccountAccountingBooks_AccountId'
-          AND [object_id] = OBJECT_ID(N'[dbo].[AccountAccountingBooks]')
-   )
-BEGIN
-    CREATE INDEX [IX_AccountAccountingBooks_AccountId]
-        ON [dbo].[AccountAccountingBooks] ([AccountId]);
-END;
-
-IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NOT NULL
-   AND NOT EXISTS (
-        SELECT 1 FROM sys.indexes
-        WHERE [name] = N'IX_AccountAccountingBooks_AccountingBookId'
-          AND [object_id] = OBJECT_ID(N'[dbo].[AccountAccountingBooks]')
-   )
-BEGIN
-    CREATE INDEX [IX_AccountAccountingBooks_AccountingBookId]
-        ON [dbo].[AccountAccountingBooks] ([AccountingBookId]);
-END;
-
-IF OBJECT_ID(N'[dbo].[AccountAccountingBooks]', N'U') IS NOT NULL
-   AND NOT EXISTS (
-        SELECT 1 FROM sys.indexes
-        WHERE [name] = N'IX_AccountAccountingBooks_TenantId_AccountId_AccountingBookId'
-          AND [object_id] = OBJECT_ID(N'[dbo].[AccountAccountingBooks]')
-   )
-BEGIN
-    CREATE UNIQUE INDEX [IX_AccountAccountingBooks_TenantId_AccountId_AccountingBookId]
-        ON [dbo].[AccountAccountingBooks] ([TenantId], [AccountId], [AccountingBookId]);
-END;
-""", cancellationToken);
-}
-
 static string SummarizeConnectionTarget(string? connectionString)
 {
     if (string.IsNullOrWhiteSpace(connectionString))
@@ -1873,41 +1705,6 @@ static string SummarizeConnectionTarget(string? connectionString)
     return safeParts.Length == 0
         ? "Configured connection string target unavailable"
         : string.Join("; ", safeParts);
-}
-
-sealed class MaintenanceCurrentUserContext : ErpSystem.Core.Interfaces.ICurrentUserService, ErpSystem.Core.Interfaces.ICurrentUserProvider
-{
-    private static readonly Guid SystemUserId = Guid.Empty;
-    private static readonly string[] SystemRoles = ["SuperAdmin"];
-    private readonly Guid _tenantId;
-
-    public MaintenanceCurrentUserContext(Guid tenantId)
-    {
-        _tenantId = tenantId;
-    }
-
-    public string? UserId => SystemUserId.ToString();
-    public string? UserName => "system";
-    public string? Email => "system@local";
-    public Guid? TenantId => _tenantId;
-    public Guid? EmployeeId => null;
-    public bool IsAuthenticated => true;
-    public IEnumerable<string> Roles => SystemRoles;
-    public string? IpAddress => null;
-    public string? UserAgent => "MaintenanceCommand";
-    public bool IsInRole(string role) => HasRole(role);
-
-    Guid ErpSystem.Core.Interfaces.ICurrentUserProvider.UserId => SystemUserId;
-    Guid ErpSystem.Core.Interfaces.ICurrentUserProvider.TenantId => _tenantId;
-    public string Username => UserName!;
-    public string FullName => "System";
-    public bool HasRole(string role) => SystemRoles.Contains(role, StringComparer.OrdinalIgnoreCase);
-    public IDictionary<string, string> Claims => new Dictionary<string, string>
-    {
-        ["tenant_id"] = _tenantId.ToString()
-    };
-    public bool IsExternalUser => false;
-    public string AuthenticationProvider => "MaintenanceCommand";
 }
 
 class NoopServiceProxy : System.Reflection.DispatchProxy

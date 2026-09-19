@@ -32,7 +32,7 @@ public sealed class QuantitySurveyMaterialReconciliationGuardTests
     [Fact]
     public void Migration_enforces_sources_lifecycle_sod_payment_lineage_and_append_only_history()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260810223350_AddQuantitySurveyMaterialReconciliationLifecycle.cs");
 
         source.Should().Contain("TR_QS0507_MaterialReconciliation_Governance")

@@ -9,7 +9,7 @@ public sealed class CivilEngineeringDevelopmentApprovalHandoffMigrationGuardTest
     public void Migration_enforces_sequence_recipient_dms_and_append_only_handoff_controls()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821123000_AddCivilEngineeringDevelopmentApprovalFileHandoffs.cs"));
         sql.Should().Contain("TR_ProjectCivilDevelopmentApprovalFileHandoffs_Lineage")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalFileHandoffs_AppendOnly")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalHandoffEvidence_Lineage")

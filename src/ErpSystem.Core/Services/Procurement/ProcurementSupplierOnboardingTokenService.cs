@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
@@ -868,13 +869,14 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                     throw Validation("SUPPLIER_ONBOARDING_TAX_GL_MISSING",
                         "The effective DEC-007 decision has no tax payable GL account.");
                 await ValidatePostingAccountsAsync(entity, method, cancellationToken);
-                await ValidateFunctionalCurrencyAsync(entity, cancellationToken);
+                var postingConfiguration = await ResolvePostingConfigurationAsync(entity, cancellationToken);
 
                 var posting = await _financePosting.PostAsync(BuildPostingRequest(
                     entity,
                     payment,
                     method.DefaultGLAccountId.Value,
                     reconciliationReference,
+                    postingConfiguration.AccountingBookCode,
                     now), cancellationToken);
                 var receipt = await _documentNumbering.GenerateConfiguredAsync(
                     DocumentNumberingModules.Procurement,
@@ -1515,7 +1517,7 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 "The payment method requires an active direct-posting asset account.");
     }
 
-    private async Task ValidateFunctionalCurrencyAsync(
+    private async Task<SupplierOnboardingPostingConfiguration> ResolvePostingConfigurationAsync(
         ProcurementSupplierOnboardingToken token,
         CancellationToken cancellationToken)
     {
@@ -1526,13 +1528,28 @@ public sealed class ProcurementSupplierOnboardingTokenService :
         if (!string.Equals(functional, token.CurrencyCode, StringComparison.OrdinalIgnoreCase))
             throw Validation("SUPPLIER_ONBOARDING_FOREIGN_CURRENCY_NOT_SUPPORTED",
                 "Supplier-onboarding token payments currently require the tenant functional currency.");
+
+        string accountingBookCode;
+        try
+        {
+            accountingBookCode = FinanceAccountingBookCodeResolver.ResolveLegacySingleBook(
+                settings?.SubledgerPostingMode, settings is not null);
+        }
+        catch (ArgumentException exception)
+        {
+            throw Validation("SUPPLIER_ONBOARDING_ACCOUNTING_BOOK_REQUIRED",
+                exception.Message);
+        }
+
+        return new SupplierOnboardingPostingConfiguration(functional, accountingBookCode);
     }
 
-    private static FinancePostingRequestDto BuildPostingRequest(
+    private static FinancePostingRequestV2Dto BuildPostingRequest(
         ProcurementSupplierOnboardingToken token,
         ProcurementSupplierOnboardingPayment payment,
         Guid receiptAccountId,
         string trustedReference,
+        string accountingBookCode,
         DateTime verifiedAtUtc)
     {
         var lines = new List<FinancePostingLineDto>
@@ -1574,7 +1591,10 @@ public sealed class ProcurementSupplierOnboardingTokenService :
                 TransactionTag = "SupplierOnboardingTax"
             });
         }
-        return new FinancePostingRequestDto
+        // Procurement submits one already-governed concrete book to Finance's leaf executor.
+        // Finance owns future multi-book applicability and orchestration; this producer must not
+        // default, expand, or duplicate this economic event across books.
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "Procurement",
             OriginModuleCode = "PROC",
@@ -1587,11 +1607,16 @@ public sealed class ProcurementSupplierOnboardingTokenService :
             Description = $"Supplier onboarding token payment {token.TokenReference}",
             JournalType = "System Generated",
             FunctionalCurrencyCode = payment.CurrencyCode,
-            IdempotencyKey = $"PROCUREMENT|SUPPLIER-ONBOARDING|{payment.Id:N}|POST",
+            AccountingBookCode = accountingBookCode,
+            IdempotencyKey = $"PROCUREMENT|SUPPLIER-ONBOARDING|{payment.Id:N}|{accountingBookCode}|POST",
             ReturnExistingOnDuplicate = true,
             Lines = lines
         };
     }
+
+    private sealed record SupplierOnboardingPostingConfiguration(
+        string FunctionalCurrencyCode,
+        string AccountingBookCode);
 
     private async Task EnsureCapabilityAsync(
         string permission,

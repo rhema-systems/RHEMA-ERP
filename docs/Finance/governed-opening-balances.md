@@ -37,6 +37,8 @@ The residual debit is not entered or authorized from a demo amount. The server d
 
 The Opening Balances workspace is available under Finance > General Ledger. Its governed preflight presents AP, AR, fixed-asset, Finance-option and Inventory-option readiness without claiming that a browser is the accounting authority. Each source action remains subject to its server controls.
 
+Posted Finance opening batches expose a **Controlled correction** panel. The maker records the reversal date, reason, and impact assessment; a different authorized reviewer approves or rejects the immutable request; and only an approved request can post. The original batch and journal remain audit evidence, while the correction links the compensating journal and posting event and marks affected source read models as reversed or ready for corrected reposting.
+
 Opening-balance approval rows deep-link to `/finance/opening-balances?batchId=<id>`. Approval amounts use the batch line functional currency; period codes and book classifications must never be passed to a currency formatter. The frontend also normalizes unexpected Finance approval currency values as a defensive rendering boundary.
 
 Posting is available only for `Approved` and retryable `PostingFailed` batches. A workflow-start `Failed` batch is not postable.

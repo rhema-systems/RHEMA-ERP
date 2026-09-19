@@ -11,6 +11,47 @@ interface VendorPaymentReadinessControlProps {
     readiness: VendorPaymentInvoiceReadiness[];
 }
 
+const userFacingCheckCopy: Record<string, { label: string; passed: string; failed: string }> = {
+    'AP-PAYMENT-INVOICE-STATE': {
+        label: 'Invoice approval status',
+        passed: 'The invoice is approved and eligible for settlement.',
+        failed: 'Approve the invoice before including it in a payment.',
+    },
+    'AP-PAYMENT-BALANCE': {
+        label: 'Outstanding balance',
+        passed: 'The invoice has an amount available to pay.',
+        failed: 'The invoice has no payable balance remaining.',
+    },
+    'AP-PAYMENT-PERSISTED-MATCH': {
+        label: 'Current invoice matching',
+        passed: 'The payment uses the latest approved invoice-matching result.',
+        failed: 'Revalidate the invoice match before payment.',
+    },
+    'AP-PAYMENT-RECEIPT-INSPECTION': {
+        label: 'Receipt and inspection evidence',
+        passed: 'The required receipt and inspection evidence is approved.',
+        failed: 'Complete and approve the required receipt inspection before payment.',
+    },
+    'AP-PAYMENT-EXCEPTION': {
+        label: 'Matching exceptions',
+        passed: 'There is no unresolved matching exception.',
+        failed: 'Resolve or obtain approval for the matching exception before payment.',
+    },
+    'AP-PAYMENT-AUDIT': {
+        label: 'Audit trail',
+        passed: 'The readiness decision can be retained in the audit trail.',
+        failed: 'Payment is blocked because the audit trail is unavailable.',
+    },
+};
+
+function checkPresentation(check: VendorPaymentInvoiceReadiness['checks'][number]) {
+    const copy = userFacingCheckCopy[check.checkKey];
+    return {
+        label: copy?.label ?? check.label,
+        message: copy ? (check.passed ? copy.passed : copy.failed) : check.message,
+    };
+}
+
 export function VendorPaymentReadinessControl({ readiness }: VendorPaymentReadinessControlProps) {
     const ready = readiness.filter((item) => item.isPaymentReady);
     const blocked = readiness.filter((item) => !item.isPaymentReady);
@@ -30,8 +71,8 @@ export function VendorPaymentReadinessControl({ readiness }: VendorPaymentReadin
                             <ShieldCheck className="h-5 w-5" /> Controlled invoice payment readiness
                         </CardTitle>
                         <CardDescription>
-                            AP-003 revalidates invoice state, the current three-way match, approved GRN inspection,
-                            strict exception status, Finance authorization, and immutable audit before funds move.
+                            Finance revalidates invoice approval, matching, receipt evidence and unresolved exceptions
+                            before payment.
                         </CardDescription>
                     </div>
                     <div className="flex gap-2">
@@ -76,13 +117,55 @@ export function VendorPaymentReadinessControl({ readiness }: VendorPaymentReadin
                     </div>
                 )}
 
-                <p className="text-xs text-muted-foreground">
-                    TDC-0506 owns payment processor/approver identity separation. TDC-0507 owns exception request,
-                    approval, evidence, and reporting; this control only consumes a current approved result.
-                </p>
-                <div className="flex flex-wrap gap-1" aria-label="Payment decision register">
-                    {decisionKeys.map((key) => <Badge key={key} variant="outline" className="font-mono text-[10px]">{key}</Badge>)}
-                </div>
+                {readiness.map((item) => (
+                    <details key={item.vendorInvoiceId} className="rounded-md border bg-muted/20 p-3">
+                        <summary className="cursor-pointer font-medium">
+                            Why {item.invoiceNumber} is {item.isPaymentReady ? 'payment ready' : 'blocked'}
+                        </summary>
+                        <div className="mt-3 space-y-2" aria-label={`Readiness checks for ${item.invoiceNumber}`}>
+                            {item.checks.map((check) => {
+                                const presentation = checkPresentation(check);
+                                return (
+                                    <div key={check.checkKey} className="flex items-start gap-2 text-sm">
+                                        {check.passed
+                                            ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                                            : <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />}
+                                        <div>
+                                            <p className="font-medium">{presentation.label}</p>
+                                            <p className="text-muted-foreground">{presentation.message}</p>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                            <p className="text-xs text-muted-foreground">
+                                Processor and approver separation is enforced again during payment approval.
+                            </p>
+                        </div>
+                    </details>
+                ))}
+
+                <details className="text-xs text-muted-foreground">
+                    <summary className="cursor-pointer font-medium text-foreground">Audit details</summary>
+                    <div className="mt-2 space-y-2 rounded-md border bg-muted/20 p-3">
+                        <p>
+                            AP-003 records payment readiness. TDC-0506 governs processor/approver separation and
+                            TDC-0507 governs approved matching exceptions.
+                        </p>
+                        {readiness[0]?.configurationProfileCode && (
+                            <p>
+                                Configuration: {readiness[0].configurationProfileCode}
+                                {readiness[0].configurationProfileVersion
+                                    ? ` v${readiness[0].configurationProfileVersion}`
+                                    : ''}
+                            </p>
+                        )}
+                        <div className="flex flex-wrap gap-1" aria-label="Payment decision register">
+                            {decisionKeys.map((key) => (
+                                <Badge key={key} variant="outline" className="font-mono text-[10px]">{key}</Badge>
+                            ))}
+                        </div>
+                    </div>
+                </details>
             </CardContent>
         </Card>
     );

@@ -6,6 +6,7 @@ public interface IFixedAssetService
 {
     Task<FixedAssetDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<FixedAssetDto>> GetAllAsync();
+    Task<IReadOnlyList<FixedAssetLocationOptionDto>> GetLocationOptionsAsync(CancellationToken cancellationToken = default);
     Task<FixedAssetDto> CreateAsync(CreateFixedAssetDto dto);
     Task<FixedAssetDto> UpdateAsync(Guid id, UpdateFixedAssetDto dto);
     Task DeleteAsync(Guid id);
@@ -15,7 +16,7 @@ public interface IFixedAssetService
     Task<byte[]> GenerateImportTemplateAsync();
 
     // Lifecycle Management
-    Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, string? comments = null, CancellationToken cancellationToken = default);
+    Task<FixedAssetDto> SubmitCapitalizationForApprovalAsync(Guid id, SubmitFixedAssetCapitalizationDto dto, CancellationToken cancellationToken = default);
     Task<FixedAssetDto> CapitalizeAsync(Guid id, CapitalizeFixedAssetDto dto);
     Task<FixedAssetDto> CapitalizeFromProcurementAsync(
         Guid id,

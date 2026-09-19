@@ -132,6 +132,11 @@ public class FxRevaluationBatch : TenantEntity
 
     public Guid FiscalPeriodId { get; set; }
 
+    public Guid AccountingBookId { get; set; }
+
+    [Required, MaxLength(20)]
+    public string AccountingBookCode { get; set; } = string.Empty;
+
     [Required]
     [MaxLength(30)]
     public string Status { get; set; } = "Draft";
@@ -166,6 +171,9 @@ public class FxRevaluationBatch : TenantEntity
     [MaxLength(450)]
     public string IdempotencyKey { get; set; } = string.Empty;
 
+    [MaxLength(64)]
+    public string? PreviewFingerprint { get; set; }
+
     public DateTime? PostedAt { get; set; }
 
     public DateTime? ReversedAt { get; set; }
@@ -177,6 +185,9 @@ public class FxRevaluationBatch : TenantEntity
 
     [ForeignKey(nameof(FiscalPeriodId))]
     public virtual FiscalPeriod FiscalPeriod { get; set; } = null!;
+
+    [ForeignKey(nameof(AccountingBookId))]
+    public virtual AccountingBook AccountingBook { get; set; } = null!;
 
     [ForeignKey(nameof(JournalEntryId))]
     public virtual JournalEntry? JournalEntry { get; set; }
@@ -206,6 +217,33 @@ public class FxRevaluationLine : TenantEntity
 
     public Guid AccountId { get; set; }
 
+    public Guid AccountAccountingBookId { get; set; }
+    public Guid? AccountBookCurrencyPolicyId { get; set; }
+    public Guid AccountClassificationId { get; set; }
+
+    [Required, MaxLength(50)]
+    public string AccountClassificationCode { get; set; } = string.Empty;
+
+    [Required, MaxLength(200)]
+    public string AccountClassificationName { get; set; } = string.Empty;
+
+    [Required, MaxLength(20)]
+    public string CoreAccountType { get; set; } = string.Empty;
+
+    [Required, MaxLength(10)]
+    public string ClassificationDefault { get; set; } = string.Empty;
+
+    public bool? RevaluationOverride { get; set; }
+    public bool EffectiveRevaluationRequired { get; set; }
+
+    [Required, MaxLength(30)]
+    public string EffectivePolicySource { get; set; } = "Classification";
+
+    public bool HasGovernanceWarning { get; set; }
+
+    [MaxLength(500)]
+    public string? GovernanceWarning { get; set; }
+
     [Required]
     [MaxLength(3)]
     public string TransactionCurrency { get; set; } = string.Empty;
@@ -220,10 +258,21 @@ public class FxRevaluationLine : TenantEntity
     [Column(TypeName = "decimal(18,2)")]
     public decimal CarryingFunctionalAmount { get; set; }
 
+    [Column(TypeName = "decimal(18,2)")]
+    public decimal PriorUnreversedAdjustment { get; set; }
+
     public Guid ClosingExchangeRateId { get; set; }
 
     [Column(TypeName = "decimal(18,6)")]
     public decimal ClosingExchangeRate { get; set; }
+
+    public DateTime ClosingRateDate { get; set; }
+
+    [Required, MaxLength(20)]
+    public string ClosingRateType { get; set; } = string.Empty;
+
+    [Required, MaxLength(20)]
+    public string ClosingQuoteSide { get; set; } = string.Empty;
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal RevaluedFunctionalAmount { get; set; }
@@ -250,6 +299,15 @@ public class FxRevaluationLine : TenantEntity
     [ForeignKey(nameof(AccountId))]
     public virtual Account Account { get; set; } = null!;
 
+    [ForeignKey(nameof(AccountAccountingBookId))]
+    public virtual AccountAccountingBook AccountAccountingBook { get; set; } = null!;
+
+    [ForeignKey(nameof(AccountBookCurrencyPolicyId))]
+    public virtual AccountBookCurrencyPolicy? AccountBookCurrencyPolicy { get; set; }
+
+    [ForeignKey(nameof(AccountClassificationId))]
+    public virtual AccountClassification AccountClassification { get; set; } = null!;
+
     [ForeignKey(nameof(ClosingExchangeRateId))]
     public virtual ExchangeRate ClosingExchangeRateRecord { get; set; } = null!;
 
@@ -261,4 +319,26 @@ public class FxRevaluationLine : TenantEntity
 
     [ForeignKey(nameof(PostingEventId))]
     public virtual FinancePostingEvent? PostingEvent { get; set; }
+}
+
+/// <summary>
+/// Durable proof that a closing rate's usage statistics were applied for one committed
+/// revaluation posting. The unique batch/posting/rate identity makes recovery retry-safe.
+/// </summary>
+public sealed class FxRevaluationRateUsage : TenantEntity
+{
+    public Guid FxRevaluationBatchId { get; set; }
+    public Guid PostingEventId { get; set; }
+    public Guid ExchangeRateId { get; set; }
+    public int UsageCount { get; set; }
+    public DateTime RecordedAtUtc { get; set; }
+
+    [ForeignKey(nameof(FxRevaluationBatchId))]
+    public FxRevaluationBatch Batch { get; set; } = null!;
+
+    [ForeignKey(nameof(PostingEventId))]
+    public FinancePostingEvent PostingEvent { get; set; } = null!;
+
+    [ForeignKey(nameof(ExchangeRateId))]
+    public ExchangeRate ExchangeRate { get; set; } = null!;
 }

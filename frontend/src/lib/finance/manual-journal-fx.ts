@@ -15,6 +15,7 @@ export type ManualJournalFxStatus = 'idle' | 'loading' | 'ready' | 'error';
 
 export interface ManualJournalFxLineState {
   currencyCode: string;
+  exchangeRateId?: string;
   exchangeRate: number | '';
   debit?: number;
   credit?: number;
@@ -159,7 +160,7 @@ export function applyCanonicalJournalRate<T extends ManualJournalFxLineState>(
   line: T,
   snapshot: Pick<
     ExchangeRate,
-    'rate' | 'currentExchangeRate' | 'rateSource' | 'effectiveDate'
+    'id' | 'rate' | 'currentExchangeRate' | 'rateSource' | 'effectiveDate'
   >
 ): T {
   const exchangeRate = Number(snapshot.rate ?? snapshot.currentExchangeRate);
@@ -169,6 +170,7 @@ export function applyCanonicalJournalRate<T extends ManualJournalFxLineState>(
 
   return recalculateJournalFunctionalAmounts({
     ...line,
+    exchangeRateId: snapshot.id,
     exchangeRate,
     rateStatus: 'ready',
     rateError: undefined,
@@ -207,6 +209,7 @@ export function getManualJournalFxBlocker(
     );
   if (
     line.rateStatus !== 'ready' ||
+    !line.exchangeRateId ||
     typeof line.exchangeRate !== 'number' ||
     line.exchangeRate <= 0
   ) {

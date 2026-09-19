@@ -111,6 +111,10 @@ public sealed class FinanceSourceDimensionAssignmentDto
     public string ContractVersion { get; set; } = string.Empty;
     public Guid SourceDocumentId { get; set; }
     public Guid? SourceLineId { get; set; }
+    public Guid? ResolvedAccountId { get; set; }
+    public DateTime? SourceDocumentDate { get; set; }
+    public int? ExpectedSourceLineCount { get; set; }
+    public string? SourceLineManifestHash { get; set; }
     public Guid? FinanceDimensionSetId { get; set; }
     public Guid? FinanceDimensionSnapshotId { get; set; }
     public DateTime? EvidenceFrozenAt { get; set; }

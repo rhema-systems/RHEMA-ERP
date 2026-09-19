@@ -90,14 +90,17 @@ namespace ErpSystem.Api.Controllers.Finance
         /// **Authorization:** Requires authenticated user
         /// </remarks>
         /// <param name="applicability">Optional filter by tax applicability. Valid values: Sales (1), Purchases (2), Both (3). When omitted, all active taxes are returned.</param>
+        /// <param name="category">Optional tax-category filter for transaction selectors.</param>
         /// <returns>List of active taxes matching the filter criteria.</returns>
         /// <response code="200">Returns the list of active taxes.</response>
         /// <response code="401">Unauthorized - user is not authenticated.</response>
         /// <response code="500">Internal server error.</response>
         [HttpGet("taxes/active")]
-        public async Task<ActionResult<IReadOnlyList<TaxDto>>> GetActiveTaxes([FromQuery] TaxApplicability? applicability = null)
+        public async Task<ActionResult<IReadOnlyList<TaxDto>>> GetActiveTaxes(
+            [FromQuery] TaxApplicability? applicability = null,
+            [FromQuery] TaxCategory? category = null)
         {
-            var taxes = await _taxConfigService.GetActiveTaxesAsync(applicability);
+            var taxes = await _taxConfigService.GetActiveTaxesAsync(applicability, category);
             return Ok(taxes);
         }
 

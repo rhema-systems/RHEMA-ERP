@@ -39,6 +39,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useDebounce } from '@/hooks/use-debounce';
 import { format } from 'date-fns';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useAuth } from '@/hooks/use-auth';
 import { workflowApiService } from '@/services/workflow-api.service';
 import type { WorkflowEntitySummaryDto } from '@/types/workflow';
@@ -110,11 +111,29 @@ export default function VendorInvoicesPage() {
         mutationFn: (id: string) => accountsPayableService.submitInvoiceForApproval(id),
         onSuccess: (savedInvoice) => {
             queryClient.invalidateQueries({ queryKey: ['vendor-invoices'] });
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoice', savedInvoice.id] });
+            queryClient.invalidateQueries({ queryKey: ['vendor-invoice-workflow-summary', savedInvoice.id] });
             toast({ title: 'Success', description: savedInvoice.approvalRequired === false
                 ? 'Invoice completed. Approval is not required.' : 'Invoice submitted for approval.' });
         },
-        onError: (error: any) => {
-            toast({ title: 'Error', description: error.message || 'Failed to submit invoice', variant: 'destructive' });
+        onError: (error: any, invoiceId) => {
+            const message = error.message || 'Failed to submit invoice';
+            const budgetCellRequired = message.includes('requires an adopted Finance budget cell');
+            toast({
+                title: budgetCellRequired ? 'Budget cell required' : 'Error',
+                description: budgetCellRequired
+                    ? 'Edit the invoice and select an adopted Finance budget cell for the affected expense line.'
+                    : message,
+                variant: 'destructive',
+                action: budgetCellRequired ? (
+                    <ToastAction
+                        altText="Edit invoice to select a budget cell"
+                        onClick={() => router.push(`/finance/ap/invoices/${invoiceId}/edit`)}
+                    >
+                        Edit Invoice
+                    </ToastAction>
+                ) : undefined,
+            });
         },
     });
 
@@ -276,7 +295,7 @@ export default function VendorInvoicesPage() {
                                                             <MoreHorizontal className="h-4 w-4" />
                                                         </Button>
                                                     </DropdownMenuTrigger>
-                                                    <DropdownMenuContent align="end">
+                                                    <DropdownMenuContent align="end" onClick={(event) => event.stopPropagation()}>
                                                         <DropdownMenuLabel>Actions</DropdownMenuLabel>
                                                         <DropdownMenuItem onClick={() => router.push(`/finance/ap/invoices/${invoice.id}`)}>
                                                             <FileText className="mr-2 h-4 w-4" /> View Details

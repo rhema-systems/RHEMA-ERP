@@ -239,7 +239,7 @@ public sealed class ProcurementReviewRegressionTests
     public void Commitment_lifecycle_migration_hard_stops_invalid_issuance_and_early_release()
     {
         var source = ReadRepositoryFile(
-            "src", "ErpSystem.Data", "Migrations",
+            "src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260812100000_HardenProcurementCommitmentLifecycle.cs");
 
         source.Should().Contain("TR_PurchaseOrders_GovernedCommitment");

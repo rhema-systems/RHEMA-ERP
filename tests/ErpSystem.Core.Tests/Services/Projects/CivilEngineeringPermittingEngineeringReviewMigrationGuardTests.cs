@@ -9,7 +9,7 @@ public sealed class CivilEngineeringPermittingEngineeringReviewMigrationGuardTes
     public void Migration_enforces_tenant_handoff_sce_policy_dms_and_append_only_review_controls()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821143000_AddCivilEngineeringPermittingEngineeringReviews.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821143000_AddCivilEngineeringPermittingEngineeringReviews.cs"));
 
         sql.Should().Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lineage")
             .And.Contain("TR_ProjectCivilDevelopmentApprovalEngineeringReviews_Lifecycle")

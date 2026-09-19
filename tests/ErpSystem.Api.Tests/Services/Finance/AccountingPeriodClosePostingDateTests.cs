@@ -611,6 +611,50 @@ public sealed class AccountingPeriodClosePostingDateTests
         workspace.MandatoryBlockerCount.Should().Be(1);
     }
 
+    [Theory]
+    [InlineData(true, FinanceCloseCheckStatuses.Failed, 1)]
+    [InlineData(false, FinanceCloseCheckStatuses.Passed, 0)]
+    [Trait("Batch", "FinanceGoLive-PeriodClose")]
+    [Trait("Category", "FiscalPeriod")]
+    public async Task EvaluateCloseWorkspace_ShouldBlockOnlyAutomaticReversalsDueByPeriodEnd(
+        bool dueInClosingPeriod, string expectedStatus, int expectedExceptions)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
+        var template = new RecurringJournalTemplate
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TemplateNumber = "RJ-REV-001",
+            Name = "Authorised accrual reversal", Status = RecurringJournalStatus.Cancelled,
+            EffectiveFrom = new DateOnly(2026, 1, 1), Frequency = RecurrenceFrequency.Monthly,
+            RecurrenceRuleJson = "{}"
+        };
+        db.RecurringJournalTemplates.Add(template);
+        db.RecurringJournalOccurrences.Add(new RecurringJournalOccurrence
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, TemplateId = template.Id, TemplateVersion = 1,
+            SequenceNumber = 7, ScheduledDate = new DateOnly(2026, 7, 31),
+            EffectiveDate = new DateOnly(2026, 7, 31), Status = RecurringJournalOccurrenceStatus.Posted,
+            JournalEntryId = Guid.NewGuid(), ReversalDueDate = dueInClosingPeriod
+                ? new DateOnly(2026, 7, 31)
+                : new DateOnly(2026, 8, 1),
+            ReversalStatus = RecurringJournalReversalStatus.Failed,
+            ReversalAuthorizedAt = new DateTime(2026, 7, 20),
+            ReversalAuthorizedByUserId = Guid.NewGuid(), ReversalError = "Posting period is locked.",
+            TemplateSnapshotJson = "{}"
+        });
+        await db.SaveChangesAsync();
+
+        var workspace = await CreateService(db, tenantId).EvaluatePeriodCloseWorkspaceAsync(period.Id);
+
+        var recurringCheck = workspace.Checks.Single(check =>
+            check.CheckCode == "RECURRING_JOURNAL_EXCEPTIONS");
+        recurringCheck.Status.Should().Be(expectedStatus);
+        recurringCheck.ExceptionCount.Should().Be(expectedExceptions);
+        workspace.MandatoryBlockerCount.Should().Be(expectedExceptions);
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-PeriodClose")]
     [Trait("Category", "FiscalPeriod")]

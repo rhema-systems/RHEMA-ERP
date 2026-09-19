@@ -28,6 +28,7 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 
 export default function CashTransactionDetailsPage() {
     const router = useRouter();
@@ -158,6 +159,10 @@ export default function CashTransactionDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <div className="no-print">
+                <SourceDocumentDimensionEvidence evidence={transaction.financeDimensions} />
+            </div>
 
             {transaction.journalEntryId && (
                 <Card className="no-print">

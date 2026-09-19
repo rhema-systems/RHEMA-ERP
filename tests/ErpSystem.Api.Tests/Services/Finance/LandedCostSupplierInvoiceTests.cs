@@ -87,9 +87,27 @@ public class LandedCostSupplierInvoiceTests
         user.SetupGet(u => u.UserId).Returns(Guid.NewGuid().ToString()); user.SetupGet(u => u.UserName).Returns("AP officer");
         var numbering = new Mock<IDocumentNumberingService>(); var number = 0;
         numbering.Setup(n => n.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<Guid?>(), It.IsAny<DateTime?>(), It.IsAny<string?>(), It.IsAny<Guid?>(), It.IsAny<CancellationToken>())).ReturnsAsync(() => $"INV-{++number}");
+        var supplierIdentity = new Mock<IApSupplierIdentityService>();
+        supplierIdentity.Setup(service => service.ResolveAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .Returns((Guid partnerId, CancellationToken _) =>
+            {
+                var partner = _partners.Single(item => item.Id == partnerId);
+                var supplier = _suppliers.Single(item =>
+                    string.Equals(item.SupplierCode, partner.PartnerCode, StringComparison.OrdinalIgnoreCase));
+                return Task.FromResult(new ApSupplierIdentityDto
+                {
+                    BusinessPartnerId = partner.Id,
+                    SupplierId = supplier.Id,
+                    PartnerCode = partner.PartnerCode,
+                    SupplierCode = supplier.SupplierCode,
+                    DisplayName = supplier.Name,
+                    IsVerified = true
+                });
+            });
         _service = new VendorInvoiceService(_unit.Object, user.Object, Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<VendorInvoiceService>>(), numbering.Object, Mock.Of<IWorkflowService>(), financePostingEngine: _finance.Object,
-            sourceDimensions: Mock.Of<IFinanceSourceDimensionService>(), landedCosts: _landed.Object, workflowIntegration: _approval.Object);
+            sourceDimensions: Mock.Of<IFinanceSourceDimensionService>(), landedCosts: _landed.Object,
+            workflowIntegration: _approval.Object, apSupplierIdentityService: supplierIdentity.Object);
         _landed.Setup(s => s.PostToInventoryAsync(_cost.Id, It.IsAny<Guid>())).ReturnsAsync(() => { _cost.Status = "Posted"; return true; });
     }
 
@@ -128,7 +146,8 @@ public class LandedCostSupplierInvoiceTests
         Assert.Equal(VendorInvoiceStatus.Draft, Assert.Single(_invoices).Status);
         Assert.Null(distribution.JournalEntryId);
         _unit.Verify(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
-        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(),
+            It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -144,7 +163,8 @@ public class LandedCostSupplierInvoiceTests
         var distribution = await _service.GetDistributionAsync(created.Id);
         Assert.Equal(360m, distribution.TotalDebit);
         Assert.Equal(360m, distribution.TotalCredit);
-        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(),
+            It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -182,7 +202,8 @@ public class LandedCostSupplierInvoiceTests
         Assert.NotEmpty(saveBoundaries);
         Assert.All(saveBoundaries, active => Assert.True(active));
         _unit.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Exactly(2));
-        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        _finance.Verify(value => value.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(),
+            It.IsAny<FinancePostingProducerContext>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -321,8 +342,8 @@ public class LandedCostSupplierInvoiceTests
         Assert.Null(line!.LandedCostItemId);
     }
 
-    private Task<FinancePostingRequestDto> BuildPosting(VendorInvoice invoice) =>
-        (Task<FinancePostingRequestDto>)typeof(VendorInvoiceService).GetMethod("BuildApInvoicePostingRequestAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
+    private Task<FinancePostingRequestV2Dto> BuildPosting(VendorInvoice invoice) =>
+        (Task<FinancePostingRequestV2Dto>)typeof(VendorInvoiceService).GetMethod("BuildApInvoicePostingRequestAsync", BindingFlags.NonPublic | BindingFlags.Instance)!
             .Invoke(_service, new object?[] { invoice, Array.Empty<Guid>(), null, CancellationToken.None })!;
 
     private PostLandedCostDto PostRequest() => new()
@@ -418,10 +439,10 @@ public class LandedCostSupplierInvoiceTests
         await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer);
         var invoice = Assert.Single(_invoices);
         SetSubmission(invoice.Id, required: false);
-        FinancePostingRequestDto? postedRequest = null;
+        FinancePostingRequestV2Dto? postedRequest = null;
         var journalId = Guid.NewGuid();
-        _finance.Setup(f => f.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((request, _) =>
+        _finance.Setup(f => f.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, CancellationToken>((request, _) =>
             {
                 Assert.True(_transaction);
                 postedRequest = request;
@@ -460,7 +481,7 @@ public class LandedCostSupplierInvoiceTests
         Assert.Null(invoice.ApprovedById);
         Assert.Null(invoice.JournalEntryId);
         await Assert.ThrowsAsync<InvalidOperationException>(() => _service.PostAsync(invoice.Id));
-        _finance.Verify(f => f.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        _finance.Verify(f => f.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Theory]
@@ -484,7 +505,7 @@ public class LandedCostSupplierInvoiceTests
         Assert.True(invoice.ApprovalRequired);
         Assert.Equal(human, invoice.ApprovedById);
         Assert.Null(invoice.JournalEntryId);
-        _finance.Verify(f => f.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        _finance.Verify(f => f.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
         _unit.Verify(u => u.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
@@ -500,7 +521,7 @@ public class LandedCostSupplierInvoiceTests
         Assert.Contains("Complete the tax treatment", error.Message);
         Assert.Equal(VendorInvoiceStatus.Draft, invoice.Status);
         _approval.Verify(w => w.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
-        _finance.Verify(f => f.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()), Times.Never);
+        _finance.Verify(f => f.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
     }
 
     [Fact]
@@ -509,7 +530,7 @@ public class LandedCostSupplierInvoiceTests
         await _service.CreateFromLandedCostAsync(_cost.Id, Request(), _producer);
         var invoice = Assert.Single(_invoices);
         SetSubmission(invoice.Id, required: false);
-        _finance.Setup(f => f.PostAsync(It.IsAny<FinancePostingRequestDto>(), It.IsAny<CancellationToken>()))
+        _finance.Setup(f => f.PostAsync(It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("The fiscal period is closed."));
 
         var error = await Assert.ThrowsAsync<InvalidOperationException>(() => _service.SubmitForApprovalAsync(invoice.Id));

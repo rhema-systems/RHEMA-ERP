@@ -77,12 +77,12 @@ public sealed class QuantitySurveyPriceIndexImportGuardTests
     }
 
     [Fact]
-    public void Migration_is_QS_only_discoverable_and_contains_database_hard_stops()
+    public void Archived_migration_is_QS_only_and_contains_database_hard_stops()
     {
         var root = FindRepositoryRoot();
         var migrationId = "20260809165157_AddQuantitySurveyPriceIndexImportWorkflow";
         var source = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", migrationId + ".cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", migrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(
             root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 

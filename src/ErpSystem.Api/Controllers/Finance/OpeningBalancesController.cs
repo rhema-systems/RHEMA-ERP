@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -111,6 +112,30 @@ public sealed class OpeningBalancesController : ControllerBase
         [FromBody] PostOpeningBalanceBatchDto? dto,
         CancellationToken cancellationToken)
         => Ok(await _openingBalanceService.PostAsync(batchId, dto?.Comment, cancellationToken));
+
+    [HttpGet("{batchId:guid}/reversals")]
+    public async Task<ActionResult<IReadOnlyList<OpeningBalanceBatchReversalDto>>> GetReversals(Guid batchId, CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.GetReversalsAsync(batchId, cancellationToken));
+
+    [HttpPost("{batchId:guid}/reversals")]
+    public async Task<ActionResult<OpeningBalanceBatchReversalDto>> RequestReversal(
+        Guid batchId,
+        [FromBody] RequestOpeningBalanceBatchReversalDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.RequestReversalAsync(batchId, dto, cancellationToken));
+
+    [HttpPost("{batchId:guid}/reversals/{requestId:guid}/review")]
+    [Authorize(Policy = FinancePermissions.ApproveOpeningBalanceReversal)]
+    public async Task<ActionResult<OpeningBalanceBatchReversalDto>> ReviewReversal(
+        Guid batchId,
+        Guid requestId,
+        [FromBody] ReviewOpeningBalanceBatchReversalDto dto,
+        CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.ReviewReversalAsync(batchId, requestId, dto, cancellationToken));
+
+    [HttpPost("{batchId:guid}/reversals/{requestId:guid}/post")]
+    public async Task<ActionResult<OpeningBalanceBatchReversalDto>> PostReversal(Guid batchId, Guid requestId, CancellationToken cancellationToken)
+        => Ok(await _openingBalanceService.PostReversalAsync(batchId, requestId, cancellationToken));
 
     [HttpGet("diagnostics")]
     public async Task<ActionResult<IReadOnlyList<OpeningBalanceDiagnosticDto>>> Diagnostics(CancellationToken cancellationToken)

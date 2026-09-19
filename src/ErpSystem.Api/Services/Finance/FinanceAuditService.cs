@@ -53,6 +53,30 @@ public sealed class FinanceAuditService : IFinanceAuditService
             throw new InvalidOperationException("Finance audit user context is required.");
         }
 
+        var idempotencyKey = string.IsNullOrWhiteSpace(auditEvent.IdempotencyKey)
+            ? null
+            : auditEvent.IdempotencyKey.Trim();
+        if (idempotencyKey?.Length > 450)
+        {
+            throw new InvalidOperationException("Finance audit idempotency key cannot exceed 450 characters.");
+        }
+
+        if (idempotencyKey != null)
+        {
+            var existing = await _context.AuditLogs
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                    item.TenantId == auditEvent.TenantId
+                    && item.IdempotencyKey == idempotencyKey
+                    && !item.IsDeleted,
+                    cancellationToken);
+            if (existing != null)
+            {
+                EnsureIdempotentAuditIdentity(existing, auditEvent);
+                return existing;
+            }
+        }
+
         var now = DateTime.UtcNow;
         var auditLog = new AuditLog
         {
@@ -65,6 +89,7 @@ public sealed class FinanceAuditService : IFinanceAuditService
             Action = auditEvent.EventType.Trim(),
             Resource = ResolveResource(auditEvent),
             ResourceId = ResolveResourceId(auditEvent),
+            IdempotencyKey = idempotencyKey,
             OldValues = auditEvent.BeforeValues == null
                 ? null
                 : JsonSerializer.Serialize(auditEvent.BeforeValues, JsonOptions),
@@ -80,8 +105,32 @@ public sealed class FinanceAuditService : IFinanceAuditService
         };
 
         _context.AuditLogs.Add(auditLog);
-        await _context.SaveChangesAsync(cancellationToken);
-        return auditLog;
+        try
+        {
+            await _context.SaveChangesAsync(cancellationToken);
+            return auditLog;
+        }
+        catch (DbUpdateException) when (idempotencyKey != null)
+        {
+            // A concurrent retry may win the tenant/key unique constraint. Detach this
+            // losing insert and return the durable winner; unrelated database failures
+            // still propagate because no matching row will exist.
+            _context.Entry(auditLog).State = EntityState.Detached;
+            var existing = await _context.AuditLogs
+                .AsNoTracking()
+                .SingleOrDefaultAsync(item =>
+                    item.TenantId == auditEvent.TenantId
+                    && item.IdempotencyKey == idempotencyKey
+                    && !item.IsDeleted,
+                    cancellationToken);
+            if (existing != null)
+            {
+                EnsureIdempotentAuditIdentity(existing, auditEvent);
+                return existing;
+            }
+
+            throw;
+        }
     }
 
     public async Task<IReadOnlyList<AuditLog>> GetAuditTrailAsync(
@@ -136,6 +185,7 @@ public sealed class FinanceAuditService : IFinanceAuditService
                 auditEvent.WorkflowApprovalId,
                 auditEvent.Reason,
                 auditEvent.Comment,
+                auditEvent.IdempotencyKey,
                 correlationId = ResolveCorrelationId(auditEvent),
                 recordedAt
             },
@@ -184,5 +234,16 @@ public sealed class FinanceAuditService : IFinanceAuditService
         return auditEvent.JournalEntryId?.ToString()
             ?? auditEvent.PostingEventId?.ToString()
             ?? auditEvent.SourceDocumentId?.ToString();
+    }
+
+    private static void EnsureIdempotentAuditIdentity(AuditLog existing, FinanceAuditEventDto requested)
+    {
+        if (!string.Equals(existing.Action, requested.EventType.Trim(), StringComparison.Ordinal)
+            || !string.Equals(existing.Resource, ResolveResource(requested), StringComparison.Ordinal)
+            || !string.Equals(existing.ResourceId, ResolveResourceId(requested), StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                "Finance audit idempotency key is already bound to different audit evidence.");
+        }
     }
 }

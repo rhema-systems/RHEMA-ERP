@@ -93,6 +93,15 @@ public class CreditNoteSummaryDto
 
 public class CreditNoteDetailDto : CreditNoteSummaryDto
 {
+    // Book-blind C7/C11 handoff evidence for the Finance checker and trusted worker.
+    public Guid? AccountingEventId { get; set; }
+    public string? AccountingEventRequestFingerprint { get; set; }
+    public string? AccountingEventStatus { get; set; }
+    public string? AccountingEventDecisionStatus { get; set; }
+    public Guid? ReversalAccountingEventId { get; set; }
+    public string? ReversalAccountingEventRequestFingerprint { get; set; }
+    public string? ReversalAccountingEventStatus { get; set; }
+    public string? ReversalAccountingEventDecisionStatus { get; set; }
     public Guid BusinessPartnerId { get; set; }
     public Guid? ReturnOrderId { get; set; }
     public string? ReturnOrderNumber { get; set; }

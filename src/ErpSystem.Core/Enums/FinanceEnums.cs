@@ -70,6 +70,52 @@ public enum AccountStatus
     PendingApproval = 4
 }
 
+public enum AccountClassificationStatus
+{
+    Draft = 1,
+    Active = 2,
+    Retired = 3
+}
+
+/// <summary>
+/// Governance state for the tenant's GL account-number identity structure.
+/// Active and Frozen definitions participate in every new account identity;
+/// Frozen definitions cannot be structurally reinterpreted.
+/// </summary>
+public enum AccountSegmentLifecycleStatus
+{
+    Draft = 1,
+    Active = 2,
+    Frozen = 3,
+    Retired = 4
+}
+
+public enum RevaluationTreatment
+{
+    Exclude = 1,
+    Include = 2
+}
+
+/// <summary>
+/// Stable behavioural families used by Finance controls. Presentation headings belong to
+/// configurable classifications and report layouts, not this vocabulary.
+/// </summary>
+public enum AccountClassificationSystemRole
+{
+    Cash = 1,
+    Bank = 2,
+    ReceivableControl = 3,
+    PayableControl = 4,
+    InventoryControl = 5,
+    FixedAssetCost = 6,
+    AccumulatedDepreciation = 7,
+    AssetUnderConstruction = 8,
+    InputTax = 9,
+    OutputTax = 10,
+    WhtReceivable = 11,
+    WhtPayable = 12
+}
+
 /// <summary>
 /// Period type enumeration for fiscal period generation.
 /// Determines how many periods are created per fiscal year.

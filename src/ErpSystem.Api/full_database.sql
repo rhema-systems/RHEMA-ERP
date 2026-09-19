@@ -3463,7 +3463,6 @@ CREATE TABLE [Accounts] (
     [RequireProjectCode] bit NOT NULL,
     [BudgetTrackingEnabled] bit NOT NULL,
     [Status] int NOT NULL,
-    [Balance] decimal(18,4) NOT NULL,
     [DebitBalance] decimal(18,4) NOT NULL,
     [CreditBalance] decimal(18,4) NOT NULL,
     [OpeningBalance] decimal(18,4) NOT NULL,

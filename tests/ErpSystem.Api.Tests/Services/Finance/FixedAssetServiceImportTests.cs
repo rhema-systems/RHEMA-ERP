@@ -39,6 +39,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     public async Task ImportAssetsFromExcelAsync_DryRun_ValidatesLocationWithoutSavingAsset()
     {
         SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
         await using var stream = CreateWorkbook(
             ("FA-TEST-001", "Dell Laptop", "Head Office - IT Room", "COMP-HW"));
 
@@ -55,6 +56,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     public async Task ImportAssetsFromExcelAsync_ValidFile_SavesLocationOnFinanceAsset()
     {
         SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
         await using var stream = CreateWorkbook(
             ("FA-TEST-001", "Dell Laptop", "Head Office - IT Room", "COMP-HW"));
 
@@ -68,7 +70,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
         var asset = await _dbContext.FixedAssets.SingleAsync();
         asset.AssetCode.Should().Be("FA-TEST-001");
         asset.Location.Should().Be("Head Office - IT Room");
-        asset.Status.Should().Be(FixedAssetStatus.Active);
+        asset.Status.Should().Be(FixedAssetStatus.Draft);
         asset.AcquisitionCost.Should().Be(1745m);
         asset.NetBookValue.Should().Be(1745m);
     }
@@ -77,6 +79,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
     public async Task ImportAssetsFromExcelAsync_WithDuplicateCode_DoesNotPartiallyImportValidRows()
     {
         var category = SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
         _dbContext.FixedAssets.Add(new FixedAsset
         {
             TenantId = _tenantId,
@@ -104,6 +107,30 @@ public sealed class FixedAssetServiceImportTests : IDisposable
         result.Errors.Should().Contain(e => e.Field == "Asset Code" && e.Error == "Duplicate asset code");
         (await _dbContext.FixedAssets.CountAsync()).Should().Be(1);
         (await _dbContext.FixedAssets.AnyAsync(a => a.AssetCode == "FA-NEW-001")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ImportAssetsFromExcelAsync_WithNonDraftStatus_RejectsLifecycleBypass()
+    {
+        SeedCategory("COMP-HW");
+        SeedBook("IFRS", isDefault: true, sortOrder: 10);
+        await using var stream = CreateOpeningWorkbook(new OpeningAssetRow
+        {
+            AssetCode = "FA-ACTIVE-001",
+            Name = "Lifecycle Bypass",
+            Location = "Head Office",
+            CategoryCode = "COMP-HW",
+            PurchasePrice = 1500m,
+            Status = "Active"
+        });
+
+        var result = await _sut.ImportAssetsFromExcelAsync(stream, "assets.xlsx");
+
+        result.SuccessCount.Should().Be(0);
+        result.Errors.Should().ContainSingle(error =>
+            error.Field == "Status"
+            && error.Error.Contains("controlled Draft records"));
+        (await _dbContext.FixedAssets.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -263,6 +290,9 @@ public sealed class FixedAssetServiceImportTests : IDisposable
             Code = code,
             Name = code,
             Purpose = isDefault ? "Primary" : "Reporting",
+            BookType = isDefault ? AccountingBookType.PrimaryFull : AccountingBookType.ParallelFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
             IsActive = true,
             IsDefault = isDefault,
             AllowsPosting = true,
@@ -311,7 +341,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
                 worksheet.Cell(rowNumber, 9).Value = 36;
                 worksheet.Cell(rowNumber, 10).Value = 100m;
                 worksheet.Cell(rowNumber, 11).Value = $"SN-{row.AssetCode}";
-                worksheet.Cell(rowNumber, 12).Value = "Active";
+                worksheet.Cell(rowNumber, 12).Value = "Draft";
             }
 
             package.SaveAs(stream);
@@ -418,7 +448,7 @@ public sealed class FixedAssetServiceImportTests : IDisposable
         public int UsefulLifeMonths { get; init; } = 36;
         public decimal ResidualValue { get; init; }
         public string? SerialNumber { get; init; }
-        public string Status { get; init; } = "Active";
+        public string Status { get; init; } = "Draft";
     }
 
     public void Dispose()

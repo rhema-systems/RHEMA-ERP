@@ -12,7 +12,11 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { expectedChequeClearingDate } from '@/lib/finance/banking-policy';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
+import { financeDataService } from '@/services/finance/finance-data.service';
 import type {
     BankAccount,
     BankingSetupStatus,
@@ -26,6 +30,7 @@ export default function NewBankDepositPage() {
     const [entries, setEntries] = useState<LiquidityAccountEntry[]>([]);
     const [paymentCandidates, setPaymentCandidates] = useState<PostedLiquidityPaymentCandidate[]>([]);
     const [setup, setSetup] = useState<BankingSetupStatus | null>(null);
+    const [chequeClearingPeriodDays, setChequeClearingPeriodDays] = useState(3);
     const [selected, setSelected] = useState<Record<string, number>>({});
     const [search, setSearch] = useState('');
     const [saving, setSaving] = useState(false);
@@ -34,6 +39,9 @@ export default function NewBankDepositPage() {
     const [paymentEntryType, setPaymentEntryType] = useState<
         'CashExpense' | 'PettyCashReplenishment' | 'CustomerRefund' | 'OtherPayment'
     >('CashExpense');
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
     const [form, setForm] = useState({
         bankAccountId: '',
         depositDate: new Date().toISOString().slice(0, 10),
@@ -47,11 +55,13 @@ export default function NewBankDepositPage() {
             cashManagementDataService.getEligibleLiquidityEntries(),
             cashManagementDataService.getBankingSetup(),
             cashManagementDataService.getPostedPaymentCandidates(),
-        ]).then(([bankAccounts, openEntries, bankingSetup, postedPayments]) => {
+            financeDataService.getFinanceSettings(),
+        ]).then(([bankAccounts, openEntries, bankingSetup, postedPayments, financeSettings]) => {
             setBanks(bankAccounts);
             setEntries(openEntries);
             setSetup(bankingSetup);
             setPaymentCandidates(postedPayments);
+            setChequeClearingPeriodDays(financeSettings.chequeClearingPeriodDays ?? 3);
         }).catch(error => toast.error(error instanceof Error ? error.message : 'Could not load banking queue.'));
     }, []);
 
@@ -75,6 +85,40 @@ export default function NewBankDepositPage() {
         });
         return { receipts, deductions, net: receipts - deductions };
     }, [entries, selected]);
+
+    const dimensionLines = useMemo(() => {
+        const bank = banks.find(item => item.id === form.bankAccountId);
+        const selectedEntries = entries.filter(entry => selected[entry.id] !== undefined);
+        return [
+            ...(bank?.glAccountId ? [{
+                id: bank.id,
+                accountId: bank.glAccountId,
+                accountLabel: `Bank · ${bank.accountName}`,
+            }] : []),
+            ...selectedEntries.flatMap(entry => {
+                const account = setup?.accounts.find(item => item.id === entry.liquidityAccountId);
+                return account?.glAccountId ? [{
+                    id: entry.id,
+                    accountId: account.glAccountId,
+                    accountLabel: `${entry.entryNumber} · ${entry.liquidityAccountName}`,
+                }] : [];
+            }),
+        ];
+    }, [banks, entries, form.bankAccountId, selected, setup?.accounts]);
+
+    const chequeHoldingAccountIds = useMemo(
+        () => new Set(setup?.accounts
+            .filter(account => account.accountType === 'ChequesAwaitingDeposit')
+            .map(account => account.id) ?? []),
+        [setup?.accounts],
+    );
+    const includesChequeReceipt = entries.some(entry =>
+        selected[entry.id] !== undefined
+        && entry.entryType === 'CustomerReceipt'
+        && chequeHoldingAccountIds.has(entry.liquidityAccountId));
+    const expectedClearingDate = form.depositDate
+        ? expectedChequeClearingDate(form.depositDate, chequeClearingPeriodDays)
+        : null;
 
     const toggle = (entry: LiquidityAccountEntry, checked: boolean) => {
         setSelected(current => {
@@ -120,6 +164,15 @@ export default function NewBankDepositPage() {
                     allocationType: entry.direction === 'Increase' ? 'Receipt' : 'Deduction',
                     amount: selected[entry.id],
                 })),
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: dimensionLines.map(line => ({
+                        sourceLineId: line.id,
+                        accountId: line.accountId,
+                        dimensions: toFinancePostingDimensionValues(lineDimensionValues[line.id] || {}),
+                    })),
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             });
             toast.success('Draft deposit created. Attach the deposit slip before submission.');
             router.push(`/finance/cash/deposits/${deposit.id}`);
@@ -148,7 +201,7 @@ export default function NewBankDepositPage() {
                 <CardHeader><CardTitle>Deposit header</CardTitle><CardDescription>One deposit represents one expected bank-statement line.</CardDescription></CardHeader>
                 <CardContent className="grid gap-4 md:grid-cols-2">
                     <div className="space-y-2"><Label>Destination bank</Label><Select required value={form.bankAccountId} onValueChange={bankAccountId => setForm({ ...form, bankAccountId })}><SelectTrigger><SelectValue placeholder="Select bank account" /></SelectTrigger><SelectContent>{banks.map(bank => <SelectItem key={bank.id} value={bank.id}>{bank.bankName} — {bank.accountName} ({bank.currency})</SelectItem>)}</SelectContent></Select></div>
-                    <div className="space-y-2"><Label>Deposit date</Label><Input required type="date" value={form.depositDate} onChange={event => setForm({ ...form, depositDate: event.target.value })} /></div>
+                    <div className="space-y-2"><Label>Deposit date</Label><Input required type="date" value={form.depositDate} onChange={event => setForm({ ...form, depositDate: event.target.value })} />{includesChequeReceipt && expectedClearingDate && <p className="text-xs text-muted-foreground">Expected cheque clearing: {expectedClearingDate.toLocaleDateString()} ({chequeClearingPeriodDays} calendar day(s), advisory only).</p>}</div>
                     <div className="space-y-2"><Label>Deposit slip / bank reference</Label><Input required maxLength={100} value={form.depositReference} onChange={event => setForm({ ...form, depositReference: event.target.value })} /></div>
                     <div className="space-y-2"><Label>Policy</Label><Input disabled value={setup?.depositPolicy === 'ControlledNetBanking' ? 'Controlled net banking' : 'Deposit intact'} /></div>
                     <div className="space-y-2 md:col-span-2"><Label>Notes</Label><Textarea value={form.notes} onChange={event => setForm({ ...form, notes: event.target.value })} /></div>
@@ -217,7 +270,7 @@ export default function NewBankDepositPage() {
                                         <td className="p-3"><div className="font-medium">{entry.entryNumber}</div><div className="text-xs text-muted-foreground">{new Date(entry.entryDate).toLocaleDateString()}</div></td>
                                         <td className="p-3"><div>{entry.counterpartyName ?? entry.description}</div><div className="text-xs text-muted-foreground">{entry.referenceNumber}</div></td>
                                         <td className="p-3">{entry.liquidityAccountName}</td>
-                                        <td className={`p-3 ${entry.direction === 'Decrease' ? 'text-red-600' : 'text-green-700'}`}>{entry.direction === 'Increase' ? 'Receipt' : 'Deduction'}</td>
+                                        <td className={`p-3 ${entry.direction === 'Decrease' ? 'text-red-600' : 'text-green-700'}`}><div>{chequeMustRemainIntact ? 'Cheque receipt' : entry.direction === 'Increase' ? 'Receipt' : 'Deduction'}</div>{chequeMustRemainIntact && expectedClearingDate && <div className="text-xs text-muted-foreground">Expected {expectedClearingDate.toLocaleDateString()}</div>}</td>
                                         <td className="p-3 text-right">{entry.currency} {entry.remainingAmount.toLocaleString(undefined, { minimumFractionDigits: 2 })}</td>
                                         <td className="p-3"><Input className="text-right" type="number" min={0.01} max={entry.remainingAmount} step="0.01" disabled={!checked || chequeMustRemainIntact} value={selected[entry.id] ?? ''} onChange={event => setSelected(current => ({ ...current, [entry.id]: Math.min(Number(event.target.value), entry.remainingAmount) }))} /></td>
                                     </tr>
@@ -225,6 +278,36 @@ export default function NewBankDepositPage() {
                             })}</tbody>
                         </table>
                     </div>
+                </CardContent>
+            </Card>
+            <Card>
+                <CardHeader>
+                    <CardTitle>Finance coding dimensions</CardTitle>
+                    <CardDescription>
+                        Code the destination bank and every selected settlement line. Fixed values are resolved and locked by Finance account rules.
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <SourceDocumentDimensionPanel
+                        context={{
+                            sourceModule: 'CASHBANK',
+                            sourceDocumentType: 'BankDepositBatch',
+                            postingAction: 'Post',
+                            sourceRoute: 'finance.cash.bank-deposits',
+                            contractVersion: '1.0',
+                        }}
+                        effectiveDate={form.depositDate}
+                        lines={dimensionLines}
+                        defaultValues={defaultDimensionValues}
+                        lineValues={lineDimensionValues}
+                        onDefaultValuesChange={(values) => {
+                            setDefaultDimensionValues(values);
+                            setApplyDefaultToAll(false);
+                        }}
+                        onLineValuesChange={setLineDimensionValues}
+                        onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                        disabled={saving}
+                    />
                 </CardContent>
             </Card>
             <div className="sticky bottom-0 flex flex-wrap items-center justify-between gap-4 border bg-background p-4 shadow-sm">

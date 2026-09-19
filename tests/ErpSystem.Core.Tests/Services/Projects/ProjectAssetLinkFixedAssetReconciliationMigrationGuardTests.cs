@@ -9,8 +9,8 @@ public sealed class ProjectAssetLinkFixedAssetReconciliationMigrationGuardTests
     public void Migration_extends_the_existing_project_link_with_tenant_safe_fixed_asset_lineage_only()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260822003500_AddProjectAssetLinkFixedAssetReconciliation.cs"));
-        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260822003500_AddProjectAssetLinkFixedAssetReconciliation.cs"));
+        var metadata = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("ProjectAssetLinks")

@@ -31,8 +31,6 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? SeparatorCharacter { get; set; } = "-";
 
         public bool LookupTableRequired { get; set; } = false;
-        public bool IsMandatory { get; set; } = true;
-        public bool IsReportingDimension { get; set; } = true;
         public bool IsNaturalAccount { get; set; } = false;
 
         [MaxLength(500)]
@@ -53,9 +51,8 @@ namespace ErpSystem.Core.DTOs.Finance
         [MaxLength(500)]
         public string? Description { get; set; }
 
-        public bool? IsReportingDimension { get; set; }
-        public bool? IsMandatory { get; set; }
-        public bool? IsActive { get; set; }
+        [Required]
+        public string RowVersion { get; set; } = string.Empty;
     }
 
     /// <summary>
@@ -71,10 +68,16 @@ namespace ErpSystem.Core.DTOs.Finance
         public string DataType { get; set; } = string.Empty;
         public string? SeparatorCharacter { get; set; }
         public bool LookupTableRequired { get; set; }
-        public bool IsMandatory { get; set; }
+        public bool IsRequired { get; set; } = true;
         public bool IsReportingDimension { get; set; }
         public bool IsNaturalAccount { get; set; }
         public bool IsActive { get; set; }
+        public string LifecycleStatus { get; set; } = "Draft";
+        public string RowVersion { get; set; } = string.Empty;
+        public int AccountUsageCount { get; set; }
+        public bool CanActivate { get; set; }
+        public bool CanFreeze { get; set; }
+        public bool IsSystemDefined { get; set; }
         public string? Description { get; set; }
         public int LookupValueCount { get; set; }
 

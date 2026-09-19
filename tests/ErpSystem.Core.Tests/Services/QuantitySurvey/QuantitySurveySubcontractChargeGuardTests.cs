@@ -8,7 +8,7 @@ public sealed class QuantitySurveySubcontractChargeGuardTests
     [Fact]
     public void Migration_is_scoped_and_enforces_charge_dms_workflow_and_valuation_lineage()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260811063100_AddQuantitySurveySubcontractChargeLifecycle.cs");
 
         source.Should().Contain("QuantitySurveySubcontractChargeNotices")

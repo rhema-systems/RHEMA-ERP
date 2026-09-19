@@ -15,6 +15,8 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { capitalProjectService, type CapitalProjectDetail, type ProjectStatus, type AddProjectCostDto, type AddSettlementRuleDto } from '@/services/finance/capitalProjectService';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { SourceDocumentDimensionDefaultsPanel, SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues, toFinanceSourceDimensionFormState } from '@/lib/finance/source-document-dimensions';
 
 export default function CapitalProjectDetailPage() {
   const params = useParams();
@@ -24,6 +26,7 @@ export default function CapitalProjectDetailPage() {
   const [project, setProject] = useState<CapitalProjectDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const [dimensionDefaults, setDimensionDefaults] = useState<Record<string, string>>({});
 
   // Add Cost dialog state
   const [costOpen, setCostOpen] = useState(false);
@@ -51,6 +54,7 @@ export default function CapitalProjectDetailPage() {
           fixedAssetsDataService.getCategories(),
         ]);
         setProject(data);
+        setDimensionDefaults(toFinanceSourceDimensionFormState(data.financeDimensions).defaultValues);
         setCategories(cats.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })));
       } catch (error) {
         console.error('Failed to load project:', error);
@@ -120,7 +124,11 @@ export default function CapitalProjectDetailPage() {
   const handleCapitalize = async () => {
     if (!confirm('Capitalize this project? This will create fixed assets and post GL journals. This action cannot be undone.')) return;
     try {
-      await capitalProjectService.capitalize(id);
+      await capitalProjectService.capitalize(id, {
+        defaultDimensions: toFinancePostingDimensionValues(dimensionDefaults),
+        lines: [],
+        applyDefaultToEligibleLines: true,
+      });
       await refresh();
     } catch (error: unknown) {
       alert(error instanceof Error ? error.message : 'Capitalization failed');
@@ -198,6 +206,8 @@ export default function CapitalProjectDetailPage() {
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Accumulated Cost</CardTitle></CardHeader><CardContent className="text-xl font-semibold">{formatMoney(project.totalAccumulatedCost)}</CardContent></Card>
         <Card><CardHeader className="pb-2"><CardTitle className="text-sm text-muted-foreground">Capitalized</CardTitle></CardHeader><CardContent className="text-xl font-semibold">{formatMoney(project.capitalizedAmount)}</CardContent></Card>
       </div>
+
+      <SourceDocumentDimensionEvidence evidence={project.financeDimensions} />
 
       {/* Cost Lines */}
       <Card>
@@ -326,7 +336,13 @@ export default function CapitalProjectDetailPage() {
       {/* Capitalize Button */}
       {project.status === 'InProgress' && (
         <Card>
-          <CardContent className="flex items-center justify-between py-6">
+          <CardContent className="space-y-4 py-6">
+            <SourceDocumentDimensionDefaultsPanel
+              effectiveDate={new Date().toISOString().slice(0, 10)}
+              values={dimensionDefaults}
+              onChange={setDimensionDefaults}
+            />
+            <div className="flex items-center justify-between gap-4">
             <div>
               <p className="font-medium">Ready to Capitalize?</p>
               <p className="text-sm text-muted-foreground">
@@ -339,6 +355,7 @@ export default function CapitalProjectDetailPage() {
               <CheckCircle className="mr-2 h-5 w-5" />
               Capitalize Project
             </Button>
+            </div>
           </CardContent>
         </Card>
       )}

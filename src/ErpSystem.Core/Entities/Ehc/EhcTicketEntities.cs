@@ -224,6 +224,15 @@ public class EhcTicket : TenantEntity
     [ForeignKey(nameof(AssignedDepartmentId))]
     public virtual Department? AssignedDepartment { get; set; }
 
+    /// <summary>
+    /// Current assignment owner from HR's Structure → Level → Unit model. AssignedDepartmentId
+    /// remains only to display historic assignments made before the organization-unit port.
+    /// </summary>
+    public Guid? AssignedOrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(AssignedOrganizationUnitId))]
+    public virtual OrganizationUnit? AssignedOrganizationUnit { get; set; }
+
 
     /// <summary>
     /// CRM records created when a public property enquiry is accepted by Sales.

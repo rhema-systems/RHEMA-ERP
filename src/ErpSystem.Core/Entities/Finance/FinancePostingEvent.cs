@@ -30,6 +30,16 @@ public class FinancePostingEvent : TenantEntity
     [MaxLength(450)]
     public string? IdempotencyKey { get; set; }
 
+    /// <summary>
+    /// Versioned canonical fingerprint of the complete normalized posting command. Historical
+    /// events remain null and are intentionally ineligible for duplicate-return retry.
+    /// </summary>
+    [MaxLength(40)]
+    public string? RequestFingerprintVersion { get; set; }
+
+    [MaxLength(64)]
+    public string? RequestFingerprint { get; set; }
+
     public Guid? JournalEntryId { get; set; }
 
     [Required]
@@ -70,11 +80,21 @@ public class FinancePostingEvent : TenantEntity
     [MaxLength(20)]
     public string BookClassification { get; set; } = "IFRS";
 
+    /// <summary>
+    /// Stable relational book authority. BookClassification is retained as the immutable
+    /// code snapshot and must agree with this referenced book.
+    /// </summary>
+    [Required]
+    public Guid AccountingBookId { get; set; }
+
     [MaxLength(1000)]
     public string? ErrorMessage { get; set; }
 
     [ForeignKey(nameof(JournalEntryId))]
     public virtual JournalEntry? JournalEntry { get; set; }
+
+    [ForeignKey(nameof(AccountingBookId))]
+    public virtual AccountingBook AccountingBook { get; set; } = null!;
 
     [ForeignKey(nameof(PrimaryExchangeRateId))]
     public virtual ExchangeRate? PrimaryExchangeRateRecord { get; set; }

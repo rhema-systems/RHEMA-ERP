@@ -9,7 +9,7 @@ public sealed class CivilEngineeringMaintenanceAssessmentMigrationGuardTests
     public void Migration_enforces_frozen_intake_lineage_workflow_stages_and_append_only_history()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821050000_AddCivilEngineeringMaintenanceAssessments.cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821050000_AddCivilEngineeringMaintenanceAssessments.cs"));
 
         migration.Should().Contain("CK_CivilEngineeringMaintenanceAssessments_Assignment")
             .And.Contain("TR_CivilEngineeringMaintenanceAssessments_Lineage")

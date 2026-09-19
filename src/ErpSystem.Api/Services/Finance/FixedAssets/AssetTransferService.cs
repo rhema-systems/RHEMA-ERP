@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -15,8 +16,7 @@ namespace ErpSystem.Api.Services.Finance.FixedAssets;
 
 public partial class AssetTransferService : IAssetTransferService
 {
-    private const string SourceModule = "FixedAssets";
-    private const string SourceDocumentType = "FixedAssetTransfer";
+    private const string SourceModule = "FA";
 
     private readonly ApplicationDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -24,6 +24,10 @@ public partial class AssetTransferService : IAssetTransferService
     private readonly IWorkflowService _workflowService;
     private readonly IFinanceAuditService? _financeAuditService;
     private readonly IFinancePostingEngine? _financePostingEngine;
+    private readonly IFixedAssetDimensionService? _fixedAssetDimensions;
+
+    private static readonly FinancePostingProducerContext ReclassificationProducer =
+        new(FinanceDimensionRouteId.FinanceFixedAssetReclassification);
 
     public AssetTransferService(
         ApplicationDbContext context,
@@ -31,7 +35,8 @@ public partial class AssetTransferService : IAssetTransferService
         IDocumentNumberingService documentNumberingService,
         IWorkflowService workflowService,
         IFinanceAuditService? financeAuditService = null,
-        IFinancePostingEngine? financePostingEngine = null)
+        IFinancePostingEngine? financePostingEngine = null,
+        IFixedAssetDimensionService? fixedAssetDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -39,6 +44,7 @@ public partial class AssetTransferService : IAssetTransferService
         _workflowService = workflowService;
         _financeAuditService = financeAuditService;
         _financePostingEngine = financePostingEngine;
+        _fixedAssetDimensions = fixedAssetDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -51,7 +57,7 @@ public partial class AssetTransferService : IAssetTransferService
             .Where(t => t.TenantId == TenantId && t.Id == id)
             .FirstOrDefaultAsync();
 
-        return transfer == null ? null : MapToDto(transfer);
+        return transfer == null ? null : await MapWithDimensionsAsync(transfer);
     }
 
     public async Task<IEnumerable<AssetTransferDto>> GetAllAsync()
@@ -61,7 +67,10 @@ public partial class AssetTransferService : IAssetTransferService
             .OrderByDescending(t => t.TransferDate)
             .ToListAsync();
 
-        return transfers.Select(MapToDto).ToList();
+        var results = new List<AssetTransferDto>(transfers.Count);
+        foreach (var transfer in transfers)
+            results.Add(await MapWithDimensionsAsync(transfer));
+        return results;
     }
 
     public async Task<IEnumerable<AssetTransferDto>> GetByAssetIdAsync(Guid assetId)
@@ -71,7 +80,10 @@ public partial class AssetTransferService : IAssetTransferService
             .OrderByDescending(t => t.TransferDate)
             .ToListAsync();
 
-        return transfers.Select(MapToDto).ToList();
+        var results = new List<AssetTransferDto>(transfers.Count);
+        foreach (var transfer in transfers)
+            results.Add(await MapWithDimensionsAsync(transfer));
+        return results;
     }
 
     public async Task<AssetTransferDto> RequestTransferAsync(RequestAssetTransferDto dto, Guid requestedById)
@@ -121,6 +133,7 @@ public partial class AssetTransferService : IAssetTransferService
         {
             TenantId = TenantId,
             FixedAssetId = dto.FixedAssetId,
+            FixedAsset = asset,
             TransferDate = dto.TransferDate.Date,
             AccountingDate = reclassification?.AccountingDate ?? dto.AccountingDate?.Date,
             FiscalPeriodId = reclassification?.FiscalPeriodId,
@@ -170,6 +183,31 @@ public partial class AssetTransferService : IAssetTransferService
 
         _context.AssetTransfers.Add(transfer);
         await _context.SaveChangesAsync();
+
+        if (transfer.TransferType == AssetTransferType.GlReclassification
+            && _fixedAssetDimensions is not null)
+        {
+            var dimensionRequest = await BuildReclassificationPostingRequestAsync(transfer);
+            var inheritedByLine = asset.JournalEntryId.HasValue
+                ? dimensionRequest.Lines
+                    .Where(line => line.SourceDocumentLineId.HasValue
+                        && line.Description?.Contains("source classification", StringComparison.OrdinalIgnoreCase) == true)
+                    .ToDictionary(line => line.SourceDocumentLineId!.Value, _ => asset.JournalEntryId.Value)
+                : new Dictionary<Guid, Guid>();
+            await _fixedAssetDimensions.SynchronizeAsync(
+                ReclassificationProducer,
+                transfer.Id,
+                transfer.AccountingDate ?? transfer.TransferDate,
+                dimensionRequest.Lines.ToList(),
+                dto.FinanceDimensions,
+                inheritedByLine,
+                "Fixed asset reclassification source and target components prepared independently.");
+            await _fixedAssetDimensions.ValidateFreezeAndApplyAsync(
+                ReclassificationProducer,
+                transfer.Id,
+                transfer.AccountingDate ?? transfer.TransferDate,
+                dimensionRequest.Lines.ToList());
+        }
 
         await RecordTransferAuditAsync(
             FinanceAuditEvents.FixedAssetTransferRequested,
@@ -580,6 +618,13 @@ public partial class AssetTransferService : IAssetTransferService
         return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
+    private void EnsureFixedAssetDimensionsConfigured()
+    {
+        if (_fixedAssetDimensions is null)
+            throw new InvalidOperationException(
+                "Finance fixed-asset dimensions are not configured for GL reclassification.");
+    }
+
     private static string? NormalizeSegmentString(string? value)
     {
         var normalized = value?.Trim();
@@ -619,7 +664,7 @@ public partial class AssetTransferService : IAssetTransferService
             EventType = FinanceAuditEvents.FixedAssetTransferBlockedInvalidTenantDimensionAccount,
             TenantId = TenantId,
             SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceDocumentType = "FixedAssetTransfer",
             SourceDocumentId = assetId,
             Resource = "Finance.FixedAssetTransfer",
             ResourceId = assetId.ToString(),
@@ -651,7 +696,9 @@ public partial class AssetTransferService : IAssetTransferService
             EventType = eventType,
             TenantId = TenantId,
             SourceModule = SourceModule,
-            SourceDocumentType = SourceDocumentType,
+            SourceDocumentType = transfer.TransferType == AssetTransferType.GlReclassification
+                ? ReclassificationProducer.Definition.DocumentType
+                : "FixedAssetTransfer",
             SourceDocumentId = transfer.Id,
             JournalEntryId = transfer.JournalEntryId,
             PostingEventId = transfer.PostingEventId,
@@ -669,6 +716,22 @@ public partial class AssetTransferService : IAssetTransferService
                 transfer.ReferenceNumber
             }
         });
+    }
+
+    private async Task<AssetTransferDto> MapWithDimensionsAsync(AssetTransfer transfer)
+    {
+        var result = MapToDto(transfer);
+        if (transfer.TransferType == AssetTransferType.GlReclassification
+            && _fixedAssetDimensions is not null)
+        {
+            var request = await BuildReclassificationPostingRequestAsync(transfer);
+            result.FinanceDimensions = await _fixedAssetDimensions.GetAsync(
+                ReclassificationProducer,
+                transfer.Id,
+                transfer.AccountingDate ?? transfer.TransferDate,
+                request.Lines.ToList());
+        }
+        return result;
     }
 
     private static AssetTransferDto MapToDto(AssetTransfer t)

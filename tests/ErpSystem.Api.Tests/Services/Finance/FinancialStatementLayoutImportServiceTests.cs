@@ -21,6 +21,87 @@ public sealed class FinancialStatementLayoutImportServiceTests
 {
     [Fact]
     [Trait("Category", "Reporting")]
+    public async Task ClassificationImport_ShouldRequirePortableV2StableCodeAndRejectNonCanonicalSelectors()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var context = CreateContext();
+        var book = SeedTenantAndBook(context, tenantId);
+        var classification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "CASH", Name = "Cash and cash equivalents", CoreAccountType = AccountType.Asset,
+            Status = AccountClassificationStatus.Active, IsPostingClassification = true
+        };
+        context.AccountClassifications.Add(classification);
+        await context.SaveChangesAsync();
+        var fixture = CreateServices(context, tenantId);
+        var definition = new FinancialStatementLayoutImportDefinitionDto
+        {
+            TemplateVersion = "2", Code = "BS_CLASS_IMPORT", Name = "Classified Balance Sheet",
+            StatementType = FinancialStatementType.BalanceSheet, AccountingBookId = book.Id,
+            Rows =
+            {
+                new FinancialStatementRowInputDto
+                {
+                    RowCode = "CASH", Label = "Cash", RowType = FinancialStatementRowType.Account,
+                    DisplayOrder = 10, SignMultiplier = 1, IsVisible = true,
+                    Mappings = { new FinancialStatementRowMappingInputDto
+                    {
+                        MappingType = FinancialStatementRowMappingType.Classification,
+                        AccountClassificationCode = "CASH", IncludeClassificationDescendants = true
+                    } }
+                }
+            }
+        };
+
+        var preview = await fixture.Import.PreviewDefinitionAsync(definition);
+        preview.Validation.IsValid.Should().BeTrue();
+        preview.Definition.Rows.Single().Mappings.Single().AccountClassificationId.Should().Be(classification.Id);
+        preview.Definition.Rows.Single().Mappings.Single().AccountClassificationCode.Should().Be("CASH");
+
+        var committed = await fixture.Import.CommitDefinitionAsync(new FinancialStatementLayoutImportCommitDto
+        {
+            Definition = definition,
+            ExpectedDefinitionHash = preview.DefinitionHash
+        });
+        var exported = await fixture.Import.ExportDefinitionAsync(committed.DraftVersionId);
+        exported.Rows.Single().Mappings.Single().AccountClassificationCode.Should().Be("CASH");
+        exported.Rows.Single().Mappings.Single().AccountClassificationId.Should().BeNull(
+            "stable codes, rather than tenant-local ids, make v2 JSON portable");
+
+        var mapping = definition.Rows.Single().Mappings.Single();
+
+        mapping.AccountClassificationCode = null;
+        mapping.AccountClassificationId = classification.Id;
+        var idOnly = await fixture.Import.PreviewDefinitionAsync(definition);
+        idOnly.Validation.Issues.Should().ContainSingle(item =>
+            item.Code == "MAPPING_CLASSIFICATION_CODE_REQUIRED"
+            && item.Message.Contains("id alone is not portable", StringComparison.Ordinal));
+
+        mapping.AccountClassificationCode = "CASH";
+        mapping.AccountClassificationId = Guid.NewGuid();
+        var mismatch = await fixture.Import.PreviewDefinitionAsync(definition);
+        mismatch.Validation.Issues.Should().ContainSingle(item => item.Code == "MAPPING_CLASSIFICATION_MISMATCH");
+
+        mapping.AccountClassificationCode = "UNKNOWN_CODE";
+        mapping.AccountClassificationId = null;
+        var unknown = await fixture.Import.PreviewDefinitionAsync(definition);
+        unknown.Validation.Issues.Should().ContainSingle(item => item.Code == "MAPPING_CLASSIFICATION_UNKNOWN");
+
+        mapping.AccountClassificationCode = "Cash and cash equivalents";
+        var displayName = await fixture.Import.PreviewDefinitionAsync(definition);
+        displayName.Validation.Issues.Should().ContainSingle(item =>
+            item.Code == "MAPPING_CLASSIFICATION_UNKNOWN"
+            && item.Message.Contains("Display names and free-text labels", StringComparison.Ordinal));
+
+        definition.TemplateVersion = "1";
+        var incompatible = await fixture.Import.PreviewDefinitionAsync(definition);
+        incompatible.Validation.Issues.Should().Contain(item => item.Code == "TEMPLATE_VERSION_INVALID");
+        incompatible.Validation.Issues.Should().Contain(item => item.Code == "MAPPING_CLASSIFICATION_UNKNOWN");
+    }
+
+    [Fact]
+    [Trait("Category", "Reporting")]
     [Trait("Category", "Spreadsheet")]
     public async Task JsonImport_ShouldRequirePreviewHashAndCreateDraftOnly()
     {

@@ -13,9 +13,9 @@ public sealed class CivilEngineeringInspectionMigrationGuardTests
     public void Migration_extends_the_authoritative_projects_quality_and_non_conformance_owners_without_backfilling_them()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
-        var hardeningMigration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", HardeningMigrationId + ".cs"));
-        var workflowMigration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", WorkflowMigrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
+        var hardeningMigration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", HardeningMigrationId + ".cs"));
+        var workflowMigration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", WorkflowMigrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("CREATE TABLE dbo.ProjectCivilInspectionControls")

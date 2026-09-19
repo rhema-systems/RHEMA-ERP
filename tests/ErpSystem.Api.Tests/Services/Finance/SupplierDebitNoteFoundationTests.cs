@@ -130,17 +130,9 @@ public sealed class SupplierDebitNoteFoundationTests
     public void MigrationRepairsHistoricalTablesAndCreatesApplicationConstraints()
     {
         using var context = CreateContext();
-        context.GetService<IMigrationsAssembly>().Migrations.Should().ContainKey(MigrationId);
-        context.GetService<IMigrationsAssembly>().Migrations.Should().ContainKey(PrecisionMigrationId);
-        context.GetService<IMigrationsAssembly>().Migrations.Should().ContainKey(HardeningMigrationId);
-
-        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableMigration().ApplyUp(builder);
-        var lifecycleOperation = builder.Operations.Should().ContainSingle()
-            .Which.Should().BeOfType<SqlOperation>().Which;
-        lifecycleOperation.SuppressTransaction.Should().BeFalse(
-            "SQL Server DDL and the migration-history insert must roll back together on failure");
-        var sql = lifecycleOperation.Sql;
+        context.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        var sql = ArchivedMigrationSource.Read("20260818103000_AddSupplierDebitNoteLifecycleAndApplications.cs");
 
         sql.Should().Contain("OBJECT_ID(N'[dbo].[SupplierDebitNotes]', N'U') IS NULL");
         sql.Should().Contain("COL_LENGTH(N'dbo.SupplierDebitNotes', N'RowVersion')");
@@ -154,24 +146,15 @@ public sealed class SupplierDebitNoteFoundationTests
         sql.Should().Contain("OBJECT_ID(N'[dbo].[SupplierReturns]', N'U') IS NOT NULL");
         sql.Should().Contain("FIN-INT-012/013 remain Planned");
 
-        var precisionBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestablePrecisionMigration().ApplyUp(precisionBuilder);
-        var precisionSql = precisionBuilder.Operations.Should().ContainSingle()
-            .Which.Should().BeOfType<SqlOperation>().Which.Sql;
+        var precisionSql = ArchivedMigrationSource.Read("20260818123000_WidenSupplierDebitNoteExchangeRatePrecision.cs");
         precisionSql.Should().Contain("c.[scale] < 6");
         precisionSql.Should().Contain("ALTER TABLE [dbo].[SupplierDebitNotes] ALTER COLUMN [ExchangeRate] decimal(18,6) NOT NULL");
 
-        var hardeningBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableHardeningMigration().ApplyUp(hardeningBuilder);
-        hardeningBuilder.Operations.Should().HaveCount(2,
-            "new columns and tables must be committed as a separate SQL command before SQL Server compiles their backfills, keys and indexes");
-        hardeningBuilder.Operations.Should().OnlyContain(operation => operation is SqlOperation);
-        var hardeningOperations = hardeningBuilder.Operations.Cast<SqlOperation>().ToList();
-        hardeningOperations.Should().OnlyContain(operation => !operation.SuppressTransaction,
-            "both schema commands and the migration-history insert must roll back together on failure");
-        var schemaSql = hardeningOperations[0].Sql;
-        var controlSql = hardeningOperations[1].Sql;
-        var hardeningSql = string.Join(Environment.NewLine, hardeningOperations.Select(operation => operation.Sql));
+        var hardeningSql = ArchivedMigrationSource.Read("20260818130000_HardenSupplierDebitNoteLineageIdentityAndSettlement.cs");
+        var hardeningBlocks = ArchivedMigrationSource.SqlBlocks("20260818130000_HardenSupplierDebitNoteLineageIdentityAndSettlement.cs");
+        hardeningBlocks.Should().HaveCount(2);
+        var schemaSql = hardeningBlocks[0];
+        var controlSql = hardeningBlocks[1];
         schemaSql.Should().Contain("ADD [LineItemType] nvarchar(20) NULL");
         schemaSql.Should().NotContain("SET [LineItemType] = N'Expense'",
             "a historical AP line cannot be guessed to be an expense instead of inventory");
@@ -192,13 +175,10 @@ public sealed class SupplierDebitNoteFoundationTests
     [Trait("Category", "Architecture")]
     public void AccountingEvidenceMigrationsRejectDestructiveDowngrades()
     {
-        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        ((Action)(() => new TestableMigration().ApplyDown(builder)))
-            .Should().Throw<NotSupportedException>();
-        ((Action)(() => new TestablePrecisionMigration().ApplyDown(builder)))
-            .Should().Throw<NotSupportedException>();
-        ((Action)(() => new TestableHardeningMigration().ApplyDown(builder)))
-            .Should().Throw<NotSupportedException>();
+        foreach (var file in new[] { "20260818103000_AddSupplierDebitNoteLifecycleAndApplications.cs",
+            "20260818123000_WidenSupplierDebitNoteExchangeRatePrecision.cs",
+            "20260818130000_HardenSupplierDebitNoteLineageIdentityAndSettlement.cs" })
+            ArchivedMigrationSource.Read(file).Should().Contain("throw new NotSupportedException");
     }
 
     [Fact]
@@ -261,6 +241,45 @@ public sealed class SupplierDebitNoteFoundationTests
         form.Should().Contain("Frozen source-invoice rate");
         form.Should().Contain("one unambiguous AP supplier identity");
         form.Should().NotContain("const approvedRate = await resolveApprovedRate();");
+    }
+
+    [Fact]
+    [Trait("Category", "Architecture")]
+    public void ApSupplierEntryUsesOneGovernedFinanceIdentityBoundary()
+    {
+        var root = FindRepositoryRoot();
+        var identityService = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApSupplierIdentityService.cs"));
+        identityService.Should().Contain("BusinessPartnerLifecyclePolicy.IsOperationallyApproved");
+        identityService.Should().Contain("BuildFinanceSupplierProjection(partner)");
+        identityService.Should().Contain("BusinessPartnerProjection");
+        identityService.Should().NotContain("partner.PartnerName ==");
+
+        var invoiceService = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "VendorInvoiceService.cs"));
+        invoiceService.Should().Contain("_apSupplierIdentityService.ResolveAsync");
+        invoiceService.Should().NotContain("s.Name == partner.PartnerName");
+        invoiceService.Should().NotContain("Auto-created from business partner");
+
+        var reportsService = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "Finance", "AP", "ApReportsService.cs"));
+        reportsService.Should().Contain("Repository<ApSupplierIdentityLink>");
+        reportsService.Should().NotContain("string.Equals(s.Name, partner.PartnerName");
+        reportsService.Should().NotContain("string.Equals(p.PrimaryEmail, supplier.Email");
+
+        var paymentPage = File.ReadAllText(Path.Combine(
+            root, "frontend", "src", "app", "finance", "ap", "payments", "create", "page.tsx"));
+        paymentPage.Should().Contain("getInvoiceSupplierEntryOptions");
+        paymentPage.Should().NotContain("businessPartnerService.getPartners");
+
+        var supplierRegister = File.ReadAllText(Path.Combine(
+            root, "frontend", "src", "app", "finance", "ap", "suppliers", "page.tsx"));
+        supplierRegister.Should().Contain("Linked on first use");
+        supplierRegister.Should().Contain("Legacy AP supplier");
+
+        var sidebar = File.ReadAllText(Path.Combine(
+            root, "frontend", "src", "components", "layout", "sidebar.tsx"));
+        sidebar.Should().Contain("href: '/finance/ap/suppliers'");
     }
 
     [Fact]
@@ -461,28 +480,21 @@ public sealed class SupplierDebitNoteFoundationTests
 
     private static string FindRepositoryRoot()
     {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "src")))
-            directory = directory.Parent;
-        return directory?.FullName
-               ?? throw new DirectoryNotFoundException("Could not locate the repository root.");
+        var configuredRoot = Environment.GetEnvironmentVariable("RHEMA_REPOSITORY_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot) &&
+            Directory.Exists(Path.Combine(configuredRoot, "src")))
+            return Path.GetFullPath(configuredRoot);
+
+        foreach (var start in new[] { Directory.GetCurrentDirectory(), AppContext.BaseDirectory })
+        {
+            var directory = new DirectoryInfo(start);
+            while (directory != null && !Directory.Exists(Path.Combine(directory.FullName, "src")))
+                directory = directory.Parent;
+            if (directory != null)
+                return directory.FullName;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate the repository root.");
     }
 
-    private sealed class TestableMigration : AddSupplierDebitNoteLifecycleAndApplications
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
-        public void ApplyDown(MigrationBuilder migrationBuilder) => Down(migrationBuilder);
-    }
-
-    private sealed class TestablePrecisionMigration : WidenSupplierDebitNoteExchangeRatePrecision
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
-        public void ApplyDown(MigrationBuilder migrationBuilder) => Down(migrationBuilder);
-    }
-
-    private sealed class TestableHardeningMigration : HardenSupplierDebitNoteLineageIdentityAndSettlement
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
-        public void ApplyDown(MigrationBuilder migrationBuilder) => Down(migrationBuilder);
-    }
 }

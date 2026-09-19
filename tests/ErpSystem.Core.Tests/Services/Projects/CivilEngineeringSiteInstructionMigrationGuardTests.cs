@@ -12,7 +12,7 @@ public sealed class CivilEngineeringSiteInstructionMigrationGuardTests
     public void Migration_adds_only_the_governance_envelope_and_protects_its_lineage_and_history()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 
         migration.Should().Contain("CREATE TABLE ProjectCivilSiteInstructionRoutings")
@@ -65,7 +65,7 @@ public sealed class CivilEngineeringSiteInstructionMigrationGuardTests
     public void Lifecycle_hardening_keeps_the_existing_owner_and_adds_scoped_evidence_version_review_follow_up_and_closure_guards()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", LifecycleHardeningMigrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", LifecycleHardeningMigrationId + ".cs"));
         var service = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Services", "CivilEngineeringSiteInstructionService.cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 

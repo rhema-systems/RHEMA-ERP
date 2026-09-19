@@ -4,15 +4,18 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Services.Finance.AP;
 
 /// <summary>
-/// Finance-owned AP identity bridge. Procurement retains ownership of BusinessPartner and
-/// Supplier records; this service only records an unambiguous pairing needed by AP settlement.
-/// Name-only matching is deliberately prohibited because names are mutable and non-unique.
+/// Finance-owned AP identity bridge. BusinessPartner remains the shared supplier master. AP's
+/// historical transaction model still requires Supplier.Id, so a purpose-authorized AP command
+/// may materialize that internal projection from an approved BusinessPartner and record the
+/// durable pairing. Name-only matching is deliberately prohibited because names are mutable and
+/// non-unique.
 /// </summary>
 public sealed class ApSupplierIdentityService : IApSupplierIdentityService
 {
@@ -45,7 +48,10 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
                 link.SupplierId == businessPartnerOrSupplierId,
                 cancellationToken);
         if (existing != null)
+        {
+            EnsureEligibleLink(existing);
             return Map(existing);
+        }
 
         // GET remains side-effect free. An exact-id/code candidate can be shown to the UI, while
         // the purpose-authorized debit-note/payment command creates the durable Finance link.
@@ -59,7 +65,9 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
             var suppliers = await ExactSupplierCandidates(partner.Id, partner.PartnerCode)
                 .AsNoTracking()
                 .ToListAsync(cancellationToken);
-            return MapCandidate(partner, RequireSingleCandidate(suppliers, partner.PartnerCode, "Business Partner"));
+            var candidate = RequireSingleCandidate(suppliers, partner.PartnerCode, "Business Partner");
+            EnsureEligibleSupplierCandidate(candidate);
+            return MapCandidate(partner, candidate);
         }
 
         var supplier = await _db.Suppliers.AsNoTracking().SingleOrDefaultAsync(item =>
@@ -84,7 +92,10 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
                 link.SupplierId == businessPartnerOrSupplierId,
                 cancellationToken);
         if (existing != null)
+        {
+            EnsureEligibleLink(existing);
             return Map(existing);
+        }
 
         var isBusinessPartner = await _db.BusinessPartners.AsNoTracking().AnyAsync(item =>
             item.TenantId == TenantId && item.Id == businessPartnerOrSupplierId && !item.IsDeleted,
@@ -126,6 +137,7 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
                 cancellationToken);
             if (existing != null)
             {
+                EnsureEligibleLink(existing);
                 if (ownsTransaction) await _unitOfWork.CommitAsync(cancellationToken);
                 return Map(existing);
             }
@@ -140,8 +152,23 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
             var candidates = await ExactSupplierCandidates(partner.Id, partner.PartnerCode)
                 .OrderBy(item => item.Id == partner.Id ? 0 : 1)
                 .ToListAsync(cancellationToken);
-            var supplier = RequireSingleCandidate(candidates, partner.PartnerCode, "Business Partner");
-            var link = BuildLink(partner, supplier, supplier.Id == partner.Id ? "SharedId" : "ExactCode");
+            if (candidates.Count > 1)
+                throw new InvalidOperationException(
+                    $"Business Partner '{partner.PartnerCode}' matches multiple AP masters. Finance will not guess an identity; resolve the duplicate master data first.");
+
+            var supplier = candidates.SingleOrDefault();
+            if (supplier != null)
+                EnsureEligibleSupplierCandidate(supplier);
+            var mappingSource = supplier == null
+                ? "BusinessPartnerProjection"
+                : supplier.Id == partner.Id ? "SharedId" : "ExactCode";
+            if (supplier == null)
+            {
+                supplier = BuildFinanceSupplierProjection(partner);
+                _db.Suppliers.Add(supplier);
+            }
+
+            var link = BuildLink(partner, supplier, mappingSource);
             _db.ApSupplierIdentityLinks.Add(link);
             await _db.SaveChangesAsync(cancellationToken);
             if (ownsTransaction) await _unitOfWork.CommitAsync(cancellationToken);
@@ -186,6 +213,7 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
                 cancellationToken);
             if (existing != null)
             {
+                EnsureEligibleLink(existing);
                 if (ownsTransaction) await _unitOfWork.CommitAsync(cancellationToken);
                 return Map(existing);
             }
@@ -199,6 +227,7 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
                 .OrderBy(item => item.Id == supplier.Id ? 0 : 1)
                 .ToListAsync(cancellationToken);
             var partner = RequireSingleCandidate(candidates, supplier.SupplierCode, "AP Supplier");
+            EnsureApEligiblePartner(partner);
             var link = BuildLink(partner, supplier, supplier.Id == partner.Id ? "SharedId" : "ExactCode");
             _db.ApSupplierIdentityLinks.Add(link);
             await _db.SaveChangesAsync(cancellationToken);
@@ -214,26 +243,39 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
     }
 
     private IQueryable<ApSupplierIdentityLink> LinkQuery() => _db.ApSupplierIdentityLinks
+        .IgnoreQueryFilters()
         .Include(link => link.BusinessPartner)
         .Include(link => link.Supplier)
         .Where(link => link.TenantId == TenantId && !link.IsDeleted);
 
     private IQueryable<Supplier> ExactSupplierCandidates(Guid partnerId, string? partnerCode) =>
-        _db.Suppliers.Where(item =>
+        _db.Suppliers.IgnoreQueryFilters().Where(item =>
             item.TenantId == TenantId &&
-            !item.IsDeleted &&
-            item.IsActive &&
             (item.Id == partnerId ||
              (!string.IsNullOrWhiteSpace(partnerCode) && item.SupplierCode == partnerCode)));
+
+    private static void EnsureEligibleSupplierCandidate(Supplier supplier)
+    {
+        if (!ApInvoiceSupplierEligibility.IsActiveSupplier(supplier))
+            throw new InvalidOperationException(
+                "An exact AP supplier identity is inactive, deleted or blacklisted. Resolve its status before pairing or onboarding.");
+    }
 
     private IQueryable<BusinessPartner> ExactPartnerCandidates(Guid supplierId, string? supplierCode) =>
         _db.BusinessPartners.Where(item =>
             item.TenantId == TenantId &&
             !item.IsDeleted &&
             item.IsActive &&
+            !item.IsBlacklisted &&
+            item.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+            (item.RegistrationStatus == BusinessPartnerLifecyclePolicy.ActiveRegistrationStatus ||
+             item.RegistrationStatus == BusinessPartnerLifecyclePolicy.LegacyApprovedRegistrationStatus) &&
             (item.PartnerType == "Supplier" ||
+             item.PartnerType == "Vendor" ||
+             item.PartnerType == "Manufacturer" ||
              item.PartnerType == "Contractor" ||
-             item.PartnerType == "Both") &&
+             item.PartnerType == "Both" ||
+             item.PartnerType == "CustomerAndSupplier") &&
             (item.Id == supplierId ||
              (!string.IsNullOrWhiteSpace(supplierCode) && item.PartnerCode == supplierCode)));
 
@@ -256,14 +298,74 @@ public sealed class ApSupplierIdentityService : IApSupplierIdentityService
 
     private static void EnsureApEligiblePartner(BusinessPartner partner)
     {
-        if (!string.Equals(partner.PartnerType, "Supplier", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(partner.PartnerType, "Contractor", StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(partner.PartnerType, "Both", StringComparison.OrdinalIgnoreCase))
+        if (!ApInvoiceSupplierEligibility.CanOnboard(partner) &&
+            !string.Equals(partner.PartnerType, "Contractor", StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
-                "Only active Supplier, Contractor or Both business partners can be paired to an AP supplier.");
+                "Only an approved supplier-capable or Contractor business partner can be paired to an AP supplier.");
+        }
+
+        if (!BusinessPartnerLifecyclePolicy.IsOperationallyApproved(partner))
+            throw new InvalidOperationException(
+                "Only approved, active and non-blacklisted supplier business partners can be used by Accounts Payable.");
+    }
+
+    private static void EnsureEligibleLink(ApSupplierIdentityLink link)
+    {
+        var partner = link.BusinessPartner
+            ?? throw new InvalidOperationException("The AP supplier identity link has no Business Partner lineage.");
+        var supplier = link.Supplier
+            ?? throw new InvalidOperationException("The AP supplier identity link has no Supplier lineage.");
+        if (partner.TenantId != link.TenantId || supplier.TenantId != link.TenantId ||
+            partner.IsDeleted)
+        {
+            throw new InvalidOperationException(
+                "The AP supplier identity link does not have active same-tenant lineage.");
+        }
+        EnsureApEligiblePartner(partner);
+        if (supplier.IsDeleted || !supplier.IsActive || supplier.IsBlacklisted ||
+            !string.Equals(supplier.Status, "Active", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "Only an active, non-blacklisted AP supplier can be used by Accounts Payable.");
         }
     }
+
+    private Supplier BuildFinanceSupplierProjection(BusinessPartner partner) => new()
+    {
+        Id = Guid.NewGuid(),
+        TenantId = TenantId,
+        SupplierCode = string.IsNullOrWhiteSpace(partner.PartnerCode)
+            ? $"BP-{partner.Id.ToString("N")[..8].ToUpperInvariant()}"
+            : partner.PartnerCode.Trim(),
+        Name = partner.PartnerName,
+        SupplierType = partner.PartnerType.Contains("Manufacturer", StringComparison.OrdinalIgnoreCase)
+            ? "Manufacturer" : "Vendor",
+        Address = partner.PhysicalAddress ?? partner.MailingAddress,
+        City = partner.PhysicalCity ?? partner.MailingCity,
+        State = partner.PhysicalState ?? partner.MailingState,
+        Country = partner.PhysicalCountry ?? partner.MailingCountry,
+        ZipCode = partner.PhysicalPostalCode ?? partner.MailingPostalCode,
+        Phone = partner.PrimaryPhone,
+        Email = partner.PrimaryEmail,
+        Website = partner.Website,
+        PrimaryContactName = partner.PrimaryContactName,
+        PrimaryContactTitle = partner.PrimaryContactTitle,
+        PrimaryContactPhone = partner.PrimaryPhone,
+        PrimaryContactEmail = partner.PrimaryEmail,
+        TaxId = partner.TaxIdentificationNumber ?? partner.VATNumber,
+        PaymentTerms = partner.PaymentTerms ?? "Net 30",
+        PaymentTermId = partner.PaymentTermId,
+        DefaultApAccountId = partner.DefaultApAccountId,
+        DefaultExpenseAccountId = partner.DefaultExpenseAccountId,
+        IsActive = true,
+        IsPreferred = partner.IsPreferred,
+        Status = "Active",
+        Notes = $"Finance AP projection of approved Business Partner {partner.PartnerCode}.",
+        CreatedAt = DateTime.UtcNow,
+        CreatedBy = UserName,
+        CreatedById = CurrentUserId
+    };
 
     private static T RequireSingleCandidate<T>(IReadOnlyList<T> candidates, string? code, string sourceType)
     {

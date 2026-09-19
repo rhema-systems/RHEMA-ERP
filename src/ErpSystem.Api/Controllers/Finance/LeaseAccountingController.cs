@@ -59,22 +59,29 @@ public class LeaseAccountingController : ControllerBase
     }
 
     [HttpPost("{id}/activate")]
-    public async Task<ActionResult<LeaseContractDetailDto>> Activate(Guid id)
+    public async Task<ActionResult<LeaseContractDetailDto>> Activate(
+        Guid id,
+        [FromBody] ActivateLeaseDto? dto = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            return Ok(await _service.ActivateLeaseAsync(id));
+            return Ok(await _service.ActivateLeaseAsync(id, dto, cancellationToken));
         }
         catch (KeyNotFoundException) { return NotFound(); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }
     }
 
     [HttpPost("{id}/schedule-lines/{lineId}/post")]
-    public async Task<ActionResult<LeaseContractDetailDto>> PostPeriodJournal(Guid id, Guid lineId)
+    public async Task<ActionResult<LeaseContractDetailDto>> PostPeriodJournal(
+        Guid id,
+        Guid lineId,
+        [FromBody] PostLeasePeriodDto? dto = null,
+        CancellationToken cancellationToken = default)
     {
         try
         {
-            return Ok(await _service.PostPeriodJournalAsync(id, lineId));
+            return Ok(await _service.PostPeriodJournalAsync(id, lineId, dto, cancellationToken));
         }
         catch (KeyNotFoundException) { return NotFound(); }
         catch (InvalidOperationException ex) { return BadRequest(new { error = ex.Message }); }

@@ -13,6 +13,7 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Migrations.Operations;
 using Microsoft.Extensions.Logging;
@@ -104,8 +105,8 @@ public sealed class FinancePostingEngineTests
         await action.Should().ThrowAsync<FinanceBudgetCommitmentConflictException>();
         (await db.JournalEntries.CountAsync()).Should().Be(0);
         (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
-        debitAccount.Balance.Should().Be(0m);
-        creditAccount.Balance.Should().Be(0m);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == debitAccount.Id)).Should().Be(0);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == creditAccount.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -150,8 +151,48 @@ public sealed class FinancePostingEngineTests
         postingEvent.OriginModuleCode.Should().Be("FIN");
         journal.OriginModuleCode.Should().Be("FIN");
 
-        cashAccount.Balance.Should().Be(100m);
-        revenueAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == cashAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == revenueAccount.Id)).ClosingBalance.Should().Be(-100m);
+    }
+
+    [Fact]
+    [Trait("Category", "PostingEngine")]
+    [Trait("Category", "RecurringJournal")]
+    public async Task PostAsync_ShouldPostEveryBalancedRecurringJournalLineWithStableSourceIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var expenseA = SeedAccount(db, tenantId, "6101", AccountType.Expense);
+        var expenseB = SeedAccount(db, tenantId, "6102", AccountType.Expense);
+        var accrualA = SeedAccount(db, tenantId, "2101", AccountType.Liability);
+        var accrualB = SeedAccount(db, tenantId, "2102", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var sourceLineIds = Enumerable.Range(0, 4).Select(_ => Guid.NewGuid()).ToArray();
+        var request = CreateRequest(tenantId, expenseA.Id, accrualA.Id);
+        request.SourceModule = "GL";
+        request.SourceDocumentType = "RecurringJournalOccurrence";
+        request.PostingAction = "PostRecurringJournalOccurrence";
+        request.Lines =
+        [
+            new() { AccountId = expenseA.Id, SourceDocumentLineId = sourceLineIds[0], DebitAmount = 600m, LineNumber = 1 },
+            new() { AccountId = expenseB.Id, SourceDocumentLineId = sourceLineIds[1], DebitAmount = 400m, LineNumber = 2 },
+            new() { AccountId = accrualA.Id, SourceDocumentLineId = sourceLineIds[2], CreditAmount = 750m, LineNumber = 3 },
+            new() { AccountId = accrualB.Id, SourceDocumentLineId = sourceLineIds[3], CreditAmount = 250m, LineNumber = 4 }
+        ];
+
+        var result = await CreateService(db, tenantId).PostAsync(request);
+
+        result.PostingStatus.Should().Be("Posted");
+        result.TotalDebitAmount.Should().Be(1000m);
+        result.TotalCreditAmount.Should().Be(1000m);
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Should().HaveCount(4);
+        journal.Transactions.OrderBy(line => line.LineNumber).Select(line => line.SourceDocumentLineId)
+            .Should().Equal(sourceLineIds.Cast<Guid?>());
+        journal.BookClassification.Should().Be("IFRS");
     }
 
     [Fact]
@@ -207,7 +248,7 @@ public sealed class FinancePostingEngineTests
     [Fact]
     [Trait("Batch", "FinanceGoLive-4")]
     [Trait("Category", "PostingEngine")]
-    public async Task PostAsync_ShouldApplyAccountBalanceMovementUsingNormalBalanceDirection()
+    public async Task PostAsync_ShouldApplyBookBalanceMovementUsingSignedDebitMinusCredit()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -222,7 +263,7 @@ public sealed class FinancePostingEngineTests
 
         var service = CreateService(db, tenantId);
 
-        await service.PostAsync(new FinancePostingRequestDto
+        await service.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "NormalBalanceDocument",
@@ -233,7 +274,7 @@ public sealed class FinancePostingEngineTests
             Description = "Normal balance direction test",
             PostingDate = new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {
@@ -246,11 +287,11 @@ public sealed class FinancePostingEngineTests
             }
         });
 
-        assetAccount.Balance.Should().Be(70m);
-        expenseAccount.Balance.Should().Be(40m);
-        liabilityAccount.Balance.Should().Be(100m);
-        equityAccount.Balance.Should().Be(25m);
-        revenueAccount.Balance.Should().Be(-15m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == assetAccount.Id)).ClosingBalance.Should().Be(70m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == expenseAccount.Id)).ClosingBalance.Should().Be(40m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == liabilityAccount.Id)).ClosingBalance.Should().Be(-100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == equityAccount.Id)).ClosingBalance.Should().Be(-25m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == revenueAccount.Id)).ClosingBalance.Should().Be(15m);
     }
 
     [Fact]
@@ -309,8 +350,11 @@ public sealed class FinancePostingEngineTests
         second.JournalEntryId.Should().Be(first.JournalEntryId);
         (await db.JournalEntries.CountAsync()).Should().Be(1);
         (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
-        debitAccount.Balance.Should().Be(100m);
-        creditAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == debitAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == creditAccount.Id)).ClosingBalance.Should().Be(-100m);
+        (await db.AccountBalances.CountAsync()).Should().Be(2);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == debitAccount.Id)).PeriodDebits.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == creditAccount.Id)).PeriodCredits.Should().Be(100m);
     }
 
     [Fact]
@@ -357,6 +401,44 @@ public sealed class FinancePostingEngineTests
 
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Posting period is not open.");
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookPeriodC4")]
+    public async Task PostAsync_ShouldFailClosed_WhenExactBookPeriodAuthorityIsMissing()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        db.AccountingBookPeriods.RemoveRange(db.AccountingBookPeriods.Local);
+        var debit = SeedAccount(db, tenantId, "6110", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2110", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id)))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_PERIOD_REQUIRED:*");
+        db.JournalEntries.Should().BeEmpty();
+        (await db.AccountBalances.CountAsync(item => item.AccountId == debit.Id)).Should().Be(0);
+        (await db.AccountBalances.CountAsync(item => item.AccountId == credit.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookPeriodC4")]
+    public async Task PostAsync_ShouldFailClosed_WhenOuterPeriodIsOpenButExactBookPeriodIsClosed()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        db.AccountingBookPeriods.Local.Single().PeriodStatus = AccountingBookPeriodStatus.Closed;
+        var debit = SeedAccount(db, tenantId, "6120", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2120", AccountType.Liability);
+        await db.SaveChangesAsync();
+
+        await FluentActions.Awaiting(() => CreateService(db, tenantId).PostAsync(CreateRequest(tenantId, debit.Id, credit.Id)))
+            .Should().ThrowAsync<InvalidOperationException>().WithMessage("ACCOUNTING_BOOK_PERIOD_NOT_OPEN:*");
+        db.JournalEntries.Should().BeEmpty();
     }
 
     [Fact]
@@ -534,7 +616,7 @@ public sealed class FinancePostingEngineTests
 
     [Fact]
     [Trait("Category", "PostingEngine")]
-    public async Task PostAsync_ShouldUpdateAccountCurrencyLinkBalanceAndHistory_WhenForeignCurrencyPosts()
+    public async Task PostAsync_ShouldUpdateBookCurrencyExposure_WithoutMutatingCurrencyLinkConfiguration()
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -551,7 +633,6 @@ public sealed class FinancePostingEngineTests
             LinkedCurrencyCode = "USD",
             IsActive = true,
             EffectiveDate = new DateTime(2026, 1, 1),
-            RevaluationRequired = true,
             TransactionRateType = "Daily",
             RevaluationRateType = "Month-End"
         };
@@ -560,18 +641,21 @@ public sealed class FinancePostingEngineTests
 
         await CreateService(db, tenantId).PostAsync(CreateForeignCurrencyRequest(tenantId, cashAccount.Id, revenueAccount.Id));
 
-        usdLink.ForeignCurrencyBalance.Should().Be(100m);
-        usdLink.BaseCurrencyEquivalent.Should().Be(1500m);
-        usdLink.CurrentExchangeRate.Should().Be(15m);
-        usdLink.RateEffectiveDate.Should().Be(new DateTime(2026, 7, 4));
-        usdLink.HasTransactionHistory.Should().BeTrue();
-        usdLink.TransactionCount.Should().Be(1);
-        usdLink.FirstTransactionDate.Should().Be(new DateTime(2026, 7, 4));
-        usdLink.LastTransactionDate.Should().Be(new DateTime(2026, 7, 4));
+        usdLink.ForeignCurrencyBalance.Should().Be(0m);
+        usdLink.BaseCurrencyEquivalent.Should().Be(0m);
+        usdLink.TransactionCount.Should().Be(0);
+        var exposure = await db.AccountCurrencyExposures.SingleAsync(item => item.AccountId == cashAccount.Id);
+        exposure.AccountingBookCode.Should().Be("IFRS");
+        exposure.TransactionCurrencyCode.Should().Be("USD");
+        exposure.SignedForeignBalance.Should().Be(100m);
+        exposure.SignedFunctionalBalance.Should().Be(1500m);
+        exposure.TransactionCount.Should().Be(1);
+        exposure.FirstTransactionDate.Should().Be(new DateTime(2026, 7, 4));
+        exposure.LastTransactionDate.Should().Be(new DateTime(2026, 7, 4));
         exchangeRate.HasBeenUsedInTransactions.Should().BeTrue();
         exchangeRate.TransactionCount.Should().Be(1);
-        cashAccount.Balance.Should().Be(1500m);
-        revenueAccount.Balance.Should().Be(1500m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == cashAccount.Id)).ClosingBalance.Should().Be(1500m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == revenueAccount.Id)).ClosingBalance.Should().Be(-1500m);
     }
 
     [Fact]
@@ -803,24 +887,10 @@ public sealed class FinancePostingEngineTests
 
         var plan = await service.GetReversalPlanAsync(original.PostingEventId, "Correct classification", new DateTime(2026, 7, 5));
         plan.ReversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
-        var reversal = await service.PostAsync(new FinancePostingRequestDto
-        {
-            SourceModule = "TEST",
-            SourceDocumentType = "TestDocumentReversal",
-            SourceDocumentId = request.SourceDocumentId,
-            SourceDocumentTenantId = tenantId,
-            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
-            ReversalReason = plan.Reason,
-            ReversalType = "Manual",
-            PostingAction = plan.PostingAction,
-            SourceDocumentReference = "REV-SRC-001",
-            Description = "Exact dimension reversal",
-            PostingDate = plan.ReversalDate,
-            JournalType = "Reversing",
-            BookClassification = "IFRS",
-            FunctionalCurrencyCode = "GHS",
-            Lines = plan.ReversalLines
-        });
+        var reversal = await service.ReverseAsync(
+            original.PostingEventId,
+            plan.Reason,
+            plan.ReversalDate);
 
         var reversalLines = await db.AccountTransactions.Where(x => x.JournalEntryId == reversal.JournalEntryId).ToListAsync();
         reversalLines.Should().OnlyContain(x => x.FinanceDimensionSetId == originalSetId);
@@ -835,30 +905,481 @@ public sealed class FinancePostingEngineTests
     }
 
     [Fact]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task PostAsync_ShouldRejectPseudoBookAtSingleBookBoundary()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.AccountingBookCode = "ALL_ACTIVE_BOOKS";
+        var audit = new Mock<IFinanceAuditService>();
+        audit.Setup(item => item.RecordAsync(It.IsAny<FinanceAuditEventDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AuditLog());
+
+        var action = () => CreateService(db, tenantId, financeAuditService: audit.Object).PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("ALL_ACTIVE_BOOKS must be expanded*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        audit.Verify(item => item.RecordAsync(
+            It.Is<FinanceAuditEventDto>(entry =>
+                entry.EventType == FinanceAuditEvents.PostingBlockedAccountingBookAuthority
+                && entry.Reason == "BOOK_CODE_PSEUDO"
+                && entry.ResourceId == "ALL_ACTIVE_BOOKS"),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("IFRS", true)]
+    [InlineData("LOCAL_STATUTORY", false)]
+    [InlineData("UNKNOWN", false)]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task ProcurementV2Boundary_RejectsDisabledUnmappedOrWrongBookWithoutPosting(
+        string requestedBook,
+        bool disableDebitMapping)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1040", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4930", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        if (disableDebitMapping)
+        {
+            (await db.AccountAccountingBooks.SingleAsync(item => item.AccountId == debit.Id)).IsEnabled = false;
+            await db.SaveChangesAsync();
+        }
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.SourceModule = "Procurement";
+        request.OriginModuleCode = "PROC";
+        request.SourceDocumentType = "SupplierOnboardingTokenPayment";
+        request.AccountingBookCode = requestedBook;
+        request.IdempotencyKey = $"PROCUREMENT|SUPPLIER-ONBOARDING|{request.SourceDocumentId:N}|{requestedBook}|POST";
+        var action = () => CreateService(db, tenantId).PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task ExactReversal_ShouldUseDisabledHistoricalMapping_AndRemainIdempotent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "6100", AccountType.Expense);
+        var credit = SeedAccount(db, tenantId, "2100", AccountType.Liability);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var original = await service.PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        foreach (var mapping in await db.AccountAccountingBooks.ToListAsync())
+            mapping.IsEnabled = false;
+        (await db.AccountingBooks.SingleAsync()).IsActive = false;
+        await db.SaveChangesAsync();
+
+        var reversal = await service.ReverseAsync(original.PostingEventId, "Correct exact posting", new DateTime(2026, 7, 5));
+        var duplicate = await service.ReverseAsync(original.PostingEventId, "Correct exact posting", new DateTime(2026, 7, 5));
+
+        reversal.WasDuplicate.Should().BeFalse();
+        duplicate.WasDuplicate.Should().BeTrue();
+        duplicate.JournalEntryId.Should().Be(reversal.JournalEntryId);
+        (await db.JournalEntries.CountAsync()).Should().Be(2);
+        (await db.AccountBalances.ToListAsync()).Should().OnlyContain(item => item.ClosingBalance == 0m);
+    }
+
+    public static TheoryData<string> ExactReversalMutationCases => new()
+    {
+        { "account" },
+        { "side" },
+        { "amount" },
+        { "currency" },
+        { "rate" },
+        { "source-line" },
+        { "dimensions" }
+    };
+
+    [Theory]
+    [MemberData(nameof(ExactReversalMutationCases))]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task PostAsync_ShouldRejectAlteredExactReversalEvidence_ForV2(string mutation)
+    {
+        var fixture = await CreateExactReversalFixtureAsync();
+        await using var db = fixture.Db;
+        var service = CreateService(db, fixture.TenantId);
+        var original = await service.PostAsync(fixture.OriginalRequest);
+        var plan = await service.GetReversalPlanAsync(
+            original.PostingEventId,
+            "Reject altered immutable evidence",
+            new DateTime(2026, 7, 5));
+        var lines = plan.ReversalLines.ToList();
+
+        switch (mutation)
+        {
+            case "account":
+                lines[0].AccountId = fixture.AlternateAccountId;
+                break;
+            case "side":
+                foreach (var line in lines)
+                {
+                    (line.DebitAmount, line.CreditAmount) = (line.CreditAmount, line.DebitAmount);
+                    (line.TransactionDebitAmount, line.TransactionCreditAmount) =
+                        (line.TransactionCreditAmount, line.TransactionDebitAmount);
+                }
+                break;
+            case "amount":
+                lines[0].CreditAmount = 3000m;
+                lines[0].TransactionCreditAmount = 200m;
+                lines[0].ForeignCurrencyAmount = 200m;
+                lines[1].DebitAmount = 3000m;
+                lines[1].TransactionDebitAmount = 3000m;
+                break;
+            case "currency":
+                lines[0].TransactionCurrency = "EUR";
+                lines[0].ExchangeRateId = fixture.EurRateId;
+                break;
+            case "rate":
+                lines[0].ExchangeRateId = fixture.AlternateUsdRateId;
+                break;
+            case "source-line":
+                lines[0].SourceDocumentLineId = Guid.NewGuid();
+                break;
+            case "dimensions":
+                lines[0].FinanceDimensionSetId = null;
+                lines[0].Dimensions = new[]
+                {
+                    new FinancePostingDimensionValueDto { DimensionCode = "PROJECT", ValueCode = "ALT" }
+                };
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(mutation), mutation, null);
+        }
+
+        var action = () => PostDirectReversalAsync(
+            service,
+            fixture.TenantId,
+            plan,
+            lines);
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookAuthority")]
+    public async Task PostAsync_ShouldAcceptUnchangedExactReversalPlan_ForV2()
+    {
+        var fixture = await CreateExactReversalFixtureAsync();
+        await using var db = fixture.Db;
+        var service = CreateService(db, fixture.TenantId);
+        var original = await service.PostAsync(fixture.OriginalRequest);
+        var plan = await service.GetReversalPlanAsync(
+            original.PostingEventId,
+            "Preserve immutable evidence",
+            new DateTime(2026, 7, 5));
+
+        var reversal = await PostDirectReversalAsync(
+            service,
+            fixture.TenantId,
+            plan,
+            plan.ReversalLines);
+
+        reversal.PostingStatus.Should().Be("Posted");
+        (await db.JournalEntries.CountAsync()).Should().Be(2);
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldPersistStableBookIdentityAndReturnSameBookRetry()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var book = await db.AccountingBooks.SingleAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        request.IdempotencyKey = "C1|SAME-BOOK|POST";
+        var service = CreateService(db, tenantId);
+
+        var first = await service.PostAsync(request);
+        var retry = await service.PostAsync(request);
+
+        retry.WasDuplicate.Should().BeTrue();
+        retry.PostingEventId.Should().Be(first.PostingEventId);
+        retry.JournalEntryId.Should().Be(first.JournalEntryId);
+        var postingEvent = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
+            .ThenInclude(journal => journal!.Transactions).SingleAsync();
+        postingEvent.AccountingBookId.Should().Be(book.Id);
+        postingEvent.BookClassification.Should().Be(book.Code);
+        postingEvent.JournalEntry!.AccountingBookId.Should().Be(book.Id);
+        postingEvent.JournalEntry.Transactions.Should().OnlyContain(line =>
+            line.AccountingBookId == book.Id && line.BookClassification == book.Code);
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldRejectConflictingPayloadForSameBookIdempotencyIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var first = CreateRequest(tenantId, debit.Id, credit.Id);
+        first.IdempotencyKey = "C1|PAYLOAD-CONFLICT|POST";
+        await service.PostAsync(first);
+        var conflicting = CreateRequest(tenantId, debit.Id, credit.Id);
+        conflicting.IdempotencyKey = first.IdempotencyKey;
+        conflicting.SourceDocumentId = Guid.NewGuid();
+        conflicting.Description = "Conflicting economic payload";
+
+        var action = () => service.PostAsync(conflicting);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*conflicting canonical request evidence*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("origin")]
+    [InlineData("source-type")]
+    [InlineData("source-reference")]
+    [InlineData("idempotency")]
+    [InlineData("line-description")]
+    [InlineData("line-reference")]
+    [InlineData("line-notes")]
+    [InlineData("line-tag")]
+    [InlineData("line-source-id")]
+    [InlineData("budget-id")]
+    [InlineData("budget-source")]
+    [InlineData("tax-evidence")]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldFingerprintEveryNormalizedProducerEvidenceField(string mutation)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var first = CreateRequest(tenantId, debit.Id, credit.Id);
+        first.IdempotencyKey = "C1|FINGERPRINT|POST";
+        await service.PostAsync(first);
+
+        var retry = CreateRequest(tenantId, debit.Id, credit.Id);
+        retry.SourceDocumentId = first.SourceDocumentId;
+        retry.IdempotencyKey = first.IdempotencyKey;
+        switch (mutation)
+        {
+            case "origin": retry.OriginModuleCode = "PROC"; break;
+            case "source-type": retry.SourceDocumentType = "ChangedDocument"; break;
+            case "source-reference": retry.SourceDocumentReference = "SRC-CHANGED"; break;
+            case "idempotency": retry.IdempotencyKey = "C1|FINGERPRINT|CHANGED"; break;
+            case "line-description": retry.Lines[0].Description = "Changed line"; break;
+            case "line-reference": retry.Lines[0].SourceReferenceNumber = "LINE-CHANGED"; break;
+            case "line-notes": retry.Lines[0].Notes = "Changed notes"; break;
+            case "line-tag": retry.Lines[0].TransactionTag = "Changed tag"; break;
+            case "line-source-id": retry.Lines[0].SourceDocumentLineId = Guid.NewGuid(); break;
+            case "budget-id": retry.BudgetReservationIds = [Guid.NewGuid()]; break;
+            case "budget-source": retry.BudgetReservationSourceDocumentType = "PurchaseOrder"; break;
+            case "tax-evidence": retry.TaxCalculationSnapshots =
+                [
+                    new FinanceTaxCalculationSnapshotDto
+                    {
+                        DocumentType = "Invoice", DocumentId = retry.SourceDocumentId,
+                        TaxId = Guid.NewGuid(), BaseAmount = 100m, TaxableAmount = 100m,
+                        TaxRate = 0.15m, TaxAmount = 15m, CalculationOrder = 1,
+                        CalculationDate = retry.PostingDate
+                    }
+                ]; break;
+        }
+
+        await FluentActions.Invoking(() => service.PostAsync(retry)).Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("*conflicting canonical request evidence*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldFailClosedForLegacyEventWithoutCanonicalRequestFingerprint()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        var service = CreateService(db, tenantId);
+        await service.PostAsync(request);
+        var stored = await db.FinancePostingEvents.SingleAsync();
+        stored.RequestFingerprint = null;
+        stored.RequestFingerprintVersion = null;
+        await db.SaveChangesAsync();
+
+        await FluentActions.Invoking(() => service.PostAsync(request)).Should()
+            .ThrowAsync<InvalidOperationException>()
+            .WithMessage("LEGACY_POSTING_RETRY_UNAVAILABLE:*");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldRejectDifferentBookRepresentationAsParallelDisabled(bool matchByIdempotency)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var localBook = SeedAdditionalBook(db, tenantId, "LOCAL_STATUTORY", debit.Id, credit.Id);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var first = CreateRequest(tenantId, debit.Id, credit.Id);
+        first.IdempotencyKey = "C1|PARALLEL-GATE|POST";
+        await service.PostAsync(first);
+        var second = CreateRequest(tenantId, debit.Id, credit.Id);
+        second.AccountingBookCode = localBook.Code;
+        if (matchByIdempotency)
+        {
+            second.SourceDocumentId = Guid.NewGuid();
+            second.IdempotencyKey = first.IdempotencyKey;
+        }
+        else
+        {
+            second.SourceDocumentId = first.SourceDocumentId;
+            second.IdempotencyKey = "C1|PARALLEL-GATE|LOCAL|POST";
+        }
+
+        var action = () => service.PostAsync(second);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("PARALLEL_BOOK_POSTING_DISABLED:*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task ReverseAsync_ShouldPreserveOriginalRelationalBookIdentity()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var original = await service.PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+        var reversal = await service.ReverseAsync(original.PostingEventId, "C1 exact reversal", new DateTime(2026, 7, 5));
+
+        var events = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
+            .ThenInclude(journal => journal!.Transactions).OrderBy(item => item.PostingDate).ToListAsync();
+        events.Should().HaveCount(2);
+        events.Should().OnlyContain(item => item.AccountingBookId == events[0].AccountingBookId
+            && item.BookClassification == events[0].BookClassification
+            && item.JournalEntry!.AccountingBookId == events[0].AccountingBookId
+            && item.JournalEntry.Transactions.All(line => line.AccountingBookId == events[0].AccountingBookId));
+        reversal.JournalEntryId.Should().NotBe(original.JournalEntryId);
+    }
+
+    [Theory]
+    [InlineData("event")]
+    [InlineData("transaction")]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task PostAsync_ShouldFailClosedWhenStoredBookIdentityConflicts(string corruptedEvidence)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var localBook = SeedAdditionalBook(db, tenantId, "LOCAL_STATUTORY", debit.Id, credit.Id);
+        await db.SaveChangesAsync();
+        var request = CreateRequest(tenantId, debit.Id, credit.Id);
+        var service = CreateService(db, tenantId);
+        await service.PostAsync(request);
+        var postingEvent = await db.FinancePostingEvents.Include(item => item.JournalEntry)!
+            .ThenInclude(journal => journal!.Transactions).SingleAsync();
+        if (corruptedEvidence == "event")
+            postingEvent.AccountingBookId = localBook.Id;
+        else
+            postingEvent.JournalEntry!.Transactions.First().AccountingBookId = localBook.Id;
+        await db.SaveChangesAsync();
+
+        var action = () => service.PostAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*Finance posting*");
+    }
+
+    [Fact]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public void StableBookIdentityMigration_ShouldPreflightBackfillAndCreateBookQualifiedConstraints()
+    {
+        var sql = ArchivedMigrationSource.Read("20260905151918_AddStablePostingAccountingBookIdentity.cs");
+
+        sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_JOURNAL");
+        sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_TRANSACTION");
+        sql.Should().Contain("C1_BOOK_ID_PREFLIGHT_EVENT");
+        sql.Should().Contain("C1_BOOK_ID_BACKFILL_INCOMPLETE");
+        sql.Should().Contain("ALL_ACTIVE_BOOKS");
+        sql.Should().Contain("b.TenantId = j.TenantId");
+        sql.Should().Contain("j.TenantId <> t.TenantId");
+        sql.Should().Contain("Latin1_General_100_BIN2");
+        sql.Should().Contain("DATALENGTH(j.BookClassification)");
+        foreach (var token in new[] { "JournalEntries", "AccountingBookId", "FinancePostingEvents",
+            "RequestFingerprint", "TenantId", "IdempotencyKey", "AccountTransactions", "JournalEntryId",
+            "C1_BOOK_ID_DOWN_BLOCKED" }) sql.Should().Contain(token);
+
+        var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+            .UseSqlServer("Server=(localdb)\\mssqllocaldb;Database=C1MigrationDiscovery;Trusted_Connection=True")
+            .Options;
+        using var discoveryContext = new ApplicationDbContext(options);
+        discoveryContext.GetService<IMigrationsAssembly>().Migrations.Keys.Should()
+            .Equal("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+    }
+
+    [Fact]
     [Trait("Category", "FinanceDimensions")]
     public void Migration_ShouldAddDimensionFoundationAndNullablePostedLineLinkage()
     {
-        var migration = new TestFinanceDimensionsMigration();
-        var operations = migration.BuildUpOperations();
-
-        operations.OfType<CreateTableOperation>().Select(x => x.Name).Should().BeEquivalentTo(new[]
+        var source = ArchivedMigrationSource.Read("20260824190000_AddFinanceTransactionDimensions.cs");
+        foreach (var token in new[]
         {
             "FinanceDimensionDefinitions",
             "FinanceDimensionValues",
             "FinanceDimensionSets",
             "FinanceDimensionSetItems",
-            "FinanceDimensionAccountRules"
-        });
-        operations.OfType<AddColumnOperation>().Should().ContainSingle(x =>
-            x.Table == "AccountTransactions" && x.Name == "FinanceDimensionSetId" && x.IsNullable);
-        operations.OfType<AddForeignKeyOperation>().Should().ContainSingle(x =>
-            x.Table == "AccountTransactions"
-            && x.PrincipalTable == "FinanceDimensionSets"
-            && x.OnDelete == ReferentialAction.Restrict);
-
-        var down = migration.BuildDownOperations();
-        down.OfType<DropColumnOperation>().Should().ContainSingle(x =>
-            x.Table == "AccountTransactions" && x.Name == "FinanceDimensionSetId");
+            "FinanceDimensionAccountRules",
+            "AccountTransactions", "FinanceDimensionSetId", "FinanceDimensionSets",
+            "onDelete: ReferentialAction.Restrict", "migrationBuilder.DropColumn"
+        }) source.Should().Contain(token);
     }
 
     private static ApplicationDbContext CreateContext()
@@ -871,30 +1392,19 @@ public sealed class FinancePostingEngineTests
         return new ApplicationDbContext(options);
     }
 
-    private sealed class TestFinanceDimensionsMigration : AddFinanceTransactionDimensions
-    {
-        public IReadOnlyList<MigrationOperation> BuildUpOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Up(builder);
-            return builder.Operations;
-        }
-
-        public IReadOnlyList<MigrationOperation> BuildDownOperations()
-        {
-            var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-            Down(builder);
-            return builder.Operations;
-        }
-    }
 
     private static FinancePostingEngine CreateService(
         ApplicationDbContext db,
         Guid tenantId,
-        IDictionary<string, string>? claims = null)
+        IDictionary<string, string>? claims = null,
+        IFinanceAuditService? financeAuditService = null)
     {
         var currentUser = CreateCurrentUser(tenantId, claims);
-        return new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
+        return new FinancePostingEngine(
+            db,
+            currentUser.Object,
+            Mock.Of<ILogger<FinancePostingEngine>>(),
+            financeAuditService);
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(
@@ -929,6 +1439,16 @@ public sealed class FinancePostingEngineTests
             CoaType = "Segmented",
             AccountSeparator = "-"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = "IFRS",
+            Name = "IFRS Primary",
+            IsDefault = true,
+            IsActive = true,
+            AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -957,6 +1477,16 @@ public sealed class FinancePostingEngineTests
         };
 
         db.FiscalPeriods.Add(period);
+        foreach (var book in db.AccountingBooks.Local.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToList())
+        {
+            db.AccountingBookPeriods.Add(new AccountingBookPeriod
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id, FiscalPeriodId = period.Id,
+                PeriodStatus = isLocked ? AccountingBookPeriodStatus.Locked
+                    : isClosed ? AccountingBookPeriodStatus.Closed
+                    : isOpen ? AccountingBookPeriodStatus.Open : AccountingBookPeriodStatus.Future
+            });
+        }
         return period;
     }
 
@@ -984,7 +1514,48 @@ public sealed class FinancePostingEngineTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        db.AccountAccountingBooks.Add(new AccountAccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            AccountId = account.Id,
+            AccountingBookId = book.Id,
+            IsEnabled = true
+        });
         return account;
+    }
+
+    private static AccountingBook SeedAdditionalBook(
+        ApplicationDbContext db,
+        Guid tenantId,
+        string code,
+        params Guid[] accountIds)
+    {
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Code = code,
+            Name = code,
+            IsActive = true,
+            AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
+        foreach (var period in db.FiscalPeriods.Local.Where(item => item.TenantId == tenantId && !item.IsDeleted).ToList())
+            db.AccountingBookPeriods.Add(new AccountingBookPeriod { Id = Guid.NewGuid(), TenantId = tenantId,
+                AccountingBookId = book.Id, FiscalPeriodId = period.Id,
+                PeriodStatus = period.IsLocked ? AccountingBookPeriodStatus.Locked : period.IsClosed ? AccountingBookPeriodStatus.Closed
+                    : period.IsOpen ? AccountingBookPeriodStatus.Open : AccountingBookPeriodStatus.Future });
+        foreach (var accountId in accountIds)
+        {
+            db.AccountAccountingBooks.Add(new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = accountId,
+                AccountingBookId = book.Id, IsEnabled = true
+            });
+        }
+        return book;
     }
 
     private static ModuleDefinition SeedModule(
@@ -1066,9 +1637,97 @@ public sealed class FinancePostingEngineTests
         return exchangeRate;
     }
 
-    private static FinancePostingRequestDto CreateRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
+    private static async Task<ExactReversalFixture> CreateExactReversalFixtureAsync()
     {
-        return new FinancePostingRequestDto
+        var tenantId = Guid.NewGuid();
+        var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var cash = SeedAccount(db, tenantId, "1000", AccountType.Asset, isMultiCurrency: true);
+        var revenue = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var alternateCash = SeedAccount(db, tenantId, "1010", AccountType.Asset, isMultiCurrency: true);
+        var usdRate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        var alternateUsdRate = SeedExchangeRate(db, tenantId, "USD", 15m);
+        alternateUsdRate.RateSource = "Alternative unit-test source";
+        var eurRate = SeedExchangeRate(db, tenantId, "EUR", 15m);
+        SeedDimensionValue(db, tenantId, "DEPARTMENT", "Department", "SALES", "Sales", 1);
+        SeedDimensionValue(db, tenantId, "PROJECT", "Project", "ALT", "Alternative", 2);
+        foreach (var accountId in new[] { cash.Id, alternateCash.Id })
+        {
+            foreach (var currency in new[] { "USD", "EUR" })
+            {
+                db.AccountCurrencyLinks.Add(new AccountCurrencyLink
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = tenantId,
+                    AccountId = accountId,
+                    LinkedCurrencyCode = currency,
+                    IsActive = true,
+                    EffectiveDate = new DateTime(2026, 1, 1),
+                    TransactionRateType = "Daily",
+                    RevaluationRateType = "Month-End"
+                });
+            }
+        }
+        await db.SaveChangesAsync();
+
+        var request = CreateForeignCurrencyRequest(tenantId, cash.Id, revenue.Id);
+        request.Lines[0].ExchangeRateId = usdRate.Id;
+        request.Lines[0].SourceDocumentLineId = Guid.NewGuid();
+        request.Lines[1].SourceDocumentLineId = Guid.NewGuid();
+        foreach (var line in request.Lines)
+        {
+            line.Dimensions = new[]
+            {
+                new FinancePostingDimensionValueDto { DimensionCode = "DEPARTMENT", ValueCode = "SALES" }
+            };
+        }
+
+        return new ExactReversalFixture(
+            db,
+            tenantId,
+            alternateCash.Id,
+            alternateUsdRate.Id,
+            eurRate.Id,
+            request);
+    }
+
+    private static Task<FinancePostingResultDto> PostDirectReversalAsync(
+        FinancePostingEngine service,
+        Guid tenantId,
+        FinanceReversalPlanDto plan,
+        IReadOnlyList<FinancePostingLineDto> lines)
+    {
+        return service.PostAsync(new FinancePostingRequestV2Dto
+        {
+            SourceModule = "TEST",
+            SourceDocumentType = "DirectReversalV2",
+            SourceDocumentId = Guid.NewGuid(),
+            SourceDocumentTenantId = tenantId,
+            ReversalOfJournalEntryId = plan.OriginalJournalEntryId,
+            ReversalReason = plan.Reason,
+            ReversalType = "Exact",
+            PostingAction = "Reverse",
+            Description = "Direct V2 exact reversal",
+            PostingDate = plan.ReversalDate,
+            JournalType = "System Generated",
+            AccountingBookCode = "IFRS",
+            FunctionalCurrencyCode = "GHS",
+            Lines = lines
+        });
+    }
+
+    private sealed record ExactReversalFixture(
+        ApplicationDbContext Db,
+        Guid TenantId,
+        Guid AlternateAccountId,
+        Guid AlternateUsdRateId,
+        Guid EurRateId,
+        FinancePostingRequestV2Dto OriginalRequest);
+
+    private static FinancePostingRequestV2Dto CreateRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
+    {
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "TestDocument",
@@ -1079,7 +1738,7 @@ public sealed class FinancePostingEngineTests
             Description = "Batch 4 posting engine test",
             PostingDate = new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {
@@ -1099,9 +1758,9 @@ public sealed class FinancePostingEngineTests
         };
     }
 
-    private static FinancePostingRequestDto CreateForeignCurrencyRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
+    private static FinancePostingRequestV2Dto CreateForeignCurrencyRequest(Guid tenantId, Guid debitAccountId, Guid creditAccountId)
     {
-        return new FinancePostingRequestDto
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "TEST",
             SourceDocumentType = "ForeignCurrencyDocument",
@@ -1112,7 +1771,7 @@ public sealed class FinancePostingEngineTests
             Description = "Foreign currency posting engine test",
             PostingDate = new DateTime(2026, 7, 4),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines = new[]
             {

@@ -195,17 +195,6 @@ namespace ErpSystem.Core.Entities.Finance
         #region Balance Tracking (Base Currency)
 
         /// <summary>
-        /// Current account balance in base currency (GHS).
-        /// 
-        /// For Asset, Expense accounts: Debit increases, Credit decreases.
-        /// For Liability, Equity, Revenue accounts: Credit increases, Debit decreases.
-        /// 
-        /// Automatically updated by transaction posting process.
-        /// </summary>
-        [Column(TypeName = "decimal(18,2)")]
-        public decimal Balance { get; set; } = 0;
-
-        /// <summary>
         /// Cumulative debit amount posted to this account (base currency).
         /// Used for detailed transaction analysis and reconciliation.
         /// </summary>

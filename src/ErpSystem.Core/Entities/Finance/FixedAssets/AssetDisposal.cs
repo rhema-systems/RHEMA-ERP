@@ -129,6 +129,10 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
         public string? FinalDepreciationProrationBasis { get; set; }
 
         public DepreciationMethod? FinalDepreciationMethodSnapshot { get; set; }
+        public DepreciationConvention? FinalDepreciationConventionSnapshot { get; set; }
+
+        [Column(TypeName = "decimal(18,8)")]
+        public decimal FinalDepreciationConventionFactor { get; set; }
         public Guid? FinalDepreciationScheduleId { get; set; }
 
         [Column(TypeName = "decimal(18,4)")]
