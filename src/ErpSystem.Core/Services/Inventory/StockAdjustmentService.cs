@@ -456,8 +456,12 @@ public class StockAdjustmentService : IStockAdjustmentService
         if (isOpeningStock) await RevalidateOpeningStockAsync(adjustment);
         adjustment.PayloadHash = payloadHash;
         adjustment.IntegrityHash = AdjustmentIntegrityHash(adjustment);
-        await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
         var directDisposal = await GetDirectDisposalSourceAsync(adjustment, allowUnlinkedDraft: true);
+        // A verified, generated disposal adjustment inherits the disposal's
+        // authorization. Requiring a second stock-adjustment warehouse scope
+        // would otherwise stop an approval-free disposal at its internal leg.
+        if (directDisposal is null)
+            await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
         await AddEvidenceAsync(adjustment, dto.Evidence, EvidenceRequired(reasonCode) && directDisposal is null);
         var plannedLines = adjustment.Items.ToList();
         adjustment.Items.Clear();
@@ -656,13 +660,14 @@ public class StockAdjustmentService : IStockAdjustmentService
             }
             EnsureRowVersion(adjustment.RowVersion, request.RowVersion);
             if (adjustment.Items.Count == 0) throw new InvalidOperationException("The adjustment has no lines.");
-            await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
+            // A generated adjustment executes its verified disposal source; it must not
+            // introduce a second approval workflow or a separate warehouse scope.
+            var disposalSource = await GetDirectDisposalSourceAsync(adjustment);
+            if (disposalSource is null)
+                await RequireAccessAsync("procurement.inventory.adjust.request", adjustment, adjustment.AdjustmentNumber);
             await RevalidateEvidenceAsync(adjustment);
             await RevalidateOpeningStockAsync(adjustment);
             var before = Snapshot(adjustment);
-            // A generated adjustment executes its verified disposal source; it must not
-            // introduce a second approval workflow after that source was made ready.
-            var disposalSource = await GetDirectDisposalSourceAsync(adjustment);
             var workflow = disposalSource is null
                 ? await _workflow.SubmitAsync("StockAdjustment", adjustment.Id)
                 : new WorkflowIntegrationResult(new ErpSystem.Core.DTOs.Workflow.WorkflowExecutionResult
@@ -902,7 +907,9 @@ public class StockAdjustmentService : IStockAdjustmentService
                 }
                 EnsureRowVersion(adjustment.RowVersion, request.RowVersion);
                 if (adjustment.ApprovalRequired && adjustment.RequestedById == userId) throw new InvalidOperationException("The adjustment requester cannot post the same adjustment.");
-                await RequireAccessAsync("procurement.inventory.adjust.approve", adjustment, adjustment.AdjustmentNumber);
+                var disposalSource = await GetDirectDisposalSourceAsync(adjustment);
+                if (disposalSource is null)
+                    await RequireAccessAsync("procurement.inventory.adjust.approve", adjustment, adjustment.AdjustmentNumber);
                 await RevalidateEvidenceAsync(adjustment);
                 await RevalidateOpeningStockAsync(adjustment);
                 var before = Snapshot(adjustment);

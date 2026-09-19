@@ -274,7 +274,7 @@ public sealed class EhcTicketService : IEhcTicketService
     private async Task PublishPropertyEnquirySalesReadyAsync(EhcTicket ticket, Guid? triggeredByUserId,
         CancellationToken cancellationToken)
     {
-        if (ticket.Status == EhcTicketStatus.New || !await IsAssignedToActiveSalesDepartmentAsync(ticket, cancellationToken))
+        if (ticket.Status == EhcTicketStatus.New || !await IsAssignedToActiveSalesOrganizationUnitAsync(ticket, cancellationToken))
         {
             return;
         }
