@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import {
   Building2,
   CheckCircle2,
+  Eye,
   ImagePlus,
   Loader2,
   MapPin,
@@ -21,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Pagination } from '@/components/ui/pagination';
 import {
   Select,
   SelectContent,
@@ -35,6 +37,9 @@ import {
   type EstateManagedAsset,
   type EstateManagedAssetDocument,
 } from '@/services/estate-land-management.service';
+import { getStatusBadgeClassName } from '@/lib/status-badge';
+
+const LISTINGS_PER_PAGE = 10;
 
 function assetTypeLabel(value: EstateManagedAssetType) {
   if (value === EstateManagedAssetType.Land) return 'Land';
@@ -78,6 +83,27 @@ function commercialSummary(asset: EstateManagedAsset) {
   );
 }
 
+function listingStatusLabel(asset: EstateManagedAsset) {
+  if (asset.isPublishedToExternalPortal && asset.externalListingStatus) {
+    return asset.externalListingStatus;
+  }
+  if (asset.listingScope === 'demarcation') return 'Pending publication';
+  return asset.externalListingStatus || 'Draft';
+}
+
+function listingTypeLabel(asset: EstateManagedAsset) {
+  if (asset.externalListingType === 'SaleAndRent') return 'Sale and rent';
+  if (asset.externalListingType && asset.externalListingType !== 'None') {
+    return asset.externalListingType;
+  }
+  if (asset.isAvailableForSale && asset.isAvailableForLease) {
+    return 'Sale and rent';
+  }
+  if (asset.isAvailableForSale) return 'Sale';
+  if (asset.isAvailableForLease) return 'Rent';
+  return 'Not set';
+}
+
 export default function EstatePropertyListingsPage() {
   const searchParams = useSearchParams();
   const requestedAssetId = searchParams.get('assetId');
@@ -90,6 +116,7 @@ export default function EstatePropertyListingsPage() {
   const [requestedAssetUnavailable, setRequestedAssetUnavailable] =
     React.useState(false);
   const [search, setSearch] = React.useState('');
+  const [listingPage, setListingPage] = React.useState(1);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
@@ -135,7 +162,7 @@ export default function EstatePropertyListingsPage() {
           setSelectedId((current) =>
             current && data.some((asset) => asset.id === current)
               ? current
-              : (data[0]?.id ?? null)
+              : null
           );
         }
       } catch {
@@ -164,7 +191,10 @@ export default function EstatePropertyListingsPage() {
   }, [loadAssets]);
 
   React.useEffect(() => {
-    if (!selected) return;
+    if (!selected) {
+      setDocuments([]);
+      return;
+    }
 
     const leaseTermMonths = selected.externalLeaseTermMonths;
     const durationUsesYears =
@@ -221,6 +251,35 @@ export default function EstatePropertyListingsPage() {
         : selected.id
     );
   }, [loadDocuments, requestedListingType, selected]);
+
+  const orderedAssets = React.useMemo(
+    () =>
+      [...assets].sort((left, right) => {
+        const rank = (asset: EstateManagedAsset) => {
+          const status = listingStatusLabel(asset).toLowerCase();
+          if (status.includes('published')) return 0;
+          if (status.includes('pending')) return 1;
+          if (status.includes('draft')) return 2;
+          return 3;
+        };
+        const rankDelta = rank(left) - rank(right);
+        if (rankDelta !== 0) return rankDelta;
+        return left.name.localeCompare(right.name);
+      }),
+    [assets]
+  );
+  const listingTotalPages = Math.max(
+    1,
+    Math.ceil(orderedAssets.length / LISTINGS_PER_PAGE)
+  );
+  const pagedAssets = orderedAssets.slice(
+    (listingPage - 1) * LISTINGS_PER_PAGE,
+    listingPage * LISTINGS_PER_PAGE
+  );
+
+  React.useEffect(() => {
+    setListingPage((current) => Math.min(current, listingTotalPages));
+  }, [listingTotalPages]);
 
   const listingImages = documents.filter((document) => document.isListingImage);
   const publishedCount = assets.filter(
@@ -439,16 +498,15 @@ export default function EstatePropertyListingsPage() {
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[380px_minmax(0,1fr)]">
-        <Card>
-          <CardHeader>
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <CardTitle className="text-base">Portal inventory</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
             <form
-              className="flex gap-2"
+              className="flex w-full gap-2 lg:w-[28rem]"
               onSubmit={(event) => {
                 event.preventDefault();
+                setListingPage(1);
                 void loadAssets(search);
               }}
             >
@@ -465,71 +523,122 @@ export default function EstatePropertyListingsPage() {
                 <Search className="h-4 w-4" />
               </Button>
             </form>
-
-            <div className="space-y-2">
-              {isLoading ? (
-                <div className="flex items-center justify-center gap-2 rounded-md border py-12 text-sm text-muted-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading assets
-                </div>
-              ) : null}
-              {!isLoading &&
-                assets.map((asset) => {
-                  const active = selected?.id === asset.id;
-                  return (
-                    <button
-                      key={asset.id}
-                      type="button"
-                      onClick={() => {
-                        setRequestedAssetUnavailable(false);
-                        setSelectedId(asset.id);
-                      }}
-                      className={`w-full rounded-md border p-3 text-left ${
-                        active
-                          ? 'border-primary bg-primary/5'
-                          : 'bg-background hover:bg-muted'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold">
-                            {asset.name}
-                          </p>
-                          <p className="mt-1 truncate text-xs text-muted-foreground">
-                            {asset.assetCode}
-                          </p>
-                        </div>
-                        {asset.isPublishedToExternalPortal &&
-                        asset.externalListingStatus === 'Published' ? (
-                          <Badge variant="secondary">Published</Badge>
-                        ) : (
-                          <Badge variant="outline">
-                            {asset.listingScope === 'demarcation'
-                              ? 'Pending publication'
-                              : 'Draft'}
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
-                        <MapPin className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">
-                          {asset.location || 'Location not recorded'}
-                        </span>
-                      </div>
-                    </button>
-                  );
-                })}
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {isLoading ? (
+            <div className="flex items-center justify-center gap-2 rounded-md border py-12 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading assets
             </div>
-          </CardContent>
-        </Card>
+          ) : null}
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">
-              {selected?.name || 'Select an asset'}
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-5">
+          {!isLoading && orderedAssets.length === 0 ? (
+            <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
+              No portal listing candidates match the current search.
+            </div>
+          ) : null}
+
+          {!isLoading && orderedAssets.length > 0 ? (
+            <div className="overflow-x-auto rounded-md border">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead className="border-b bg-muted/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2 font-medium">Property</th>
+                    <th className="px-3 py-2 font-medium">Asset type</th>
+                    <th className="px-3 py-2 font-medium">Request type</th>
+                    <th className="px-3 py-2 font-medium">Price</th>
+                    <th className="px-3 py-2 font-medium">Location</th>
+                    <th className="px-3 py-2 font-medium">Status</th>
+                    <th className="px-3 py-2 text-right font-medium">
+                      Action
+                    </th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {pagedAssets.map((asset) => {
+                    const active = selected?.id === asset.id;
+                    const status = listingStatusLabel(asset);
+                    return (
+                      <tr
+                        key={asset.id}
+                        className={active ? 'bg-primary/5' : 'bg-background'}
+                      >
+                        <td className="px-3 py-3 align-top">
+                          <div className="font-medium">{asset.name}</div>
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {asset.assetCode}
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          {assetTypeLabel(asset.assetType)}
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          <Badge variant="secondary">
+                            {listingTypeLabel(asset)}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          {commercialSummary(asset)}
+                        </td>
+                        <td className="px-3 py-3 align-top text-muted-foreground">
+                          <div className="flex max-w-[18rem] items-center gap-2">
+                            <MapPin className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">
+                              {asset.location || 'Location not recorded'}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="px-3 py-3 align-top">
+                          <Badge
+                            variant="outline"
+                            className={getStatusBadgeClassName(status)}
+                          >
+                            {status}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-3 text-right align-top">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant={active ? 'default' : 'outline'}
+                            className="gap-2"
+                            onClick={() => {
+                              setRequestedAssetUnavailable(false);
+                              setSelectedId(asset.id);
+                            }}
+                          >
+                            <Eye className="h-4 w-4" />
+                            View
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+
+          {orderedAssets.length > LISTINGS_PER_PAGE ? (
+            <Pagination
+              currentPage={listingPage}
+              totalPages={listingTotalPages}
+              totalItems={orderedAssets.length}
+              pageSize={LISTINGS_PER_PAGE}
+              onPageChange={setListingPage}
+            />
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            {selected?.name || 'Select an asset'}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-5">
             {requestedAssetUnavailable ? (
               <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
                 The requested managed asset could not be loaded. Search for the
@@ -926,7 +1035,6 @@ export default function EstatePropertyListingsPage() {
             )}
           </CardContent>
         </Card>
-      </div>
     </div>
   );
 }

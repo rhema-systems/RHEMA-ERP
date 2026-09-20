@@ -9,9 +9,11 @@ import {
   CreditCard,
   FileText,
   FileSignature,
+  FileUp,
   Landmark,
   Loader2,
   Home,
+  Plus,
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react';
@@ -26,6 +28,12 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -254,6 +262,10 @@ export function LeaseSetupWorkspace() {
   const [rightOfEntryDate, setRightOfEntryDate] = React.useState('');
   const [leaseTermYears, setLeaseTermYears] = React.useState('');
   const [propertyFileReference, setPropertyFileReference] = React.useState('');
+  const [signedAgreementFile, setSignedAgreementFile] =
+    React.useState<File | null>(null);
+  const [fileInputResetKey, setFileInputResetKey] = React.useState(0);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
@@ -272,7 +284,9 @@ export function LeaseSetupWorkspace() {
       setAssets(
         managedAssets.filter(
           (asset) =>
-            asset.status === EstateManagedAssetStatus.Available &&
+            (asset.status === EstateManagedAssetStatus.Available ||
+              (asset.assetType === EstateManagedAssetType.Land &&
+                asset.status === EstateManagedAssetStatus.LandBank)) &&
             asset.isAvailableForLease &&
             !asset.customerBusinessPartnerId
         )
@@ -310,7 +324,7 @@ export function LeaseSetupWorkspace() {
   const signedAgreementReference = propertyFileReference.trim();
   const leaseStartDate = rightOfEntryDate || dateOfTenancy;
   const signedReferenceNeedsDate =
-    Boolean(signedAgreementReference) && !leaseStartDate;
+    Boolean(signedAgreementReference || signedAgreementFile) && !leaseStartDate;
   const leaseStatusPreview = signedAgreementReference && leaseStartDate
     ? 'Leased - signed agreement and start / move-in date recorded'
     : 'Reserved - customer selected, agreement/signature or start date pending';
@@ -349,6 +363,8 @@ export function LeaseSetupWorkspace() {
     setRightOfEntryDate('');
     setLeaseTermYears('');
     setPropertyFileReference('');
+    setSignedAgreementFile(null);
+    setFileInputResetKey((current) => current + 1);
   };
 
   const saveLeaseSetup = async () => {
@@ -375,6 +391,21 @@ export function LeaseSetupWorkspace() {
 
     setIsSaving(true);
     try {
+      let signedAgreementReferenceToSave =
+        propertyFileReference.trim() || null;
+      if (signedAgreementFile) {
+        const uploadedAgreement = await estateLandManagementService.uploadDocument(
+          selectedAsset.id,
+          signedAgreementFile,
+          'Signed Lease Agreement',
+          `Signed agreement - ${selectedAsset.assetCode}`
+        );
+        signedAgreementReferenceToSave =
+          uploadedAgreement.centralDocumentReference ||
+          uploadedAgreement.documentName ||
+          uploadedAgreement.fileName;
+      }
+
       const savedLease = await estateLandManagementService.updateRegister(
         selectedAsset.id,
         {
@@ -384,7 +415,7 @@ export function LeaseSetupWorkspace() {
           customerBusinessPartnerId: selectedCustomer.id,
           lesseeName: selectedCustomer.partnerName,
           lesseeAddress: selectedCustomer.physicalAddress || null,
-          propertyFileReference: propertyFileReference.trim() || null,
+          propertyFileReference: signedAgreementReferenceToSave,
         }
       );
 
@@ -396,6 +427,7 @@ export function LeaseSetupWorkspace() {
         ...current.filter((asset) => asset.id !== savedLease.id),
       ]);
       clearForm();
+      setIsCreateDialogOpen(false);
       toast.success(
         'Lease setup saved and the asset was reserved. Continue Occupancy, Handover, Billing, and Records handoffs as required.'
       );
@@ -410,38 +442,16 @@ export function LeaseSetupWorkspace() {
 
   return (
     <div className="space-y-6">
-      <Card className="border-primary/20">
-      <CardHeader>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
               <FileSignature className="h-5 w-5 text-primary" />
               New Lease Assignment
-            </CardTitle>
-            <CardDescription className="mt-2 max-w-3xl">
-              Attach a customer and set the lease terms here. Land ground rent
-              is inherited from the approved Estates assessment; apartments and
-              units use their agreed rent amount. Only assets released as
-              Available for Lease are offered for selection.
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">Lease Management</Badge>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              disabled={isLoading}
-              onClick={() => void loadOptions()}
-              aria-label="Refresh available properties and customers"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
+            </DialogTitle>
+          </DialogHeader>
 
-      <CardContent className="space-y-6">
+      <div className="space-y-6">
         {loadError ? (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
             {loadError}
@@ -535,20 +545,30 @@ export function LeaseSetupWorkspace() {
 
           <div className="space-y-2">
             <Label htmlFor="lease-file-reference">
-              Signed agreement / property file reference
+              Signed agreement / property file
             </Label>
             <Input
+              key={fileInputResetKey}
               id="lease-file-reference"
-              maxLength={120}
-              value={propertyFileReference}
-              onChange={(event) => setPropertyFileReference(event.target.value)}
-              placeholder="e.g. PM/LEASE/2026/001"
+              type="file"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setSignedAgreementFile(file);
+                setPropertyFileReference(file?.name ?? '');
+              }}
             />
             <p className="text-xs text-muted-foreground">
-              Required before ground-rent billing can start. Generate the
-              agreement from the approved template, then record the signed
-              document or property file reference here.
+              Upload the signed agreement or property file. The uploaded
+              document reference will be saved on the lease record before
+              billing can continue.
             </p>
+            {signedAgreementFile ? (
+              <Badge variant="secondary" className="w-fit gap-1">
+                <FileUp className="h-3.5 w-3.5" />
+                {signedAgreementFile.name}
+              </Badge>
+            ) : null}
           </div>
         </div>
 
@@ -691,8 +711,9 @@ export function LeaseSetupWorkspace() {
             Save lease setup
           </Button>
         </div>
-      </CardContent>
-      </Card>
+      </div>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader>
@@ -705,9 +726,29 @@ export function LeaseSetupWorkspace() {
                 status.
               </CardDescription>
             </div>
-            <Badge variant="secondary">
-              {filteredLeaseRecords.length} records
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">
+                {filteredLeaseRecords.length} records
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={isLoading}
+                onClick={() => void loadOptions()}
+                aria-label="Refresh lease management data"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                className="gap-2"
+                onClick={() => setIsCreateDialogOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Add New Lease Assignment
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">

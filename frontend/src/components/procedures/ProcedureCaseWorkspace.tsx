@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import React from 'react';
-import { usePathname, useSearchParams } from 'next/navigation';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import {
   BookTemplate,
   CheckCircle2,
@@ -43,6 +43,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { CentralDocumentViewerDialog } from '@/components/document-management/CentralDocumentViewerDialog';
 import { useToast } from '@/hooks/use-toast';
 import { getStatusBadgeClassName } from '@/lib/status-badge';
+import { organizationLevelService } from '@/services/hr/organization-level.service';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import {
   documentManagementService,
   type CentralDocumentGenerationTemplate,
@@ -88,6 +91,15 @@ const LAND_FEE_ENTITY_TYPES = new Set([
 const CHANGE_OF_USE_ENTITY_TYPES = new Set(['EstateChangeOfUse']);
 
 const GENERATED_DOCUMENT_MODULES = new Set(['Estate', 'Legal']);
+
+type DepartmentOption = {
+  id: string;
+  name: string;
+  code: string;
+  organizationLevelId: string;
+  levelName?: string | null;
+};
+
 const LINKED_LEGAL_STAGE_EDITABLE_FIELDS: Record<string, string[]> = {
   'Legal Intake': ['assignedLegalOfficer'],
   'Agreement Vetting': [
@@ -389,6 +401,11 @@ const formatFinanceStatus = (
   fallback = 'Not generated'
 ): string => status?.trim().replace(/([a-z])([A-Z])/g, '$1 $2') || fallback;
 
+const isDepartmentLevel = (name?: string | null, code?: string | null) => {
+  const normalized = `${name ?? ''} ${code ?? ''}`.trim().toLowerCase();
+  return normalized.includes('department') || normalized.includes('dept');
+};
+
 const isLegalTransferStageSignatureRecorded = (
   procedureCase: ProcedureCaseDetail,
   document: ProcedureCaseDocument
@@ -432,6 +449,7 @@ export function ProcedureCaseWorkspace({
   caseBasePath,
   detailOnly = false,
 }: ProcedureCaseWorkspaceProps) {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const pathname = usePathname();
   const terminology = getProcedureWorkspaceTerminology(workspaceType);
@@ -473,6 +491,12 @@ export function ProcedureCaseWorkspace({
   const [previewDocumentId, setPreviewDocumentId] = React.useState<
     string | null
   >(null);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
+  const [departmentOptions, setDepartmentOptions] = React.useState<
+    DepartmentOption[]
+  >([]);
+  const [isLoadingDepartments, setIsLoadingDepartments] =
+    React.useState(false);
   const [generationTemplates, setGenerationTemplates] = React.useState<
     CentralDocumentGenerationTemplate[]
   >([]);
@@ -491,6 +515,8 @@ export function ProcedureCaseWorkspace({
     referenceNumber: prefilledCase.referenceNumber,
     applicantName: prefilledCase.applicantName,
     sourceDepartment: prefilledCase.sourceDepartment,
+    organizationLevelId: searchParams.get('organizationLevelId') || '',
+    organizationUnitId: searchParams.get('organizationUnitId') || '',
     receivedDate: prefilledCase.receivedDate,
     description: prefilledCase.description,
   });
@@ -521,6 +547,17 @@ export function ProcedureCaseWorkspace({
   )?.value;
   const isLinkedLegalMatter =
     module === 'Legal' && Boolean(originatingPropertyCaseId);
+  const selectedNewCaseDepartment = departmentOptions.find(
+    (department) => department.id === newCase.organizationUnitId
+  );
+  const selectedCaseDepartmentValue =
+    selectedCase?.organizationUnitId ||
+    departmentOptions.find(
+      (department) =>
+        department.name.trim().toLowerCase() ===
+        (selectedCase?.sourceDepartment ?? '').trim().toLowerCase()
+    )?.id ||
+    '';
   const legalTransferFinanceSnapshot = React.useMemo(() => {
     if (!selectedCase || entityType !== 'LegalTransfer') {
       return null;
@@ -816,6 +853,56 @@ export function ProcedureCaseWorkspace({
   }, [loadCases]);
 
   React.useEffect(() => {
+    let mounted = true;
+
+    const loadDepartments = async () => {
+      setIsLoadingDepartments(true);
+      try {
+        const [levels, units] = await Promise.all([
+          organizationLevelService.getAll(),
+          organizationUnitService.getSummary(),
+        ]);
+        if (!mounted) {
+          return;
+        }
+
+        const departmentLevelIds = new Set(
+          levels
+            .filter((level) => level.isActive && isDepartmentLevel(level.name, level.code))
+            .map((level) => level.id)
+        );
+        const departmentUnits = units
+          .filter((unit: OrganizationUnitSummary) =>
+            unit.isActive && departmentLevelIds.has(unit.organizationLevelId)
+          )
+          .sort((left, right) => left.name.localeCompare(right.name))
+          .map((unit) => ({
+            id: unit.id,
+            name: unit.name,
+            code: unit.code,
+            organizationLevelId: unit.organizationLevelId,
+            levelName: unit.levelName,
+          }));
+        setDepartmentOptions(departmentUnits);
+      } catch {
+        if (mounted) {
+          setDepartmentOptions([]);
+        }
+      } finally {
+        if (mounted) {
+          setIsLoadingDepartments(false);
+        }
+      }
+    };
+
+    void loadDepartments();
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  React.useEffect(() => {
     if (
       requestedCaseId ||
       appliedPrefillSignatureRef.current === prefillSignature
@@ -829,14 +916,26 @@ export function ProcedureCaseWorkspace({
       Boolean(prefilledCase.sourceDepartment) ||
       Boolean(prefilledCase.receivedDate) ||
       Boolean(prefilledCase.description) ||
+      Boolean(searchParams.get('organizationUnitId')) ||
       Object.keys(prefilledFieldValues).length > 0;
     if (!hasPrefill) {
       return;
     }
 
     appliedPrefillSignatureRef.current = prefillSignature;
-    setNewCase(prefilledCase);
-  }, [prefillSignature, prefilledCase, prefilledFieldValues, requestedCaseId]);
+    setNewCase((current) => ({
+      ...current,
+      ...prefilledCase,
+      organizationLevelId: searchParams.get('organizationLevelId') || '',
+      organizationUnitId: searchParams.get('organizationUnitId') || '',
+    }));
+  }, [
+    prefillSignature,
+    prefilledCase,
+    prefilledFieldValues,
+    requestedCaseId,
+    searchParams,
+  ]);
 
   React.useEffect(() => {
     if (!supportsGeneratedDocuments) {
@@ -1010,6 +1109,11 @@ export function ProcedureCaseWorkspace({
   };
 
   const createCase = async () => {
+    if (!selectedNewCaseDepartment) {
+      setError('Select the source department from HR organization units.');
+      return;
+    }
+
     setIsSaving(true);
     setError(null);
     try {
@@ -1018,7 +1122,9 @@ export function ProcedureCaseWorkspace({
         entityType,
         title: newCase.title,
         applicantName: newCase.applicantName,
-        sourceDepartment: newCase.sourceDepartment,
+        sourceDepartment: selectedNewCaseDepartment.name,
+        organizationLevelId: selectedNewCaseDepartment.organizationLevelId,
+        organizationUnitId: selectedNewCaseDepartment.id,
         receivedDate: newCase.receivedDate,
         description: newCase.description,
         fieldValues: prefilledFieldValues,
@@ -1029,10 +1135,16 @@ export function ProcedureCaseWorkspace({
         referenceNumber: '',
         applicantName: '',
         sourceDepartment: '',
+        organizationLevelId: '',
+        organizationUnitId: '',
         receivedDate: '',
         description: '',
       });
       await loadCases();
+      setIsCreateDialogOpen(false);
+      if (registerOnly || detailOnly) {
+        router.push(caseDetailHref(created.id));
+      }
     } catch (err) {
       setError(
         err instanceof Error
@@ -1075,6 +1187,8 @@ export function ProcedureCaseWorkspace({
         referenceNumber: selectedCase.referenceNumber,
         applicantName: selectedCase.applicantName,
         sourceDepartment: selectedCase.sourceDepartment,
+        organizationLevelId: selectedCase.organizationLevelId,
+        organizationUnitId: selectedCase.organizationUnitId,
         receivedDate: selectedCase.receivedDate,
         description: selectedCase.description,
       });
@@ -1635,6 +1749,94 @@ export function ProcedureCaseWorkspace({
     );
   };
 
+  const renderCreateCaseForm = () => (
+    <div className="space-y-3">
+      <Input
+        value={newCase.title}
+        onChange={(event) =>
+          setNewCase({ ...newCase, title: event.target.value })
+        }
+      />
+      <Input
+        placeholder="Applicant / party name"
+        value={newCase.applicantName}
+        onChange={(event) =>
+          setNewCase({
+            ...newCase,
+            applicantName: event.target.value,
+          })
+        }
+      />
+      <Select
+        value={newCase.organizationUnitId || undefined}
+        disabled={isLoadingDepartments || departmentOptions.length === 0}
+        onValueChange={(value) => {
+          const department = departmentOptions.find((item) => item.id === value);
+          setNewCase({
+            ...newCase,
+            sourceDepartment: department?.name ?? '',
+            organizationLevelId: department?.organizationLevelId ?? '',
+            organizationUnitId: department?.id ?? '',
+          });
+        }}
+      >
+        <SelectTrigger>
+          <SelectValue
+            placeholder={
+              isLoadingDepartments
+                ? 'Loading departments'
+                : 'Select source department'
+            }
+          />
+        </SelectTrigger>
+        <SelectContent>
+          {departmentOptions.map((department) => (
+            <SelectItem key={department.id} value={department.id}>
+              {department.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {!isLoadingDepartments && departmentOptions.length === 0 ? (
+        <p className="text-xs text-destructive">
+          No active Department-level HR organization units are configured.
+        </p>
+      ) : null}
+      <Input
+        type="date"
+        value={newCase.receivedDate}
+        onChange={(event) =>
+          setNewCase({
+            ...newCase,
+            receivedDate: event.target.value,
+          })
+        }
+      />
+      <Textarea
+        placeholder="Description"
+        value={newCase.description}
+        onChange={(event) =>
+          setNewCase({
+            ...newCase,
+            description: event.target.value,
+          })
+        }
+      />
+      <Button
+        className="w-full gap-2"
+        onClick={() => void createCase()}
+        disabled={isSaving || !selectedNewCaseDepartment}
+      >
+        {isSaving ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : (
+          <Plus className="h-4 w-4" />
+        )}
+        {terminology.createLabel}
+      </Button>
+    </div>
+  );
+
   const caseDetailHref = (id: string) => {
     const base = caseBasePath || pathname;
     return `${base.replace(/\/$/, '')}/cases/${encodeURIComponent(id)}`;
@@ -1672,14 +1874,27 @@ export function ProcedureCaseWorkspace({
                   <h2 className="text-sm font-semibold">
                     {terminology.collectionLabel}
                   </h2>
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    {isLoading ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      {isLoading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : null}
+                      <span>
+                        {caseTotalCount} case
+                        {caseTotalCount === 1 ? '' : 's'}
+                      </span>
+                    </div>
+                    {allowsManualCaseCreation ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="gap-2"
+                        onClick={() => setIsCreateDialogOpen(true)}
+                      >
+                        <Plus className="h-4 w-4" />
+                        {terminology.createLabel}
+                      </Button>
                     ) : null}
-                    <span>
-                      {caseTotalCount} case
-                      {caseTotalCount === 1 ? '' : 's'}
-                    </span>
                   </div>
                 </div>
                 {cases.length === 0 && !isLoading ? (
@@ -1774,62 +1989,7 @@ export function ProcedureCaseWorkspace({
                   <h2 className="text-sm font-semibold">
                     {terminology.createHeading}
                   </h2>
-                  <div className="mt-3 space-y-3">
-                    <Input
-                      value={newCase.title}
-                      onChange={(event) =>
-                        setNewCase({ ...newCase, title: event.target.value })
-                      }
-                    />
-                    <Input
-                      placeholder="Applicant / party name"
-                      value={newCase.applicantName}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          applicantName: event.target.value,
-                        })
-                      }
-                    />
-                    <Input
-                      placeholder="Source department"
-                      value={newCase.sourceDepartment}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          sourceDepartment: event.target.value,
-                        })
-                      }
-                    />
-                    <Input
-                      type="date"
-                      value={newCase.receivedDate}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          receivedDate: event.target.value,
-                        })
-                      }
-                    />
-                    <Textarea
-                      placeholder="Description"
-                      value={newCase.description}
-                      onChange={(event) =>
-                        setNewCase({
-                          ...newCase,
-                          description: event.target.value,
-                        })
-                      }
-                    />
-                    <Button
-                      className="w-full gap-2"
-                      onClick={() => void createCase()}
-                      disabled={isSaving}
-                    >
-                      <Plus className="h-4 w-4" />
-                      {terminology.createLabel}
-                    </Button>
-                  </div>
+                  <div className="mt-3">{renderCreateCaseForm()}</div>
                 </div>
               ) : null}
             {!registerOnly && selectedCase ? (
@@ -1945,20 +2105,47 @@ export function ProcedureCaseWorkspace({
                       >
                         Source department
                       </label>
-                      <Input
-                        id="procedure-source-department"
-                        value={selectedCase.sourceDepartment ?? ''}
+                      <Select
+                        value={selectedCaseDepartmentValue || undefined}
                         disabled={
                           !canEditProcedureField('sourceDepartment') ||
-                          isLinkedLegalMatter
+                          isLinkedLegalMatter ||
+                          isLoadingDepartments ||
+                          departmentOptions.length === 0
                         }
-                        onChange={(event) =>
+                        onValueChange={(value) => {
+                          const department = departmentOptions.find(
+                            (item) => item.id === value
+                          );
                           setSelectedCase({
                             ...selectedCase,
-                            sourceDepartment: event.target.value,
-                          })
-                        }
-                      />
+                            sourceDepartment: department?.name ?? '',
+                            organizationLevelId:
+                              department?.organizationLevelId ?? null,
+                            organizationUnitId: department?.id ?? null,
+                            organizationLevelName:
+                              department?.levelName ?? null,
+                            organizationUnitName: department?.name ?? null,
+                          });
+                        }}
+                      >
+                        <SelectTrigger id="procedure-source-department">
+                          <SelectValue
+                            placeholder={
+                              isLoadingDepartments
+                                ? 'Loading departments'
+                                : 'Select source department'
+                            }
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {departmentOptions.map((department) => (
+                            <SelectItem key={department.id} value={department.id}>
+                              {department.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div className="space-y-1.5">
                       <label
@@ -2603,6 +2790,19 @@ export function ProcedureCaseWorkspace({
           </div>
         </CardContent>
       </Card>
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{terminology.createHeading}</DialogTitle>
+            <DialogDescription>
+              Source department is selected from HR organization units at the
+              Department level. The reference number is generated by the
+              system.
+            </DialogDescription>
+          </DialogHeader>
+          {renderCreateCaseForm()}
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={Boolean(previewDocument && previewDocumentUrl)}
         onOpenChange={(open) => {
