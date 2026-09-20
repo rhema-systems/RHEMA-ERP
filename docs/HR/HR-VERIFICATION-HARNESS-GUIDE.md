@@ -62,9 +62,14 @@ times; every harness README carries the warning.
 ### 2.2 The user builds; you stop the API first
 
 Never run `dotnet build`. Kill the running `ErpSystem.Api` process (it locks its own output
-DLLs), then stop and ask the user to build, and continue from their result. A "fast EF build"
-exists that hides `hrdev` migrations — a migration is inert until listed in
-`FastBuildMigrationMetadata`.
+DLLs), then stop and ask the user to build, and continue from their result.
+
+A "fast EF build" is active on this machine — it drops ~300 MB of generated `*.Designer.cs` from
+Debug builds. ⚠ **Updated 2026-09-19.** It no longer hides migrations: the discovery metadata is
+generated from the designers on disk at build time, so a scaffolded migration is covered
+automatically and the old `FastBuildMigrationMetadata` listing step is gone. **Do not re-create
+that file.** It is also local-only, so teammates and CI are unaffected. Run `dotnet ef` through
+`src/ErpSystem.Data/ef.ps1`, which picks the right flag. See `docs/LOCAL-FAST-EF-BUILD.md`.
 
 ### 2.3 Other environment facts
 

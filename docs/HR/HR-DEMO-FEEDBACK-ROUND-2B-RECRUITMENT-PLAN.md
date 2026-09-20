@@ -34,7 +34,7 @@
 | § 8 | Open questions, each with a default |
 
 House rules that bind every slice: the user runs `dotnet build` and scaffolds migrations (the
-agent edits them and lists them in `FastBuildMigrationMetadata`); the agent stages, the user
+agent edits them; ⚠ superseded 2026-09-19 — the discovery metadata is generated, so there is nothing to list by hand (see `docs/LOCAL-FAST-EF-BUILD.md`)); the agent stages, the user
 commits; every slice's harness (`D:\Rhema\TDC ERPS\dev-harness\`) is green twice in Staging with
 the JWT key; every new column a user can fill is in `demo-coverage-manifest.csv` with seeding.
 

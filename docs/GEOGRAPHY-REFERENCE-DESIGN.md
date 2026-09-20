@@ -368,8 +368,9 @@ in use is the last place to guess.
 
 - `TenantEntity` throughout; **stamp `TenantId` explicitly on create** and tenant-filter every read
   (the ported-HR tenancy gap).
-- New tables must be regenerated into the EF model snapshot; the migration must be listed in
-  `FastBuildMigrationMetadata` or it is inert.
+- New tables must be regenerated into the EF model snapshot. (⚠ Superseded 2026-09-19: the
+  `FastBuildMigrationMetadata` listing no longer exists — discovery metadata is generated. Do not
+  re-create that file; see `docs/LOCAL-FAST-EF-BUILD.md`.)
 - Unique indexes are filtered on `IsDeleted` where soft delete applies — a soft-deleted area must
   not hold its `Code` hostage.
 - Seed data keyed on official `Code`, so re-running the seeder is a no-op rather than a duplicate.

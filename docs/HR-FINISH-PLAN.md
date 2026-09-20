@@ -197,8 +197,12 @@ session picking up this plan does not relearn them.
    Uploads need `clamd-stub.mjs` or the gate refuses with 422 and the failures read as defects.
 6. **Type-check against a scoped `tsconfig`** compared to a stashed baseline — a full-project
    `tsc --noEmit` crashes on this repo (see lane 9).
-7. **Migrations:** the user scaffolds, I edit and list it in `FastBuildMigrationMetadata`, the user
-   updates. A schema change has three homes including the snapshot. A migration not listed is inert.
+7. **Migrations:** the user scaffolds, I edit, the user updates. A schema change has three homes
+   including the snapshot. ⚠ **Superseded 2026-09-19:** there is no longer a
+   `FastBuildMigrationMetadata` to list a migration in — master deleted it, and the local fast build
+   generates the discovery metadata from the designers on disk. A scaffolded migration is covered
+   automatically. **Do not re-create that file**; a tracked copy builds green locally and fails CI
+   with duplicate `[Migration]` attributes. See `docs/LOCAL-FAST-EF-BUILD.md`.
 8. **I never run `dotnet build` and never commit.** Kill the running API process before asking for
    a rebuild; stage the slice and hand over the message.
 

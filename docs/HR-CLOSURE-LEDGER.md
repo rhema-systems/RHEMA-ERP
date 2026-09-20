@@ -1401,9 +1401,10 @@ columns.
 3. ⚠ **One code change must go in the SAME slice, before the properties are removed**:
    `JobOfferHireService` writes three of the four in one object initialiser (lines 1485–1495). The
    solution will not compile with the properties gone and those assignments still there.
-4. Then the standard migration dance: **the user scaffolds, I edit and list it in
-   `FastBuildMigrationMetadata`, the user updates.** A migration not listed there is inert. The
-   schema change has **three homes** — entity, migration, snapshot.
+4. Then the standard migration dance: **the user scaffolds, I edit, the user updates.** The
+   schema change has **three homes** — entity, migration, snapshot. ⚠ **Superseded 2026-09-19:**
+   the `FastBuildMigrationMetadata` listing step no longer exists and the file must not be
+   re-created; see `docs/LOCAL-FAST-EF-BUILD.md`.
 
 #### How to know nothing is broken afterwards
 

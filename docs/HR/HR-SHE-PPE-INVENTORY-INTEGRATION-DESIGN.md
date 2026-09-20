@@ -232,7 +232,7 @@ none exists; `IssuanceNumber` format `PPE-YYYY-D4`.
 
 | # | Work | Size |
 |---|---|---|
-| A | Entities, migration (user scaffolds; guarded SQL; `FastBuildMigrationMetadata`), bridge, service, controller, DTOs, mappers, reminder + dashboard re-point | 1 day |
+| A | Entities, migration (user scaffolds; guarded SQL; no metadata listing — see `docs/LOCAL-FAST-EF-BUILD.md`), bridge, service, controller, DTOs, mappers, reminder + dashboard re-point | 1 day |
 | B | Seeder + harness rewrite (slices 1/6/13 green) | ½ day |
 | C | Frontend: picker, stock screen, issuance dialog, self-service, types/services | 1 day |
 | D | Docs: boundaries §3.6 + §2, integration map rows 14/15, cross-module backlog §9 asks, finish plan row, memory | ¼ day |

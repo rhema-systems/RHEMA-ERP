@@ -302,8 +302,7 @@ Harness folders under `D:\Rhema\TDC ERPS\dev-harness\` (outside the repo, per th
 boundary): existing `hr-employee-docs`, `hr-jobarch`, `hr-payroll-membership`; new
 `hr-organization`, `hr-teams` and `hr-salary-structure`. Every new table goes into
 `dev-harness/hr-demo-smoke/demo-coverage-manifest.csv` or the UAT rebuild gate reports it. Every
-new migration is guarded and listed in `FastBuildMigrationMetadata` or it is inert on the fast
-build. Every reference-data screen goes into `frontend/src/config/hr-setup-nav.ts` under the
+new migration is guarded (⚠ superseded 2026-09-19: the discovery metadata is generated, so there is nothing to list by hand (see `docs/LOCAL-FAST-EF-BUILD.md`)). Every reference-data screen goes into `frontend/src/config/hr-setup-nav.ts` under the
 group it belongs to, and the runbook path must name the group.
 
 ### Lane A — Bugs and unreachable features · ✅ **DONE 2026-09-09** · 88 assertions ×2
