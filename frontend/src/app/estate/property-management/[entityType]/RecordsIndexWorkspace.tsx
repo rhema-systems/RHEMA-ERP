@@ -9,7 +9,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
@@ -24,6 +23,7 @@ import {
   propertyReference,
   sourceReference,
 } from './property-workspace-utils';
+import { useManagedAssetsPage } from './use-managed-assets-page';
 
 interface DocumentRow extends EstateManagedAssetDocument {
   asset: EstateManagedAsset;
@@ -40,19 +40,30 @@ export function RecordsIndexWorkspace() {
   const [searchDraft, setSearchDraft] = React.useState(initialSearch);
   const [search, setSearch] = React.useState(initialSearch);
   const [selectedAssetId, setSelectedAssetId] = React.useState('all');
-  const [isLoading, setIsLoading] = React.useState(true);
+  const {
+    assets: pagedAssets,
+    page,
+    setPage,
+    isLoading: isAssetsLoading,
+    loadError: assetLoadError,
+    loadAssets,
+    pageSize,
+    totalPages,
+    totalItems,
+  } = useManagedAssetsPage({
+    search: search || undefined,
+    errorMessage: 'Unable to load property records index.',
+  });
+  const [isDocumentsLoading, setIsDocumentsLoading] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
-  const documentPages = usePaginatedItems(documents, 10);
 
   const load = React.useCallback(async () => {
-    setIsLoading(true);
+    setIsDocumentsLoading(true);
     setLoadError(null);
     try {
-      const managedAssets = await estateLandManagementService.getManagedAssets({ search: search || undefined, take: 200 });
-      setAssets(managedAssets);
       const targetAssets = selectedAssetId === 'all'
-        ? managedAssets.slice(0, 30)
-        : managedAssets.filter((asset) => asset.id === selectedAssetId);
+        ? pagedAssets
+        : assets.filter((asset) => asset.id === selectedAssetId);
       const documentGroups = await Promise.all(
         targetAssets.map(async (asset) => {
           const records = await estateLandManagementService.getDocuments(asset.id).catch(() => []);
@@ -61,13 +72,16 @@ export function RecordsIndexWorkspace() {
       );
       setDocuments(documentGroups.flat());
     } catch {
-      setAssets([]);
       setDocuments([]);
       setLoadError('Unable to load property records index.');
     } finally {
-      setIsLoading(false);
+      setIsDocumentsLoading(false);
     }
-  }, [search, selectedAssetId]);
+  }, [assets, pagedAssets, selectedAssetId]);
+
+  React.useEffect(() => {
+    setAssets(pagedAssets);
+  }, [pagedAssets]);
 
   React.useEffect(() => {
     void load();
@@ -83,10 +97,13 @@ export function RecordsIndexWorkspace() {
     }
   }, [assets, prefillAssetId, prefillReference, selectedAssetId]);
 
+  const isLoading = isAssetsLoading || isDocumentsLoading;
+  const effectiveLoadError = assetLoadError || loadError;
+
   return (
     <div className="space-y-6">
       <div className="grid gap-3 sm:grid-cols-3">
-        <Card><CardHeader className="pb-3"><CardDescription>Indexed assets</CardDescription><CardTitle className="text-2xl">{assets.length}</CardTitle></CardHeader></Card>
+        <Card><CardHeader className="pb-3"><CardDescription>Indexed assets</CardDescription><CardTitle className="text-2xl">{totalItems}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-3"><CardDescription>Loaded documents</CardDescription><CardTitle className="text-2xl">{documents.length}</CardTitle></CardHeader></Card>
         <Card><CardHeader className="pb-3"><CardDescription>DMS-linked records</CardDescription><CardTitle className="text-2xl">{documents.filter((item) => item.centralDocumentRecordId).length}</CardTitle></CardHeader></Card>
       </div>
@@ -100,9 +117,9 @@ export function RecordsIndexWorkspace() {
                 Search property-linked document references, DMS references, listing images, lease files, handover evidence, and operational record metadata. Central DMS remains the file/version owner.
               </CardDescription>
             </div>
-            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void load()}><RefreshCw className="h-4 w-4" /></Button>
+            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void loadAssets(page)}><RefreshCw className="h-4 w-4" /></Button>
           </div>
-          <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_18rem_auto]" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
+          <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_18rem_auto]" onSubmit={(event) => { event.preventDefault(); setPage(1); setSearch(searchDraft.trim()); setSelectedAssetId('all'); }}>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="pl-9" placeholder="Search property, document, tenant, or reference" />
@@ -120,7 +137,7 @@ export function RecordsIndexWorkspace() {
           </form>
         </CardHeader>
         <CardContent>
-          {loadError ? <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{loadError}</div> : null}
+          {effectiveLoadError ? <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">{effectiveLoadError}</div> : null}
           {isLoading ? <div className="flex justify-center gap-2 py-10 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" /> Loading records index</div> : null}
           {!isLoading && documents.length > 0 ? (
             <div className="overflow-x-auto rounded-md border">
@@ -137,7 +154,7 @@ export function RecordsIndexWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {documentPages.items.map((document) => (
+                  {documents.map((document) => (
                     <TableRow key={document.id}>
                       <TableCell><div className="font-medium">{document.documentName || document.fileName}</div><div className="text-xs text-muted-foreground">{document.fileName}</div></TableCell>
                       <TableCell><div>{document.asset.name}</div><div className="text-xs text-muted-foreground">{propertyReference(document.asset)} · {sourceReference(document.asset)}</div></TableCell>
@@ -152,8 +169,8 @@ export function RecordsIndexWorkspace() {
               </Table>
             </div>
           ) : null}
-          {documents.length > documentPages.pageSize ? <Pagination currentPage={documentPages.currentPage} totalPages={documentPages.totalPages} totalItems={documentPages.totalItems} pageSize={documentPages.pageSize} onPageChange={documentPages.setCurrentPage} /> : null}
-          {!isLoading && !loadError && documents.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No documents found for the current selection.</div> : null}
+          {selectedAssetId === 'all' && totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
+          {!isLoading && !effectiveLoadError && documents.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No documents found for the current selection.</div> : null}
         </CardContent>
       </Card>
     </div>

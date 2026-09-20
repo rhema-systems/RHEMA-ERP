@@ -187,6 +187,9 @@ export interface EstateLandDemarcation {
   allocatedCost?: number | null;
   costPerAcre?: number | null;
   targetSalePrice?: number | null;
+  groundRentPayable?: number | null;
+  groundRentRatePerAcre?: number | null;
+  groundRentComputed?: number | null;
   parentLandAssetReference?: string | null;
   parentFixedAssetReference?: string | null;
   childFixedAssetReference?: string | null;
@@ -329,10 +332,13 @@ export interface UpdateEstateManagedAssetOccupancy {
 export interface EstateManagedAssetQuery {
   assetType?: EstateManagedAssetType;
   status?: EstateManagedAssetStatus;
+  statuses?: EstateManagedAssetStatus[];
   search?: string;
   availableForLease?: boolean;
   availableForSale?: boolean;
   portalListingCandidates?: boolean;
+  publishedToExternalPortal?: boolean;
+  skip?: number;
   take?: number;
 }
 
@@ -411,10 +417,17 @@ const assetMatchesQuery = (
 ) =>
   enumMatches(asset.assetType, query.assetType, assetTypeNames) &&
   enumMatches(asset.status, query.status, assetStatusNames) &&
+  (query.statuses === undefined ||
+    query.statuses.length === 0 ||
+    query.statuses.some((status) =>
+      enumMatches(asset.status, status, assetStatusNames)
+    )) &&
   (query.availableForLease === undefined ||
     asset.isAvailableForLease === query.availableForLease) &&
   (query.availableForSale === undefined ||
-    asset.isAvailableForSale === query.availableForSale);
+    asset.isAvailableForSale === query.availableForSale) &&
+  (query.publishedToExternalPortal === undefined ||
+    asset.isPublishedToExternalPortal === query.publishedToExternalPortal);
 
 const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
   search: query.search || undefined,
@@ -422,9 +435,12 @@ const buildManagedAssetQueryParams = (query: EstateManagedAssetQuery) => ({
     query.assetType === undefined ? undefined : assetTypeNames[query.assetType],
   status:
     query.status === undefined ? undefined : assetStatusNames[query.status],
+  statuses: query.statuses?.map((status) => assetStatusNames[status]),
   availableForLease: query.availableForLease,
   availableForSale: query.availableForSale,
   portalListingCandidates: query.portalListingCandidates,
+  publishedToExternalPortal: query.publishedToExternalPortal,
+  skip: query.skip,
   take: query.take || 250,
 });
 
@@ -464,13 +480,16 @@ export class EstateLandManagementService {
   }
 
   async getPortalListingDemarcations(
-    search?: string
+    search?: string,
+    skip = 0,
+    take = 300
   ): Promise<EstateManagedAsset[]> {
     const response = await apiService.get<ApiListResponse<EstateManagedAsset>>(
       '/estate/managed-assets/portal-listing-demarcations',
       {
         search: search || undefined,
-        take: 300,
+        skip,
+        take,
       }
     );
 

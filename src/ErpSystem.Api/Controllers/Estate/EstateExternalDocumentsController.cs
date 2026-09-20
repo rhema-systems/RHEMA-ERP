@@ -1686,7 +1686,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         if (normalizedListingType != null)
         {
             query = query.Where(asset => asset.ExternalListingType == normalizedListingType
-                || asset.ExternalListingType == "SaleAndRent");
+                || (normalizedListingType == "Sale" && (asset.ExternalListingType == "SaleAndRent" || asset.ExternalListingType == "SaleAndLease"))
+                || (normalizedListingType == "Rent" && asset.ExternalListingType == "SaleAndRent")
+                || (normalizedListingType == "Lease" && asset.ExternalListingType == "SaleAndLease"));
         }
 
         if (normalizedLocation != null)
@@ -1730,7 +1732,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         if (normalizedListingType != null)
         {
             demarcationQuery = demarcationQuery.Where(item => item.ExternalListingType == normalizedListingType
-                || item.ExternalListingType == "SaleAndRent");
+                || (normalizedListingType == "Sale" && (item.ExternalListingType == "SaleAndRent" || item.ExternalListingType == "SaleAndLease"))
+                || (normalizedListingType == "Rent" && item.ExternalListingType == "SaleAndRent")
+                || (normalizedListingType == "Lease" && item.ExternalListingType == "SaleAndLease"));
         }
 
         if (normalizedLocation != null)
@@ -1827,7 +1831,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         if (normalizedListingType != null)
         {
             query = query.Where(asset => asset.ExternalListingType == normalizedListingType
-                || asset.ExternalListingType == "SaleAndRent");
+                || (normalizedListingType == "Sale" && (asset.ExternalListingType == "SaleAndRent" || asset.ExternalListingType == "SaleAndLease"))
+                || (normalizedListingType == "Rent" && asset.ExternalListingType == "SaleAndRent")
+                || (normalizedListingType == "Lease" && asset.ExternalListingType == "SaleAndLease"));
         }
 
         if (normalizedLocation != null)
@@ -1871,7 +1877,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         if (normalizedListingType != null)
         {
             demarcationQuery = demarcationQuery.Where(item => item.ExternalListingType == normalizedListingType
-                || item.ExternalListingType == "SaleAndRent");
+                || (normalizedListingType == "Sale" && (item.ExternalListingType == "SaleAndRent" || item.ExternalListingType == "SaleAndLease"))
+                || (normalizedListingType == "Rent" && item.ExternalListingType == "SaleAndRent")
+                || (normalizedListingType == "Lease" && item.ExternalListingType == "SaleAndLease"));
         }
 
         if (normalizedLocation != null)
@@ -2192,7 +2200,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
 
         var applicantName = customer.PartnerName;
         var reference = BuildExternalReference("LISTING");
-        var requestLabel = requestType == "Purchase" ? "Purchase bid" : "Rental request";
+        var requestLabel = requestType == "Purchase"
+            ? "Purchase bid"
+            : requestType == "Lease"
+                ? "Lease request"
+                : "Rental request";
         var transactionSummary = requestType == "Purchase"
             ? $"{requestLabel} for {listingReference} - {listingName} by {customer.PartnerName} ({customer.CustomerAccountNumber}) at {listingCurrency} {request.OfferAmount:0.##}."
             : $"{requestLabel} for {listingReference} - {listingName} by {customer.PartnerName} ({customer.CustomerAccountNumber}).";
@@ -2201,7 +2213,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             : $"{transactionSummary} {request.Message.Trim()}";
         var publishedListingType = listingType == "SaleAndRent"
             ? "Sale or Rent"
-            : listingType;
+            : listingType == "SaleAndLease"
+                ? "Sale or Lease"
+                : listingType;
         var publishedAmount = requestType == "Purchase"
             ? listingSalePrice ?? listingPrice
             : listingMonthlyRent ?? listingPrice;
@@ -2222,7 +2236,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             ["currency"] = listingCurrency,
             ["requestedLeaseTerm"] = requestType == "Purchase" || !listingLeaseTermMonths.HasValue
                 ? null
-                : $"{listingLeaseTermMonths.Value} months",
+                : FormatRecurringTerm(listingLeaseTermMonths.Value),
             ["requestMessage"] = request.Message?.Trim(),
             ["customerValidationStatus"] = "Pending",
             ["listingValidationStatus"] = "Pending",
@@ -3284,20 +3298,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return query;
         }
 
-        if (listingType == "Rent")
+        if (listingType is "Rent" or "Lease")
         {
             return query.Where(asset =>
-                ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
-                    ?? asset.ExternalMonthlyRent
-                    ?? asset.ExternalListingPrice).HasValue
+                (asset.ExternalMonthlyRent ?? asset.ExternalListingPrice).HasValue
                 && (!minPrice.HasValue ||
-                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
-                        ?? asset.ExternalMonthlyRent
-                        ?? asset.ExternalListingPrice) >= minPrice.Value)
+                    (asset.ExternalMonthlyRent ?? asset.ExternalListingPrice) >= minPrice.Value)
                 && (!maxPrice.HasValue ||
-                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
-                        ?? asset.ExternalMonthlyRent
-                        ?? asset.ExternalListingPrice) <= maxPrice.Value));
+                    (asset.ExternalMonthlyRent ?? asset.ExternalListingPrice) <= maxPrice.Value));
         }
 
         if (listingType == "Sale")
@@ -3316,17 +3324,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     (asset.ExternalSalePrice ?? asset.ExternalListingPrice) >= minPrice.Value)
                 && (!maxPrice.HasValue ||
                     (asset.ExternalSalePrice ?? asset.ExternalListingPrice) <= maxPrice.Value))
-            || (((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
-                    ?? asset.ExternalMonthlyRent
-                    ?? asset.ExternalListingPrice).HasValue
+            || ((asset.ExternalMonthlyRent ?? asset.ExternalListingPrice).HasValue
                 && (!minPrice.HasValue ||
-                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
-                        ?? asset.ExternalMonthlyRent
-                        ?? asset.ExternalListingPrice) >= minPrice.Value)
+                    (asset.ExternalMonthlyRent ?? asset.ExternalListingPrice) >= minPrice.Value)
                 && (!maxPrice.HasValue ||
-                    ((asset.AssetType == EstateManagedAssetType.Land ? asset.GroundRentPayable : null)
-                        ?? asset.ExternalMonthlyRent
-                        ?? asset.ExternalListingPrice) <= maxPrice.Value)));
+                    (asset.ExternalMonthlyRent ?? asset.ExternalListingPrice) <= maxPrice.Value)));
     }
 
     private static IQueryable<EstateLandDemarcation> ApplyPublicPriceFilter(
@@ -3340,20 +3342,14 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return query;
         }
 
-        if (listingType == "Rent")
+        if (listingType is "Rent" or "Lease")
         {
             return query.Where(item =>
-                (item.EstateManagedAsset.GroundRentPayable
-                    ?? item.ExternalMonthlyRent
-                    ?? item.ExternalListingPrice).HasValue
+                (item.ExternalMonthlyRent ?? item.ExternalListingPrice).HasValue
                 && (!minPrice.HasValue ||
-                    (item.EstateManagedAsset.GroundRentPayable
-                        ?? item.ExternalMonthlyRent
-                        ?? item.ExternalListingPrice) >= minPrice.Value)
+                    (item.ExternalMonthlyRent ?? item.ExternalListingPrice) >= minPrice.Value)
                 && (!maxPrice.HasValue ||
-                    (item.EstateManagedAsset.GroundRentPayable
-                        ?? item.ExternalMonthlyRent
-                        ?? item.ExternalListingPrice) <= maxPrice.Value));
+                    (item.ExternalMonthlyRent ?? item.ExternalListingPrice) <= maxPrice.Value));
         }
 
         if (listingType == "Sale")
@@ -3372,17 +3368,11 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                     (item.ExternalSalePrice ?? item.ExternalListingPrice) >= minPrice.Value)
                 && (!maxPrice.HasValue ||
                     (item.ExternalSalePrice ?? item.ExternalListingPrice) <= maxPrice.Value))
-            || ((item.EstateManagedAsset.GroundRentPayable
-                    ?? item.ExternalMonthlyRent
-                    ?? item.ExternalListingPrice).HasValue
+            || ((item.ExternalMonthlyRent ?? item.ExternalListingPrice).HasValue
                 && (!minPrice.HasValue ||
-                    (item.EstateManagedAsset.GroundRentPayable
-                        ?? item.ExternalMonthlyRent
-                        ?? item.ExternalListingPrice) >= minPrice.Value)
+                    (item.ExternalMonthlyRent ?? item.ExternalListingPrice) >= minPrice.Value)
                 && (!maxPrice.HasValue ||
-                    (item.EstateManagedAsset.GroundRentPayable
-                        ?? item.ExternalMonthlyRent
-                        ?? item.ExternalListingPrice) <= maxPrice.Value)));
+                    (item.ExternalMonthlyRent ?? item.ExternalListingPrice) <= maxPrice.Value)));
     }
 
     private static string? Normalize(string? value)
@@ -3398,8 +3388,10 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         return value.Trim().ToLowerInvariant() switch
         {
             "sale" => "Sale",
-            "rent" or "lease" => "Rent",
+            "rent" => "Rent",
+            "lease" => "Lease",
             "saleandrent" or "sale and rent" or "sale/rent" or "both" => "SaleAndRent",
+            "saleandlease" or "sale and lease" or "sale/lease" => "SaleAndLease",
             _ => null
         };
     }
@@ -3409,16 +3401,39 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         var normalized = NormalizeListingType(requestedType);
         if (normalized is null)
         {
-            normalized = listingType == "SaleAndRent" ? "Rent" : listingType;
+            normalized = listingType switch
+            {
+                "SaleAndRent" => "Rent",
+                "SaleAndLease" => "Lease",
+                _ => listingType
+            };
         }
 
-        if (listingType != "SaleAndRent" && normalized != listingType)
+        if (listingType != "SaleAndRent" && listingType != "SaleAndLease" && normalized != listingType)
         {
             normalized = listingType;
         }
 
-        return normalized == "Sale" ? "Purchase" : "Lease";
+        if (listingType == "SaleAndRent" && normalized is not ("Sale" or "Rent"))
+        {
+            normalized = "Rent";
+        }
+        if (listingType == "SaleAndLease" && normalized is not ("Sale" or "Lease"))
+        {
+            normalized = "Lease";
+        }
+
+        return normalized == "Sale"
+            ? "Purchase"
+            : normalized == "Rent"
+                ? "Rent"
+                : "Lease";
     }
+
+    private static string FormatRecurringTerm(int termMonths)
+        => termMonths > 0 && termMonths % 12 == 0
+            ? $"{termMonths / 12} years"
+            : $"{termMonths} months";
 
     private static IQueryable<EstateManagedAsset> WhereExternallyAvailableListings(IQueryable<EstateManagedAsset> query)
         // Estate external portal: keep GET listings and POST requests on the same availability gate so stale listing IDs cannot start procedures.
@@ -3430,17 +3445,24 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             && string.IsNullOrEmpty(asset.LesseeName)
             && (asset.ExternalListingType == "Sale"
                 || ((asset.ExternalListingType == "Rent"
-                        || asset.ExternalListingType == "SaleAndRent")
+                        || asset.ExternalListingType == "Lease"
+                        || asset.ExternalListingType == "SaleAndRent"
+                        || asset.ExternalListingType == "SaleAndLease")
                     && asset.ExternalMonthlyRent.HasValue
                     && asset.ExternalMonthlyRent > 0
                     && (asset.AssetType != EstateManagedAssetType.Land
+                        || asset.ExternalListingType == "Rent"
+                        || asset.ExternalListingType == "SaleAndRent"
                         || (asset.GroundRentPayable.HasValue
                             && asset.GroundRentPayable > 0))
                     && asset.ExternalLeaseTermMonths.HasValue
                     && asset.ExternalLeaseTermMonths > 0))
             && ((asset.ExternalListingType == "Sale" && asset.IsAvailableForSale)
                 || (asset.ExternalListingType == "Rent" && asset.IsAvailableForLease)
+                || (asset.ExternalListingType == "Lease" && asset.IsAvailableForLease)
                 || (asset.ExternalListingType == "SaleAndRent"
+                    && (asset.IsAvailableForSale || asset.IsAvailableForLease))
+                || (asset.ExternalListingType == "SaleAndLease"
                     && (asset.IsAvailableForSale || asset.IsAvailableForLease)))
             && ((asset.AssetType == EstateManagedAssetType.Land
                     && asset.Status == EstateManagedAssetStatus.LandBank

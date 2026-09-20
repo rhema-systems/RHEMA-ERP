@@ -29,6 +29,7 @@ public sealed record EstateSalesListingApplicationHandoffRequest(
     Guid SalesOpportunityId,
     string SalesReference,
     decimal? AgreedAmount,
+    string? RequestedLeaseTerm,
     decimal? SalesAmountPaid,
     string? SalesPaymentReference,
     string? Currency,
@@ -127,6 +128,8 @@ public sealed class EstateSalesListingApplicationHandoffService(
             : $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}";
         var requestType = NormalizeRequestType(request.RequestType, demarcation?.ExternalListingType ?? asset.ExternalListingType);
         var requestLabel = requestType == "Purchase" ? "Purchase enquiry" : "Lease enquiry";
+        if (requestType != "Purchase" && string.IsNullOrWhiteSpace(request.RequestedLeaseTerm))
+            throw new InvalidOperationException("Enter the Sales-agreed rent or lease duration before handing the enquiry to Estate.");
         var amount = request.AgreedAmount ?? opportunity.Amount;
         if (amount <= 0)
             throw new InvalidOperationException("Enter a positive agreed amount before handing the enquiry to Estate.");
@@ -158,6 +161,7 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["requestType"] = requestLabel,
             ["listingPrice"] = amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             ["offerAmount"] = requestType == "Purchase" ? amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+            ["requestedLeaseTerm"] = requestType == "Purchase" ? null : Truncate(request.RequestedLeaseTerm!.Trim(), 120),
             ["currency"] = currency,
             ["salesAmountPaid"] = salesAmountPaid.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
             ["salesPaymentReference"] = TruncateOptional(request.SalesPaymentReference, 200),
@@ -268,11 +272,21 @@ public sealed class EstateSalesListingApplicationHandoffService(
             || normalized.Equals("Sale", StringComparison.OrdinalIgnoreCase)
             ? "Purchase"
             : normalized.Equals("Lease", StringComparison.OrdinalIgnoreCase)
-                || normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
                 ? "Lease"
-                : string.Equals(listingType, "Sale", StringComparison.OrdinalIgnoreCase) ? "Purchase" : "Lease";
+                : normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
+                    || normalized.Equals("Rental", StringComparison.OrdinalIgnoreCase)
+                    || normalized.Equals("Tenancy", StringComparison.OrdinalIgnoreCase)
+                    ? "Rent"
+                    : listingType switch
+                    {
+                        "Sale" => "Purchase",
+                        "Lease" or "SaleAndLease" => "Lease",
+                        "Rent" or "SaleAndRent" => "Rent",
+                        _ => "Lease"
+                    };
         return string.Equals(listingType, "Sale", StringComparison.OrdinalIgnoreCase) ? "Purchase"
-            : string.Equals(listingType, "Rent", StringComparison.OrdinalIgnoreCase) ? "Lease"
+            : string.Equals(listingType, "Rent", StringComparison.OrdinalIgnoreCase) ? "Rent"
+            : string.Equals(listingType, "Lease", StringComparison.OrdinalIgnoreCase) ? "Lease"
             : normalized;
     }
 

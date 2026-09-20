@@ -12,13 +12,11 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
-  estateLandManagementService,
   EstateManagedAssetStatus,
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
@@ -35,6 +33,7 @@ import {
   propertyReference,
   sourceReference,
 } from './property-workspace-utils';
+import { useManagedAssetsPage } from './use-managed-assets-page';
 
 function isRentalBillingReady(asset: EstateManagedAsset) {
   const hasActiveLease = [
@@ -67,12 +66,29 @@ export function BillingServiceChargeWorkspace() {
   const prefillReference =
     searchParams.get('field_propertyUnit') || searchParams.get('referenceNumber');
   const initialSearch = prefillReference || '';
-  const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [accounts, setAccounts] = React.useState<GroundRentAccount[]>([]);
   const [penaltyStatuses, setPenaltyStatuses] = React.useState<EstateRentPenaltyStatus[]>([]);
   const [searchDraft, setSearchDraft] = React.useState(initialSearch);
   const [search, setSearch] = React.useState(initialSearch);
-  const [isLoading, setIsLoading] = React.useState(true);
+  const {
+    assets,
+    page,
+    setPage,
+    isLoading,
+    loadError,
+    loadAssets,
+    pageSize,
+    totalPages,
+    totalItems,
+  } = useManagedAssetsPage({
+    search: search || undefined,
+    statuses: [
+      EstateManagedAssetStatus.Reserved,
+      EstateManagedAssetStatus.Leased,
+      EstateManagedAssetStatus.Occupied,
+    ],
+    errorMessage: 'Unable to load billing and service charge records.',
+  });
   const [activatingAssetId, setActivatingAssetId] = React.useState<string | null>(null);
   const [pendingBillingAsset, setPendingBillingAsset] = React.useState<EstateManagedAsset | null>(null);
   const [penaltyAsset, setPenaltyAsset] = React.useState<EstateManagedAsset | null>(null);
@@ -82,33 +98,23 @@ export function BillingServiceChargeWorkspace() {
   const [penaltyCapAmount, setPenaltyCapAmount] = React.useState('');
   const [savingPenaltyTerms, setSavingPenaltyTerms] = React.useState(false);
   const [assessingPenaltyAssetId, setAssessingPenaltyAssetId] = React.useState<string | null>(null);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-
-  const load = React.useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
+  const loadSupportingData = React.useCallback(async () => {
     try {
-      const [managedAssets, groundRentAccounts, rentPenaltyStatuses] = await Promise.all([
-        estateLandManagementService.getManagedAssets({ search: search || undefined, take: 500 }),
+      const [groundRentAccounts, rentPenaltyStatuses] = await Promise.all([
         estateGroundRentService.getAccounts().catch(() => []),
         estatePropertyManagementService.getRentPenaltyStatuses().catch(() => []),
       ]);
-      setAssets(managedAssets);
       setAccounts(groundRentAccounts);
       setPenaltyStatuses(rentPenaltyStatuses);
     } catch {
-      setAssets([]);
       setAccounts([]);
       setPenaltyStatuses([]);
-      setLoadError('Unable to load billing and service charge records.');
-    } finally {
-      setIsLoading(false);
     }
-  }, [search]);
+  }, []);
 
   React.useEffect(() => {
-    void load();
-  }, [load]);
+    void loadSupportingData();
+  }, [loadSupportingData]);
 
   const accountByAssetId = React.useMemo(
     () => new Map(accounts.map((account) => [account.estateManagedAssetId, account])),
@@ -129,13 +135,15 @@ export function BillingServiceChargeWorkspace() {
     [penaltyStatuses]
   );
 
-  const displayedBillableAssets = React.useMemo(() => {
-    if (!prefillAssetId && !prefillReference) return billableAssets;
-    return billableAssets.filter((asset) =>
+  const displayedBillableAssets = React.useMemo(
+    () =>
+      prefillAssetId || prefillReference
+        ? billableAssets.filter((asset) =>
       assetMatchesWorkspacePrefill(asset, prefillAssetId, prefillReference)
-    );
-  }, [billableAssets, prefillAssetId, prefillReference]);
-  const billingPages = usePaginatedItems(displayedBillableAssets, 10);
+          )
+        : billableAssets,
+    [billableAssets, prefillAssetId, prefillReference]
+  );
 
   const readyCount = displayedBillableAssets.filter((asset) => {
     const account = accountByAssetId.get(asset.id);
@@ -148,7 +156,7 @@ export function BillingServiceChargeWorkspace() {
     try {
       const result = await estatePropertyManagementService.activateRentBilling(asset.id);
       toast.success(result.message);
-      await load();
+      await Promise.all([loadAssets(page), loadSupportingData()]);
       setPendingBillingAsset(null);
       return true;
     } catch (error) {
@@ -190,7 +198,7 @@ export function BillingServiceChargeWorkspace() {
       });
       toast.success(result.message);
       setPenaltyAsset(null);
-      await load();
+      await Promise.all([loadAssets(page), loadSupportingData()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to save rental penalty terms.');
     } finally {
@@ -203,7 +211,7 @@ export function BillingServiceChargeWorkspace() {
     try {
       const result = await estatePropertyManagementService.assessRentPenalty(asset.id);
       toast.success(result.message);
-      await load();
+      await Promise.all([loadAssets(page), loadSupportingData()]);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : 'Unable to assess the rental penalty.');
     } finally {
@@ -228,9 +236,9 @@ export function BillingServiceChargeWorkspace() {
                 Billing readiness board for rent, ground rent, service charge, deposits, arrears, and Finance AR handoff references. This screen does not duplicate Finance AR ledgers.
               </CardDescription>
             </div>
-            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void load()}><RefreshCw className="h-4 w-4" /></Button>
+            <Button type="button" variant="outline" size="icon" disabled={isLoading} onClick={() => void Promise.all([loadAssets(page), loadSupportingData()])}><RefreshCw className="h-4 w-4" /></Button>
           </div>
-          <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); setSearch(searchDraft.trim()); }}>
+          <form className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_auto]" onSubmit={(event) => { event.preventDefault(); setPage(1); setSearch(searchDraft.trim()); }}>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchDraft} onChange={(event) => setSearchDraft(event.target.value)} className="pl-9" placeholder="Search property, tenant, or billing reference" />
@@ -256,7 +264,7 @@ export function BillingServiceChargeWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {billingPages.items.map((asset) => {
+                  {displayedBillableAssets.map((asset) => {
                     const account = accountByAssetId.get(asset.id);
                     const land = isLandAsset(asset);
                     const ready = land
@@ -320,7 +328,7 @@ export function BillingServiceChargeWorkspace() {
               </Table>
             </div>
           ) : null}
-          {displayedBillableAssets.length > billingPages.pageSize ? <Pagination currentPage={billingPages.currentPage} totalPages={billingPages.totalPages} totalItems={billingPages.totalItems} pageSize={billingPages.pageSize} onPageChange={billingPages.setCurrentPage} /> : null}
+          {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
           {!isLoading && !loadError && displayedBillableAssets.length === 0 ? <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">No billing records found.</div> : null}
         </CardContent>
       </Card>

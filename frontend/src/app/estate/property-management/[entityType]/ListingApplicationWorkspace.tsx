@@ -101,7 +101,11 @@ const SUMMARY_FIELD_KEYS = [
   'estateRemainingAmount',
   'premiumChargeRequired',
   'premiumChargeAmount',
+  'premiumChargeInvoiceId',
   'premiumChargeInvoiceReference',
+  'premiumChargeInvoiceStatus',
+  'premiumChargePaidAmount',
+  'premiumChargeBalance',
   'premiumChargePaymentStatus',
   'requestedLeaseTerm',
   'requestMessage',
@@ -135,6 +139,14 @@ const formatValue = (field: ProcedureCaseField): string => {
     ? field.value
     : new Intl.DateTimeFormat('en-GB').format(date);
 };
+
+const formatMoney = (amount: number, currencyCode = 'GHS') =>
+  Number.isFinite(amount)
+    ? new Intl.NumberFormat('en-GH', {
+        style: 'currency',
+        currency: currencyCode || 'GHS',
+      }).format(amount)
+    : 'Not recorded';
 
 const caseFieldValue = (procedureCase: ProcedureCaseDetail, key: string) =>
   procedureCase.fields.find((field) => field.key === key)?.value?.trim() || '';
@@ -196,7 +208,11 @@ const isPremiumChargeSettled = (procedureCase: ProcedureCaseDetail) => {
 const PREMIUM_FIELD_KEYS = new Set([
   'premiumChargeRequired',
   'premiumChargeAmount',
+  'premiumChargeInvoiceId',
   'premiumChargeInvoiceReference',
+  'premiumChargeInvoiceStatus',
+  'premiumChargePaidAmount',
+  'premiumChargeBalance',
   'premiumChargePaymentStatus',
 ]);
 
@@ -318,6 +334,7 @@ const editableFieldKeys = (procedureCase: ProcedureCaseDetail) => {
     keys.add('decisionStatus');
     if (isRentalApplication(procedureCase)) {
       keys.add('moveInDate');
+      keys.add('requestedLeaseTerm');
     }
   }
   return keys;
@@ -769,6 +786,17 @@ export function ListingApplicationWorkspace() {
       stageName === 'estate decision and agreement' &&
       approved &&
       isRentalApplication(selectedCase) &&
+      !caseFieldValue(selectedCase, 'requestedLeaseTerm')
+    ) {
+      setError(
+        'Set the approved rental term before generating the agreement.'
+      );
+      return;
+    }
+    if (
+      stageName === 'estate decision and agreement' &&
+      approved &&
+      isRentalApplication(selectedCase) &&
       isPremiumChargeRequired(selectedCase) &&
       !isPremiumChargeSettled(selectedCase)
     ) {
@@ -947,9 +975,19 @@ export function ListingApplicationWorkspace() {
 
     const rentalApplication = isRentalApplication(selectedCase);
     const moveInDate = caseFieldValue(selectedCase, 'moveInDate');
+    const requestedLeaseTerm = caseFieldValue(
+      selectedCase,
+      'requestedLeaseTerm'
+    );
     if (rentalApplication && !moveInDate) {
       setError(
         'Set the approved move-in date before generating the rental agreement.'
+      );
+      return;
+    }
+    if (rentalApplication && !requestedLeaseTerm) {
+      setError(
+        'Set the approved rental term before generating the rental agreement.'
       );
       return;
     }
@@ -1252,6 +1290,52 @@ export function ListingApplicationWorkspace() {
     }
   };
 
+  const createPremiumChargeInvoice = async () => {
+    if (!selectedCase) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result =
+        await estatePropertyManagementService.createPremiumChargeInvoice(
+          selectedCase.id
+        );
+      setSelectedCase(await procedureCaseService.getCase(selectedCase.id));
+      toast.success(result.message);
+    } catch (premiumError) {
+      const message = errorMessage(
+        premiumError,
+        'Unable to create the premium charge invoice.'
+      );
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const syncPremiumChargePaymentStatus = async () => {
+    if (!selectedCase) return;
+    setIsSaving(true);
+    setError(null);
+    try {
+      const result =
+        await estatePropertyManagementService.syncPremiumChargePaymentStatus(
+          selectedCase.id
+        );
+      setSelectedCase(await procedureCaseService.getCase(selectedCase.id));
+      toast.success(result.message);
+    } catch (premiumError) {
+      const message = errorMessage(
+        premiumError,
+        'Unable to refresh the premium charge payment status.'
+      );
+      setError(message);
+      toast.error(message);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const completeSaleOwnership = async () => {
     if (!selectedCase) return;
     setIsSaving(true);
@@ -1328,6 +1412,44 @@ export function ListingApplicationWorkspace() {
       approvedDecision &&
       rentalApplication &&
       !caseFieldValue(selectedCase, 'moveInDate')
+  );
+  const missingApprovedRentTerm = Boolean(
+    selectedCase &&
+      approvedDecision &&
+      rentalApplication &&
+      !caseFieldValue(selectedCase, 'requestedLeaseTerm')
+  );
+  const premiumChargeRequired = Boolean(
+    selectedCase && rentalApplication && isPremiumChargeRequired(selectedCase)
+  );
+  const premiumChargeSettled = Boolean(
+    selectedCase && isPremiumChargeSettled(selectedCase)
+  );
+  const premiumChargeAmount = selectedCase
+    ? caseMoneyValue(selectedCase, 'premiumChargeAmount')
+    : Number.NaN;
+  const premiumChargeBalance = selectedCase
+    ? caseMoneyValue(selectedCase, 'premiumChargeBalance')
+    : Number.NaN;
+  const premiumChargeInvoiceId = selectedCase
+    ? caseFieldValue(selectedCase, 'premiumChargeInvoiceId')
+    : '';
+  const premiumChargeInvoiceReference = selectedCase
+    ? caseFieldValue(selectedCase, 'premiumChargeInvoiceReference')
+    : '';
+  const premiumChargePaymentStatus = selectedCase
+    ? caseFieldValue(selectedCase, 'premiumChargePaymentStatus') ||
+      (premiumChargeInvoiceId ? 'Payment pending' : 'Pending invoice')
+    : '';
+  const premiumChargeCurrency = selectedCase
+    ? caseFieldValue(selectedCase, 'currency') || 'GHS'
+    : 'GHS';
+  const missingPremiumChargePayment = Boolean(
+    selectedCase &&
+      approvedDecision &&
+      rentalApplication &&
+      premiumChargeRequired &&
+      !premiumChargeSettled
   );
   const missingApprovedAgreement = Boolean(
     selectedCase &&
@@ -1781,7 +1903,8 @@ export function ListingApplicationWorkspace() {
                             htmlFor={field.id}
                           >
                             {field.label}
-                            {field.key === 'moveInDate' &&
+                            {(field.key === 'moveInDate' ||
+                              field.key === 'requestedLeaseTerm') &&
                             rentalApplication &&
                             isDecisionStage(selectedCase)
                               ? ' *'
@@ -1973,6 +2096,119 @@ export function ListingApplicationWorkspace() {
                 </TabsContent>
 
                 <TabsContent value="agreement" className="space-y-4">
+              {premiumChargeRequired ? (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-base">
+                      <Send className="h-4 w-4" />
+                      Premium charge
+                    </CardTitle>
+                    <p className="text-sm text-muted-foreground">
+                      Estate initiates the premium charge invoice, then waits
+                      for Finance payment confirmation before the agreement can
+                      be generated.
+                    </p>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="grid gap-3 text-sm md:grid-cols-4">
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Amount
+                        </div>
+                        <div className="mt-1 font-medium">
+                          {formatMoney(
+                            premiumChargeAmount,
+                            premiumChargeCurrency
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Invoice
+                        </div>
+                        <div className="mt-1 font-medium">
+                          {premiumChargeInvoiceReference || 'Not created'}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Payment
+                        </div>
+                        <Badge
+                          variant={
+                            premiumChargeSettled ? 'secondary' : 'outline'
+                          }
+                          className="mt-1"
+                        >
+                          {premiumChargePaymentStatus || 'Pending invoice'}
+                        </Badge>
+                      </div>
+                      <div>
+                        <div className="text-xs text-muted-foreground">
+                          Balance
+                        </div>
+                        <div className="mt-1 font-medium">
+                          {Number.isFinite(premiumChargeBalance)
+                            ? formatMoney(
+                                premiumChargeBalance,
+                                premiumChargeCurrency
+                              )
+                            : premiumChargeInvoiceId
+                              ? 'Awaiting Finance'
+                              : 'Not invoiced'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {premiumChargeInvoiceId ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-2"
+                          disabled={isSaving || premiumChargeSettled}
+                          onClick={() =>
+                            void syncPremiumChargePaymentStatus()
+                          }
+                        >
+                          {isSaving ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RefreshCw className="h-4 w-4" />
+                          )}
+                          {premiumChargeSettled
+                            ? 'Premium paid'
+                            : 'Refresh Finance payment'}
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          className="gap-2"
+                          disabled={
+                            isSaving ||
+                            premiumChargeSettled ||
+                            !(premiumChargeAmount > 0)
+                          }
+                          onClick={() => void createPremiumChargeInvoice()}
+                        >
+                          {isSaving ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Send className="h-4 w-4" />
+                          )}
+                          Create premium invoice
+                        </Button>
+                      )}
+                      {premiumChargeSettled ? (
+                        <div className="flex items-center gap-2 text-sm font-medium text-emerald-700">
+                          <CheckCircle2 className="h-4 w-4" />
+                          Agreement can continue
+                        </div>
+                      ) : null}
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : null}
+
               {showAgreementGeneration ? (
                 <Card>
                   <CardHeader>
@@ -2016,6 +2252,8 @@ export function ListingApplicationWorkspace() {
                           !selectedTemplateCode ||
                           !approvedDecision ||
                           missingApprovedMoveInDate ||
+                          missingApprovedRentTerm ||
+                          missingPremiumChargePayment ||
                           agreementAlreadyGenerated ||
                           caseIsCompleted
                         }
@@ -2035,6 +2273,19 @@ export function ListingApplicationWorkspace() {
                         No {rentalApplication ? 'lease' : 'sale'} agreement
                         template is available. Upload or activate the correct
                         transaction template in Central DMS first.
+                      </p>
+                    ) : null}
+                    {missingApprovedRentTerm ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Enter the approved rental term on the current stage
+                        before generating the rental agreement.
+                      </p>
+                    ) : null}
+                    {missingPremiumChargePayment ? (
+                      <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Initiate the premium charge invoice and wait for Finance
+                        payment confirmation before generating the rental or
+                        lease agreement.
                       </p>
                     ) : null}
                     {generatedAgreement ? (
@@ -2594,6 +2845,8 @@ export function ListingApplicationWorkspace() {
                           !selectedCase.canEditCurrentStage ||
                           !stageConfirmed ||
                           missingApprovedMoveInDate ||
+                          missingApprovedRentTerm ||
+                          missingPremiumChargePayment ||
                           missingApprovedAgreement ||
                           missingLegalAgreementReview
                     }
@@ -2619,6 +2872,19 @@ export function ListingApplicationWorkspace() {
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       Submit the generated agreement to Legal and wait for Legal
                       approval before routing this stage forward.
+                    </p>
+                  ) : null}
+                  {missingApprovedRentTerm ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Enter the approved rental term before routing this rental
+                      case forward.
+                    </p>
+                  ) : null}
+                  {missingPremiumChargePayment ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Premium charge payment is still pending. Refresh the
+                      Finance payment status after Finance receives payment, or
+                      waive the charge when management approves the waiver.
                     </p>
                   ) : null}
                   {!caseIsCompleted && selectedCase.canEditCurrentStage ? (

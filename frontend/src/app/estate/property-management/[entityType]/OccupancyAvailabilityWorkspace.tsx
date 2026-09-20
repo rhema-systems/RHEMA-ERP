@@ -26,7 +26,6 @@ import {
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -51,6 +50,7 @@ import {
   type EstateManagedAsset,
 } from '@/services/estate-land-management.service';
 import { assetMatchesWorkspacePrefill } from './property-workspace-utils';
+import { useManagedAssetsPage } from './use-managed-assets-page';
 
 const statusLabels: Record<EstateManagedAssetStatus, string> = {
   [EstateManagedAssetStatus.LandBank]: 'Land bank',
@@ -187,7 +187,6 @@ export function OccupancyAvailabilityWorkspace() {
   const prefillReference =
     searchParams.get('field_propertyUnit') || searchParams.get('referenceNumber');
   const initialSearch = prefillReference || '';
-  const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
   const [searchDraft, setSearchDraft] = React.useState(initialSearch);
   const [search, setSearch] = React.useState(initialSearch);
   const [statusFilter, setStatusFilter] = React.useState('active');
@@ -198,55 +197,37 @@ export function OccupancyAvailabilityWorkspace() {
   const [leaseAvailable, setLeaseAvailable] = React.useState(false);
   const [saleAvailable, setSaleAvailable] = React.useState(false);
   const [notes, setNotes] = React.useState('');
-  const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
-  const [loadError, setLoadError] = React.useState<string | null>(null);
-
-  const loadAssets = React.useCallback(async () => {
-    setIsLoading(true);
-    setLoadError(null);
-    try {
-      setAssets(
-        await estateLandManagementService.getManagedAssets({
-          search: search || undefined,
-          take: 500,
-        })
-      );
-    } catch {
-      setAssets([]);
-      setLoadError('Unable to load occupancy and availability records.');
-    } finally {
-      setIsLoading(false);
-    }
-  }, [search]);
-
-  React.useEffect(() => {
-    void loadAssets();
-  }, [loadAssets]);
-
-  const filteredAssets = React.useMemo(() => {
-    if (statusFilter === 'active') {
-      return assets.filter(
-        (asset) =>
-          asset.status !== EstateManagedAssetStatus.Retired &&
-          asset.status !== EstateManagedAssetStatus.LandBank &&
-          asset.status !== EstateManagedAssetStatus.UnderDevelopment
-      );
-    }
-
-    if (statusFilter === 'portal') {
-      return assets.filter((asset) => asset.isPublishedToExternalPortal);
-    }
-
-    if (statusFilter === 'hidden') {
-      return assets.filter((asset) => !asset.isPublishedToExternalPortal);
-    }
-
-    if (statusFilter === 'all') return assets;
-
-    return assets.filter((asset) => asset.status === Number(statusFilter));
-  }, [assets, statusFilter]);
-  const occupancyPages = usePaginatedItems(filteredAssets, 10);
+  const statusQuery =
+    statusFilter === 'active'
+      ? controlledStatuses.filter(
+          (status) => status !== EstateManagedAssetStatus.Retired
+        )
+      : statusFilter === 'all' || statusFilter === 'portal' || statusFilter === 'hidden'
+        ? undefined
+        : [Number(statusFilter) as EstateManagedAssetStatus];
+  const {
+    assets,
+    setAssets,
+    page,
+    setPage,
+    isLoading,
+    loadError,
+    loadAssets,
+    pageSize,
+    totalPages,
+    totalItems,
+  } = useManagedAssetsPage({
+    search: search || undefined,
+    statuses: statusQuery,
+    publishedToExternalPortal:
+      statusFilter === 'portal'
+        ? true
+        : statusFilter === 'hidden'
+          ? false
+          : undefined,
+    errorMessage: 'Unable to load occupancy and availability records.',
+  });
 
   const selectedAsset = assets.find((asset) => asset.id === selectedAssetId);
   const selectedNeedsLeaseEvidence = selectedAsset
@@ -398,7 +379,7 @@ export function OccupancyAvailabilityWorkspace() {
                 variant="outline"
                 size="icon"
                 disabled={isLoading}
-                onClick={() => void loadAssets()}
+                onClick={() => void loadAssets(page)}
                 aria-label="Refresh occupancy board"
               >
                 <RefreshCw className="h-4 w-4" />
@@ -409,6 +390,7 @@ export function OccupancyAvailabilityWorkspace() {
               className="grid gap-2 lg:grid-cols-[minmax(14rem,1fr)_14rem_auto]"
               onSubmit={(event) => {
                 event.preventDefault();
+                setPage(1);
                 setSearch(searchDraft.trim());
               }}
             >
@@ -421,7 +403,7 @@ export function OccupancyAvailabilityWorkspace() {
                   placeholder="Search property, unit, lessee, or file reference"
                 />
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(value) => { setPage(1); setStatusFilter(value); }}>
                 <SelectTrigger>
                   <SelectValue placeholder="Filter status" />
                 </SelectTrigger>
@@ -453,13 +435,13 @@ export function OccupancyAvailabilityWorkspace() {
                 Loading occupancy records
               </div>
             ) : null}
-            {!isLoading && !loadError && filteredAssets.length === 0 ? (
+            {!isLoading && !loadError && assets.length === 0 ? (
               <div className="rounded-md border border-dashed p-10 text-center text-sm text-muted-foreground">
                 No occupancy records match the current filter.
               </div>
             ) : null}
 
-            {!isLoading && !loadError && filteredAssets.length > 0 ? (
+            {!isLoading && !loadError && assets.length > 0 ? (
               <div className="overflow-x-auto rounded-md border">
                 <Table>
                   <TableHeader>
@@ -474,7 +456,7 @@ export function OccupancyAvailabilityWorkspace() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {occupancyPages.items.map((asset) => (
+                    {assets.map((asset) => (
                       <TableRow
                         key={asset.id}
                         className={
@@ -541,7 +523,7 @@ export function OccupancyAvailabilityWorkspace() {
                 </Table>
               </div>
             ) : null}
-            {filteredAssets.length > occupancyPages.pageSize ? <Pagination currentPage={occupancyPages.currentPage} totalPages={occupancyPages.totalPages} totalItems={occupancyPages.totalItems} pageSize={occupancyPages.pageSize} onPageChange={occupancyPages.setCurrentPage} /> : null}
+            {totalPages > 1 ? <Pagination currentPage={page} totalPages={totalPages} totalItems={totalItems} pageSize={pageSize} onPageChange={setPage} /> : null}
           </CardContent>
         </Card>
 

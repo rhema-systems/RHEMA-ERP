@@ -36,9 +36,21 @@ export function PropertyEnquiryDialog({ listing, onClose, onCreated }: {
     }).catch(() => { if (active) { setError('Could not load your business partner details. Close this dialog and try again.'); } });
     return () => { active = false; };
   }, []);
-  const price = listing.externalListingType === 'Rent'
+  const isRent = listing.externalListingType === 'Rent' || listing.externalListingType === 'SaleAndRent';
+  const isLease = listing.externalListingType === 'Lease' || listing.externalListingType === 'SaleAndLease';
+  const price = isRent || isLease
     ? listing.externalMonthlyRent ?? listing.externalListingPrice
     : listing.externalSalePrice ?? listing.externalListingPrice;
+  const listingLabel = listing.externalListingType === 'Sale'
+    ? 'For sale'
+    : isLease
+      ? listing.externalListingType === 'SaleAndLease'
+        ? 'For sale or lease'
+        : 'For lease'
+      : listing.externalListingType === 'SaleAndRent'
+        ? 'For sale or rent'
+        : 'For rent';
+  const chargeCadence = isLease ? ' / year' : isRent ? ' / month' : '';
   const formattedPrice = price == null ? 'Price on request' : new Intl.NumberFormat(undefined, {
     style: 'currency', currency: listing.externalListingCurrency || 'GHS', maximumFractionDigits: 0,
   }).format(price);
@@ -66,7 +78,7 @@ export function PropertyEnquiryDialog({ listing, onClose, onCreated }: {
         <p className="font-semibold">{listing.name}</p>
         <p className="text-sm text-slate-600">{listing.assetCode}</p>
         <p className="text-sm">{listing.location || 'Location not specified'}</p>
-        <p className="text-sm">{listing.externalListingType === 'Sale' ? 'For sale' : listing.externalListingType === 'Rent' ? 'For rent / lease' : 'For sale or rent'} · {formattedPrice}{listing.externalListingType === 'Rent' ? ' / month' : ''}</p>
+        <p className="text-sm">{listingLabel} · {formattedPrice}{chargeCadence}</p>
       </div>
       {profiles.length > 0 ? <div className="space-y-2">
         <Label htmlFor="enquiry-partner">Business partner</Label>

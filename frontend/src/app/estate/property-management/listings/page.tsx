@@ -20,6 +20,13 @@ import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Pagination } from '@/components/ui/pagination';
@@ -55,25 +62,33 @@ function formatMoney(value?: number, currency = 'GHS') {
   }).format(value);
 }
 
-function formatLeaseTerm(months?: number) {
-  if (!months) return 'Duration not set';
-  if (months % 12 === 0) {
-    const years = months / 12;
-    return `${years} year${years === 1 ? '' : 's'}`;
-  }
-  return `${months} month${months === 1 ? '' : 's'}`;
+function includesSale(listingType: string) {
+  return listingType === 'Sale' || listingType === 'SaleAndRent' || listingType === 'SaleAndLease';
+}
+
+function includesRecurringCharge(listingType: string) {
+  return listingType === 'Rent' || listingType === 'Lease' || listingType === 'SaleAndRent' || listingType === 'SaleAndLease';
+}
+
+function isLeaseListing(listingType: string) {
+  return listingType === 'Lease' || listingType === 'SaleAndLease';
 }
 
 function commercialSummary(asset: EstateManagedAsset) {
   const currency = asset.externalListingCurrency || asset.currency;
   if (asset.externalListingType === 'Rent') {
-    if (asset.assetType === EstateManagedAssetType.Land) {
-      return `${formatMoney(asset.groundRentPayable, currency)} annual ground rent · ${formatLeaseTerm(asset.externalLeaseTermMonths)}`;
-    }
-    return `${formatMoney(asset.externalMonthlyRent, currency)} / month · ${formatLeaseTerm(asset.externalLeaseTermMonths)}`;
+    return `${formatMoney(asset.externalMonthlyRent, currency)} / month`;
+  }
+  if (asset.externalListingType === 'Lease') {
+    const annualCharge = asset.externalMonthlyRent;
+    return `${formatMoney(annualCharge, currency)} / year`;
   }
   if (asset.externalListingType === 'SaleAndRent') {
     return `${formatMoney(asset.externalSalePrice, currency)} sale · ${formatMoney(asset.externalMonthlyRent, currency)} / month`;
+  }
+  if (asset.externalListingType === 'SaleAndLease') {
+    const annualCharge = asset.externalMonthlyRent;
+    return `${formatMoney(asset.externalSalePrice, currency)} sale · ${formatMoney(annualCharge, currency)} / year`;
   }
   return formatMoney(
     asset.externalSalePrice ||
@@ -92,15 +107,22 @@ function listingStatusLabel(asset: EstateManagedAsset) {
 }
 
 function listingTypeLabel(asset: EstateManagedAsset) {
-  if (asset.externalListingType === 'SaleAndRent') return 'Sale and rent';
+  if (asset.externalListingType === 'SaleAndRent') {
+    return 'Sale and rent';
+  }
+  if (asset.externalListingType === 'SaleAndLease') {
+    return 'Sale and lease';
+  }
   if (asset.externalListingType && asset.externalListingType !== 'None') {
     return asset.externalListingType;
   }
   if (asset.isAvailableForSale && asset.isAvailableForLease) {
-    return 'Sale and rent';
+    return 'Sale';
   }
   if (asset.isAvailableForSale) return 'Sale';
-  if (asset.isAvailableForLease) return 'Rent';
+  if (asset.isAvailableForLease) {
+    return 'Rent';
+  }
   return 'Not set';
 }
 
@@ -117,6 +139,7 @@ export default function EstatePropertyListingsPage() {
     React.useState(false);
   const [search, setSearch] = React.useState('');
   const [listingPage, setListingPage] = React.useState(1);
+  const [listingHasNextPage, setListingHasNextPage] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [isUploading, setIsUploading] = React.useState(false);
@@ -126,8 +149,6 @@ export default function EstatePropertyListingsPage() {
     externalListingStatus: 'Published',
     externalSalePrice: '',
     externalMonthlyRent: '',
-    externalLeaseDuration: '',
-    externalLeaseDurationUnit: 'months',
     externalListingCurrency: 'GHS',
     externalListingNotes: '',
   });
@@ -138,18 +159,35 @@ export default function EstatePropertyListingsPage() {
   );
 
   const loadAssets = React.useCallback(
-    async (query?: string) => {
+    async (query?: string, page = 1) => {
       setIsLoading(true);
       try {
+        const skip = Math.max(0, page - 1) * LISTINGS_PER_PAGE;
+        const take = LISTINGS_PER_PAGE + 1;
         const [managedAssets, demarcations] = await Promise.all([
           estateLandManagementService.getManagedAssets({
             search: query,
             portalListingCandidates: true,
-            take: 300,
+            skip,
+            take,
           }),
-          estateLandManagementService.getPortalListingDemarcations(query),
+          estateLandManagementService.getPortalListingDemarcations(
+            query,
+            skip,
+            take
+          ),
         ]);
-        const data = [...managedAssets, ...demarcations];
+        const nonLandAssets = managedAssets.filter(
+          (asset) => asset.assetType !== EstateManagedAssetType.Land
+        );
+        setListingHasNextPage(
+          nonLandAssets.length > LISTINGS_PER_PAGE ||
+            demarcations.length > LISTINGS_PER_PAGE
+        );
+        const data = [
+          ...nonLandAssets.slice(0, LISTINGS_PER_PAGE),
+          ...demarcations.slice(0, LISTINGS_PER_PAGE),
+        ];
         setAssets(data);
         const requestedAsset = requestedAssetId
           ? data.find((asset) => asset.id === requestedAssetId)
@@ -196,23 +234,22 @@ export default function EstatePropertyListingsPage() {
       return;
     }
 
-    const leaseTermMonths = selected.externalLeaseTermMonths;
-    const durationUsesYears =
-      leaseTermMonths != null &&
-      leaseTermMonths > 0 &&
-      leaseTermMonths % 12 === 0;
+    const requestedType =
+      requestedListingType === 'Sale' ||
+      requestedListingType === 'Rent' ||
+      requestedListingType === 'Lease'
+        ? requestedListingType
+        : null;
+    const savedListingType =
+      selected.externalListingType && selected.externalListingType !== 'None'
+        ? selected.externalListingType
+        : null;
     setForm({
       isPublishedToExternalPortal: selected.isPublishedToExternalPortal,
       externalListingType:
-        selected.externalListingType && selected.externalListingType !== 'None'
-          ? selected.externalListingType
-          : requestedListingType === 'Sale' ||
-              requestedListingType === 'Rent' ||
-              requestedListingType === 'SaleAndRent'
-            ? requestedListingType
-            : selected.assetType === EstateManagedAssetType.Land
-              ? 'Sale'
-              : 'Rent',
+        savedListingType ??
+        requestedType ??
+        'Rent',
       externalListingStatus:
         selected.externalListingStatus ||
         (selected.listingScope === 'demarcation' ? 'Draft' : 'Published'),
@@ -226,22 +263,14 @@ export default function EstatePropertyListingsPage() {
             ? ''
             : String(selected.externalSalePrice),
       externalMonthlyRent:
-        selected.assetType === EstateManagedAssetType.Land &&
-        selected.groundRentPayable != null
-          ? String(selected.groundRentPayable)
-          : selected.externalMonthlyRent == null &&
-        selected.externalListingType === 'Rent'
+        selected.externalMonthlyRent == null &&
+        includesRecurringCharge(savedListingType ?? selected.externalListingType)
           ? selected.externalListingPrice == null
             ? ''
             : String(selected.externalListingPrice)
           : selected.externalMonthlyRent == null
             ? ''
             : String(selected.externalMonthlyRent),
-      externalLeaseDuration:
-        leaseTermMonths == null
-          ? ''
-          : String(durationUsesYears ? leaseTermMonths / 12 : leaseTermMonths),
-      externalLeaseDurationUnit: durationUsesYears ? 'years' : 'months',
       externalListingCurrency: selected.externalListingCurrency || 'GHS',
       externalListingNotes: selected.externalListingNotes || '',
     });
@@ -270,12 +299,12 @@ export default function EstatePropertyListingsPage() {
   );
   const listingTotalPages = Math.max(
     1,
-    Math.ceil(orderedAssets.length / LISTINGS_PER_PAGE)
+    listingHasNextPage ? listingPage + 1 : listingPage
   );
-  const pagedAssets = orderedAssets.slice(
-    (listingPage - 1) * LISTINGS_PER_PAGE,
-    listingPage * LISTINGS_PER_PAGE
-  );
+  const pagedAssets = orderedAssets.slice(0, LISTINGS_PER_PAGE);
+  const listingTotalItems = listingHasNextPage
+    ? listingPage * LISTINGS_PER_PAGE + 1
+    : (listingPage - 1) * LISTINGS_PER_PAGE + pagedAssets.length;
 
   React.useEffect(() => {
     setListingPage((current) => Math.min(current, listingTotalPages));
@@ -287,18 +316,30 @@ export default function EstatePropertyListingsPage() {
       asset.isPublishedToExternalPortal &&
       asset.externalListingStatus === 'Published'
   ).length;
-  const includesSale =
-    form.externalListingType === 'Sale' ||
-    form.externalListingType === 'SaleAndRent';
-  const includesRent =
-    form.externalListingType === 'Rent' ||
-    form.externalListingType === 'SaleAndRent';
-  const rentPublicationBlockedByGroundRent = Boolean(
+  const listingIncludesSale = includesSale(form.externalListingType);
+  const listingIncludesCharge = includesRecurringCharge(
+    form.externalListingType
+  );
+  const listingIsLease = isLeaseListing(form.externalListingType);
+  const selectedIsLand = selected?.assetType === EstateManagedAssetType.Land;
+  const listingPublicationBlockedByGroundRent = Boolean(
     selected &&
       form.isPublishedToExternalPortal &&
-      includesRent &&
-      selected.assetType === EstateManagedAssetType.Land &&
+      listingIncludesCharge &&
+      listingIsLease &&
+      selectedIsLand &&
       !(selected.groundRentPayable != null && selected.groundRentPayable > 0)
+  );
+  const leaseAmountBelowGroundRent = Boolean(
+    selected &&
+      form.isPublishedToExternalPortal &&
+      listingIncludesCharge &&
+      listingIsLease &&
+      selectedIsLand &&
+      selected.groundRentPayable != null &&
+      selected.groundRentPayable > 0 &&
+      form.externalMonthlyRent &&
+      Number(form.externalMonthlyRent) < selected.groundRentPayable
   );
   const minimumSalePrice =
     selected?.listingScope === 'demarcation' &&
@@ -310,7 +351,7 @@ export default function EstatePropertyListingsPage() {
   const saveListing = async () => {
     if (!selected) return;
     const salePriceValue =
-      includesSale && form.externalSalePrice
+      listingIncludesSale && form.externalSalePrice
         ? Number(form.externalSalePrice)
         : null;
     if (
@@ -326,35 +367,66 @@ export default function EstatePropertyListingsPage() {
       );
       return;
     }
+    if (listingPublicationBlockedByGroundRent) {
+      toast.error(
+        selected.listingScope === 'demarcation'
+          ? 'Assess annual ground rent for this demarcated land portion before publishing the lease listing.'
+          : 'Assess annual ground rent before publishing this land lease listing.'
+      );
+      return;
+    }
+    if (leaseAmountBelowGroundRent) {
+      toast.error(
+        `Lease amount per year cannot be below the approved ground rent of ${formatMoney(
+          selected.groundRentPayable,
+          form.externalListingCurrency || selected.currency
+        )}.`
+      );
+      return;
+    }
 
     setIsSaving(true);
     try {
+      const resolvedListingType = form.externalListingType;
+      const resolvedIncludesSale = includesSale(resolvedListingType);
+      const resolvedIncludesCharge = includesRecurringCharge(resolvedListingType);
+      const resolvedIsLease = isLeaseListing(resolvedListingType);
+      const recurringAmount =
+        resolvedIncludesCharge && form.externalMonthlyRent
+            ? Number(form.externalMonthlyRent)
+            : null;
+      if (
+        resolvedIncludesCharge &&
+        resolvedIsLease &&
+        selected.assetType === EstateManagedAssetType.Land &&
+        selected.groundRentPayable != null &&
+        selected.groundRentPayable > 0 &&
+        recurringAmount != null &&
+        recurringAmount < selected.groundRentPayable
+      ) {
+        toast.error(
+          `Lease amount per year cannot be below the approved ground rent of ${formatMoney(
+            selected.groundRentPayable,
+            form.externalListingCurrency || selected.currency
+          )}.`
+        );
+        return;
+      }
       const payload = {
         isPublishedToExternalPortal: form.isPublishedToExternalPortal,
-        externalListingType: form.externalListingType,
+        externalListingType: resolvedListingType,
         externalListingStatus: form.externalListingStatus,
-        externalListingPrice: includesSale
+        externalListingPrice: resolvedIncludesSale
           ? form.externalSalePrice
             ? Number(form.externalSalePrice)
             : null
-          : form.externalMonthlyRent
-            ? Number(form.externalMonthlyRent)
-            : null,
+          : recurringAmount,
         externalSalePrice:
-          includesSale && form.externalSalePrice
+          resolvedIncludesSale && form.externalSalePrice
             ? Number(form.externalSalePrice)
             : null,
-        externalMonthlyRent:
-          includesRent && selected.assetType === EstateManagedAssetType.Land
-            ? selected.groundRentPayable ?? null
-            : includesRent && form.externalMonthlyRent
-              ? Number(form.externalMonthlyRent)
-              : null,
-        externalLeaseTermMonths:
-          includesRent && form.externalLeaseDuration
-            ? Number(form.externalLeaseDuration) *
-              (form.externalLeaseDurationUnit === 'years' ? 12 : 1)
-            : null,
+        externalMonthlyRent: recurringAmount,
+        externalLeaseTermMonths: null,
         externalListingCurrency: form.externalListingCurrency,
         externalListingNotes: form.externalListingNotes,
       };
@@ -368,7 +440,7 @@ export default function EstatePropertyListingsPage() {
             ...payload,
           }
         );
-        await loadAssets(search);
+        await loadAssets(search, listingPage);
       } else {
         const updated = await estateLandManagementService.updateExternalListing(
           selected.id,
@@ -418,7 +490,7 @@ export default function EstatePropertyListingsPage() {
       }
       toast.success('Listing removed from Portal Listings.');
       setSelectedId(null);
-      await loadAssets(search);
+      await loadAssets(search, listingPage);
     } catch (error: any) {
       toast.error(error?.message || 'Unable to remove the portal listing.');
     } finally {
@@ -507,7 +579,7 @@ export default function EstatePropertyListingsPage() {
               onSubmit={(event) => {
                 event.preventDefault();
                 setListingPage(1);
-                void loadAssets(search);
+                void loadAssets(search, 1);
               }}
             >
               <div className="relative flex-1">
@@ -620,25 +692,39 @@ export default function EstatePropertyListingsPage() {
             </div>
           ) : null}
 
-          {orderedAssets.length > LISTINGS_PER_PAGE ? (
+          {listingTotalPages > 1 ? (
             <Pagination
               currentPage={listingPage}
               totalPages={listingTotalPages}
-              totalItems={orderedAssets.length}
+              totalItems={listingTotalItems}
               pageSize={LISTINGS_PER_PAGE}
-              onPageChange={setListingPage}
+              onPageChange={(page) => {
+                setListingPage(page);
+                void loadAssets(search, page);
+              }}
             />
           ) : null}
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">
-            {selected?.name || 'Select an asset'}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-5">
+      <Dialog
+        open={Boolean(selected) || requestedAssetUnavailable}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedId(null);
+            setRequestedAssetUnavailable(false);
+          }
+        }}
+      >
+        <DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{selected?.name || 'Portal listing'}</DialogTitle>
+            <DialogDescription>
+              Review the listing details, commercial terms, visibility, and
+              portal images.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-5">
             {requestedAssetUnavailable ? (
               <div className="rounded-md border border-dashed p-6 text-sm text-muted-foreground">
                 The requested managed asset could not be loaded. Search for the
@@ -697,7 +783,13 @@ export default function EstatePropertyListingsPage() {
                   <div className="space-y-2">
                     <Label>Listing type</Label>
                     <Select
-                      value={form.externalListingType}
+                      value={
+                        listingIsLease
+                          ? 'Lease'
+                          : listingIncludesCharge
+                            ? 'Rent'
+                            : 'Sale'
+                      }
                       onValueChange={(value) =>
                         setForm((current) => ({
                           ...current,
@@ -711,9 +803,7 @@ export default function EstatePropertyListingsPage() {
                       <SelectContent>
                         <SelectItem value="Sale">Sale</SelectItem>
                         <SelectItem value="Rent">Rent</SelectItem>
-                        <SelectItem value="SaleAndRent">
-                          Sale and rent
-                        </SelectItem>
+                        <SelectItem value="Lease">Lease</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -761,7 +851,7 @@ export default function EstatePropertyListingsPage() {
                     </div>
                   </div>
                   <div className="grid gap-4 md:grid-cols-2">
-                    {includesSale ? (
+                    {listingIncludesSale ? (
                       <div className="space-y-2">
                         <Label>Sale price</Label>
                         <Input
@@ -796,75 +886,58 @@ export default function EstatePropertyListingsPage() {
                         ) : null}
                       </div>
                     ) : null}
-                    {includesRent ? (
-                      <>
-                        <div className="space-y-2">
-                          <Label>
-                            {selected.assetType === EstateManagedAssetType.Land
-                              ? 'Annual ground rent'
-                              : 'Rent per month'}
-                          </Label>
-                          <Input
-                            type="number"
-                            min="0"
-                            value={form.externalMonthlyRent}
-                            readOnly={
-                              selected.assetType === EstateManagedAssetType.Land
-                            }
-                            onChange={(event) =>
-                              setForm((current) => ({
-                                ...current,
-                                externalMonthlyRent: event.target.value,
-                              }))
-                            }
-                            placeholder={
-                              selected.assetType === EstateManagedAssetType.Land
-                                ? 'Complete ground-rent assessment first'
+                    {listingIncludesCharge ? (
+                      <div className="space-y-2">
+                        <Label>
+                          {selectedIsLand && listingIsLease
+                            ? 'Lease amount per year'
+                            : listingIsLease
+                              ? 'Amount per year'
+                              : 'Amount per month'}
+                        </Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          value={form.externalMonthlyRent}
+                          onChange={(event) =>
+                            setForm((current) => ({
+                              ...current,
+                              externalMonthlyRent: event.target.value,
+                            }))
+                          }
+                          placeholder={
+                            selectedIsLand && listingIsLease
+                              ? 'Enter lease amount per year'
+                              : listingIsLease
+                                ? 'Enter yearly lease amount'
                                 : 'Enter monthly rent'
-                            }
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Rental duration</Label>
-                          <div className="grid grid-cols-[1fr_130px] gap-2">
-                            <Input
-                              type="number"
-                              min="1"
-                              value={form.externalLeaseDuration}
-                              onChange={(event) =>
-                                setForm((current) => ({
-                                  ...current,
-                                  externalLeaseDuration: event.target.value,
-                                }))
-                              }
-                              placeholder="Duration"
-                            />
-                            <Select
-                              value={form.externalLeaseDurationUnit}
-                              onValueChange={(value) =>
-                                setForm((current) => ({
-                                  ...current,
-                                  externalLeaseDurationUnit: value,
-                                }))
-                              }
-                            >
-                              <SelectTrigger>
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="months">Months</SelectItem>
-                                <SelectItem value="years">Years</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </>
+                          }
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Sales will capture the agreed customer duration before
+                          handing the case to Estate.
+                        </p>
+                        {selectedIsLand &&
+                        listingIsLease &&
+                        selected.groundRentPayable != null &&
+                        selected.groundRentPayable > 0 ? (
+                          <p className="text-xs text-muted-foreground">
+                            Approved ground rent floor:{' '}
+                            {formatMoney(
+                              selected.groundRentPayable,
+                              form.externalListingCurrency || selected.currency
+                            )}
+                            . The yearly lease amount cannot be lower.
+                          </p>
+                        ) : null}
+                      </div>
                     ) : null}
                   </div>
                 </div>
 
-                {includesRent &&
-                selected.assetType === EstateManagedAssetType.Land ? (
+                {listingIncludesCharge &&
+                listingIsLease &&
+                selectedIsLand ? (
                   <div
                     className={`rounded-md border p-4 ${
                       selected.groundRentPayable != null &&
@@ -877,37 +950,15 @@ export default function EstatePropertyListingsPage() {
                     <p className="mt-1 text-sm">
                       {selected.groundRentPayable != null &&
                       selected.groundRentPayable > 0
-                        ? `Annual ground rent assessed at ${formatMoney(
+                        ? `Annual ground rent floor assessed at ${formatMoney(
                             selected.groundRentPayable,
                             form.externalListingCurrency || selected.currency
-                          )}. This can be shown on the portal, but billing will only start after customer acceptance, signed agreement, and move-in / agreement start date.`
-                        : 'Assess and approve annual ground rent through the applicable Estate SOP before publishing this land rental listing. Billing account setup happens later after customer acceptance, signed agreement, and move-in / agreement start date.'}
+                          )}. The principal yearly lease amount must be equal to or above this floor. Billing will only start after customer acceptance, signed agreement, and move-in / agreement start date.`
+                        : 'Assess and approve annual ground rent through the applicable Estate SOP before publishing this land lease listing. Billing account setup happens later after customer acceptance, signed agreement, and move-in / agreement start date.'}
                     </p>
                     {selected.groundRentPayable == null ||
                     selected.groundRentPayable <= 0 ? (
                       <div className="mt-3 flex flex-wrap gap-2">
-                        <Button
-                          asChild
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="bg-white"
-                        >
-                          <Link href="/estate/EstateLandsPartiallyServiced">
-                            Partially serviced land SOP
-                          </Link>
-                        </Button>
-                        <Button
-                          asChild
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="bg-white"
-                        >
-                          <Link href="/estate/EstateTenancyRegularisation">
-                            Regularisation SOP
-                          </Link>
-                        </Button>
                         <Button
                           asChild
                           type="button"
@@ -952,10 +1003,14 @@ export default function EstatePropertyListingsPage() {
                   </Button>
                   <Button
                     onClick={saveListing}
-                    disabled={isSaving || rentPublicationBlockedByGroundRent}
+                    disabled={isSaving}
                     title={
-                      rentPublicationBlockedByGroundRent
-                        ? 'Assess annual ground rent before publishing this land rental listing.'
+                      listingPublicationBlockedByGroundRent
+                        ? selected.listingScope === 'demarcation'
+                          ? 'Assess annual ground rent for this demarcated land portion before publishing.'
+                          : 'Assess annual ground rent before publishing this land lease listing.'
+                        : leaseAmountBelowGroundRent
+                          ? 'Lease amount per year cannot be below the approved ground rent.'
                         : undefined
                     }
                   >
@@ -1033,8 +1088,9 @@ export default function EstatePropertyListingsPage() {
                 No Portal Listing candidate is selected.
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

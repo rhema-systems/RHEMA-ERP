@@ -152,6 +152,11 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
             return BadRequest(new { success = false, message = "Enter the completed Sales reference, up to 200 characters." });
         if (request.AgreedAmount is <= 0)
             return BadRequest(new { success = false, message = "Enter a positive agreed amount." });
+        if (ListingRequiresSalesDuration(property.ListingType)
+            && string.IsNullOrWhiteSpace(request.RequestedLeaseTerm))
+            return BadRequest(new { success = false, message = "Enter the Sales-agreed rent or lease duration before handing this enquiry to Estate." });
+        if (request.RequestedLeaseTerm?.Trim().Length > 120)
+            return BadRequest(new { success = false, message = "Sales-agreed duration must be 120 characters or fewer." });
         if (request.SalesAmountPaid is < 0)
             return BadRequest(new { success = false, message = "Sales amount paid cannot be negative." });
         if (request.SalesAmountPaid.HasValue
@@ -175,6 +180,7 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
                 ticket.CrmOpportunityId.Value,
                 request.SalesReference.Trim(),
                 request.AgreedAmount,
+                request.RequestedLeaseTerm,
                 request.SalesAmountPaid,
                 request.SalesPaymentReference,
                 request.Currency,
@@ -227,6 +233,12 @@ public sealed class EhcPropertyEnquiriesController(ApplicationDbContext db, ICur
     private static bool IsEstateListingSource(string? source)
         => string.Equals(source, "estate-public-listing", StringComparison.OrdinalIgnoreCase)
             || string.Equals(source, "state-public-listing", StringComparison.OrdinalIgnoreCase);
+
+    private static bool ListingRequiresSalesDuration(string? listingType)
+        => string.Equals(listingType, "Rent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(listingType, "Lease", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(listingType, "SaleAndRent", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(listingType, "SaleAndLease", StringComparison.OrdinalIgnoreCase);
 
     private async Task ResolveAfterEstateHandoffAsync(
         ErpSystem.Core.Entities.Ehc.EhcTicket ticket,
@@ -297,6 +309,7 @@ public sealed record PropertyEnquiryTransition(EhcTicketStatus Status, Guid? Tra
 public sealed record CreatePropertyEnquiryEstateHandoff(
     string? SalesReference,
     decimal? AgreedAmount,
+    string? RequestedLeaseTerm,
     decimal? SalesAmountPaid,
     string? SalesPaymentReference,
     string? Currency,
