@@ -104,7 +104,7 @@ public class HrCurrencyBridge
     /// <para>Reading <c>InverseRate</c> here would make travel numerically right today and put it
     /// in open disagreement with every other module — two truths about the same trip, which is
     /// worse than one shared, fixable error. Reported instead: see
-    /// <c>docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c> §2. Fixing Finance fixes travel with no
+    /// <c>docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c> §2. Fixing Finance fixes travel with no
     /// change here.</para>
     /// </remarks>
     public async Task<decimal> GetRateToBaseAsync(

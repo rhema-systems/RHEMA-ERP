@@ -477,7 +477,7 @@ export interface SafetyInspectionDocumentCreateRequest {
   uploadedById: string;
 }
 
-// ── Checklist builder (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ─────────────
+// ── Checklist builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ─────────────
 // A template is header fields + lettered sections of items (+ critical Yes/No sections) + a
 // scoring mode + outcomes + signatories. Structure is writable only while Draft; publishing
 // validates and freezes it; "new version" clones it into Draft v+1 under the same number.

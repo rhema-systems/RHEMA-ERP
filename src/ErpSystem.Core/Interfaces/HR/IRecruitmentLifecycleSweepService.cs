@@ -21,7 +21,7 @@ public sealed class RecruitmentSweepResultDto
 /// </summary>
 /// <remarks>
 /// <para><b>Why this exists (G-2.4, G-6.2, 2026-09-15).</b> Appendix C of
-/// <c>docs/HR/HR-RECRUITMENT-SYSTEM-GUIDE.md</c> named this as its third pattern: *date-driven
+/// <c>docs/HR/areas/recruitment/HR-RECRUITMENT-SYSTEM-GUIDE.md</c> named this as its third pattern: *date-driven
 /// statuses that only a human can write*. There was <b>no scheduled job anywhere in the
 /// recruitment module</b>, and two statuses depended on one:</para>
 ///

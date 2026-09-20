@@ -53,7 +53,7 @@ import { cn } from '@/lib/utils';
 import { OrganizationUnitPickerField } from '@/components/hr/common/OrganizationUnitPickerField';
 
 /**
- * The walk (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §5): header fields, every section
+ * The walk (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §5): header fields, every section
  * with a C / NC / NA (or Yes / No) control per item and a remarks box, a live score, the outcome
  * + Complete gate, and the signature block. Answers are held locally and saved in one call; the
  * server recomputes everything on Complete. Once completed the answers are read-only.

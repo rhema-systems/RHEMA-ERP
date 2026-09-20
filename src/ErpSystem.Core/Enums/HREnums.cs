@@ -2503,7 +2503,7 @@ public enum EmploymentType
 /// <remarks>
 /// <para>HR's fact, because the scale is HR's concept — <c>EmployeeSalaryAssignment</c> places a
 /// person on a <c>SalaryNotch</c> whose amount is the pay — while payroll is already amount-based
-/// and never reads the placement. Round-2 lane E1 (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5.2).</para>
+/// and never reads the placement. Round-2 lane E1 (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5.2).</para>
 ///
 /// <para>⚠ Independent of <c>EmploymentType</c> and of <c>IsOnPayroll</c>. A permanent employee can
 /// be negotiated (a retained specialist) and a contractor can be on the scale; the feedback's

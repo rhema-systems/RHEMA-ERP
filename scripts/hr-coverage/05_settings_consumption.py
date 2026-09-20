@@ -13,7 +13,7 @@ the screen mentions all of them, and mentioning is not consuming.
 
 WHY THIS EXISTS
 ---------------
-`docs/HR-CONFIGURATION-REGISTER.md` polices one rule:
+`docs/HR/programme/HR-CONFIGURATION-REGISTER.md` polices one rule:
 
     A setting that saves and is read by nothing is worse than a hardcoded constant.
 

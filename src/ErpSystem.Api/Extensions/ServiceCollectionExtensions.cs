@@ -262,7 +262,7 @@ namespace ErpSystem.Api.Extensions
             // controller was dead. Both interfaces and both implementations already existed; only
             // the registration was missing. Found 2026-09-14 because HR's pre-employment check
             // providers cannot be registered without a supplier. Recorded in
-            // docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md.
+            // docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md.
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierContactRepository, ErpSystem.Data.Repositories.Procurement.SupplierContactRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.ISupplierItemCatalogRepository, ErpSystem.Data.Repositories.Procurement.SupplierItemCatalogRepository>();
             services.AddScoped<ErpSystem.Core.Interfaces.Procurement.IPurchaseRequisitionRepository, ErpSystem.Data.Repositories.Procurement.PurchaseRequisitionRepository>();
@@ -1149,7 +1149,7 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Services.HR.IStaffNumberService,
                                ErpSystem.Core.Services.HR.StaffNumberService>();
 
-            // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): template, check, review,
+            // Employee bulk import (docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md): template, check, review,
             // commit. Lives in Api because it reads and writes workbooks (ClosedXML) and stores the
             // upload through the HR document gate; every employee still goes through IEmployeeService.
             services.AddScoped<ErpSystem.Core.Interfaces.HR.IEmployeeImportService,

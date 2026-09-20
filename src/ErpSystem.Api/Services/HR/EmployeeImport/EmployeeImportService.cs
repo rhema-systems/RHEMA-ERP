@@ -13,7 +13,7 @@ using Microsoft.EntityFrameworkCore;
 namespace ErpSystem.Api.Services.HR.EmployeeImport;
 
 /// <summary>
-/// Employee bulk import: template, check, review, commit. See <c>docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md</c>.
+/// Employee bulk import: template, check, review, commit. See <c>docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md</c>.
 /// </summary>
 /// <remarks>
 /// <para><b>Reads</b> go straight to the DbContext (tenant-filtered, soft-delete aware) because the

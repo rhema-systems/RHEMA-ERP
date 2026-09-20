@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <summary>
-    /// Demo feedback round 2, lane D1 (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 5 lane D, § 6.7):
+    /// Demo feedback round 2, lane D1 (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 5 lane D, § 6.7):
     /// where an employee's probation term came from, the contract-kind link that Q-4 chose to
     /// surface rather than delete, and the retire flag that kind needs — plus the one-off repair of
     /// <c>IsCurrent</c> without which fixing defect X-4 would make the live data worse.

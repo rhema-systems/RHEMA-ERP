@@ -28,7 +28,7 @@ namespace ErpSystem.Data.Migrations
     /// <b>No deduction lives here.</b> These columns are a declaration payroll reads through
     /// <c>GET Assets/payroll/rental-deductions</c>; the deduction itself is payroll's, which is
     /// another module and read-only to this one. Registered as <b>16.6</b> in
-    /// <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the sweep after the module.
+    /// <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the sweep after the module.
     /// </para>
     /// <para>
     /// ⚠ <b>Every add is guarded and every drop is conditional</b>, so the migration is safe to

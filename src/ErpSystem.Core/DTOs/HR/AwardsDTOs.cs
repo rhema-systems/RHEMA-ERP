@@ -839,7 +839,7 @@ public class ProcessAwardPaymentDto
     /// <c>MonetaryAmount</c> is what was promised; this is what was paid.
     ///
     /// ⚠ This is a RECORD, not a posting. Per the HR-Finance split it does not touch the general
-    /// ledger; the amount is registered in docs/HR-FINANCE-INTEGRATION-BACKLOG.md for the sweep that
+    /// ledger; the amount is registered in docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md for the sweep that
     /// runs after the module.
     /// </remarks>
     [Range(0, double.MaxValue)]

@@ -74,7 +74,7 @@ public class AwardType : TenantEntity
     ///
     /// <para>TDC's note does not state a rule. This makes the position a visible setting rather
     /// than a hidden default, so their answer becomes a data change. See
-    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
+    /// <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
     /// </remarks>
     public bool AllowSelfNomination { get; set; }
 
@@ -130,7 +130,7 @@ public class AwardType : TenantEntity
     /// is the right way round: a window is a softening TDC has not asked for, and defaulting to one
     /// would quietly grant an amnesty nobody approved. ⚠ It is also the thing most likely to be
     /// wrong for a thirty-year award, where a warning from two decades ago would otherwise disqualify
-    /// — which is exactly why the question is in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> rather than
+    /// — which is exactly why the question is in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> rather than
     /// answered here.
     /// </remarks>
     public int? DisqualifyingDisciplineMonths { get; set; }
@@ -309,7 +309,7 @@ public class AwardCycle : TenantEntity
 /// <para><b>The default ladder is 10 / 15 / 20 / 25 / 30 years, and only the years are defaulted.</b>
 /// The money, leave days and benefits are left empty deliberately: TDC has not said what a
 /// twenty-year award is worth, and a seeded figure would look authoritative. See decision D-8 and
-/// the entry in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
+/// the entry in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c>.</para>
 ///
 /// <para>⚠ Measured 2026-08-21: <b>one</b> employee on the live tenant has ten years' service and
 /// none has fifteen. The rungs above ten therefore have no live subjects at all, which is why the

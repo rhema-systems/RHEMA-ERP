@@ -669,7 +669,7 @@ public partial class ApplicationDbContext
     public DbSet<StaffTravelHealthRequirement> StaffTravelHealthRequirements { get; set; } = null!;
     public DbSet<NumberSequence> NumberSequences { get; set; } = null!;
 
-    // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md): the checked workbook and its rows.
+    // Employee bulk import (docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md): the checked workbook and its rows.
     public DbSet<EmployeeImportSession> EmployeeImportSessions { get; set; } = null!;
     public DbSet<EmployeeImportRow> EmployeeImportRows { get; set; } = null!;
     /// <summary>Round 3, lane S. ⚠ A DbSet is load-bearing for HR entities (tenant FK convention, table name).</summary>
@@ -10894,7 +10894,7 @@ private void ConfigureHREntities(ModelBuilder builder)
 
         // D. Safety inspections & audits ──────────────────────────────
         // A template number is shared by its versions (v1 retired, v2 published, v3 draft), so
-        // uniqueness is per version — see docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.3.
+        // uniqueness is per version — see docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.3.
         builder.Entity<SheInspectionChecklist>(e =>
         {
             e.HasIndex(x => new { x.TenantId, x.ChecklistNumber, x.Version }).IsUnique();

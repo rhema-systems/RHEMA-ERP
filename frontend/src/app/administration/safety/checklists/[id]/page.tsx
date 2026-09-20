@@ -23,7 +23,7 @@ import { safetyChecklistService } from '@/services/hr/safety-checklist.service';
 type Action = 'publish' | 'retire' | 'newVersion' | 'delete';
 
 /**
- * The checklist builder (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §5): one template,
+ * The checklist builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §5): one template,
  * shaped across six tabs. Draft → Publish freezes the structure; New version clones it under the
  * same number; Retire withdraws it from the scheduling picker. Past inspections keep their version.
  */

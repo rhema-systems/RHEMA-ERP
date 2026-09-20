@@ -84,7 +84,7 @@ public class SheInspectionChecklistController : SheApiControllerBase
         return NoContent();
     }
 
-    // ── Builder: lifecycle (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+    // ── Builder: lifecycle (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
     [HttpPost("{id:guid}/publish")]
     [Authorize(Policy = HrPermissions.SheAdminPolicy)]
     public async Task<ActionResult<SheInspectionChecklistDto>> Publish(Guid id)

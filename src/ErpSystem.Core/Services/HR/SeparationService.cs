@@ -1948,7 +1948,7 @@ public class SeparationService : ISeparationService
     /// ⚠ <b>A policy assumption, stated rather than buried.</b> Calendar days: monthly × 12 ÷ 365.
     /// A 30-day-month or working-day basis gives different money on the same facts, and TDC has not
     /// said which it uses — so the basis is written onto every computed line in words, and the
-    /// question is recorded in <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Do not change this quietly.
+    /// question is recorded in <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Do not change this quietly.
     /// </remarks>
     /// <remarks>
     /// ⚠ The figure in force is <c>CompanyHrPolicySettings.SettlementDaysPerYear</c>; this seeds it.

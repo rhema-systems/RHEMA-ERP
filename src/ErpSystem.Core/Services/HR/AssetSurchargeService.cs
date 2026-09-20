@@ -41,7 +41,7 @@ namespace ErpSystem.Core.Services.HR;
 /// <para><b>Where this stops.</b> It deducts nothing and posts nothing.
 /// <see cref="GetPayrollDeductionLinesAsync"/> is a read-only projection payroll consumes;
 /// <see cref="RecordRecoveryAsync"/> records what somebody else collected. See the payroll
-/// ownership boundary, decision D2, and <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
+/// ownership boundary, decision D2, and <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
 /// </remarks>
 public class AssetSurchargeService : IAssetSurchargeService
 {

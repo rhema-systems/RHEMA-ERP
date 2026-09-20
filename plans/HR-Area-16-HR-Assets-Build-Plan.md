@@ -377,7 +377,7 @@ problem the row counts say we do not have.
 ### D2 — how far HR goes on the rental / benefit-in-kind seam (AST-9, AST-10). ✅ **DECIDED 2026-08-23.**
 
 *Constraint: payroll is another developer's module — integrate read-only, never modify. And every
-money event is registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` and posted in one sweep after
+money event is registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` and posted in one sweep after
 the whole HR module.*
 
 *Recommendation taken.* **HR *declares and exposes*, and stops there.** HR gains: `IsRentable` on the
@@ -598,7 +598,7 @@ found **cross-module defect 10** — admission and discharge numbers are `{PREFI
 behind unique indexes, so two of either in one second collide with a 500. HR ships no workaround; the
 harness asserts the defect and paces around it.
 
-**Three cross-module defects recorded rather than fixed** (`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`):
+**Three cross-module defects recorded rather than fixed** (`docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md`):
 **#8** Finance's fixed-asset → Maintenance link is a field no screen can set; **#9** Projects'
 maintenance follow-through throws for every tenant because those three lookups are empty — four
 shipped actions whose buttons light up on the wrong condition and then fail, with the middleware
@@ -617,7 +617,7 @@ overdue returns; and the full screen set.
 **Out of scope, deliberately:**
 
 - **GL posting** of surcharges, rental deductions or disposal proceeds. Registered in
-  `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, posted in the one sweep after the whole HR module. Do
+  `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, posted in the one sweep after the whole HR module. Do
   **not** invent an HR-side posting mechanism here.
 - **Computing payroll.** HR exposes the rental/surcharge amounts; payroll consumes them.
 - **Depreciation, valuation, capitalisation and disposal accounting** — Finance's, read-only here.
@@ -1231,7 +1231,7 @@ not a debt, and one to be settled at exit or paid directly is not payroll's to d
 that list would have payroll collecting money nobody has ruled is owed. `InstalmentAmount` is the
 assessed amount over the declared count: a statement of intent, not a schedule, because HR does not
 know payroll's periods, its rounding or its net-pay floor. Registered as **16.1–16.7** in
-`docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, with the one question no other area raises — a surcharge
+`docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, with the one question no other area raises — a surcharge
 is the only place in the HR module where the employer is the **creditor**.
 
 **Screen.** `/hr/assets/me` gains a Charges tab, a fifth counter, and the accept/dispute dialog. The

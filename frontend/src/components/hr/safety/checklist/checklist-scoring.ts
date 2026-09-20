@@ -1,5 +1,5 @@
 // Client-side mirror of the server's scoring rules
-// (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.5–2.6), so the run screen can show the
+// (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.5–2.6), so the run screen can show the
 // score as the inspector ticks. The server recomputes on Complete; this never writes anything.
 
 import type {

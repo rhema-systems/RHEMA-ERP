@@ -14,7 +14,7 @@ namespace ErpSystem.Core.DTOs.HR;
 ///
 /// <para>The table was seeded with seven TDC rows and then had no DTO, no service, no controller
 /// and no screen — surfaced in lane D1 (round-2 question Q-4). See
-/// docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 9.</para>
+/// docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 9.</para>
 /// </remarks>
 public class EmployeeContractTypeDto
 {

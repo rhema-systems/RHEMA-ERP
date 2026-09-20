@@ -79,7 +79,7 @@ class SafetyChecklistService {
     return apiService.delete<void>(`${this.baseUrl}/items/${itemId}`);
   }
 
-  // ── Builder: lifecycle (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+  // ── Builder: lifecycle (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
 
   /** Validates the structure and freezes it; refused (422) with the list of problems otherwise. */
   publish(id: string): Promise<SheInspectionChecklist> {

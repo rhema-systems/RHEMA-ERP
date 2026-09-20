@@ -1031,7 +1031,7 @@ export const navigationItems: NavItem[] = [
             icon: BadgeAlert,
             permissions: ['HR.Employee.Read'],
           },
-          // Employee bulk import (docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md). Write-gated, the same
+          // Employee bulk import (docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md). Write-gated, the same
           // tier as the create form: loading and amending employee records is what Write means,
           // and the HR role holds Write but not Admin — Admin hid this from every HR desk user.
           {

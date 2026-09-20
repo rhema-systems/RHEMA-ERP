@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <summary>
-    /// Demo feedback round 2, lane A (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 5): the guarantor's
+    /// Demo feedback round 2, lane A (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 5): the guarantor's
     /// national-ID kind as a foreign key to the identification-type catalogue (E-13), and a
     /// documents table for the papers that pertain to a guarantor — the signed form, an ID scan,
     /// a payslip — through the controlled upload gate (E-12).

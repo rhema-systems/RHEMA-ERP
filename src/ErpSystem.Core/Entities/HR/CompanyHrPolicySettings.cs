@@ -151,7 +151,7 @@ public class CompanyHrPolicySettings : TenantEntity
     /// <remarks>
     /// ⚠ <b>Ours, not TDC's, and that is why it lives here.</b> FR-HR-181 names the escalation route
     /// and sets no time limit at any rung; five days is a working assumption raised with TDC in
-    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered. Until slice 7 it was a
+    /// <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered. Until slice 7 it was a
     /// <c>const</c> in <c>DisciplineReminderService</c>, so TDC's eventual answer would have cost a
     /// code change and a deploy. Now it costs a settings edit.
     ///

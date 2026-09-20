@@ -910,7 +910,7 @@ public class SheRiskAssessmentAcknowledgement : TenantEntity
 
 /// <summary>
 /// An inspection checklist template — the form the SHE team designs and inspections are run against.
-/// Design record: docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md. A template is header fields +
+/// Design record: docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md. A template is header fields +
 /// lettered sections of numbered items (+ optional critical Yes/No sections) + a scoring mode + outcomes
 /// + signatories. Structure is editable only while <see cref="Status"/> is Draft; publishing freezes it,
 /// and "new version" clones it into Draft v+1 under the same number so past inspections keep their form.

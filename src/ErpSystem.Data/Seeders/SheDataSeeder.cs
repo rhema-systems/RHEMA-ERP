@@ -543,7 +543,7 @@ public class SheDataSeeder
 
     // ── D. Inspections ───────────────────────────────────────────────────────
 
-    // Three published templates (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §6): the
+    // Three published templates (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §6): the
     // original general walk, now sectioned, plus TDC's own two paper forms transcribed — the Food
     // Vendor Screening & Inspection Checklist (percentage bands + critical disqualifiers) and the
     // Cafeteria Inspection Checklist (qualitative rating). Then one run against each shape.

@@ -738,7 +738,7 @@ public class StaffTravelFinanceService : IStaffTravelFinanceService
     /// <para>⚠ This is the travel-side arithmetic only. The GL entries that ought to accompany it —
     /// clearing an employee receivable, posting the net payment — are deliberately out of scope per
     /// decision D-4 and are registered as items 12.1–12.3 in
-    /// <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
+    /// <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
     /// </remarks>
     private async Task SettleLinkedAdvanceAsync(
         StaffTravelExpenseClaim claim, CancellationToken cancellationToken)

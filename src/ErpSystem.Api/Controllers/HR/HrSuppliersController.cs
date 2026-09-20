@@ -20,7 +20,7 @@ namespace ErpSystem.Api.Controllers.HR;
 /// <para><b>Why not <c>api/Suppliers</c>.</b> Procurement's own list answers <b>400 "The operation
 /// is not valid for the current state of the object"</b> to every caller, admin included
 /// (measured 2026-09-10; recorded for the Procurement owner in
-/// <c>docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c>). Even when that is fixed, this projection
+/// <c>docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c>). Even when that is fixed, this projection
 /// is the same shape and reason as <c>HrCurrenciesController</c> and
 /// <c>HrFinanceAccountsController</c>: another module owns what a supplier IS; HR owns which one
 /// a cost is paid to, and hands its screens id, code, name and active — nothing else.</para>

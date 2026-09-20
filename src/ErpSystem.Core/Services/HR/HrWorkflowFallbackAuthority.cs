@@ -34,7 +34,7 @@ namespace ErpSystem.Core.Services.HR;
 /// asked, which is worth defending against even when the default configuration is sound.</para></para>
 ///
 /// <para>It was found through recruitment (G-4.1 and G-10.1 of
-/// <c>docs/HR/HR-RECRUITMENT-SYSTEM-GUIDE.md</c>) and is not a recruitment defect: several HR
+/// <c>docs/HR/areas/recruitment/HR-RECRUITMENT-SYSTEM-GUIDE.md</c>) and is not a recruitment defect: several HR
 /// services carried a comment asserting the <i>opposite</i> — that submit and approve are
 /// "inoperable by design until a definition is published". They were not inoperable. They
 /// auto-approved, which is the dangerous direction to be wrong in, and the prose was the confident

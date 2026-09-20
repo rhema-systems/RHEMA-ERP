@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <summary>
-    /// Demo feedback round 2, lane E1 (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5.2): how an
+    /// Demo feedback round 2, lane E1 (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5.2): how an
     /// employee's basic pay is arrived at — the salary scale, or an amount agreed for the person —
     /// and the note that says why when it is the latter.
     /// </summary>

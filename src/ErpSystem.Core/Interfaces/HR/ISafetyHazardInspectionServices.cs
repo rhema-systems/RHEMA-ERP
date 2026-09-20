@@ -84,7 +84,7 @@ public interface ISheInspectionChecklistService
     Task<SheInspectionChecklistItemDto> UpdateItemAsync(UpdateSheInspectionChecklistItemDto dto, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> DeleteItemAsync(Guid itemId, CancellationToken cancellationToken = default);
 
-    // ── Builder (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+    // ── Builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
     /// <summary>Validates the structure and freezes it; retires the previous version if it is still published.</summary>
     Task<SheInspectionChecklistDto> PublishAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
     Task<SheInspectionChecklistDto> RetireAsync(Guid id, Guid userId, CancellationToken cancellationToken = default);
@@ -149,7 +149,7 @@ public interface ISafetyInspectionService
     Task<SafetyInspectionDocumentDto> AddDocumentAsync(CreateSafetyInspectionDocumentDto dto, Guid tenantId, Guid userId, CancellationToken cancellationToken = default);
     Task<bool> DeleteDocumentAsync(Guid documentId, CancellationToken cancellationToken = default);
 
-    // ── Checklist run (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+    // ── Checklist run (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
     /// <summary>Materialises a published template's items onto an inspection that has none yet.</summary>
     Task<SafetyInspectionDto> ApplyChecklistAsync(Guid inspectionId, ApplySafetyInspectionChecklistDto dto, Guid userId, CancellationToken cancellationToken = default);
     /// <summary>Bulk answer: each item's status (validated against its section kind) and remarks.</summary>

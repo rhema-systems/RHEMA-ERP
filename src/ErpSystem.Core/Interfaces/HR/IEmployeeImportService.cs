@@ -7,7 +7,7 @@ namespace ErpSystem.Core.Interfaces.HR;
 /// Bulk employee load from the system-generated workbook: template, check, review, commit.
 /// </summary>
 /// <remarks>
-/// See <c>docs/HR/HR-EMPLOYEE-IMPORT-DESIGN.md</c>. Every employee is written through
+/// See <c>docs/HR/areas/employees/HR-EMPLOYEE-IMPORT-DESIGN.md</c>. Every employee is written through
 /// <see cref="IEmployeeService"/>; this service only decides what to send and records what happened.
 /// </remarks>
 public interface IEmployeeImportService

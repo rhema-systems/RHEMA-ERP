@@ -656,7 +656,7 @@ public class EmployeeAwardService : IEmployeeAwardService
     ///
     /// <para><b>This is bookkeeping inside the awards module, not accounting.</b> Per the standing
     /// HR-Finance split it posts nothing to the general ledger; the money events are registered in
-    /// <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the sweep that follows the module. A budget
+    /// <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the sweep that follows the module. A budget
     /// figure the awards desk maintains for itself is not a parallel ledger.</para>
     ///
     /// <para>An award with no budget for its year is <b>not</b> refused. TDC has not said budgets are
@@ -1299,7 +1299,7 @@ public class AwardNominationService : IAwardNominationService
     /// <para><b>Not gated: nominating yourself.</b> The note does not say whether an employee may
     /// put their own name forward, and this refuses to invent a rule TDC has not stated. Self
     /// nomination is therefore accepted, the harness asserts that it is, and the question is in
-    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Making the position visible is the point: a silent
+    /// <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c>. Making the position visible is the point: a silent
     /// choice either way would be a decision nobody took.</para>
     /// </remarks>
     private async Task ValidateNominationAsync(Guid tenantId, Guid nominatedById, CreateAwardNominationDto dto)

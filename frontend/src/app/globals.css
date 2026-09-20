@@ -402,7 +402,7 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
   }
 
   /* SHE inspection checklist — the completed form printed as the paper it replaces
-     (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.10). Same body-class pattern as the
+     (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.10). Same body-class pattern as the
      asset report: everything hides, the print root is lifted to the page origin. */
   body.printing-she-inspection > * {
     visibility: hidden;

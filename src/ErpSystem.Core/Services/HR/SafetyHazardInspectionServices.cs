@@ -542,7 +542,7 @@ public class SheRiskAssessmentService : ISheRiskAssessmentService
 
 /// <summary>
 /// Inspection checklist templates and the builder that shapes them
-/// (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md). Structure — fields, sections, items,
+/// (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md). Structure — fields, sections, items,
 /// outcomes, signatories and the header's scoring / print columns — is writable only while the template
 /// is Draft. Publishing validates and freezes it; "new version" clones it under the same number.
 /// </summary>
@@ -1345,7 +1345,7 @@ public class SafetyInspectionService : ISafetyInspectionService
         var entity = dto.ToEntity(tenantId, userId);
         entity.InspectionNumber = await GenerateInspectionNumberAsync(tenantId, cancellationToken);
         // Choosing a template loads its items onto the inspection, unassessed, and starts the walk
-        // (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.4). Free-form stays Scheduled.
+        // (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.4). Free-form stays Scheduled.
         if (dto.ChecklistId != null)
         {
             var checklist = await GetRunnableChecklistAsync(dto.ChecklistId.Value, tenantId);
@@ -1537,7 +1537,7 @@ public class SafetyInspectionService : ISafetyInspectionService
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
-    //  Checklist run — docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4
+    //  Checklist run — docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4
     // ═════════════════════════════════════════════════════════════════════════════
 
     private async Task<SafetyInspection> GetOwnedInspectionWithDetailsAsync(Guid id)

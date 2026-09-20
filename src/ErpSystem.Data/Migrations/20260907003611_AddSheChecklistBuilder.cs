@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <summary>
-    /// The SHE inspection checklist builder (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §3):
+    /// The SHE inspection checklist builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §3):
     /// four template child tables (fields, sections, outcomes, signatories), two run tables (field
     /// values, signatures), lifecycle / scoring / print columns on <c>SheInspectionChecklists</c>,
     /// a section link on the items, computed-score and outcome columns on <c>SafetyInspections</c>,

@@ -19,7 +19,7 @@
     chain as applied, so the database CLAIMS to be current while missing those objects, and it can
     never afterwards be brought forward with `dotnet ef database update`. That is acceptable for a
     demo box that is rebuilt on demand. It is NOT acceptable for anything that becomes go-live.
-    See docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md section 21.
+    See docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md section 21.
 
     !! WHAT YOU GET, AND WHAT IS INVENTED
     'seed-hr-all' installs FACTS: the real organisation structure, the real positions, the reference

@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * The employee's Salary tab — round-2 lane E1 (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5).
+ * The employee's Salary tab — round-2 lane E1 (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 6.5).
  *
  * Four sections, in the order § 6.5.3 gives them:
  *   1. Pay basis — scale or negotiated, the note, and the figure HR would quote with its source.

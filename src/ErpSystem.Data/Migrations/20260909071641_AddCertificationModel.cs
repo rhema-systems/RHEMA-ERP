@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <summary>
-    /// Demo feedback round 2, lane C2 (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 1.3, § 6.3): the
+    /// Demo feedback round 2, lane C2 (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 1.3, § 6.3): the
     /// certification model — a credential catalogue under the certifying body, the skill and
     /// position links that consume it, what an employee holds with its evidence, and the pair the
     /// expiry sweep writes.

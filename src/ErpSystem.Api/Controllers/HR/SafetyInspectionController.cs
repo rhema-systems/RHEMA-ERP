@@ -199,7 +199,7 @@ public class SafetyInspectionController : SheApiControllerBase
         return NoContent();
     }
 
-    // ── Checklist run (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
+    // ── Checklist run (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ──
     /// <summary>Loads a published template's items onto an inspection that has none yet.</summary>
     [HttpPost("{id:guid}/apply-checklist")]
     [Authorize(Policy = HrPermissions.SheWritePolicy)]

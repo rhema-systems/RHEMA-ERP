@@ -182,7 +182,7 @@ class SafetyInspectionService {
     return apiService.delete<void>(`${this.baseUrl}/documents/${documentId}`);
   }
 
-  // ── Checklist run (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ────────────
+  // ── Checklist run (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §4) ────────────
 
   /** Loads a published template's items onto an inspection that has none yet (422 otherwise). */
   applyChecklist(inspectionId: string, checklistId: string): Promise<SafetyInspection> {

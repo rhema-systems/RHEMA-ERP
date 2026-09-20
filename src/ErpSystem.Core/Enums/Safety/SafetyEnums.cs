@@ -270,7 +270,7 @@ public enum SheInspectionResult
     NeedsFollowUp = 4
 }
 
-// ── Inspection checklist builder (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ──
+// ── Inspection checklist builder (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ──
 
 /// <summary>Template lifecycle. Structure is editable only in Draft; Published rows are what inspections pin.</summary>
 public enum SheChecklistStatus

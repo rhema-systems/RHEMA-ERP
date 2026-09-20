@@ -553,7 +553,7 @@ public class SeparationClearanceItem : TenantEntity
 /// copy quietly disagrees with the lines under it.</para>
 ///
 /// <para>⚠ <b>Nothing here posts to the general ledger.</b> Per the standing HR↔Finance split every
-/// money event is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> and posted in one
+/// money event is registered in <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> and posted in one
 /// sweep after the whole HR module. This records what is payable; Finance pays it.</para>
 /// </remarks>
 public class SeparationSettlement : TenantEntity

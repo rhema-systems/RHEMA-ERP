@@ -152,7 +152,7 @@ public class TdcDemoCheckProviderLinkSeeder
     /// false success, with no error and no id for the caller to act on. (Its companion defect, every
     /// endpoint on that controller answering 400 because two repositories were missing from DI, was
     /// fixed the same day; reads work now, the write does not.) Both are recorded as items 26 and 28
-    /// in <c>docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c>. <b>When the write is fixed, this
+    /// in <c>docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c>. <b>When the write is fixed, this
     /// method should be deleted and scenario 050 §21 restored</b> — the mapping endpoint,
     /// <c>POST /api/pre-employment-checks/providers</c>, works and should be used.</para>
     /// </summary>

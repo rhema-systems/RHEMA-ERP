@@ -501,7 +501,7 @@ public class MyRiskAcknowledgementDto
 
 #region Inspection Checklist
 
-// The builder: docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md. A template is header fields +
+// The builder: docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md. A template is header fields +
 // sections of items (+ critical Yes/No sections) + scoring mode + outcomes + signatories. Structure is
 // writable only in Draft; the service refuses (422) structure writes on Published / Retired rows.
 
@@ -960,7 +960,7 @@ public class SafetyInspectionDto : BaseDto
     public Guid? ClosedById { get; set; }
     public string? ClosedByName { get; set; }
 
-    // ── Checklist run (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ──
+    // ── Checklist run (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md) ──
     public string? ChecklistNumber { get; set; }
     public int? ChecklistVersion { get; set; }
     public SheChecklistScoringMode? ScoringMode { get; set; }

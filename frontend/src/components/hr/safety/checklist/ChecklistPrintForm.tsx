@@ -12,7 +12,7 @@ import { bandLabel, fmtPct, standardChoices } from './checklist-scoring';
 /**
  * The paper form, rendered from the template — blank as a builder preview, filled when an inspection
  * is passed. One component serves both so the preview is exactly what will print
- * (docs/HR/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.10). Black on white regardless of theme.
+ * (docs/HR/areas/she/HR-SHE-INSPECTION-CHECKLIST-BUILDER-DESIGN.md §2.10). Black on white regardless of theme.
  */
 interface Props {
   checklist: SheInspectionChecklist;

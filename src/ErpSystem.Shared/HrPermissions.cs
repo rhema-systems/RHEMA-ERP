@@ -639,7 +639,7 @@ public static class HrPermissions
     /// instance-level check does the real work, and not before.</para>
     ///
     /// <para><b>Recruitment is the exception to the Admin line above</b>, added 2026-09-15 to close
-    /// G-3.1 and G-4.8 of <c>docs/HR/HR-RECRUITMENT-SYSTEM-GUIDE.md</c>. Everywhere else Admin is
+    /// G-3.1 and G-4.8 of <c>docs/HR/areas/recruitment/HR-RECRUITMENT-SYSTEM-GUIDE.md</c>. Everywhere else Admin is
     /// the home for a management <i>decision</i>; in recruitment it had drifted onto ordinary
     /// record-keeping, and the result was that the HR function could not run its own module.
     /// <c>POST /position-vacancies/reconcile</c> is the <b>only</b> writer of the vacancy register

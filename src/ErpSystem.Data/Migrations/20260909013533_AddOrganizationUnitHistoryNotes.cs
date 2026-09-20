@@ -5,7 +5,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 namespace ErpSystem.Data.Migrations
 {
     /// <summary>
-    /// Demo feedback round 2, lane B1 (docs/HR/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 5): a <c>Notes</c>
+    /// Demo feedback round 2, lane B1 (docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2-PLAN.md § 5): a <c>Notes</c>
     /// column on the organisation-unit change log — the "any other ones" of O-3b, beside the
     /// reason and the effective dates that became the user's in the same slice.
     /// </summary>
