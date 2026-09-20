@@ -809,8 +809,8 @@ app.MapHub<ErpSystem.Api.Hubs.DashboardHub>("/api/hubs/dashboard");
 var skipStartupInitialization = app.Environment.IsEnvironment("Testing")
     || app.Configuration.GetValue<bool>("SkipStartupInitialization");
 var databaseConnectionTimeout = TimeSpan.FromSeconds(Math.Max(
-    1,
-    app.Configuration.GetValue("StartupInitialization:DatabaseConnectionTimeoutSeconds", 5)));
+    5,
+    app.Configuration.GetValue("StartupInitialization:DatabaseConnectionTimeoutSeconds", 30)));
 var migrationTimeout = TimeSpan.FromSeconds(Math.Max(
     5,
     app.Configuration.GetValue("StartupInitialization:MigrationTimeoutSeconds", 120)));
