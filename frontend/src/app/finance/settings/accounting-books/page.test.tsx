@@ -293,9 +293,12 @@ describe('accounting book settings', () => {
         expect(screen.getByText('Configuring → Initializing')).toBeInTheDocument();
         expect(screen.getAllByText('Not applicable — full book')).toHaveLength(2);
         expect(screen.getAllByText('Begin controlled opening preparation')).toHaveLength(2);
+        expect(await screen.findByText(/Configuration-stage initialization evidence already exists/)).toBeInTheDocument();
         expect(screen.getByText('What this approval authorizes')).toBeInTheDocument();
-        expect(screen.getByText(/Initialization evidence does not exist yet/)).toBeInTheDocument();
-        expect(financeDataService.getAccountingBookInitialization).not.toHaveBeenCalled();
+        expect(screen.getByText('2026-01: Open')).toBeInTheDocument();
+        expect(screen.getByText('Account-level reconciliation')).toBeInTheDocument();
+        expect(financeDataService.getAccountingBookInitialization).toHaveBeenCalledWith('book-local');
+        expect(financeDataService.getAccountingBookPeriods).toHaveBeenCalledWith('book-local');
     });
 
     it('reuses approved initialization and period evidence for an Active decision', async () => {

@@ -81,6 +81,7 @@ function LifecycleTransitionEvidence({ book, target, evidence, retry }: {
     retry: () => void;
 }) {
     const current = statusOf(book);
+    const hasPreparationEvidence = Boolean(evidence.initialization) || evidence.periods.length > 0;
     return <div className="space-y-4 rounded-md border p-4">
         <div>
             <p className="font-medium">Lifecycle decision evidence</p>
@@ -98,7 +99,17 @@ function LifecycleTransitionEvidence({ book, target, evidence, retry }: {
             <div className="sm:col-span-2 lg:col-span-4"><span className="text-muted-foreground">Transition reason</span><p>{book.pendingTransitionReason || 'The maker will provide a reason when submitting this request.'}</p></div>
         </div>
 
-        {target === 'Initializing' && <Alert><ShieldAlert className="h-4 w-4" /><AlertTitle>What this approval authorizes</AlertTitle><AlertDescription>Initialization evidence does not exist yet. This decision authorizes the book to enter Initializing so its exact-book periods and opening evidence can be prepared and independently approved.</AlertDescription></Alert>}
+        {target === 'Initializing' && (evidence.loading ? <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading initialization and period evidence…</div>
+            : evidence.error ? <Alert variant="destructive"><AlertTitle>Initialization evidence unavailable</AlertTitle><AlertDescription>{evidence.error} <Button type="button" variant="link" className="h-auto p-0" onClick={retry}>Retry</Button></AlertDescription></Alert>
+                : <div className="space-y-4">
+                    <Alert><ShieldAlert className="h-4 w-4" /><AlertTitle>What this approval authorizes</AlertTitle><AlertDescription>{hasPreparationEvidence
+                        ? 'Configuration-stage initialization evidence already exists and is shown below. This decision authorizes the book to enter Initializing; it does not replace the independent decisions recorded on that evidence.'
+                        : 'No initialization evidence has been prepared. This decision authorizes the book to enter Initializing, where its exact-book periods and opening evidence can be prepared and independently approved.'}</AlertDescription></Alert>
+                    {hasPreparationEvidence && <>
+                        <div className="rounded-md border p-3 text-sm"><p className="font-medium">Exact-book periods prepared during configuration</p>{evidence.periods.length === 0 ? <p className="mt-1 text-muted-foreground">No exact-book periods are configured.</p> : <div className="mt-2 flex flex-wrap gap-2">{evidence.periods.map(period => <Badge key={period.id} variant={period.status === 'Open' ? 'default' : 'outline'}>{period.fiscalPeriodCode}: {period.status}</Badge>)}</div>}</div>
+                        {evidence.initialization && <InitializationEvidencePack initialization={evidence.initialization} />}
+                    </>}
+                </div>)}
 
         {target === 'Active' && (evidence.loading ? <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading approved initialization and period evidence…</div>
             : evidence.error ? <Alert variant="destructive"><AlertTitle>Activation evidence unavailable</AlertTitle><AlertDescription>{evidence.error} <Button type="button" variant="link" className="h-auto p-0" onClick={retry}>Retry</Button></AlertDescription></Alert>
@@ -225,12 +236,20 @@ export default function AccountingBooksSettingsPage() {
     };
 
     const loadLifecycleEvidence = useCallback(async (book: AccountingBook, target: AccountingBookLifecycleStatus) => {
-        if (target !== 'Active') {
+        if (target !== 'Initializing' && target !== 'Active') {
             setLifecycleEvidence(emptyLifecycleEvidence());
             return;
         }
         setLifecycleEvidence({ ...emptyLifecycleEvidence(), loading: true });
         try {
+            if (target === 'Initializing') {
+                const [initialization, periods] = await Promise.all([
+                    financeDataService.getAccountingBookInitialization(book.id),
+                    financeDataService.getAccountingBookPeriods(book.id),
+                ]);
+                setLifecycleEvidence({ loading: false, error: null, initialization, readiness: null, periods });
+                return;
+            }
             const [initialization, readiness, periods] = await Promise.all([
                 financeDataService.getAccountingBookInitialization(book.id),
                 financeDataService.getAccountingBookActivationReadiness(book.id),
@@ -238,7 +257,7 @@ export default function AccountingBooksSettingsPage() {
             ]);
             setLifecycleEvidence({ loading: false, error: null, initialization, readiness, periods });
         } catch (reason) {
-            setLifecycleEvidence({ ...emptyLifecycleEvidence(), error: reason instanceof Error ? reason.message : 'Activation evidence could not be loaded.' });
+            setLifecycleEvidence({ ...emptyLifecycleEvidence(), error: reason instanceof Error ? reason.message : 'Lifecycle evidence could not be loaded.' });
         }
     }, []);
 
