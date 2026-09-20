@@ -139,12 +139,6 @@ function parsePriceFilter(value: string) {
     : undefined;
 }
 
-function isLandListing(listing?: ExternalEstateListing | null) {
-  if (!listing) return false;
-  const assetType = String(listing.assetType).toLowerCase();
-  return assetType === '0' || assetType === 'land';
-}
-
 function ListingImage({ listing }: { listing: ExternalEstateListing }) {
   const [imageUrl, setImageUrl] = React.useState<string | null>(null);
 
@@ -537,21 +531,7 @@ export default function ExternalPropertyListingsPage() {
                             ? 'Lease duration'
                             : 'Rental duration'
                         }
-                        value={formatLeaseTerm(
-                          selected.externalLeaseTermMonths
-                        )}
-                      />
-                    ) : null}
-                    {selected.externalListingType !== 'Sale' &&
-                    isLeaseListingType(selected.externalListingType) &&
-                    isLandListing(selected) ? (
-                      <ListingStat
-                        icon={FileText}
-                        label="Ground rent floor"
-                        value={formatMoney(
-                          selected.groundRentPayable,
-                          selected.externalListingCurrency
-                        )}
+                        value="Duration on request"
                       />
                     ) : null}
                   </div>
@@ -576,9 +556,7 @@ export default function ExternalPropertyListingsPage() {
                     </div>
                     <div className="mt-1 text-sm text-slate-500">
                       {selected.externalListingType !== 'Sale'
-                        ? `${formatLeaseTerm(
-                            selected.externalLeaseTermMonths
-                          )} · Sales will continue the enquiry`
+                        ? 'Sales will continue the enquiry'
                         : listingTypeLabel(selected.externalListingType)}
                     </div>
                   </div>

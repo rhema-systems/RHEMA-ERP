@@ -55,12 +55,6 @@ function formatLeaseTerm(months?: number | null) {
   return `${months} month${months === 1 ? '' : 's'}`;
 }
 
-function isLandListing(listing?: ExternalEstateListing | null) {
-  if (!listing) return false;
-  const assetType = String(listing.assetType).toLowerCase();
-  return assetType === '0' || assetType === 'land';
-}
-
 function isLeaseListingType(value: string) {
   return value === 'Lease' || value === 'SaleAndLease';
 }
@@ -487,21 +481,7 @@ export default function PublicPropertyListingsPage() {
                               ? 'Lease duration'
                               : 'Rental duration'
                           }
-                          value={formatLeaseTerm(
-                            selected.externalLeaseTermMonths
-                          )}
-                        />
-                      ) : null}
-                      {selected.externalListingType !== 'Sale' &&
-                      isLeaseListingType(selected.externalListingType) &&
-                      isLandListing(selected) ? (
-                        <ListingStat
-                          icon={FileText}
-                          label="Ground rent floor"
-                          value={formatMoney(
-                            selected.groundRentPayable,
-                            selected.externalListingCurrency
-                          )}
+                          value="Duration on request"
                         />
                       ) : null}
                     </div>
@@ -526,9 +506,7 @@ export default function PublicPropertyListingsPage() {
                       </div>
                       <div className="mt-1 text-sm text-slate-500">
                         {selected.externalListingType !== 'Sale'
-                          ? `${formatLeaseTerm(
-                              selected.externalLeaseTermMonths
-                            )} · Sales will continue the enquiry`
+                          ? 'Sales will continue the enquiry'
                           : listingTypeLabel(selected.externalListingType)}
                       </div>
                     </div>
