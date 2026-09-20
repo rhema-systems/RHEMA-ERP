@@ -116,6 +116,7 @@ describe('accounting-book applicability settings', () => {
         });
         render(<AccountingBookApplicabilityPage />);
         await screen.findByText('Selection preview');
+        expect(screen.getByText(/Checks which active, ready accounting books would be selected/)).toBeInTheDocument();
         fireEvent.change(screen.getByLabelText('Origin module'), { target: { value: 'fin' } });
         fireEvent.change(screen.getByLabelText('Document type'), { target: { value: 'ManualJournal' } });
         fireEvent.change(screen.getByLabelText('Posting action'), { target: { value: 'Post' } });
