@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import {
   AlertTriangle,
   BellRing,
@@ -16,7 +16,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
@@ -42,7 +42,9 @@ const formatDate = (value?: string) => value
   ? new Intl.DateTimeFormat('en-GH', { dateStyle: 'medium' }).format(new Date(value))
   : '—';
 const money = (amount: number, currency = 'GHS') =>
-  new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(amount);
+  currency === 'UNSPECIFIED'
+    ? `Currency unspecified ${new Intl.NumberFormat('en-GH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(amount)}`
+    : new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(amount);
 
 export default function ArCollectionsPage() {
   const { toast } = useToast();
@@ -55,6 +57,7 @@ export default function ArCollectionsPage() {
   const [summary, setSummary] = useState<ArCollectionSummary>();
   const [assignees, setAssignees] = useState<ArCollectionAssignee[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string>();
   const [saving, setSaving] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [search, setSearch] = useState('');
@@ -67,6 +70,7 @@ export default function ArCollectionsPage() {
   const [taskOpen, setTaskOpen] = useState(false);
   const [reminderOpen, setReminderOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [generateOpen, setGenerateOpen] = useState(false);
   const [history, setHistory] = useState<ArCollectionHistoryItem[]>([]);
 
   const [taskForm, setTaskForm] = useState({
@@ -76,9 +80,11 @@ export default function ArCollectionsPage() {
   const [reminderForm, setReminderForm] = useState({
     channel: 'Email', recipient: '', message: '', nextFollowUpDate: '', confirmedDispatched: false,
   });
+  const [generateForm, setGenerateForm] = useState({ assignedToId: '', followUpInDays: '1', priority: '5' });
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(undefined);
     try {
       const [queue, totals, users] = await Promise.all([
         arCollectionDataService.getWorkQueue({
@@ -96,9 +102,15 @@ export default function ArCollectionsPage() {
       setSummary(totals);
       setAssignees(users);
     } catch (error) {
+      const message = error instanceof Error ? error.message : 'Please retry.';
+      setRows([]);
+      setTotalPages(0);
+      setSummary(undefined);
+      setAssignees([]);
+      setLoadError(message);
       toast({
         title: 'Collection workspace could not be loaded',
-        description: error instanceof Error ? error.message : 'Please retry.',
+        description: message,
         variant: 'destructive',
       });
     } finally {
@@ -172,13 +184,15 @@ export default function ArCollectionsPage() {
     try {
       const result = await arCollectionDataService.generateTasks({
         minimumDaysOverdue: minimumDays,
-        followUpInDays: 1,
-        priority: 5,
+        assignedToId: generateForm.assignedToId || undefined,
+        followUpInDays: Number(generateForm.followUpInDays),
+        priority: Number(generateForm.priority),
       });
       toast({
         title: 'Overdue work queue synchronized',
-        description: `${result.createdCount} created, ${result.refreshedCount} refreshed, ${result.autoResolvedCount} resolved and ${result.reactivatedCount} reactivated from settlement evidence.`,
+        description: `${result.createdCount} created, ${result.refreshedCount} refreshed, ${result.autoResolvedCount} resolved, ${result.reactivatedCount} reactivated, and ${result.skippedUnresolvedPartnerCount} skipped because partner identity could not be resolved.`,
       });
+      setGenerateOpen(false);
       await load();
     } catch (error) {
       toast({ title: 'Task generation failed', description: error instanceof Error ? error.message : 'Please retry.', variant: 'destructive' });
@@ -244,12 +258,15 @@ export default function ArCollectionsPage() {
       </div>
       <div className="flex gap-2">
         <Button variant="outline" onClick={() => void load()} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
-        {canManage && <Button onClick={generateTasks} disabled={generating}>
-          {generating ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <UserPlus className="mr-2 h-4 w-4" />}Generate follow-up tasks
+        {canManage && <Button onClick={() => setGenerateOpen(true)} disabled={generating || loading || Boolean(loadError)}>
+          <UserPlus className="mr-2 h-4 w-4" />Generate follow-up tasks
         </Button>}
       </div>
     </div>
 
+    {loading ? <Card data-testid="collection-loading"><CardContent className="p-12 text-center text-muted-foreground"><Loader2 className="mr-2 inline h-5 w-5 animate-spin" />Loading posted AR exposures…</CardContent></Card>
+      : loadError ? <Card role="alert" className="border-destructive"><CardContent className="space-y-4 p-8"><div><p className="font-semibold text-destructive">Collection workspace could not be loaded</p><p className="mt-1 text-sm text-muted-foreground">{loadError}</p></div><Button onClick={() => void load()}><RefreshCw className="mr-2 h-4 w-4" />Retry</Button></CardContent></Card>
+      : <>
     <div className="grid gap-4 md:grid-cols-4">{cards.map(({ title, value, Icon, tone }) =>
       <Card key={title}><CardContent className="flex items-center justify-between p-5"><div><p className="text-sm text-muted-foreground">{title}</p><p className="text-2xl font-bold">{value}</p></div><Icon className={`h-7 w-7 ${tone}`} /></CardContent></Card>)}</div>
 
@@ -262,9 +279,10 @@ export default function ArCollectionsPage() {
       </CardContent>
     </Card>
 
-    <div className="grid gap-4 md:grid-cols-2">
-      <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Live posted outstanding</p><p className="text-2xl font-bold">{money(summary?.totalOutstanding ?? 0)}</p></CardContent></Card>
-      <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Promises currently recorded</p><p className="text-2xl font-bold">{money(summary?.totalPromised ?? 0)}</p></CardContent></Card>
+    <div className="grid gap-4 lg:grid-cols-3">
+      <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Native outstanding by currency</p><div className="mt-2 space-y-1">{summary?.nativeCurrencyTotals.length ? summary.nativeCurrencyTotals.map(total => <p key={total.currencyCode} className="text-xl font-bold">{money(total.outstandingAmount, total.currencyCode)}</p>) : <p className="text-sm text-muted-foreground">No overdue native-currency exposure.</p>}</div></CardContent></Card>
+      <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Native promises by currency</p><div className="mt-2 space-y-1">{summary?.nativeCurrencyTotals.length ? summary.nativeCurrencyTotals.map(total => <p key={total.currencyCode} className="text-xl font-bold">{money(total.promisedAmount, total.currencyCode)}</p>) : <p className="text-sm text-muted-foreground">No promises currently recorded.</p>}</div></CardContent></Card>
+      <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Functional-currency outstanding</p>{summary?.functionalOutstandingTotal != null && summary.functionalCurrencyCode ? <><p className="mt-2 text-xl font-bold">{money(summary.functionalOutstandingTotal, summary.functionalCurrencyCode)}</p><p className="mt-1 text-xs text-muted-foreground">{summary.functionalTotalBasis}</p></> : <p className="mt-2 text-sm text-muted-foreground">Unavailable — {summary?.functionalTotalUnavailableReason ?? 'authoritative carrying-balance evidence was not returned.'}</p>}</CardContent></Card>
     </div>
 
     <Card>
@@ -273,10 +291,9 @@ export default function ArCollectionsPage() {
         <div className="overflow-x-auto"><table className="w-full text-sm">
           <thead className="border-y bg-muted/40 text-left"><tr>{['Customer / invoice', 'Due', 'Outstanding', 'Follow-up', 'Owner', 'Status', 'Actions'].map(item => <th key={item} className="px-4 py-3 font-medium">{item}</th>)}</tr></thead>
           <tbody>
-            {loading && <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" />Loading posted AR exposures…</td></tr>}
-            {!loading && rows.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground"><CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-green-600" />No overdue exposure matches these filters.</td></tr>}
+            {rows.length === 0 && <tr><td colSpan={7} className="px-4 py-12 text-center text-muted-foreground"><CheckCircle2 className="mx-auto mb-2 h-8 w-8 text-green-600" />No overdue exposure matches these filters.</td></tr>}
             {rows.map(row => <tr key={row.settlementBalanceId} className="border-b align-top hover:bg-muted/30">
-              <td className="px-4 py-4"><div className="font-semibold">{row.customerName}</div><div>{row.invoiceNumber}</div><div className="text-xs text-muted-foreground">{row.customerCode || 'No customer code'} · {row.daysOverdue} days overdue · {row.agingBucket}</div></td>
+              <td className="px-4 py-4"><div className="font-semibold">{row.customerName}</div>{!row.isPartnerResolved && <Badge variant="destructive" className="mt-1">Unresolved partner</Badge>}<div>{row.invoiceNumber}</div><div className="text-xs text-muted-foreground">{row.customerCode || 'No customer code'} · {row.daysOverdue} days overdue · {row.agingBucket}</div>{row.partnerResolutionMessage && <div className="mt-1 text-xs text-destructive">{row.partnerResolutionMessage}</div>}</td>
               <td className="px-4 py-4">{formatDate(row.dueDate)}</td>
               <td className="px-4 py-4 font-semibold">{money(row.outstandingAmount, row.currencyCode)}{row.isPromiseBreached && <Badge variant="destructive" className="ml-2">Promise breached</Badge>}</td>
               <td className="px-4 py-4"><div className={row.isFollowUpOverdue ? 'font-semibold text-red-600' : ''}>{formatDate(row.followUpDate)}</div>{row.lastActivityAt && <div className="text-xs text-muted-foreground">Last activity {formatDate(row.lastActivityAt)}</div>}</td>
@@ -289,6 +306,14 @@ export default function ArCollectionsPage() {
         {totalPages > 1 && <div className="flex items-center justify-between p-4"><span className="text-sm text-muted-foreground">Page {page} of {totalPages}</span><div className="flex gap-2"><Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(value => value - 1)}>Previous</Button><Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage(value => value + 1)}>Next</Button></div></div>}
       </CardContent>
     </Card>
+    </>}
+
+    <Dialog open={generateOpen} onOpenChange={setGenerateOpen}><DialogContent><DialogHeader><DialogTitle>Generate follow-up tasks</DialogTitle><DialogDescription>This action is not driven by an approval workflow. It synchronizes overdue settlement exposure and assigns newly created tasks to the officer selected here.</DialogDescription></DialogHeader>
+      <div className="space-y-4">
+        <Field label="Assign generated tasks to"><Select value={generateForm.assignedToId || 'self'} onValueChange={value => setGenerateForm(form => ({ ...form, assignedToId: value === 'self' ? '' : value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="self">Current user</SelectItem>{assignees.map(item => <SelectItem key={item.userId} value={item.userId}>{item.displayName}</SelectItem>)}</SelectContent></Select></Field>
+        <div className="grid grid-cols-2 gap-4"><Field label="Follow up in days"><Input type="number" min={0} max={3650} value={generateForm.followUpInDays} onChange={event => setGenerateForm(form => ({ ...form, followUpInDays: event.target.value }))} /></Field><Field label="Priority (1-10)"><Input type="number" min={1} max={10} value={generateForm.priority} onChange={event => setGenerateForm(form => ({ ...form, priority: event.target.value }))} /></Field></div>
+      </div><DialogFooter><Button variant="outline" onClick={() => setGenerateOpen(false)}>Cancel</Button><Button onClick={generateTasks} disabled={generating}>{generating && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Generate tasks</Button></DialogFooter>
+    </DialogContent></Dialog>
 
     <Dialog open={taskOpen} onOpenChange={setTaskOpen}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{selected?.taskId ? 'Update collection task' : 'Assign collection task'}</DialogTitle></DialogHeader>
       <div className="grid gap-4 md:grid-cols-2">

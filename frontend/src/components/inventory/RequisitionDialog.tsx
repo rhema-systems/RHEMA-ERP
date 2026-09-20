@@ -14,7 +14,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
-import { Plus, Trash2, Search, Package, AlertCircle, Pencil, Check, X } from 'lucide-react';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
+import { Plus, Trash2, Package, AlertCircle, Pencil, Check, X } from 'lucide-react';
+import { RequisitionItemSelect } from './RequisitionItemSelect';
 import {
   inventoryRequisitionService,
   InventoryRequisitionDetailDto, InventoryRequisitionItemDto,
@@ -24,6 +26,7 @@ import {
 } from '@/services/inventoryRequisitionService';
 import { inventoryManagementService, WarehouseDto, WarehouseInventoryItemDto, WarehouseLocationDto, BinStockDto } from '@/services/inventoryManagementService';
 import { useToast } from '@/hooks/use-toast';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { format } from 'date-fns';
 
 interface RequisitionDialogProps {
@@ -45,7 +48,6 @@ interface RequisitionDialogProps {
 interface FormData {
   departmentId: string;
   departmentName: string;
-  costCenter: string;
   warehouseId: string;
   locationId: string;
   requisitionType: number;
@@ -118,7 +120,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   const [loadingItems, setLoadingItems] = useState(false);
   const [loadingLocations, setLoadingLocations] = useState(false);
   const [loadingLocationStock, setLoadingLocationStock] = useState(false);
-  const [itemSearchTerm, setItemSearchTerm] = useState('');
   const [showAddItem, setShowAddItem] = useState(false);
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingItemData, setEditingItemData] = useState<{ requestedQuantity: number; notes: string }>({ requestedQuantity: 1, notes: '' });
@@ -127,7 +128,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   const [formData, setFormData] = useState<FormData>({
     departmentId: '',
     departmentName: '',
-    costCenter: '',
     warehouseId: '',
     locationId: '',
     requisitionType: 1,
@@ -153,7 +153,19 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   const isProjectScoped = !!projectContext;
   const requisitionStatus = normalizeStatus(requisitionDetail?.status);
   const canEdit = !isViewMode && (isCreateMode || requisitionStatus === 1);
-  const showApprovalsTab = !!requisitionDetail && !isCreateMode;
+  const workflowPolicy = useWorkflowSummary({
+    entityType: 'InventoryRequisition', entityId: requisitionId,
+    loadWorkflowSummary: open && !isCreateMode,
+  });
+  const workflowPolicyProps = {
+    entityType: 'InventoryRequisition', entityId: requisitionId,
+    workflowSummary: workflowPolicy.summary, workflowSummaryLoading: workflowPolicy.loading,
+    workflowSummaryError: workflowPolicy.error, loadWorkflowSummary: false,
+  };
+  const showApprovalsTab = !!requisitionDetail && !isCreateMode && workflowPolicy.visibility.showTab;
+  useEffect(() => {
+    if (!showApprovalsTab && activeTab === 'approvals') setActiveTab('details');
+  }, [showApprovalsTab, activeTab]);
 
   // Reset state when dialog opens/closes
   useEffect(() => {
@@ -161,13 +173,11 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       setActiveTab('details');
       setPendingItems([]);
       setShowAddItem(false);
-      setItemSearchTerm('');
       setItemFormData({ inventoryItemId: '', locationId: '', requestedQuantity: 1, lotNumber: '', batchNumber: '', serialNumber: '', notes: '' });
       if (mode === 'create') {
         setFormData({
           departmentId: projectContext?.departmentId || '',
           departmentName: projectContext?.departmentName || '',
-          costCenter: '',
           warehouseId: '',
           locationId: '',
           requisitionType: projectContext ? 2 : 1,
@@ -218,6 +228,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   useEffect(() => {
     setItemFormData((current) => ({
       ...current,
+      inventoryItemId: '',
       locationId: formData.locationId || '',
     }));
 
@@ -229,7 +240,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         })),
       );
     }
-  }, [formData.locationId, isCreateMode]);
+  }, [formData.locationId, formData.warehouseId, isCreateMode]);
 
   const loadDepartments = async () => {
     try {
@@ -249,7 +260,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       setFormData({
         departmentId: detail.departmentId || '',
         departmentName: detail.departmentName || '',
-        costCenter: detail.costCenter || '',
         warehouseId: detail.warehouseId || '',
         locationId: detail.locationId || '',
         requisitionType: detail.requisitionType || 1,
@@ -321,7 +331,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         const createDto: CreateInventoryRequisitionDto = {
           departmentId: formData.departmentId,
           departmentName: formData.departmentName,
-          costCenter: formData.costCenter,
           warehouseId: formData.warehouseId,
           locationId: formData.locationId || undefined,
           projectId: projectContext?.projectId,
@@ -339,7 +348,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         await inventoryRequisitionService.update(requisitionId, {
           departmentId: formData.departmentId,
           departmentName: formData.departmentName,
-          costCenter: formData.costCenter,
           warehouseId: formData.warehouseId,
           locationId: formData.locationId || undefined,
           projectId: projectContext?.projectId,
@@ -354,7 +362,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
       onOpenChange(false);
     } catch (err: unknown) {
       console.error('Error saving requisition:', err);
-      const errorMessage = err instanceof Error ? err.message : 'Failed to save requisition';
+      const errorMessage = getProcurementProblemMessage(err, 'Failed to save requisition');
       toast({ title: 'Error', description: errorMessage, variant: 'destructive' });
     } finally {
       setSaving(false);
@@ -486,19 +494,10 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
     return <Badge className={s?.color || 'bg-gray-100'}>{s?.label || RequisitionStatusMap[numStatus] || status}</Badge>;
   };
 
-  const filteredWarehouseItems = warehouseInventoryItems.filter(item =>
-    item.itemCode.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
-    item.itemName.toLowerCase().includes(itemSearchTerm.toLowerCase())
-  );
-  const filteredLocationStockItems = locationStockItems.filter(item =>
-    item.itemCode.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
-    item.itemName.toLowerCase().includes(itemSearchTerm.toLowerCase()) ||
-    item.locationCode.toLowerCase().includes(itemSearchTerm.toLowerCase())
-  );
   const locationLookup = new Map(warehouseLocations.map((location) => [location.id, location]));
   const selectedLocation = formData.locationId ? locationLookup.get(formData.locationId) : undefined;
   const selectableItems = formData.locationId
-    ? filteredLocationStockItems.map((item) => ({
+    ? locationStockItems.map((item) => ({
         inventoryItemId: item.inventoryItemId,
         itemCode: item.itemCode,
         itemName: item.itemName,
@@ -508,7 +507,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         locationId: item.locationId,
         locationLabel: item.locationCode,
       }))
-    : filteredWarehouseItems.map((item) => ({
+    : warehouseInventoryItems.map((item) => ({
         inventoryItemId: item.inventoryItemId,
         itemCode: item.itemCode,
         itemName: item.itemName,
@@ -519,7 +518,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
         locationLabel: '',
       }));
 
-  const displayItems = isCreateMode ? pendingItems.map((item, idx) => {
+  const displayItems: InventoryRequisitionItemDto[] = isCreateMode ? pendingItems.map((item, idx) => {
     const invItem =
       selectableItems.find((inventoryItem) => inventoryItem.inventoryItemId === item.inventoryItemId) ||
       warehouseInventoryItems.find((inventoryItem) => inventoryItem.inventoryItemId === item.inventoryItemId);
@@ -544,15 +543,15 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="flex h-[680px] max-h-[90dvh] max-w-6xl flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <div className="flex flex-col gap-1">
               <DialogTitle>
                 {isCreateMode ? 'New Requisition' : isEditMode ? 'Edit Requisition' : 'View Requisition'}
                 {requisitionDetail && <span className="ml-2 text-muted-foreground">#{requisitionDetail.requisitionNumber}</span>}
               </DialogTitle>
               <div className="flex items-center gap-2">
-                <span className="text-sm text-muted-foreground">
+                <DialogDescription className="text-sm text-muted-foreground">
                   {isCreateMode
                     ? isProjectScoped
                       ? 'Create a project-linked inventory requisition'
@@ -560,7 +559,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                     : isEditMode
                       ? 'Edit requisition details'
                       : 'View requisition details'}
-                </span>
+                </DialogDescription>
                 {requisitionDetail && getStatusBadge(requisitionDetail.status)}
                 {requisitionDetail && requisitionStatus === 2 && requisitionDetail.currentWorkflowStepName && (
                   <Badge variant="outline" className="text-xs">
@@ -572,16 +571,16 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
           </DialogHeader>
 
           {loading ? (
-            <div className="flex justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>
+            <div className="flex min-h-0 flex-1 items-center justify-center py-8"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div></div>
           ) : (
-            <Tabs value={activeTab} onValueChange={setActiveTab}>
-              <TabsList className={`grid w-full ${showApprovalsTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="flex min-h-0 flex-1 flex-col">
+              <TabsList className={`grid w-full shrink-0 ${showApprovalsTab ? 'grid-cols-3' : 'grid-cols-2'}`}>
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="items">Items ({displayItems.length})</TabsTrigger>
-                {showApprovalsTab && <WorkflowTabTrigger value="approvals" />}
+                {showApprovalsTab && <WorkflowTabTrigger value="approvals" {...workflowPolicyProps} />}
               </TabsList>
 
-              <TabsContent value="details" className="space-y-4">
+              <TabsContent value="details" className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 pb-1">
                 {projectContext ? (
                   <Card className="border-dashed">
                     <CardContent className="pt-4">
@@ -657,10 +656,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                     </Select>
                   </div>
                   <div className="space-y-2">
-                    <Label>Cost Center</Label>
-                    <Input value={formData.costCenter} onChange={(e) => setFormData({ ...formData, costCenter: e.target.value })} disabled={!canEdit} />
-                  </div>
-                  <div className="space-y-2">
                     <Label>Required Date</Label>
                     <Input type="date" value={formData.requiredDate} onChange={(e) => setFormData({ ...formData, requiredDate: e.target.value })} disabled={!canEdit} />
                   </div>
@@ -675,7 +670,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                 </div>
               </TabsContent>
 
-              <TabsContent value="items" className="space-y-4">
+              <TabsContent value="items" className="min-h-0 flex-1 space-y-4 overflow-y-auto px-1 pb-1">
                 {canEdit && (
                   <div className="flex justify-between items-center">
                     <Button variant="outline" size="sm" onClick={() => setShowAddItem(!showAddItem)}>
@@ -693,20 +688,10 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                           ? `Showing stock from ${selectedLocation?.locationCode || 'selected location'}${selectedLocation?.name ? ` - ${selectedLocation.name}` : ''}.`
                           : 'Showing warehouse-level stock. Select a warehouse location above to filter items by bin/location and view exact available quantities there.'}
                       </div>
-                      <div className="relative">
-                        <Search className="absolute left-2 top-2.5 h-4 w-4 text-muted-foreground" />
-                        <Input placeholder="Search items..." className="pl-8" value={itemSearchTerm} onChange={(e) => setItemSearchTerm(e.target.value)} />
-                      </div>
-                      <Select value={itemFormData.inventoryItemId} onValueChange={(v) => setItemFormData({ ...itemFormData, inventoryItemId: v })}>
-                        <SelectTrigger><SelectValue placeholder="Select item" /></SelectTrigger>
-                        <SelectContent>
-                          {selectableItems.map(item => (
-                            <SelectItem key={`${item.inventoryItemId}:${item.locationId || 'warehouse'}`} value={item.inventoryItemId}>
-                              {item.itemCode} - {item.itemName} (Avail: {item.availableStock}{item.locationLabel ? ` | ${item.locationLabel}` : ''})
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      <RequisitionItemSelect key={`${formData.warehouseId}:${formData.locationId}`}
+                        items={selectableItems} value={itemFormData.inventoryItemId}
+                        onChange={inventoryItemId => setItemFormData(current => ({ ...current, inventoryItemId }))}
+                        loading={loadingItems || loadingLocationStock} disabled={!formData.warehouseId} />
                       {(loadingItems || loadingLocationStock) ? (
                         <div className="text-sm text-muted-foreground">
                           Loading stock availability...
@@ -735,7 +720,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   </Card>
                 )}
 
-                <Table>
+                {canEdit && <p className="text-xs text-muted-foreground mb-2">Draft costs are calculated from the item&apos;s configured valuation method when saved.</p>}
+                <Table className="min-w-[1080px]">
                   <TableHeader>
                     <TableRow>
                       <TableHead>Item</TableHead>
@@ -744,6 +730,8 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                       <TableHead>Requested</TableHead>
                       <TableHead>Approved</TableHead>
                       <TableHead>Issued</TableHead>
+                      <TableHead>Returned</TableHead>
+                      <TableHead className="whitespace-nowrap">Net issued</TableHead>
                       <TableHead>UoM</TableHead>
                       <TableHead>Unit Cost</TableHead>
                       <TableHead>Total</TableHead>
@@ -752,13 +740,15 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   </TableHeader>
                   <TableBody>
                     {displayItems.length === 0 ? (
-                      <TableRow><TableCell colSpan={canEdit ? 10 : 9} className="text-center text-muted-foreground">No items added</TableCell></TableRow>
+                      <TableRow><TableCell colSpan={canEdit ? 12 : 11} className="text-center text-muted-foreground">No items added</TableCell></TableRow>
                     ) : (
                       displayItems.map((item) => (
                         <TableRow key={item.id}>
-                          <TableCell><div className="font-medium">{item.itemCode}</div><div className="text-sm text-muted-foreground">{item.itemName}</div></TableCell>
+                          <TableCell className="min-w-[140px]"><div className="font-medium">{item.itemCode}</div><div className="text-sm text-muted-foreground">{item.itemName}</div></TableCell>
                           <TableCell className="text-xs">{[item.lotNumber && `Lot ${item.lotNumber}`, item.batchNumber && `Batch ${item.batchNumber}`, item.serialNumber && `SN ${item.serialNumber}`].filter(Boolean).join(' · ') || '—'}</TableCell>
-                          <TableCell>{item.locationName || (requisitionDetail?.locationName ?? 'Warehouse level')}</TableCell>
+                          <TableCell>{item.locationName || (item.locationId ? 'Location unavailable' :
+                            (item.grossIssuedQuantity ?? item.issuedQuantity) > 0 ? 'Not recorded' :
+                            requisitionDetail?.locationName || 'Selected when issuing')}</TableCell>
                           <TableCell>
                             {editingItemId === item.id ? (
                               <Input
@@ -773,12 +763,16 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                             )}
                           </TableCell>
                           <TableCell>{item.approvedQuantity}</TableCell>
-                          <TableCell>{item.issuedQuantity}</TableCell>
+                          <TableCell>{item.grossIssuedQuantity ?? item.issuedQuantity + (item.returnedQuantity ?? 0)}</TableCell>
+                          <TableCell className={(item.returnedQuantity ?? 0) > 0
+                            ? 'bg-red-50 font-semibold text-red-800 dark:bg-red-950/40 dark:text-red-300'
+                            : undefined}>{item.returnedQuantity ?? 0}</TableCell>
+                          <TableCell>{item.netIssuedQuantity ?? item.issuedQuantity}</TableCell>
                           <TableCell>{item.unitOfMeasure}</TableCell>
-                          <TableCell>{item.unitCost.toFixed(2)}</TableCell>
+                          <TableCell>{isCreateMode || editingItemId === item.id ? 'On save' : item.unitCost.toFixed(2)}</TableCell>
                           <TableCell>
-                            {editingItemId === item.id
-                              ? ((item.unitCost || 0) * editingItemData.requestedQuantity).toFixed(2)
+                            {isCreateMode || editingItemId === item.id
+                              ? 'On save'
                               : item.totalCost.toFixed(2)
                             }
                           </TableCell>
@@ -816,7 +810,9 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
 
               {showApprovalsTab && requisitionDetail && (
                 <WorkflowTabContent
+                  {...workflowPolicyProps}
                   value="approvals"
+                  className="mt-2 min-h-0 flex-1 overflow-y-auto px-1 pb-1"
                   entityType="InventoryRequisition"
                   entityId={requisitionDetail.id}
                   entityLabel="Inventory Requisition"
@@ -836,16 +832,18 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   }}
                   onAfterAction={async () => {
                     await loadRequisitionDetail();
+                    await workflowPolicy.refresh();
                   }}
                 />
               )}
             </Tabs>
           )}
 
-          <DialogFooter className="flex justify-between">
+          <DialogFooter className="flex shrink-0 justify-between">
             <div className="flex gap-2">
               {requisitionDetail && displayItems.length > 0 && (
                 <WorkflowApprovalActions
+                  {...workflowPolicyProps}
                   entityType="InventoryRequisition"
                   entityId={requisitionDetail.id}
                   entityLabel="Inventory Requisition"
@@ -853,7 +851,6 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   status={RequisitionStatusMap[requisitionStatus] || 'Draft'}
                   currentStepName={requisitionDetail.currentWorkflowStepName}
                   showStepBadge={requisitionStatus === 2 && !!requisitionDetail.currentWorkflowStepName}
-                  loadWorkflowSummary={requisitionStatus === 2}
                   canSubmit={requisitionStatus === 1}
                   canApproveReject={requisitionStatus === 2}
                   onSubmit={async () => {
@@ -898,6 +895,7 @@ export function RequisitionDialog({ open, onOpenChange, mode, requisitionId, war
                   onAfterAction={async () => {
                     await loadRequisitionDetail();
                     onSuccess();
+                    await workflowPolicy.refresh();
                   }}
                   onOpenWorkflows={() => router.push('/administration/workflow')}
                   size="sm"

@@ -1,6 +1,7 @@
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -131,6 +132,18 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             ?? throw new ProcurementInvoicePaymentSodNotFoundException(
                 $"Vendor payment with Id '{paymentId}' was not found in the current tenant.");
 
+        if (!payment.ApprovalRequired)
+        {
+            if (payment.AuthorizedById.HasValue || payment.AuthorizedDate.HasValue || payment.WorkflowInstanceId.HasValue ||
+                payment.InvoicePaymentSodControlEventId.HasValue || !payment.SubmittedById.HasValue || !payment.SubmittedAt.HasValue ||
+                (payment.PaymentBatchId.HasValue && (payment.PaymentBatch == null || payment.PaymentBatch.IsDeleted ||
+                    payment.PaymentBatch.TenantId != TenantId || payment.PaymentBatch.ApprovalRequired)))
+                throw BlockedEvidence("VendorPayment", payment.Id, payment.PaymentNumber, null);
+            await RevalidateNoApprovalSourceAsync(payment.PaymentBatchId ?? payment.Id,
+                GetEffectiveAllocations(payment.Allocations).Select(item => item.VendorInvoice).ToList(), cancellationToken);
+            return;
+        }
+
         await RevalidatePersistedAsync(
             payment.PaymentBatchId.HasValue
                 ? ProcurementInvoicePaymentSodRules.BatchSourceType
@@ -159,6 +172,16 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             .SingleOrDefaultAsync(cancellationToken)
             ?? throw new ProcurementInvoicePaymentSodNotFoundException(
                 $"Payment batch with Id '{batchId}' was not found in the current tenant.");
+
+        if (!batch.ApprovalRequired)
+        {
+            if (batch.ApprovedById.HasValue || batch.ApprovedDate.HasValue || batch.InvoicePaymentSodControlEventId.HasValue ||
+                !batch.CreatedById.HasValue || batch.CreatedById == Guid.Empty)
+                throw BlockedEvidence("PaymentBatch", batch.Id, batch.BatchNumber, null);
+            await RevalidateNoApprovalSourceAsync(batch.Id,
+                batch.Items.SelectMany(item => item.Invoices).Select(item => item.VendorInvoice).ToList(), cancellationToken);
+            return;
+        }
 
         await RevalidatePersistedAsync(
             ProcurementInvoicePaymentSodRules.BatchSourceType,
@@ -458,6 +481,21 @@ public sealed class ProcurementInvoicePaymentSodService : IProcurementInvoicePay
             throw new ProcurementInvoicePaymentSodBlockedException(code, message, readiness);
 
         return readiness;
+    }
+
+    private async Task RevalidateNoApprovalSourceAsync(
+        Guid sourceId, IReadOnlyList<VendorInvoice> invoices, CancellationToken cancellationToken)
+    {
+        // This removes only a nonexistent approver comparison. Tenant/source lineage remains
+        // compulsory, and the normal payment owner still enforces AP-003 and Finance posting.
+        if (invoices.Any(item => item == null || item.IsDeleted || item.TenantId != TenantId ||
+                !item.SubmittedById.HasValue || item.SubmittedById == Guid.Empty) ||
+            await _unitOfWork.Repository<WorkflowInstance>().GetQueryable(item =>
+                item.TenantId == TenantId && item.EntityId == sourceId && !item.IsDeleted &&
+                (item.Status == WorkflowInstanceStatus.Created || item.Status == WorkflowInstanceStatus.InProgress ||
+                 item.Status == WorkflowInstanceStatus.Waiting || item.Status == WorkflowInstanceStatus.Suspended))
+                .AnyAsync(cancellationToken))
+            throw BlockedEvidence("Payment", sourceId, sourceId.ToString(), null);
     }
 
     private async Task RevalidatePersistedAsync(

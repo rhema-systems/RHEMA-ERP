@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
@@ -43,6 +43,7 @@ import {
   CalendarDays,
   Globe2,
   ListTree,
+  ListFilter,
   Mail,
   Building,
   BarChart3,
@@ -167,6 +168,7 @@ export interface NavItem {
    * than an explanation and is empty entirely for an item with no parent group.
    */
   description?: string;
+  fallback?: NavItem;
 }
 
 export function canAccessNavItem(
@@ -191,6 +193,24 @@ export function canAccessNavItem(
   return item.accessMode === 'any'
     ? checks.some(Boolean)
     : checks.every(Boolean);
+}
+
+export function filterNavigationByAccess(
+  items: NavItem[],
+  hasAnyRole: (roles: string[]) => boolean,
+  hasAnyPermission: (permissions: string[]) => boolean
+): NavItem[] {
+  return items.flatMap(item => {
+    if (!canAccessNavItem(item, hasAnyRole, hasAnyPermission)) {
+      return item.fallback
+        ? filterNavigationByAccess([item.fallback], hasAnyRole, hasAnyPermission)
+        : [];
+    }
+    const children = item.children
+      ? filterNavigationByAccess(item.children, hasAnyRole, hasAnyPermission)
+      : undefined;
+    return item.children && !children?.length ? [] : [{ ...item, children }];
+  });
 }
 
 const ADMINISTRATION_ROLES = [
@@ -520,17 +540,12 @@ export const navigationItems: NavItem[] = [
           },
           {
             title: 'Suppliers',
-            href: '/procurement/business-partners?partnerType=Supplier',
+            href: '/finance/ap/suppliers',
             icon: Users,
-            permissions: [
-              'Finance.Read',
-              'Finance.Admin',
-              'procurement.records.read',
-              'procurement.supplier.manage',
-              'procurement.supplier.review',
-            ],
-            accessMode: 'any',
+            permissions: ['Finance.Read'],
           },
+          /* Procurement and Inventory own supplier masters, purchase orders, approvals,
+           * and physical receipt workflows. Finance consumes their accounting evidence.
           {
             title: 'Purchase Orders',
             href: '/finance/ap/purchase-orders',
@@ -555,12 +570,15 @@ export const navigationItems: NavItem[] = [
             href: '/finance/ap/receipts',
             icon: Package,
           },
+          */
           { title: 'Invoices', href: '/finance/ap/invoices', icon: FileText },
+          /* Procurement and Inventory own the supplier-return workflow.
           {
             title: 'Supplier Returns',
             href: '/finance/ap/returns',
             icon: RotateCcw,
           },
+          */
           {
             title: 'Supplier Debit Notes',
             href: '/finance/ap/supplier-debit-notes',
@@ -569,12 +587,12 @@ export const navigationItems: NavItem[] = [
           },
           { title: 'Payments', href: '/finance/ap/payments', icon: CreditCard },
           {
-            title: 'Adjustment Journal',
+            title: 'New AP Adjustment',
             href: '/finance/subledger-adjustments/new?module=AP',
             icon: FileText,
           },
           {
-            title: 'Journals',
+            title: 'AP Journal Entries',
             href: '/finance/journal-entries?sourceModule=AP',
             icon: FileText,
           },
@@ -627,6 +645,7 @@ export const navigationItems: NavItem[] = [
             href: '/finance/ar/dashboard',
             icon: LayoutDashboard,
           },
+          /* Sales and the shared business-partner master own these customer workflows.
           {
             title: 'Customer Partners',
             href: '/procurement/business-partners?partnerType=Customer',
@@ -641,6 +660,7 @@ export const navigationItems: NavItem[] = [
           { title: 'Quotes', href: '/sales/crm/quotes', icon: FileText },
           { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
           { title: 'Deliveries', href: '/sales/deliveries', icon: Truck },
+          */
           {
             title: 'Customers',
             href: '/finance/ar/customers',
@@ -653,6 +673,7 @@ export const navigationItems: NavItem[] = [
             accessMode: 'any',
           },
           { title: 'Invoices', href: '/finance/ar/invoices', icon: FileText },
+          /* Sales owns customer-return and sales-credit-note source workflows.
           {
             title: 'Customer Returns',
             href: '/sales/return-orders',
@@ -663,6 +684,7 @@ export const navigationItems: NavItem[] = [
             href: '/sales/credit-notes',
             icon: CreditCard,
           },
+          */
           { title: 'Receipts', href: '/finance/ar/receipts', icon: CreditCard },
           {
             title: 'Collection Follow-up',
@@ -675,14 +697,16 @@ export const navigationItems: NavItem[] = [
             ],
             accessMode: 'any',
           },
+          /* Sales owns the customer-refund source workflow.
           { title: 'Refunds', href: '/sales/refunds', icon: DollarSign },
+          */
           {
-            title: 'Adjustment Journal',
+            title: 'New AR Adjustment',
             href: '/finance/subledger-adjustments/new?module=AR',
             icon: FileText,
           },
           {
-            title: 'Journals',
+            title: 'AR Journal Entries',
             href: '/finance/journal-entries?sourceModule=AR',
             icon: FileText,
           },
@@ -738,6 +762,11 @@ export const navigationItems: NavItem[] = [
             title: 'Cash Transactions',
             href: '/finance/cash/transactions',
             icon: Activity,
+          },
+          {
+            title: 'Bank Deposits',
+            href: '/finance/cash/deposits',
+            icon: Landmark,
           },
           {
             title: 'Bank Reconciliation',
@@ -904,6 +933,23 @@ export const navigationItems: NavItem[] = [
             title: 'Reports Overview',
             href: '/finance/reports',
             icon: LayoutDashboard,
+          },
+          {
+            title: 'Statement Layouts',
+            href: '/finance/reports/layouts',
+            icon: BookTemplate,
+            permissions: [
+              'Finance.Read',
+              'Finance.Reports.Layouts.Manage',
+              'Finance.Reports.Layouts.Publish',
+            ],
+            accessMode: 'any',
+          },
+          {
+            title: 'Ad Hoc Report Builder',
+            href: '/reports/financial/ad-hoc',
+            icon: ListFilter,
+            permissions: ['Finance.Reports.AdHoc.Build'],
           },
           {
             title: 'Trial Balance',
@@ -2509,6 +2555,17 @@ export const navigationItems: NavItem[] = [
     href: '/inventory',
     icon: Package,
     roles: INVENTORY_ROLES,
+    // Employees already have server-authorized access to their own requests.
+    // Show that route without exposing warehouse operations or granting roles.
+    fallback: {
+      title: 'Inventory',
+      href: '/inventory',
+      icon: Package,
+      roles: ['Employee'],
+      children: [
+        { title: 'My requisitions', href: '/inventory/requisitions', icon: ClipboardList },
+      ],
+    },
     permissions: [
       'procurement.inventory.read',
       'procurement.inventory.master-data.manage',
@@ -2715,6 +2772,7 @@ export const navigationItems: NavItem[] = [
     roles: [
       ...ADMINISTRATION_ROLES,
       'Sales User',
+      'Marketing User',
       'Sales Manager',
       'Sales Officer',
       'Salesperson',
@@ -2723,6 +2781,7 @@ export const navigationItems: NavItem[] = [
     accessMode: 'any',
     children: [
       { title: 'Sales Overview', href: '/sales', icon: LayoutDashboard },
+      { title: 'Property Enquiries', href: '/sales/property-enquiries', icon: MessageSquare, permissions: ['enquiry.property.access'] },
       { title: 'Sales Orders', href: '/sales/orders', icon: ShoppingCart },
       { title: 'Allocations', href: '/sales/allocations', icon: MapPin },
       { title: 'Delivery Notes', href: '/sales/deliveries', icon: Truck },
@@ -3573,8 +3632,8 @@ export const navigationItems: NavItem[] = [
                 permissions: ['Finance.AccessScopes.Manage'],
               },
               {
-                title: 'Chart of Accounts Setup',
-                href: '/administration/finance/accounts',
+                title: 'Chart of Accounts',
+                href: '/finance/accounts',
                 icon: CreditCard,
               },
               {
@@ -3879,6 +3938,12 @@ export const navigationItems: NavItem[] = [
             title: 'Issue Accounting & Asset Custody',
             href: '/administration/inventory/issue-accounting',
             icon: Landmark,
+            permissions: ['procurement.inventory.master-data.manage'],
+          },
+          {
+            title: 'Physical Count Decisions',
+            href: '/administration/inventory/count-decisions',
+            icon: Settings,
             permissions: ['procurement.inventory.master-data.manage'],
           },
         ],
@@ -4491,7 +4556,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       (item) => item.title === itemTitle
     );
     const childCount = menuItem?.children?.length || 0;
-    const estimatedHeight = childCount * 40 + 16; // 40px per item + padding
+    const estimatedHeight = childCount * 32 + 10; // 32px rows + panel padding and borders
 
     const position = calculateMenuPosition(rect, itemTitle, estimatedHeight);
     setMenuPositions({
@@ -4531,7 +4596,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       (child) => child.title === childTitle
     );
     const grandChildCount = childItem?.children?.length || 0;
-    const estimatedHeight = grandChildCount * 40 + 16; // 40px per item + padding
+    const estimatedHeight = grandChildCount * 32 + 10; // 32px rows + panel padding and borders
 
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
     setMenuPositions((prev) => ({
@@ -4586,7 +4651,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       (grandChild) => grandChild.title === grandChildTitle
     );
     const greatGrandChildCount = grandChildItem?.children?.length || 0;
-    const estimatedHeight = greatGrandChildCount * 40 + 16; // 40px per item + padding
+    const estimatedHeight = greatGrandChildCount * 32 + 10; // 32px rows + panel padding and borders
 
     const position = calculateMenuPosition(rect, menuKey, estimatedHeight);
     setMenuPositions((prev) => ({
@@ -4721,27 +4786,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       return items;
     }
 
-    return items.reduce<NavItem[]>((acc, item) => {
-      const hasAccess = canAccessNavItem(item, hasAnyRole, hasAnyPermission);
-
-      if (!hasAccess) {
-        return acc;
-      }
-
-      const children = item.children
-        ? filterNavItems(item.children)
-        : undefined;
-      if (item.children && (!children || children.length === 0)) {
-        return acc;
-      }
-
-      acc.push({
-        ...item,
-        children,
-      });
-
-      return acc;
-    }, []);
+    return filterNavigationByAccess(items, hasAnyRole, hasAnyPermission);
   };
 
   return (
@@ -4788,7 +4833,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 space-y-0 overflow-y-auto p-2">
+        <nav className={cn('flex-1 overflow-y-auto p-2', sidebarIsCollapsed ? 'space-y-0' : 'space-y-0.5')}>
           {filterNavItems(sidebarNavigationItems).map((item, _index, siblings) => {
             const Icon = item.icon;
             const hasChildren = item.children && item.children.length > 0;
@@ -4798,6 +4843,8 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
               <div key={item.title} className="relative">
                 {hasChildren ? (
                   <button
+                    aria-label={item.title}
+                    title={item.title}
                     onMouseEnter={(e) => handleMainItemHover(item.title, e)}
                     onClick={(e) => {
                       if (hoveredItem === item.title) {
@@ -4808,32 +4855,40 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                       openMainItemMenu(item.title, e);
                     }}
                     className={cn(
-                      'flex w-full items-center justify-between rounded-xl px-4 py-3 text-sm font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      'flex w-full items-center justify-between font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      sidebarIsCollapsed
+                        ? 'rounded-xl px-4 py-3 text-sm'
+                        : 'min-h-9 gap-2 rounded-lg border border-transparent px-3 py-1.5 text-sm leading-5',
                       itemIsActive
                         ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
-                    <div className="flex items-center space-x-4">
-                      <Icon className="h-6 w-6 flex-shrink-0" />
-                      {!sidebarIsCollapsed && <span>{item.title}</span>}
+                    <div className={cn('flex items-center', sidebarIsCollapsed ? 'space-x-4' : 'min-w-0 gap-2.5')}>
+                      <Icon className={cn('flex-shrink-0', sidebarIsCollapsed ? 'h-6 w-6' : 'h-4 w-4')} />
+                      {!sidebarIsCollapsed && <span className="truncate">{item.title}</span>}
                     </div>
                     {!sidebarIsCollapsed && hasChildren && (
-                      <ChevronRight className="h-5 w-5" />
+                      <ChevronRight className="h-4 w-4 flex-shrink-0" />
                     )}
                   </button>
                 ) : (
                   <Link
                     href={item.href}
+                    aria-label={item.title}
+                    title={item.title}
                     className={cn(
-                      'flex items-center space-x-4 rounded-xl px-4 py-3 text-sm font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      'flex items-center font-medium transition-all hover:bg-slate-100 dark:hover:bg-slate-800/50',
+                      sidebarIsCollapsed
+                        ? 'space-x-4 rounded-xl px-4 py-3 text-sm'
+                        : 'min-h-9 gap-2.5 rounded-lg border border-transparent px-3 py-1.5 text-sm leading-5',
                       itemIsActive
                         ? 'bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/50'
                         : 'text-slate-700 dark:text-slate-300'
                     )}
                   >
-                    <Icon className="h-6 w-6 flex-shrink-0" />
-                    {!sidebarIsCollapsed && <span>{item.title}</span>}
+                    <Icon className={cn('flex-shrink-0', sidebarIsCollapsed ? 'h-6 w-6' : 'h-4 w-4')} />
+                    {!sidebarIsCollapsed && <span className="truncate">{item.title}</span>}
                   </Link>
                 )}
               </div>
@@ -4857,7 +4912,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
       {hoveredItem && menuPositions[hoveredItem] && (
         <div
           data-sidebar-flyout="true"
-          className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+          className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-1 max-h-[calc(100vh-40px)] overflow-y-auto"
           style={{
             left: menuPositions[hoveredItem].x,
             top: menuPositions[hoveredItem].y,
@@ -4895,18 +4950,18 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                         cancelPendingOpen();
                         openChildItemMenu(hoveredItem, child.title, e);
                       }}
-                      className="w-full flex items-center gap-3 px-4 py-2 text-[13px] text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300 transition-colors"
+                      className="w-full flex min-h-8 items-center gap-2.5 px-3 py-1.5 text-sm font-medium leading-5 text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-700 dark:text-slate-300 transition-colors"
                     >
                       <ChildIcon className="h-4 w-4 flex-shrink-0" />
                       <span className="flex-1">{child.title}</span>
-                      <ChevronRight className="h-4 w-4" />
+                      <ChevronRight className="h-4 w-4 flex-shrink-0" />
                     </button>
                   ) : (
                     <Link
                       href={child.href}
                       onClick={clearMenus}
                       className={cn(
-                        'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                        'flex min-h-8 items-center gap-2.5 px-3 py-1.5 text-sm font-medium leading-5 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                         childIsActive
                           ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
                           : 'text-slate-700 dark:text-slate-300'
@@ -4945,7 +5000,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         menuPositions[`${hoveredItem}-${hoveredChild}`] && (
           <div
             data-sidebar-flyout="true"
-            className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+            className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-1 max-h-[calc(100vh-40px)] overflow-y-auto"
             style={{
               left: menuPositions[`${hoveredItem}-${hoveredChild}`].x,
               top: menuPositions[`${hoveredItem}-${hoveredChild}`].y,
@@ -4993,24 +5048,24 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                             e
                           );
                         }}
-                        className="w-full flex items-center gap-3 px-4 py-2 text-[13px] text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 transition-colors"
+                        className="w-full flex min-h-8 items-center gap-2.5 px-3 py-1.5 text-sm font-medium leading-5 text-left hover:bg-slate-100 dark:hover:bg-slate-800/50 text-slate-600 dark:text-slate-400 transition-colors"
                       >
-                        <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
+                        <GrandChildIcon className="h-4 w-4 flex-shrink-0" />
                         <span className="flex-1">{grandchild.title}</span>
-                        <ChevronRight className="h-3 w-3" />
+                        <ChevronRight className="h-4 w-4 flex-shrink-0" />
                       </button>
                     ) : (
                       <Link
                         href={grandchild.href}
                         onClick={clearMenus}
                         className={cn(
-                          'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                          'flex min-h-8 items-center gap-2.5 px-3 py-1.5 text-sm font-medium leading-5 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                           grandchildIsActive
                             ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
                             : 'text-slate-600 dark:text-slate-400'
                         )}
                       >
-                        <GrandChildIcon className="h-3 w-3 flex-shrink-0" />
+                        <GrandChildIcon className="h-4 w-4 flex-shrink-0" />
                         <span>{grandchild.title}</span>
                       </Link>
                     )}
@@ -5049,7 +5104,7 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
         ] && (
           <div
             data-sidebar-flyout="true"
-            className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-2 max-h-[calc(100vh-40px)] overflow-y-auto"
+            className="fixed bg-white/95 dark:bg-[#202020]/95 backdrop-blur-xl border border-slate-200/50 dark:border-neutral-700/70 rounded-lg shadow-lg z-50 min-w-56 py-1 max-h-[calc(100vh-40px)] overflow-y-auto"
             style={{
               left: menuPositions[
                 `${hoveredItem}-${hoveredChild}-${hoveredGrandChild}`
@@ -5084,13 +5139,13 @@ export function Sidebar({ className, defaultCollapsed = false }: SidebarProps) {
                     href={greatGrandchild.href}
                     onClick={clearMenus}
                     className={cn(
-                      'flex items-center gap-3 px-4 py-2 text-[13px] hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
+                      'flex min-h-8 items-center gap-2.5 px-3 py-1.5 text-sm font-medium leading-5 hover:bg-slate-100 dark:hover:bg-slate-800/50 transition-colors',
                       greatGrandchildIsActive
                         ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 font-medium'
                         : 'text-slate-500 dark:text-slate-500'
                     )}
                   >
-                    <GreatGrandChildIcon className="h-3 w-3 flex-shrink-0" />
+                    <GreatGrandChildIcon className="h-4 w-4 flex-shrink-0" />
                     <span>{greatGrandchild.title}</span>
                   </Link>
                 );

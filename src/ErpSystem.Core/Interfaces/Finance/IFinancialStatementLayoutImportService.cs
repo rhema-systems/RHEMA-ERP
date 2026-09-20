@@ -7,6 +7,14 @@ public interface IFinancialStatementLayoutImportService
     Task<FinancialStatementLayoutFileDto> CreateWorkbookTemplateAsync(
         CancellationToken cancellationToken = default);
 
+    Task<FinancialStatementLayoutImportDefinitionDto> ExportDefinitionAsync(
+        Guid versionId,
+        CancellationToken cancellationToken = default);
+
+    Task<FinancialStatementLayoutFileDto> ExportWorkbookAsync(
+        Guid versionId,
+        CancellationToken cancellationToken = default);
+
     Task<FinancialStatementLayoutImportPreviewDto> PreviewDefinitionAsync(
         FinancialStatementLayoutImportDefinitionDto definition,
         CancellationToken cancellationToken = default);

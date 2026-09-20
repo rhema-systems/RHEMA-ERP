@@ -33,6 +33,8 @@ export interface CentralDocumentViewerFile {
   contentType?: string | null;
   sourceLabel?: string | null;
   version?: string | null;
+  /** Already generated PDF bytes. Never used to override a protected/linked document source. */
+  pdfData?: Uint8Array | null;
 }
 
 interface CentralDocumentViewerDialogProps {
@@ -88,6 +90,11 @@ function resolvePdfView(file: CentralDocumentViewerFile | null) {
     return { url: null, originalUrl: null, status: 'none' as const };
   }
 
+  if (file.pdfData?.byteLength && !file.documentRecordId && !file.versionId &&
+      !file.fileUploadRecordId && !file.repositoryPath && !file.renditionPath && !file.externalDocumentUrl) {
+    return { url: null, originalUrl: null, status: 'generated' as const };
+  }
+
   const renditionUrl = normalizeViewerUrl(file.renditionPath);
   if (renditionUrl) {
     return {
@@ -127,7 +134,7 @@ export function CentralDocumentViewerDialog({
   const annotationsEnabled = enableAnnotations;
   const [localFile, setLocalFile] =
     React.useState<CentralDocumentViewerFile | null>(file);
-  const [previewObjectUrl, setPreviewObjectUrl] = React.useState<string | null>(
+  const [previewData, setPreviewData] = React.useState<Uint8Array | null>(
     null
   );
   const [isLoadingPreview, setIsLoadingPreview] = React.useState(false);
@@ -147,7 +154,11 @@ export function CentralDocumentViewerDialog({
   }, [file]);
 
   const view = resolvePdfView(localFile);
-  const viewerUrl = previewObjectUrl || view.url;
+  const securePreviewRequired = Boolean(
+    (localFile?.documentRecordId || view.url?.startsWith('/api/')) &&
+    (localFile?.versionId || view.url?.startsWith('/api/'))
+  );
+  const viewerUrl = securePreviewRequired ? null : view.url;
   const title = localFile?.title || 'Document preview';
   const canGenerateRendition =
     view.status === 'conversion-required' &&
@@ -159,11 +170,15 @@ export function CentralDocumentViewerDialog({
 
   React.useEffect(() => {
     let cancelled = false;
-    let objectUrl: string | null = null;
-
-    setPreviewObjectUrl(null);
+    setPreviewData(null);
     const currentFile = localFile;
     const secureApiUrl = view.url?.startsWith('/api/') ? view.url : null;
+
+    if (open && view.status === 'generated' && currentFile?.pdfData) {
+      setPreviewData(currentFile.pdfData);
+      setIsLoadingPreview(false);
+      return () => undefined;
+    }
 
     if (!open || (!currentFile?.documentRecordId && !secureApiUrl)) {
       setIsLoadingPreview(false);
@@ -200,10 +215,11 @@ export function CentralDocumentViewerDialog({
           return;
         }
 
+        // Pass already-authorized bytes directly to the PDF renderer. Re-fetching
+        // a blob URL is unnecessary and fails under rehearsal's network policy.
+        const bytes = new Uint8Array(await blob.arrayBuffer());
         if (cancelled) return;
-
-        objectUrl = URL.createObjectURL(blob);
-        setPreviewObjectUrl(objectUrl);
+        setPreviewData(bytes);
       } catch (error) {
         if (!cancelled) {
           setDownloadError(
@@ -223,9 +239,6 @@ export function CentralDocumentViewerDialog({
 
     return () => {
       cancelled = true;
-      if (objectUrl) {
-        URL.revokeObjectURL(objectUrl);
-      }
     };
   }, [
     open,
@@ -233,6 +246,8 @@ export function CentralDocumentViewerDialog({
     localFile?.versionId,
     localFile?.repositoryPath,
     localFile?.renditionPath,
+    localFile?.pdfData,
+    view.status,
     view.url,
   ]);
 
@@ -376,9 +391,10 @@ export function CentralDocumentViewerDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 overflow-hidden bg-background p-4">
-          {viewerUrl ? (
+          {previewData || viewerUrl ? (
             <CentralDocumentPdfViewer
               fileUrl={viewerUrl}
+              fileData={previewData}
               fileName={localFile?.fileName || title}
               enableAnnotations={annotationsEnabled}
             />

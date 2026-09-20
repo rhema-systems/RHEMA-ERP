@@ -11,6 +11,9 @@ public interface IWorkflowService
     /// </summary>
     Task<bool> HasActiveApprovalWorkflowAsync(string entityType);
 
+    /// <summary>Existing approvals retain their route when a definition is deactivated.</summary>
+    Task<bool> HasActiveApprovalInstanceAsync(string entityType, Guid entityId);
+
     /// <summary>
     /// Starts an approval workflow for an entity
     /// </summary>

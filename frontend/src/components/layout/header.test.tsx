@@ -1,5 +1,7 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { hydrateRoot } from 'react-dom/client';
+import { renderToString } from 'react-dom/server';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Header } from './header';
@@ -9,13 +11,14 @@ const mocks = vi.hoisted(() => ({
   setTheme: vi.fn(),
   roles: ['SuperAdmin'],
   permissions: ['*'],
+  userAvailable: true,
 }));
 
 vi.stubGlobal('React', React);
 
 vi.mock('../../hooks/use-auth', () => ({
   useAuth: () => ({
-    user: {
+    user: mocks.userAvailable ? {
       firstName: 'Demo',
       lastName: 'User',
       username: 'demo.user',
@@ -24,7 +27,7 @@ vi.mock('../../hooks/use-auth', () => ({
       isActive: true,
       roles: mocks.roles,
       permissions: mocks.permissions,
-    },
+    } : undefined,
     logout: mocks.logout,
     isLoggingOut: false,
     hasAnyRole: (roles: string[]) => roles.some(role =>
@@ -73,6 +76,50 @@ describe('Header layout', () => {
     mocks.setTheme.mockReset();
     mocks.roles = ['SuperAdmin'];
     mocks.permissions = ['*'];
+    mocks.userAvailable = true;
+  });
+
+  it('hydrates the signed-out server header before revealing stored-user settings permissions', async () => {
+    mocks.roles = [];
+    mocks.permissions = [];
+    mocks.userAvailable = false;
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(<Header />);
+    document.body.appendChild(container);
+    expect(container.querySelector('[aria-label="Open settings"]')).toBeNull();
+
+    // The first browser render can read permissions from localStorage before
+    // the current-user query finishes; the server cannot read that storage.
+    mocks.roles = ['ProcurementOfficer'];
+    mocks.permissions = ['procurement.supplier.manage'];
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, <Header />, { onRecoverableError });
+    try {
+      await waitFor(() => expect(container.querySelector('[aria-label="Open settings"]')).not.toBeNull());
+      expect(onRecoverableError).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
+  });
+
+  it('hydrates placeholder account text before showing a cached client user', async () => {
+    mocks.roles = [];
+    mocks.permissions = [];
+    mocks.userAvailable = false;
+    const container = document.createElement('div');
+    container.innerHTML = renderToString(<Header />);
+    document.body.appendChild(container);
+    mocks.userAvailable = true;
+    const onRecoverableError = vi.fn();
+    const root = hydrateRoot(container, <Header />, { onRecoverableError });
+    try {
+      await waitFor(() => expect(container.querySelector('[aria-label="Open account sidebar"]')).toHaveTextContent('Demo User'));
+      expect(onRecoverableError).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => root.unmount());
+      container.remove();
+    }
   });
 
   it('keeps search at the left and pins tenant and user content to the full-width right edge', () => {
@@ -97,7 +144,7 @@ describe('Header layout', () => {
     expect(screen.queryByRole('button', { name: 'Theme' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
 
-    expect(screen.getByRole('dialog', { name: 'Demo User' })).toBeInTheDocument();
+    expect(screen.getByRole('complementary', { name: 'Demo User' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Profile Settings' })).toHaveAttribute('href', '/profile');
     expect(screen.getByRole('link', { name: 'Account Settings' })).toHaveAttribute('href', '/account');
     expect(screen.getByRole('link', { name: 'All Settings' })).toHaveAttribute('href', '/settings');
@@ -107,7 +154,59 @@ describe('Header layout', () => {
     expect(mocks.setTheme).toHaveBeenCalledWith('dark');
 
     fireEvent.click(screen.getByRole('button', { name: 'Close account sidebar' }));
-    expect(screen.queryByRole('dialog', { name: 'Demo User' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('complementary', { name: 'Demo User' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open account sidebar' })).toHaveFocus();
+  });
+
+  it('opens a non-modal account panel without a backdrop or body scroll lock and restores focus on Escape', () => {
+    render(<Header />);
+    const trigger = screen.getByRole('button', { name: 'Open account sidebar' });
+    const previousOverflow = document.body.style.overflow;
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const panel = screen.getByRole('complementary', { name: 'Demo User' });
+    expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    expect(trigger).toHaveAttribute('aria-controls', panel.id);
+    expect(panel).not.toHaveAttribute('aria-modal');
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Dismiss account sidebar' })).not.toBeInTheDocument();
+    expect(document.body.style.overflow).toBe(previousOverflow);
+    expect(screen.getByRole('button', { name: 'Close account sidebar' })).toHaveFocus();
+
+    const notifications = screen.getByRole('button', { name: 'Notifications' });
+    notifications.focus();
+    expect(notifications).toHaveFocus();
+    fireEvent.keyDown(notifications, { key: 'Escape' });
+
+    expect(panel).not.toBeInTheDocument();
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    expect(trigger).toHaveFocus();
+    expect(document.body.style.overflow).toBe(previousOverflow);
+  });
+
+  it('keeps focus in the selected control when the header rerenders', () => {
+    const { rerender } = render(<Header />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
+    const nightMode = screen.getByRole('radio', { name: /Night/ });
+    nightMode.focus();
+
+    rerender(<Header className="test-update" />);
+
+    expect(nightMode).toHaveFocus();
+    const profileLink = screen.getByRole('link', { name: 'Profile Settings' });
+    profileLink.addEventListener('click', event => event.preventDefault(), { once: true });
+    fireEvent.click(profileLink);
+    expect(screen.queryByRole('complementary', { name: 'Demo User' })).not.toBeInTheDocument();
+  });
+
+  it('preserves sign out from the account panel', () => {
+    render(<Header />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open account sidebar' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Sign Out' }));
+
+    expect(mocks.logout).toHaveBeenCalledOnce();
+    expect(screen.queryByRole('complementary', { name: 'Demo User' })).not.toBeInTheDocument();
   });
 
   it('hides Settings entry points when the user has no authorized settings item', () => {

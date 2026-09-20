@@ -302,7 +302,7 @@ public sealed class QuantitySurveyPaymentCertificateService(
                 if (!result.ExecutionResult.Success)
                     throw Conflict(result.ExecutionResult.Message ?? "The configured payment-certificate workflow could not be started.");
                 workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.PaymentCertificate)
-                    .ApplySubmitOutcome(new CertificateWorkflowAdapter(entity), result.Outcome, UserId);
+                    .ApplySubmitOutcome(new CertificateWorkflowAdapter(entity), result, UserId);
                 if (result.Outcome != WorkflowOutcome.Pending)
                     throw Conflict("The payment-certificate workflow must stop at an independent approval step.");
                 entity.Status = ProjectPaymentCertificateStatuses.Issued;

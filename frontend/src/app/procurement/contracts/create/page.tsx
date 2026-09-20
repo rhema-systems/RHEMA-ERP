@@ -17,6 +17,7 @@ import { format } from 'date-fns';
 import { Suspense } from 'react';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { ContractRetentionFields, DEFAULT_CONTRACT_RETENTION_PERCENTAGE, validateContractRetention } from '@/components/procurement/ContractRetentionFields';
 
 function CreateContractForm() {
   const router = useRouter();
@@ -38,7 +39,8 @@ function CreateContractForm() {
     contractValue: 0,
     currency: 'GHS',
     paymentTerms: 'Net 30',
-    retentionPercentage: 5,
+    retentionPercentage: DEFAULT_CONTRACT_RETENTION_PERCENTAGE,
+    retentionClause: '',
     startDate: format(new Date(), 'yyyy-MM-dd'),
     endDate: '',
     durationDays: 365,
@@ -92,6 +94,12 @@ function CreateContractForm() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const retentionError = validateContractRetention(formData.retentionPercentage, formData.retentionClause);
+    if (retentionError) {
+      toast.error(retentionError);
+      return;
+    }
 
     if (!formData.contractTitle.trim()) {
       toast.error('Contract title is required');
@@ -272,8 +280,9 @@ function CreateContractForm() {
                   </Select>
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="retentionPercentage">Retention %</Label>
-                  <Input id="retentionPercentage" type="number" step="0.1" min="0" max="100" value={formData.retentionPercentage} onChange={(e) => handleInputChange('retentionPercentage', parseFloat(e.target.value) || 0)} />
+                  <ContractRetentionFields percentage={formData.retentionPercentage} clause={formData.retentionClause}
+                    onPercentageChange={(value) => handleInputChange('retentionPercentage', value)}
+                    onClauseChange={(value) => handleInputChange('retentionClause', value)} />
                 </div>
               </div>
             </CardContent>

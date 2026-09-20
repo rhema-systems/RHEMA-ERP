@@ -1,12 +1,12 @@
 'use client';
 
 import * as React from 'react';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 import {
   AlertCircle,
   CheckCircle2,
   Loader2,
   RefreshCw,
-  ShieldCheck,
   XCircle,
 } from 'lucide-react';
 
@@ -106,53 +106,19 @@ export function PurchaseOrderComplianceGate({
 
   const passed = readiness.checks.filter((check) => check.passed).length;
   return (
-    <Card
-      data-testid="purchase-order-compliance-gate"
-      className={
-        readiness.isCompliant
-          ? 'border-emerald-300 bg-emerald-50/40'
-          : 'border-amber-300 bg-amber-50/50'
-      }
-    >
-      <CardHeader className="gap-3">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <ShieldCheck className="h-5 w-5" />
-              PO compliance gate
-            </CardTitle>
-            <CardDescription className="mt-1">
+    <ProcurementControlAccordion
+        title="PO compliance gate"
+        data-testid="purchase-order-compliance-gate"
+        summary={`${passed}/${readiness.checks.length} checks pass`}
+        status={<Badge variant="outline">{readiness.isCompliant ? 'Ready to progress' : `${readiness.blockedReasons.length} blocker(s)`}</Badge>}
+        notice={!readiness.isCompliant && (readiness.blockedReasons[0] || 'Compliance checks need attention. Expand for details.')}
+        actions={<Button type="button" variant="ghost" size="sm" aria-label="Refresh compliance readiness" onClick={() => void load()}><RefreshCw className="h-4 w-4" /></Button>}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
               Shared server control for supplier, budget, source, award,
               GHANEPS, contract, and signature readiness.
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge
-              className={
-                readiness.isCompliant
-                  ? 'bg-emerald-100 text-emerald-900'
-                  : 'bg-amber-100 text-amber-950'
-              }
-            >
-              {readiness.isCompliant
-                ? 'Ready to progress'
-                : `${readiness.blockedReasons.length} blocker(s)`}
-            </Badge>
-            <Button
-              variant="ghost"
-              size="sm"
-              aria-label="Refresh compliance readiness"
-              onClick={() => void load()}
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-        <p className="text-sm">
-          {passed}/{readiness.checks.length} checks pass · evaluated{' '}
-          {new Date(readiness.evaluatedAtUtc).toLocaleString()}
-        </p>
-      </CardHeader>
+            </p>
+      <p className="mb-3 text-xs text-muted-foreground">Last evaluated: {new Date(readiness.evaluatedAtUtc).toLocaleString()}</p>
       <CardContent className="grid gap-3 md:grid-cols-2">
         {readiness.checks.map((check) => {
           const Icon = check.passed ? CheckCircle2 : XCircle;
@@ -195,6 +161,6 @@ export function PurchaseOrderComplianceGate({
           );
         })}
       </CardContent>
-    </Card>
+    </ProcurementControlAccordion>
   );
 }

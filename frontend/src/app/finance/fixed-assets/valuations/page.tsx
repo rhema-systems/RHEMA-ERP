@@ -20,6 +20,8 @@ import { cn } from '@/lib/utils';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import type { FixedAsset, FixedAssetCategory, AssetValuation, AssetValuationCorrection, ValuationType, CreateAssetValuationDto, CreateBulkAssetValuationDto } from '@/types/fixed-assets';
 import { useToast } from '@/components/ui/use-toast';
+import { SourceDocumentDimensionDefaultsPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 export default function AssetValuationsPage() {
     const [assets, setAssets] = useState<FixedAsset[]>([]);
@@ -38,6 +40,7 @@ export default function AssetValuationsPage() {
         valuationType: 'Revaluation' as ValuationType,
         fairValue: 0,
     });
+    const [singleDimensionDefaults, setSingleDimensionDefaults] = useState<Record<string, string>>({});
 
     // Bulk valuation dialog
     const [bulkDialogOpen, setBulkDialogOpen] = useState(false);
@@ -48,6 +51,7 @@ export default function AssetValuationsPage() {
         valuationType: 'Revaluation' as ValuationType,
         indexPercentage: 0,
     });
+    const [bulkDimensionDefaults, setBulkDimensionDefaults] = useState<Record<string, string>>({});
 
     // A posted valuation is never edited in place. This workspace deliberately mirrors the
     // request -> independent review -> compensating-journal stages enforced by the API.
@@ -149,11 +153,19 @@ export default function AssetValuationsPage() {
         }
         try {
             setIsSubmitting(true);
-            const result = await fixedAssetsDataService.createValuation(singleForm as CreateAssetValuationDto);
+            const result = await fixedAssetsDataService.createValuation({
+                ...singleForm,
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(singleDimensionDefaults),
+                    lines: [],
+                    applyDefaultToEligibleLines: true,
+                },
+            } as CreateAssetValuationDto);
             setValuations(prev => [result, ...prev]);
             toast({ title: 'Success', description: 'Valuation recorded successfully.' });
             setSingleDialogOpen(false);
             setSingleForm({ valuationDate: new Date().toISOString().split('T')[0], valuationType: 'Revaluation', fairValue: 0 });
+            setSingleDimensionDefaults({});
         } catch (error: unknown) {
             toast({ title: 'Error', description: error instanceof Error ? error.message : 'Failed to create valuation.', variant: 'destructive' });
         } finally {
@@ -171,6 +183,11 @@ export default function AssetValuationsPage() {
             const result = await fixedAssetsDataService.createBulkValuation({
                 ...bulkForm as CreateBulkAssetValuationDto,
                 fixedAssetIds: selectedAssetIds,
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(bulkDimensionDefaults),
+                    lines: [],
+                    applyDefaultToEligibleLines: true,
+                },
             });
             toast({
                 title: 'Bulk Valuation Complete',
@@ -178,6 +195,7 @@ export default function AssetValuationsPage() {
             });
             setBulkDialogOpen(false);
             setSelectedAssetIds([]);
+            setBulkDimensionDefaults({});
             setBulkForm({ valuationDate: new Date().toISOString().split('T')[0], valuationType: 'Revaluation', indexPercentage: 0 });
             // Add successful items to display
             if (result.successfulItems) {
@@ -423,6 +441,12 @@ export default function AssetValuationsPage() {
                                     <Textarea rows={2} value={singleForm.reason || ''} onChange={(e) => setSingleForm({ ...singleForm, reason: e.target.value })} />
                                 </div>
                             </div>
+                            <SourceDocumentDimensionDefaultsPanel
+                                effectiveDate={singleForm.valuationDate || new Date().toISOString().slice(0, 10)}
+                                values={singleDimensionDefaults}
+                                onChange={setSingleDimensionDefaults}
+                                disabled={isSubmitting}
+                            />
                             <DialogFooter>
                                 <Button variant="outline" onClick={() => setSingleDialogOpen(false)}>Cancel</Button>
                                 <Button onClick={handleSingleValuation} disabled={isSubmitting}>
@@ -512,6 +536,12 @@ export default function AssetValuationsPage() {
                                 </Card>
                                 <p className="text-sm text-muted-foreground">{selectedAssetIds.length} asset(s) selected</p>
                             </div>
+                            <SourceDocumentDimensionDefaultsPanel
+                                effectiveDate={bulkForm.valuationDate || new Date().toISOString().slice(0, 10)}
+                                values={bulkDimensionDefaults}
+                                onChange={setBulkDimensionDefaults}
+                                disabled={isSubmitting}
+                            />
                             <DialogFooter>
                                 <Button variant="outline" onClick={() => setBulkDialogOpen(false)}>Cancel</Button>
                                 <Button onClick={handleBulkValuation} disabled={isSubmitting || selectedAssetIds.length === 0}>

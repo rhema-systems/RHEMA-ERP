@@ -220,7 +220,7 @@ export default function ConsultantTimesheetDetailPage() {
           <TabsTrigger value="confirmations">
             Client confirmation ({t.confirmations.length})
           </TabsTrigger>
-          <WorkflowTabTrigger value="workflow" />
+          <WorkflowTabTrigger value="workflow" {...workflow.tabProps} />
         </TabsList>
 
         <TabsContent value="entries" className="pt-4">
@@ -398,6 +398,7 @@ export default function ConsultantTimesheetDetailPage() {
         </TabsContent>
 
         <WorkflowTabContent
+          {...workflow.tabProps}
           value="workflow"
           entityType="ConsultantTimesheet"
           entityId={id}

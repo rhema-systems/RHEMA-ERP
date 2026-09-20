@@ -29,12 +29,10 @@ import { financeService } from '@/services/finance.service';
 import { useToast } from '@/hooks/use-toast';
 import { validateJournalEntryForm } from '@/lib/finance/journal-entry-mapper';
 import {
-    ALL_ACTIVE_BOOKS_CODE,
     DEFAULT_ACCOUNTING_BOOKS,
     getAccountingBookName,
     getPostingTargetBooks,
     isAccountEligibleForBook,
-    isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
 import {
     applyCanonicalJournalRate,
@@ -49,12 +47,14 @@ import {
     getMissingRequiredManualDimension,
     resolveManualDimensionValues,
 } from '@/lib/finance/manual-journal-dimensions';
+import { appendJournalLine, createFreshManualJournalLine } from '@/lib/finance/journal-line-addition';
 
 interface JournalLine {
     id: string;
     accountId: string;
     description: string;
     currencyCode: string;
+    exchangeRateId?: string;
     exchangeRate: number | '';
     debit: number;
     credit: number;
@@ -86,6 +86,7 @@ const mapEntryToLines = (entry: JournalEntry, functionalCurrency: string): Journ
         const raw = transaction as any;
         const currencyCode = normalizeCurrencyCode(raw.currencyCode || raw.transactionCurrency || entry.primaryCurrency) || functionalCurrency;
         const exchangeRate = raw.exchangeRate ?? 1;
+        const exchangeRateId = raw.exchangeRateId as string | undefined;
         const foreignAmount = raw.foreignAmount ?? raw.foreignCurrencyAmount;
         const debit = transaction.transactionType === 'Debit' ? transaction.amount : 0;
         const credit = transaction.transactionType === 'Credit' ? transaction.amount : 0;
@@ -95,12 +96,15 @@ const mapEntryToLines = (entry: JournalEntry, functionalCurrency: string): Journ
             accountId: transaction.accountId,
             description: transaction.description || '',
             currencyCode,
+            exchangeRateId,
             exchangeRate,
             debit,
             credit,
             foreignDebit: transaction.transactionType === 'Debit' ? foreignAmount : 0,
             foreignCredit: transaction.transactionType === 'Credit' ? foreignAmount : 0,
-            rateStatus: currencyCode === functionalCurrency ? 'ready' : 'idle',
+            rateStatus: currencyCode === functionalCurrency || exchangeRateId ? 'ready' : 'idle',
+            rateSource: raw.exchangeRateSource,
+            rateDate: raw.exchangeRateDate,
             dimensions: Object.fromEntries((transaction.dimensions ?? []).map(item => [item.dimensionCode, item.valueCode])),
         };
     });
@@ -185,7 +189,9 @@ export default function EditJournalEntryPage() {
                         }
                         const request = getManualJournalRateRequest(account, line.currencyCode, links, settings, toDateInputValue(journalEntry.entryDate || journalEntry.transactionDate));
                         if (!request) throw new Error(`No rate policy exists for ${line.currencyCode}.`);
-                        const snapshot = await financeService.getCurrentExchangeRate(line.currencyCode, request);
+                        const snapshot = line.exchangeRateId
+                            ? await financeDataService.getExchangeRateById(line.exchangeRateId)
+                            : await financeService.getCurrentExchangeRate(line.currencyCode, request);
                         return applyCanonicalJournalRate(line, snapshot);
                     } catch (error) {
                         return {
@@ -238,14 +244,13 @@ export default function EditJournalEntryPage() {
     const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
     const formatAmount = (amount: number) =>
         amount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-    const isAllActiveBooks = isAllActiveBooksCode(header.bookClassification);
+    const isRetiredOpeningBalance = header.journalType === 'Opening Balance';
     const targetAccountingBooks = useMemo(
         () => getPostingTargetBooks(accountingBooks, header.bookClassification),
         [accountingBooks, header.bookClassification]
     );
     const selectedBookName = getAccountingBookName(accountingBooks, header.bookClassification);
-    const targetBookLabel = isAllActiveBooks ? 'all active books' : selectedBookName;
-    const targetBookListText = targetAccountingBooks.map(book => book.name).join(', ');
+    const targetBookLabel = selectedBookName;
     const invalidLines = useMemo(() => {
         return lines
             .map((line, index) => {
@@ -267,20 +272,10 @@ export default function EditJournalEntryPage() {
     [functionalCurrency, lines]);
 
     const handleAddLine = () => {
-        setLines([
-            ...lines,
-            {
-                id: crypto.randomUUID(),
-                accountId: '',
-                description: '',
-                currencyCode: functionalCurrency,
-                exchangeRate: 1,
-                debit: 0,
-                credit: 0,
-                rateStatus: functionalCurrency ? 'ready' : 'idle',
-                dimensions: { ...defaultDimensions },
-            },
-        ]);
+        setLines(current => appendJournalLine(
+            current,
+            description => createFreshManualJournalLine(crypto.randomUUID(), functionalCurrency, description),
+        ));
     };
 
     const handleRemoveLine = (id: string) => {
@@ -328,6 +323,7 @@ export default function EditJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: `${currency} is not effective for account ${account.accountNumber || account.accountCode} on ${effectiveDate}.`,
@@ -341,6 +337,7 @@ export default function EditJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: 1,
                 rateStatus: 'ready',
                 rateError: undefined,
@@ -357,6 +354,7 @@ export default function EditJournalEntryPage() {
         setLines(current => current.map(line => line.id === lineId ? {
             ...line,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: '',
             rateStatus: 'loading',
             rateError: undefined,
@@ -377,6 +375,7 @@ export default function EditJournalEntryPage() {
                 line.id === lineId && line.rateRequestKey === requestKey
                     ? {
                         ...line,
+                        exchangeRateId: undefined,
                         exchangeRate: '',
                         rateStatus: 'error',
                         rateError: message,
@@ -409,6 +408,7 @@ export default function EditJournalEntryPage() {
                 ...line,
                 accountId,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: currency === functionalCurrency ? 1 : '',
                 foreignDebit: currency === functionalCurrency ? undefined : 0,
                 foreignCredit: currency === functionalCurrency ? undefined : 0,
@@ -426,6 +426,7 @@ export default function EditJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 accountId,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: message,
@@ -438,6 +439,7 @@ export default function EditJournalEntryPage() {
             ...line,
             accountId: '',
             currencyCode: functionalCurrency,
+            exchangeRateId: undefined,
             exchangeRate: 1,
             foreignDebit: undefined,
             foreignCredit: undefined,
@@ -459,6 +461,7 @@ export default function EditJournalEntryPage() {
         setLines(current => current.map(item => item.id === lineId ? {
             ...item,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: currency === functionalCurrency ? 1 : '',
             foreignDebit: currency === functionalCurrency ? undefined : 0,
             foreignCredit: currency === functionalCurrency ? undefined : 0,
@@ -526,6 +529,7 @@ export default function EditJournalEntryPage() {
                         description: line.description || undefined,
                         reference: header.referenceNumber || entry?.journalEntryNumber || 'JE',
                         currencyCode: isForeign ? transactionCurrency : undefined,
+                        exchangeRateId: isForeign ? line.exchangeRateId : undefined,
                         exchangeRate: isForeign ? exchangeRate : undefined,
                         foreignAmount: isForeign ? foreignAmount || undefined : undefined,
                         lineNumber: index + 1,
@@ -541,6 +545,14 @@ export default function EditJournalEntryPage() {
 
     const handleSaveDraft = async () => {
         if (!entry) return;
+        if (isRetiredOpeningBalance) {
+            toast({
+                title: 'Legacy opening balance is read-only',
+                description: 'Use the controlled Opening Balances workspace for cutover corrections.',
+                variant: 'destructive',
+            });
+            return;
+        }
 
         if (currencyReferenceError || !functionalCurrency) {
             toast({
@@ -582,9 +594,7 @@ export default function EditJournalEntryPage() {
             return;
         }
 
-        const validationErrors = validateJournalEntryForm(header, lines, entry.journalEntryNumber, {
-            openingBalanceAutoRoutingEnabled: false,
-        });
+        const validationErrors = validateJournalEntryForm(header, lines, entry.journalEntryNumber);
         if (validationErrors.length > 0) {
             toast({ title: 'Validation', description: validationErrors[0], variant: 'destructive' });
             return;
@@ -626,7 +636,7 @@ export default function EditJournalEntryPage() {
                         <ArrowLeft className="mr-2 h-4 w-4" />
                         Cancel
                     </Button>
-                    <Button onClick={handleSaveDraft} disabled={saving || !isBalanced || totalDebit === 0 || Boolean(currencyReferenceError) || Boolean(fxBlockingMessage)}>
+                    <Button onClick={handleSaveDraft} disabled={isRetiredOpeningBalance || saving || !isBalanced || totalDebit === 0 || Boolean(currencyReferenceError) || Boolean(fxBlockingMessage)}>
                         {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Save className="mr-2 h-4 w-4" />}
                         Save Draft
                     </Button>
@@ -680,13 +690,12 @@ export default function EditJournalEntryPage() {
                     </AlertDescription>
                 </Alert>
             )}
-            {header.journalType === 'Opening Balance' && isAllActiveBooks && (
-                <Alert>
+            {isRetiredOpeningBalance && (
+                <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>All Active Books Posting</AlertTitle>
+                    <AlertTitle>Legacy opening-balance journal is read-only</AlertTitle>
                     <AlertDescription>
-                        This draft will be duplicated when posted to: {targetBookListText || 'No active posting books configured'}.
-                        The active book list is resolved again at posting time.
+                        Manual opening balances are retired. Use the controlled Opening Balances workspace for corrections or new cutover processing.
                     </AlertDescription>
                 </Alert>
             )}
@@ -712,9 +721,6 @@ export default function EditJournalEntryPage() {
                             <Select value={header.bookClassification} onValueChange={(value) => setHeader({ ...header, bookClassification: value })}>
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {(header.journalType === 'Opening Balance' || isAllActiveBooks) && (
-                                        <SelectItem value={ALL_ACTIVE_BOOKS_CODE}>All Active Books</SelectItem>
-                                    )}
                                     {accountingBooks.map((book) => (
                                         <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
                                     ))}

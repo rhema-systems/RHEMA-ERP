@@ -11,6 +11,15 @@ public sealed class InventoryDisposalDto
     public string WarehouseCode { get; set; } = string.Empty;
     public string WarehouseName { get; set; } = string.Empty;
     public InventoryDisposalStatus Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
+    public bool CanEdit { get; set; }
+    public bool CanSubmit { get; set; }
+    public bool CanApprove { get; set; }
+    public bool CanStageExecution { get; set; }
+    public bool CanComplete { get; set; }
+    public bool CanCancel { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    public decimal? PostedStockValue { get; set; }
     public InventoryDisposalMethod Method { get; set; }
     public string Reason { get; set; } = string.Empty;
     public string IdentificationDetails { get; set; } = string.Empty;
@@ -32,6 +41,9 @@ public sealed class InventoryDisposalDto
     public string? ExecutionReference { get; set; }
     public Guid? ProceedsPostingEventId { get; set; }
     public Guid? ProceedsJournalEntryId { get; set; }
+    /// <summary>Durable C7/C8 checker handoff identity; no book or execution capability is exposed.</summary>
+    public Guid? FinanceProducerApprovalId { get; set; }
+    public bool FinanceProducerApprovalIsGroup { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
     public decimal TotalQuantity { get; set; }
     public decimal TotalValue { get; set; }
@@ -44,6 +56,7 @@ public sealed class InventoryDisposalDto
 
 public sealed class InventoryDisposalLineDto
 {
+    public string UnitOfMeasure { get; set; } = string.Empty;
     public Guid Id { get; set; }
     public Guid InventoryItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
@@ -95,11 +108,11 @@ public sealed class CreateInventoryDisposalRequest
     public Guid WarehouseId { get; set; }
     public InventoryDisposalMethod Method { get; set; }
     [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
-    [Required, MaxLength(2000)] public string IdentificationDetails { get; set; } = string.Empty;
+    [MaxLength(2000)] public string IdentificationDetails { get; set; } = string.Empty;
     [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
     [MaxLength(100)] public string? CorrelationId { get; set; }
     [MinLength(1)] public List<CreateInventoryDisposalLineRequest> Lines { get; set; } = [];
-    [MinLength(1)] public List<InventoryControlEvidenceRequest> Evidence { get; set; } = [];
+    public List<InventoryControlEvidenceRequest> Evidence { get; set; } = [];
 }
 
 public sealed class CreateInventoryDisposalLineRequest
@@ -143,6 +156,17 @@ public sealed class VoteInventoryDisposalRequest : InventoryDisposalMutationRequ
 
 public sealed class SubmitInventoryDisposalRequest : InventoryDisposalMutationRequest;
 
+public sealed class UpdateInventoryDisposalRequest : InventoryDisposalMutationRequest
+{
+    public InventoryDisposalMethod Method { get; set; }
+    [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
+    [MaxLength(2000)] public string IdentificationDetails { get; set; } = string.Empty;
+    [MinLength(1)] public List<CreateInventoryDisposalLineRequest> Lines { get; set; } = [];
+    public List<InventoryControlEvidenceRequest> Evidence { get; set; } = [];
+}
+
+public sealed class CancelInventoryDisposalRequest : InventoryDisposalMutationRequest;
+
 public sealed class DecideInventoryDisposalRequest : InventoryDisposalMutationRequest
 {
     public bool Approved { get; set; }
@@ -150,11 +174,12 @@ public sealed class DecideInventoryDisposalRequest : InventoryDisposalMutationRe
 
 public sealed class StageInventoryDisposalExecutionRequest : InventoryDisposalMutationRequest
 {
+    public bool PostImmediately { get; set; }
     [Range(typeof(decimal), "0", "999999999999")] public decimal ProceedsAmount { get; set; }
     public Guid? ProceedsAccountId { get; set; }
     [MaxLength(200)] public string? BuyerOrRecipient { get; set; }
     [Required, MaxLength(200)] public string ExecutionReference { get; set; } = string.Empty;
-    [MinLength(1)] public List<InventoryControlEvidenceRequest> Evidence { get; set; } = [];
+    public List<InventoryControlEvidenceRequest> Evidence { get; set; } = [];
 }
 
 public sealed class CompleteInventoryDisposalRequest : InventoryDisposalMutationRequest

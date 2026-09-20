@@ -563,6 +563,8 @@ public class WorkflowEntitySummaryDto
     public Guid EntityId { get; set; }
 
     public bool HasActiveInstance { get; set; }
+    /// <summary>Retained prior workflow instances remain available as history even when new approvals are disabled.</summary>
+    public bool HasWorkflowHistory { get; set; }
     /// <summary>
     /// True when this tenant/entity type has an active Published approval
     /// definition, or this record already has an active workflow instance.

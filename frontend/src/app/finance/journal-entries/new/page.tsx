@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
-import { ArrowLeft, Save, Plus, Trash2, AlertCircle, FileText, Loader2 } from 'lucide-react';
+import { ArrowLeft, Save, Plus, Trash2, AlertCircle, Loader2 } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { ManualJournalAccountCombobox } from '@/components/finance/journal-entries/manual-journal-account-combobox';
@@ -21,12 +21,10 @@ import { mapJournalEntryFormToCreateDto, validateJournalEntryForm } from '@/lib/
 import { useDocumentSequence } from '@/hooks/use-document-sequence';
 import { FinanceDocumentTypes } from '@/types/document-numbering';
 import {
-    ALL_ACTIVE_BOOKS_CODE,
     DEFAULT_ACCOUNTING_BOOKS,
     getAccountingBookName,
     getPostingTargetBooks,
     isAccountEligibleForBook,
-    isAllActiveBooksCode,
 } from '@/lib/finance/accounting-books';
 import {
     applyCanonicalJournalRate,
@@ -40,12 +38,14 @@ import {
     getMissingRequiredManualDimension,
     resolveManualDimensionValues,
 } from '@/lib/finance/manual-journal-dimensions';
+import { appendJournalLine, createFreshManualJournalLine } from '@/lib/finance/journal-line-addition';
 
 interface JournalLine {
     id: string;
     accountId: string;
     description: string;
     currencyCode: string;
+    exchangeRateId?: string;
     exchangeRate: number | '';
     debit: number;
     credit: number;
@@ -90,8 +90,6 @@ export default function NewJournalEntryPage() {
     const [journalNumber, setJournalNumber] = useState('');
     const journalSequence = useDocumentSequence('Finance', FinanceDocumentTypes.JournalEntry);
     const [saving, setSaving] = useState(false);
-    const [migrationClearingConfigured, setMigrationClearingConfigured] = useState(true);
-    const [openingBalanceAutoRoutingEnabled, setOpeningBalanceAutoRoutingEnabled] = useState(true);
 
     useEffect(() => {
         if (!journalSequence.loading && !journalSequence.allowManualEntry) {
@@ -136,8 +134,6 @@ export default function NewJournalEntryPage() {
 
                 setFinanceSettings(settings);
                 setCurrencies(activeCurrencies);
-                setMigrationClearingConfigured(Boolean(settings.migrationClearingAccountId));
-                setOpeningBalanceAutoRoutingEnabled(settings.openingBalanceAutoRoutingEnabled ?? true);
                 setLines(current => current.map(line => ({
                     ...line,
                     currencyCode: line.currencyCode || baseCurrency,
@@ -190,15 +186,12 @@ export default function NewJournalEntryPage() {
     const totalDebit = lines.reduce((sum, line) => sum + (line.debit || 0), 0);
     const totalCredit = lines.reduce((sum, line) => sum + (line.credit || 0), 0);
     const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
-    const allowOpeningBalanceAutoBalance = header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled;
-    const isAllActiveBooks = isAllActiveBooksCode(header.bookClassification);
     const targetAccountingBooks = useMemo(
         () => getPostingTargetBooks(accountingBooks, header.bookClassification),
         [accountingBooks, header.bookClassification]
     );
     const selectedBookName = getAccountingBookName(accountingBooks, header.bookClassification);
-    const targetBookLabel = isAllActiveBooks ? 'all active books' : selectedBookName;
-    const targetBookListText = targetAccountingBooks.map(book => book.name).join(', ');
+    const targetBookLabel = selectedBookName;
     const invalidLines = useMemo(() => {
         return lines
             .map((line, index) => {
@@ -223,28 +216,14 @@ export default function NewJournalEntryPage() {
         setHeader(current => ({
             ...current,
             journalType: value,
-            bookClassification:
-                value === 'Opening Balance' || !isAllActiveBooksCode(current.bookClassification)
-                    ? current.bookClassification
-                    : 'IFRS',
         }));
     };
 
     const handleAddLine = () => {
-        setLines([
-            ...lines,
-            {
-                id: Date.now().toString(),
-                accountId: '',
-                description: '',
-                currencyCode: functionalCurrency,
-                exchangeRate: 1,
-                debit: 0,
-                credit: 0,
-                rateStatus: functionalCurrency ? 'ready' : 'idle',
-                dimensions: { ...defaultDimensions },
-            },
-        ]);
+        setLines(current => appendJournalLine(
+            current,
+            description => createFreshManualJournalLine(crypto.randomUUID(), functionalCurrency, description),
+        ));
     };
 
     const handleRemoveLine = (id: string) => {
@@ -292,6 +271,7 @@ export default function NewJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: `${currency} is not effective for account ${account.accountNumber} on ${effectiveDate}.`,
@@ -305,6 +285,7 @@ export default function NewJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: 1,
                 rateStatus: 'ready',
                 rateError: undefined,
@@ -321,6 +302,7 @@ export default function NewJournalEntryPage() {
         setLines(current => current.map(line => line.id === lineId ? {
             ...line,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: '',
             rateStatus: 'loading',
             rateError: undefined,
@@ -341,6 +323,7 @@ export default function NewJournalEntryPage() {
                 line.id === lineId && line.rateRequestKey === requestKey
                     ? {
                         ...line,
+                        exchangeRateId: undefined,
                         exchangeRate: '',
                         rateStatus: 'error',
                         rateError: message,
@@ -373,6 +356,7 @@ export default function NewJournalEntryPage() {
                 ...line,
                 accountId,
                 currencyCode: currency,
+                exchangeRateId: undefined,
                 exchangeRate: currency === functionalCurrency ? 1 : '',
                 foreignDebit: currency === functionalCurrency ? undefined : 0,
                 foreignCredit: currency === functionalCurrency ? undefined : 0,
@@ -390,6 +374,7 @@ export default function NewJournalEntryPage() {
             setLines(current => current.map(line => line.id === lineId ? {
                 ...line,
                 accountId,
+                exchangeRateId: undefined,
                 exchangeRate: '',
                 rateStatus: 'error',
                 rateError: message,
@@ -402,6 +387,7 @@ export default function NewJournalEntryPage() {
             ...line,
             accountId: '',
             currencyCode: functionalCurrency,
+            exchangeRateId: undefined,
             exchangeRate: 1,
             foreignDebit: undefined,
             foreignCredit: undefined,
@@ -423,6 +409,7 @@ export default function NewJournalEntryPage() {
         setLines(current => current.map(item => item.id === lineId ? {
             ...item,
             currencyCode: currency,
+            exchangeRateId: undefined,
             exchangeRate: currency === functionalCurrency ? 1 : '',
             foreignDebit: currency === functionalCurrency ? undefined : 0,
             foreignCredit: currency === functionalCurrency ? undefined : 0,
@@ -487,15 +474,6 @@ export default function NewJournalEntryPage() {
             return;
         }
 
-        if (header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled && !migrationClearingConfigured) {
-            toast({
-                title: 'Migration Clearing Account Required',
-                description: 'Set Migration Clearing Account in Finance Settings before saving Opening Balance journals.',
-                variant: 'destructive'
-            });
-            return;
-        }
-
         if (invalidLines.length > 0) {
             toast({
                 title: 'Classification Validation',
@@ -520,7 +498,6 @@ export default function NewJournalEntryPage() {
 
         // Use centralised contract guard for validation and mapping
         const validationErrors = validateJournalEntryForm(header, lines, journalNumber, {
-            openingBalanceAutoRoutingEnabled,
             requireJournalNumber: false,
         });
         if (validationErrors.length > 0) {
@@ -568,7 +545,6 @@ export default function NewJournalEntryPage() {
                             || currencyReferenceLoading
                             || Boolean(currencyReferenceError)
                             || Boolean(fxBlockingMessage)
-                            || (header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled && !migrationClearingConfigured)
                         }
                     >
                         {saving ? (
@@ -603,7 +579,7 @@ export default function NewJournalEntryPage() {
             </Breadcrumb>
 
             {/* Validation Alert */}
-            {!allowOpeningBalanceAutoBalance && !isBalanced && totalDebit > 0 && (
+            {!isBalanced && totalDebit > 0 && (
                 <Alert variant="destructive">
                     <AlertCircle className="h-4 w-4" />
                     <AlertTitle>Entry is not balanced</AlertTitle>
@@ -629,26 +605,6 @@ export default function NewJournalEntryPage() {
                     <AlertDescription>{currencyReferenceError}</AlertDescription>
                 </Alert>
             )}
-            {header.journalType === 'Opening Balance' && openingBalanceAutoRoutingEnabled && !migrationClearingConfigured && (
-                <Alert variant="destructive">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertTitle>Migration Clearing Account Not Configured</AlertTitle>
-                    <AlertDescription>
-                        Opening Balance journals require Migration Clearing Account in Finance Settings.
-                    </AlertDescription>
-                </Alert>
-            )}
-            {header.journalType === 'Opening Balance' && isAllActiveBooks && (
-                <Alert>
-                    <FileText className="h-4 w-4" />
-                    <AlertTitle>All Active Books Posting</AlertTitle>
-                    <AlertDescription>
-                        This draft will be duplicated when posted to: {targetBookListText || 'No active posting books configured'}.
-                        The active book list is resolved again at posting time.
-                    </AlertDescription>
-                </Alert>
-            )}
-
             {/* Header Form */}
             <Card>
                 <CardHeader>
@@ -691,7 +647,6 @@ export default function NewJournalEntryPage() {
                                     <SelectItem value="General">General</SelectItem>
                                     <SelectItem value="Adjusting">Adjusting</SelectItem>
                                     <SelectItem value="Reversing">Reversing</SelectItem>
-                                    <SelectItem value="Opening Balance">Opening Balance</SelectItem>
                                 </SelectContent>
                             </Select>
                         </div>
@@ -703,9 +658,6 @@ export default function NewJournalEntryPage() {
                             >
                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                 <SelectContent>
-                                    {header.journalType === 'Opening Balance' && (
-                                        <SelectItem value={ALL_ACTIVE_BOOKS_CODE}>All Active Books</SelectItem>
-                                    )}
                                     {accountingBooks.map((book) => (
                                         <SelectItem key={book.code} value={book.code}>{book.name}</SelectItem>
                                     ))}

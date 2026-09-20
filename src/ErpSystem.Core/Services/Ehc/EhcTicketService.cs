@@ -4,6 +4,7 @@ using ErpSystem.Core.DTOs.Ehc;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
@@ -23,6 +24,9 @@ public sealed class EhcTicketService : IEhcTicketService
     private const string DefaultWorkflowName = "EHC Ticket";
     private const string ExternalPortalTicketPathPrefix = "/support/tickets";
     private const string EhcUploadCategory = "ehc-ticket";
+    private const string PropertyListingLeadSource = "estate-public-listing";
+    private const string LegacyPropertyListingLeadSource = "state-public-listing";
+    private const string SalesAndMarketingOrganizationUnitCode = "UNIT-MKT";
 
     private readonly IEhcTicketRepository _ticketRepository;
     private readonly IUnitOfWork _unitOfWork;
@@ -89,6 +93,287 @@ public sealed class EhcTicketService : IEhcTicketService
         await _unitOfWork.Repository<EhcTicketAuditEvent>().AddAsync(ev);
     }
 
+    /// <summary>
+    /// Moves a public property enquiry into CRM only after Helpdesk has assigned it to the active
+    /// Sales and Marketing organization unit and advanced it from New. Every EHC interaction is linked once, so a
+    /// transient retry or later update can safely backfill the CRM timeline without duplicates.
+    /// </summary>
+    private async Task<bool> IsAssignedToActiveSalesOrganizationUnitAsync(EhcTicket ticket, CancellationToken cancellationToken)
+    {
+        return ticket.AssignedOrganizationUnitId.HasValue &&
+               await _unitOfWork.Repository<OrganizationUnit>().GetQueryable(unit =>
+                       unit.Id == ticket.AssignedOrganizationUnitId.Value &&
+                       unit.TenantId == ticket.TenantId &&
+                       !unit.IsDeleted &&
+                       unit.IsActive &&
+                       unit.Code == SalesAndMarketingOrganizationUnitCode)
+                   .AnyAsync(cancellationToken);
+    }
+
+    private async Task SynchronizePropertyEnquiryCrmAsync(EhcTicket ticket, CancellationToken cancellationToken)
+    {
+        if (ticket.TicketType != EhcTicketType.Enquiry ||
+            ticket.Status == EhcTicketStatus.New ||
+            !ticket.AssignedOrganizationUnitId.HasValue ||
+            string.IsNullOrWhiteSpace(ticket.PropertyListingContextJson))
+        {
+            return;
+        }
+
+        if (!await IsAssignedToActiveSalesOrganizationUnitAsync(ticket, cancellationToken))
+        {
+            return;
+        }
+
+        EhcPropertyListingContextDto? property;
+        try
+        {
+            property = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(ticket.PropertyListingContextJson);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Property listing snapshot for EHC ticket {TicketId} is invalid", ticket.Id);
+            return;
+        }
+
+        if (property == null || !IsPropertyListingLeadSource(property.Source))
+        {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var changed = false;
+        if (!ticket.CrmLeadId.HasValue)
+        {
+            var (firstName, lastName) = SplitCrmContactName(property.ContactName, property.BusinessPartnerName);
+            var lead = new Lead
+            {
+                TenantId = ticket.TenantId,
+                ReferenceNumber = ticket.TicketNumber,
+                Status = "Active",
+                EffectiveDate = now,
+                FirstName = firstName,
+                LastName = lastName,
+                CompanyName = Clip(property.BusinessPartnerName, 100),
+                Email = Clip(property.ContactEmail, 100),
+                Phone = Clip(property.ContactPhone, 20),
+                LeadSource = PropertyListingLeadSource,
+                LeadStatus = "Qualified",
+                QualificationScore = 40,
+                EstimatedValue = property.Price ?? 0m,
+                AssignedToId = ticket.AssignedToUserId,
+                Notes = Clip(BuildPropertySnapshotSummary(property, ticket), 2000),
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName ?? "EHC property enquiry",
+                CreatedById = ticket.CreatedById
+            };
+            await _unitOfWork.Repository<Lead>().AddAsync(lead);
+            ticket.CrmLeadId = lead.Id;
+            changed = true;
+        }
+
+        if (!ticket.CrmOpportunityId.HasValue)
+        {
+            var opportunity = new Opportunity
+            {
+                TenantId = ticket.TenantId,
+                ReferenceNumber = ticket.TicketNumber,
+                Status = "Active",
+                EffectiveDate = now,
+                Name = Clip($"Property enquiry: {property.ListingName}", 200)!,
+                Description = Clip($"{BuildPropertySnapshotSummary(property, ticket)}\n\n{ticket.Description}", 2000),
+                LeadId = ticket.CrmLeadId,
+                Stage = "Qualification",
+                Probability = 10,
+                Amount = property.Price ?? 0m,
+                Currency = NormalizeCurrency(property.Currency),
+                ExpectedCloseDate = now.AddDays(90),
+                LeadSource = PropertyListingLeadSource,
+                OpportunityType = "New Business",
+                AssignedToId = ticket.AssignedToUserId,
+                Notes = $"Source ticket: {ticket.TicketNumber}",
+                CreatedAt = now,
+                CreatedBy = _currentUserService.UserName ?? "EHC property enquiry",
+                CreatedById = ticket.CreatedById
+            };
+            await _unitOfWork.Repository<Opportunity>().AddAsync(opportunity);
+            ticket.CrmOpportunityId = opportunity.Id;
+            changed = true;
+        }
+
+        if (changed)
+        {
+            ticket.UpdatedAt = now;
+            await _unitOfWork.Repository<EhcTicket>().UpdateAsync(ticket);
+        }
+
+        var linkRepository = _unitOfWork.Repository<EhcCrmEngagementLink>();
+        var sourceKeys = (await linkRepository
+                .GetQueryable(l => l.TenantId == ticket.TenantId && l.TicketId == ticket.Id && !l.IsDeleted)
+                .Select(l => l.SourceKey)
+                .ToListAsync(cancellationToken))
+            .ToHashSet(StringComparer.Ordinal);
+
+        var sourcePrefix = $"EhcTicket:{ticket.Id}";
+        var initial = SplitCrmActivityText($"Public property listing enquiry received.\n{BuildPropertySnapshotSummary(property, ticket)}\n\n{ticket.Description}");
+        await AddCrmActivityIfMissingAsync(ticket, sourceKeys, $"{sourcePrefix}:Created", "InitialEnquiry",
+            $"Property enquiry {ticket.TicketNumber} received", "Email", initial.Description, initial.Notes,
+            ticket.CreatedAt, ticket.RequesterUserId, requiresFollowUp: true);
+
+        var handoff = SplitCrmActivityText($"Helpdesk assigned this enquiry to the Sales department. Current ticket status: {ticket.Status}.\n{BuildPropertySnapshotSummary(property, ticket)}");
+        await AddCrmActivityIfMissingAsync(ticket, sourceKeys, $"{sourcePrefix}:SalesHandoff", "SalesHandoff",
+            $"Property enquiry {ticket.TicketNumber} handed to Sales", "Task", handoff.Description, handoff.Notes,
+            ticket.UpdatedAt ?? now, ticket.AssignedToUserId, requiresFollowUp: true);
+
+        var messages = await _unitOfWork.Repository<EhcTicketMessage>()
+            .GetQueryable(m => m.TenantId == ticket.TenantId && m.TicketId == ticket.Id && !m.IsDeleted)
+            .OrderBy(m => m.CreatedAt)
+            .ToListAsync(cancellationToken);
+        foreach (var message in messages)
+        {
+            var direction = message.IsInternal
+                ? "Internal note"
+                : message.AuthorUserId == ticket.RequesterUserId ? "Supplier message" : "Sales response";
+            var details = SplitCrmActivityText($"{direction} on {ticket.TicketNumber}.\n\n{message.Body}");
+            await AddCrmActivityIfMissingAsync(ticket, sourceKeys, $"{sourcePrefix}:Message:{message.Id}",
+                message.IsInternal ? "InternalNote" : direction.Replace(" ", string.Empty),
+                $"{direction}: {ticket.TicketNumber}", message.IsInternal ? "Note" : "Email", details.Description, details.Notes,
+                message.CreatedAt, message.AuthorUserId, requiresFollowUp: false);
+        }
+
+        var statusHistory = await _unitOfWork.Repository<EhcTicketStatusHistory>()
+            .GetQueryable(h => h.TenantId == ticket.TenantId && h.TicketId == ticket.Id && !h.IsDeleted)
+            .OrderBy(h => h.CreatedAt)
+            .ToListAsync(cancellationToken);
+        foreach (var history in statusHistory.Where(h => h.FromStatus.HasValue || h.ToStatus != EhcTicketStatus.New))
+        {
+            var details = SplitCrmActivityText($"Ticket status changed from {history.FromStatus?.ToString() ?? "None"} to {history.ToStatus}.\n\n{history.Notes ?? "No transition notes were entered."}");
+            await AddCrmActivityIfMissingAsync(ticket, sourceKeys, $"{sourcePrefix}:Status:{history.Id}", "StatusChange",
+                $"Status changed to {history.ToStatus}: {ticket.TicketNumber}", "Note", details.Description, details.Notes,
+                history.CreatedAt, history.ChangedByUserId, requiresFollowUp: false);
+        }
+
+        var attachments = await _unitOfWork.Repository<EhcTicketAttachment>()
+            .GetQueryable(a => a.TenantId == ticket.TenantId && a.TicketId == ticket.Id && !a.IsDeleted)
+            .OrderBy(a => a.CreatedAt)
+            .ToListAsync(cancellationToken);
+        foreach (var attachment in attachments)
+        {
+            var details = SplitCrmActivityText($"{(attachment.IsInternal ? "Internal" : "External")} attachment added to {ticket.TicketNumber}: {attachment.FileName}.");
+            await AddCrmActivityIfMissingAsync(ticket, sourceKeys, $"{sourcePrefix}:Attachment:{attachment.Id}", "Attachment",
+                $"Attachment added: {ticket.TicketNumber}", "Note", details.Description, details.Notes,
+                attachment.CreatedAt, attachment.CreatedById, requiresFollowUp: false);
+        }
+
+        if (changed || sourceKeys.Count > 0)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+    }
+
+    private async Task PublishPropertyEnquirySalesReadyAsync(EhcTicket ticket, Guid? triggeredByUserId,
+        CancellationToken cancellationToken)
+    {
+        if (ticket.Status == EhcTicketStatus.New || !await IsAssignedToActiveSalesOrganizationUnitAsync(ticket, cancellationToken))
+        {
+            return;
+        }
+
+        await PublishTicketTopicAsync(
+            ticket.TenantId,
+            activity: "PropertyEnquirySalesReady",
+            audience: "Internal",
+            ticketId: ticket.Id,
+            triggeredByUserId: triggeredByUserId,
+            data: new Dictionary<string, object>
+            {
+                ["ticketId"] = ticket.Id,
+                ["ticketNumber"] = ticket.TicketNumber,
+                ["assignedToUserId"] = ticket.AssignedToUserId ?? Guid.Empty,
+                ["ActionUrl"] = $"/sales/property-enquiries?id={ticket.Id}"
+            },
+            cancellationToken);
+    }
+
+    private async Task AddCrmActivityIfMissingAsync(EhcTicket ticket, ISet<string> sourceKeys, string sourceKey,
+        string engagementType, string subject, string activityType, string description, string? notes,
+        DateTime activityDate, Guid? assignedToUserId, bool requiresFollowUp)
+    {
+        if (!sourceKeys.Add(sourceKey))
+        {
+            return;
+        }
+
+        var activity = new Activity
+        {
+            TenantId = ticket.TenantId,
+            ReferenceNumber = ticket.TicketNumber,
+            Status = "Active",
+            Subject = Clip(subject, 200)!,
+            ActivityType = activityType,
+            Description = Clip(description, 2000),
+            ActivityDate = activityDate,
+            ActivityStatus = "Completed",
+            Priority = 2,
+            AssignedToId = assignedToUserId ?? ticket.AssignedToUserId,
+            LeadId = ticket.CrmLeadId,
+            OpportunityId = ticket.CrmOpportunityId,
+            Notes = Clip(notes, 2000),
+            RequiresFollowUp = requiresFollowUp,
+            CreatedAt = activityDate,
+            CreatedBy = _currentUserService.UserName ?? "EHC property enquiry",
+            CreatedById = ticket.CreatedById
+        };
+        await _unitOfWork.Repository<Activity>().AddAsync(activity);
+        await _unitOfWork.Repository<EhcCrmEngagementLink>().AddAsync(new EhcCrmEngagementLink
+        {
+            TenantId = ticket.TenantId,
+            TicketId = ticket.Id,
+            CrmActivityId = activity.Id,
+            SourceKey = sourceKey,
+            EngagementType = engagementType,
+            CreatedAt = activityDate,
+            CreatedBy = _currentUserService.UserName ?? "EHC property enquiry",
+            CreatedById = ticket.CreatedById
+        });
+    }
+
+    private static (string Description, string? Notes) SplitCrmActivityText(string text)
+    {
+        var normalized = text.Trim();
+        return normalized.Length <= 2000
+            ? (normalized, null)
+            : (normalized[..2000], Clip(normalized[2000..], 2000));
+    }
+
+    private static (string FirstName, string LastName) SplitCrmContactName(string? contactName, string? companyName)
+    {
+        var name = string.IsNullOrWhiteSpace(contactName) ? companyName : contactName;
+        var parts = (name ?? "Property enquiry contact").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return parts.Length switch
+        {
+            0 => ("Property", "Enquiry"),
+            1 => (Clip(parts[0], 100)!, "Enquiry"),
+            _ => (Clip(parts[0], 100)!, Clip(string.Join(' ', parts.Skip(1)), 100)!)
+        };
+    }
+
+    private static bool IsPropertyListingLeadSource(string? source) =>
+        string.Equals(source, PropertyListingLeadSource, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(source, LegacyPropertyListingLeadSource, StringComparison.OrdinalIgnoreCase);
+
+    private static string BuildPropertySnapshotSummary(EhcPropertyListingContextDto property, EhcTicket ticket) =>
+        $"Source: {property.Source}; Listing: {property.ListingReference} — {property.ListingName}; " +
+        $"Type: {property.ListingType}; Currency: {property.Currency}; Listing ID: {property.ListingId}; EHC ticket: {ticket.TicketNumber}.";
+
+    private static string NormalizeCurrency(string? currency) => string.IsNullOrWhiteSpace(currency)
+        ? "USD"
+        : Clip(currency.Trim().ToUpperInvariant(), 3)!;
+
+    private static string? Clip(string? value, int maxLength) => string.IsNullOrWhiteSpace(value)
+        ? null
+        : value.Trim().Length <= maxLength ? value.Trim() : value.Trim()[..maxLength];
+
     private async Task PublishTicketTopicAsync(
         Guid tenantId,
         string activity,
@@ -102,6 +387,46 @@ public sealed class EhcTicketService : IEhcTicketService
 
         try
         {
+            if (audience == "Internal" && (activity == "Created" || activity == "Message" || activity == "PropertyEnquirySalesReady"))
+            {
+                var propertyTicket = await _ticketRepository.Query()
+                    .Where(t => t.Id == ticketId && t.TenantId == tenantId && !t.IsDeleted)
+                    .Select(t => new { t.PropertyListingContextJson, t.Status, t.AssignedOrganizationUnitId })
+                    .FirstOrDefaultAsync(cancellationToken);
+                if (!string.IsNullOrEmpty(propertyTicket?.PropertyListingContextJson))
+                {
+                    var property = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(propertyTicket.PropertyListingContextJson)!;
+                    if (property != null && IsPropertyListingLeadSource(property.Source))
+                    {
+                        data["listingName"] = property.ListingName;
+                        data["listingReference"] = property.ListingReference;
+                        data["businessPartnerName"] = property.BusinessPartnerName;
+
+                        if (activity is "Created" or "Message")
+                        {
+                            var salesReady = propertyTicket.Status != EhcTicketStatus.New &&
+                                propertyTicket.AssignedOrganizationUnitId.HasValue &&
+                                await _unitOfWork.Repository<OrganizationUnit>().GetQueryable(unit =>
+                                        unit.Id == propertyTicket.AssignedOrganizationUnitId.Value &&
+                                        unit.TenantId == tenantId &&
+                                        !unit.IsDeleted &&
+                                        unit.IsActive &&
+                                        unit.Code == SalesAndMarketingOrganizationUnitCode)
+                                    .AnyAsync(cancellationToken);
+                            if (salesReady && activity == "Message")
+                            {
+                                activity = "PropertyEnquiryMessage";
+                                data["ActionUrl"] = $"/sales/property-enquiries?id={ticketId}";
+                            }
+                            else
+                            {
+                                activity = "PropertyEnquiryTriage" + activity;
+                                data["ActionUrl"] = $"/helpdesk/tickets/{ticketId}";
+                            }
+                        }
+                    }
+                }
+            }
             if (string.Equals(audience, "Internal", StringComparison.OrdinalIgnoreCase))
             {
                 await EnrichDataWithWatchersAsync(tenantId, ticketId, data, cancellationToken);
@@ -322,6 +647,53 @@ public sealed class EhcTicketService : IEhcTicketService
     }
 
     public async Task<EhcTicketDetailDto> CreateExternalTicketAsync(CreateEhcTicketRequestDto request, CancellationToken cancellationToken = default)
+        => await CreateExternalTicketCoreAsync(request, null, null, cancellationToken);
+
+    public async Task<EhcTicketDetailDto> CreateExternalPropertyEnquiryAsync(
+        CreateEhcTicketRequestDto request, EhcPropertyListingContextDto property, Guid submissionId,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsPropertyListingLeadSource(property.Source) || property.ListingId == Guid.Empty || submissionId == Guid.Empty)
+            throw new ArgumentException("A property listing and submission identifier are required.");
+        if (!Guid.TryParse(_currentUserService.UserId, out var requesterId) || !_currentUserService.TenantId.HasValue)
+            throw new InvalidOperationException("An authenticated tenant account is required.");
+        EhcTicketDetailDto? result = null;
+        await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(cancellationToken);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"property-enquiry:{_currentUserService.TenantId}:{requesterId}:{submissionId}", cancellationToken);
+                var existing = await _ticketRepository.Query().AsNoTracking().FirstOrDefaultAsync(t =>
+                    t.TenantId == _currentUserService.TenantId && t.RequesterUserId == requesterId
+                    && t.ExternalSubmissionId == submissionId && !t.IsDeleted, cancellationToken);
+                if (existing != null)
+                {
+                    var saved = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(existing.PropertyListingContextJson!);
+                    if (saved?.ListingId != property.ListingId || saved.BusinessPartnerId != property.BusinessPartnerId || existing.Description != request.Description.Trim())
+                        throw new ArgumentException("This submission identifier has already been used for a different enquiry.");
+                    result = await GetMyTicketByIdAsync(existing.Id, cancellationToken);
+                }
+                else
+                {
+                    request.TicketType = EhcTicketType.Enquiry;
+                    request.Source = EhcTicketSource.Web;
+                    result = await CreateExternalTicketCoreAsync(request, property, submissionId, cancellationToken);
+                }
+                await _unitOfWork.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                await _unitOfWork.RollbackAsync(cancellationToken);
+                _unitOfWork.ClearTrackedChanges();
+                throw;
+            }
+        }, cancellationToken);
+        return result ?? throw new InvalidOperationException("The enquiry could not be loaded.");
+    }
+
+    private async Task<EhcTicketDetailDto> CreateExternalTicketCoreAsync(CreateEhcTicketRequestDto request,
+        EhcPropertyListingContextDto? property, Guid? submissionId, CancellationToken cancellationToken)
     {
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
@@ -390,6 +762,8 @@ public sealed class EhcTicketService : IEhcTicketService
 
         var ticket = new EhcTicket
         {
+            PropertyListingContextJson = property == null ? null : JsonSerializer.Serialize(property),
+            ExternalSubmissionId = submissionId,
             TenantId = tenantId,
             TicketNumber = ticketNumber,
             TicketType = request.TicketType,
@@ -1037,6 +1411,7 @@ public sealed class EhcTicketService : IEhcTicketService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
         await PublishTicketTopicAsync(
             tenantId,
@@ -1156,6 +1531,7 @@ public sealed class EhcTicketService : IEhcTicketService
             data: new { attachmentId = attachment.Id, fileName = attachment.FileName, fileSize = attachment.FileSize });
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
         await PublishTicketTopicAsync(
             tenantId,
@@ -1262,6 +1638,7 @@ public sealed class EhcTicketService : IEhcTicketService
             data: new { messageId = message.Id });
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
         await PublishTicketTopicAsync(
             tenantId,
@@ -1413,6 +1790,7 @@ public sealed class EhcTicketService : IEhcTicketService
             data: new { attachmentId = attachment.Id, fileName = attachment.FileName, fileSize = attachment.FileSize, isInternal });
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
         // Notify requester if this attachment is external-facing.
         if (!isInternal)
@@ -1492,7 +1870,7 @@ public sealed class EhcTicketService : IEhcTicketService
         return ticket == null ? null : await MapToDetailDtoAsync(ticket, includeInternal: true, cancellationToken);
     }
 
-    public async Task AssignTicketAsync(Guid ticketId, Guid assignedToUserId, Guid? assignedDepartmentId = null, CancellationToken cancellationToken = default)
+    public async Task AssignTicketAsync(Guid ticketId, Guid assignedToUserId, Guid? assignedOrganizationUnitId = null, CancellationToken cancellationToken = default)
     {
         var tenantId = _currentUserService.TenantId ?? Guid.Empty;
         if (tenantId == Guid.Empty)
@@ -1513,10 +1891,20 @@ public sealed class EhcTicketService : IEhcTicketService
         }
 
         var previousAssignee = ticket.AssignedToUserId;
-        var previousDepartment = ticket.AssignedDepartmentId;
+        var previousOrganizationUnit = ticket.AssignedOrganizationUnitId;
+
+        OrganizationUnit? organizationUnit = null;
+        if (assignedOrganizationUnitId.HasValue && assignedOrganizationUnitId.Value != Guid.Empty)
+        {
+            organizationUnit = await _unitOfWork.Repository<OrganizationUnit>().GetByIdAsync(assignedOrganizationUnitId.Value);
+            if (organizationUnit == null || organizationUnit.TenantId != tenantId || organizationUnit.IsDeleted || !organizationUnit.IsActive)
+            {
+                throw new ArgumentException("Invalid organization unit.", nameof(assignedOrganizationUnitId));
+            }
+        }
 
         ticket.AssignedToUserId = assignedToUserId;
-        ticket.AssignedDepartmentId = assignedDepartmentId;
+        ticket.AssignedOrganizationUnitId = organizationUnit?.Id;
         ticket.UpdatedAt = DateTime.UtcNow;
         ticket.UpdatedBy = _currentUserService.UserName;
         ticket.LastModifiedById = actorUserId;
@@ -1524,20 +1912,13 @@ public sealed class EhcTicketService : IEhcTicketService
         await ticketRepo.UpdateAsync(ticket);
 
         // Add an internal audit message for traceability (hidden from external users).
-        if (previousAssignee != assignedToUserId || previousDepartment != assignedDepartmentId)
+        if (previousAssignee != assignedToUserId || previousOrganizationUnit != ticket.AssignedOrganizationUnitId)
         {
             var assigneeName = assignedToUserId.ToString();
 
-            string? deptName = null;
-            if (assignedDepartmentId.HasValue && assignedDepartmentId.Value != Guid.Empty)
-            {
-                var dept = await _unitOfWork.Repository<Department>().GetByIdAsync(assignedDepartmentId.Value);
-                deptName = dept?.Name;
-            }
-
             var who = _currentUserService.UserName ?? "System";
-            var body = deptName != null
-                ? $"Assignment updated by {who}: {assigneeName} • {deptName}"
+            var body = organizationUnit != null
+                ? $"Assignment updated by {who}: {assigneeName} • {organizationUnit.Name}"
                 : $"Assignment updated by {who}: {assigneeName}";
 
             await _unitOfWork.Repository<EhcTicketMessage>().AddAsync(new EhcTicketMessage
@@ -1562,15 +1943,21 @@ public sealed class EhcTicketService : IEhcTicketService
                 data: new
                 {
                     previousAssignee = previousAssignee,
-                    previousDepartment = previousDepartment,
+                    previousOrganizationUnit = previousOrganizationUnit,
                     assignedToUserId,
-                    assignedDepartmentId
+                    assignedOrganizationUnitId = ticket.AssignedOrganizationUnitId
                 });
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
-        if (previousAssignee != assignedToUserId || previousDepartment != assignedDepartmentId)
+        if (previousOrganizationUnit != ticket.AssignedOrganizationUnitId && ticket.Status != EhcTicketStatus.New)
+        {
+            await PublishPropertyEnquirySalesReadyAsync(ticket, actorUserId, cancellationToken);
+        }
+
+        if (previousAssignee != assignedToUserId || previousOrganizationUnit != ticket.AssignedOrganizationUnitId)
         {
             await PublishTicketTopicAsync(
                 tenantId,
@@ -1583,7 +1970,7 @@ public sealed class EhcTicketService : IEhcTicketService
                     ["ticketId"] = ticket.Id,
                     ["ticketNumber"] = ticket.TicketNumber,
                     ["assignedToUserId"] = assignedToUserId,
-                    ["assignedDepartmentId"] = assignedDepartmentId ?? Guid.Empty,
+                    ["assignedOrganizationUnitId"] = ticket.AssignedOrganizationUnitId ?? Guid.Empty,
                     ["ActionUrl"] = $"/helpdesk/tickets/{ticket.Id}"
                 },
                 cancellationToken);
@@ -1660,6 +2047,12 @@ public sealed class EhcTicketService : IEhcTicketService
             }
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
+
+            if (fromStatus == EhcTicketStatus.New)
+            {
+                await PublishPropertyEnquirySalesReadyAsync(ticket, actorUserId, cancellationToken);
+            }
 
             await PublishTicketTopicAsync(
                 tenantId,
@@ -1718,6 +2111,7 @@ public sealed class EhcTicketService : IEhcTicketService
                 data: new { fromStatus = fromStatus.ToString(), toStatus = EhcTicketStatus.InProgress.ToString() });
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
             await PublishTicketTopicAsync(
                 tenantId,
@@ -1790,6 +2184,7 @@ public sealed class EhcTicketService : IEhcTicketService
                 data: new { fromStatus = fromStatus.ToString(), toStatus = EhcTicketStatus.Reopened.ToString() });
 
             await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
             await PublishTicketTopicAsync(
                 tenantId,
@@ -1972,6 +2367,12 @@ public sealed class EhcTicketService : IEhcTicketService
         }
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
+
+        if (fromStatus == EhcTicketStatus.New)
+        {
+            await PublishPropertyEnquirySalesReadyAsync(ticket, actorUserId, cancellationToken);
+        }
 
         await PublishTicketTopicAsync(
             tenantId,
@@ -2168,6 +2569,7 @@ public sealed class EhcTicketService : IEhcTicketService
             t => t.Category,
             t => t.Subcategory,
             t => t.AssignedDepartment,
+            t => t.AssignedOrganizationUnit,
             t => t.AssignedToUser,
             t => t.RequesterUser,
             t => t.Messages!,
@@ -2343,6 +2745,7 @@ public sealed class EhcTicketService : IEhcTicketService
             data: new { messageId = message.Id });
 
         await _unitOfWork.SaveChangesAsync(cancellationToken);
+        await SynchronizePropertyEnquiryCrmAsync(ticket, cancellationToken);
 
         await PublishTicketTopicAsync(
             tenantId,
@@ -2635,6 +3038,7 @@ public sealed class EhcTicketService : IEhcTicketService
             ClosedAt = ticket.ClosedAt,
             FeedbackRating = feedbackRating,
             FeedbackSubmittedAt = feedbackSubmittedAtUtc,
+            AssignedOrganizationUnitName = ticket.AssignedOrganizationUnit?.Name,
             AssignedDepartmentName = ticket.AssignedDepartment?.Name,
             AssignedToName = ticket.AssignedToUser != null
                 ? $"{ticket.AssignedToUser.FirstName} {ticket.AssignedToUser.LastName}".Trim()
@@ -2765,6 +3169,7 @@ public sealed class EhcTicketService : IEhcTicketService
 
         return new EhcTicketDetailDto
         {
+            PropertyListing = string.IsNullOrWhiteSpace(ticket.PropertyListingContextJson) ? null : JsonSerializer.Deserialize<EhcPropertyListingContextDto>(ticket.PropertyListingContextJson),
             Id = ticket.Id,
             TicketNumber = ticket.TicketNumber,
             TicketType = ticket.TicketType,
@@ -2786,6 +3191,8 @@ public sealed class EhcTicketService : IEhcTicketService
             FirstRespondedAt = includeInternal ? ticket.FirstRespondedAt : null,
             ResolvedAt = ticket.ResolvedAt,
             ClosedAt = ticket.ClosedAt,
+            AssignedOrganizationUnitId = includeInternal ? ticket.AssignedOrganizationUnitId : null,
+            AssignedOrganizationUnitName = includeInternal ? ticket.AssignedOrganizationUnit?.Name : null,
             AssignedDepartmentId = includeInternal ? ticket.AssignedDepartmentId : null,
             AssignedDepartmentName = includeInternal ? ticket.AssignedDepartment?.Name : null,
             AssignedToUserId = includeInternal ? ticket.AssignedToUserId : null,

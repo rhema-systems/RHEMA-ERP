@@ -70,7 +70,7 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         var returnResults = new List<ValidationResult>();
         Validator.TryValidateObject(returnRequest, new ValidationContext(returnRequest), returnResults, true).Should().BeFalse();
         returnResults.SelectMany(value => value.MemberNames).Should().Contain(nameof(ReturnRequisitionDto.ReasonCode));
-        returnResults.SelectMany(value => value.MemberNames).Should().Contain(nameof(ReturnRequisitionDto.Reason));
+        returnResults.SelectMany(value => value.MemberNames).Should().NotContain(nameof(ReturnRequisitionDto.Reason));
         returnResults.SelectMany(value => value.MemberNames).Should().Contain(nameof(ReturnRequisitionDto.IdempotencyKey));
         returnResults.SelectMany(value => value.MemberNames).Should().Contain(nameof(ReturnRequisitionDto.RowVersion));
 
@@ -79,6 +79,43 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         Validator.TryValidateObject(adjustment, new ValidationContext(adjustment), adjustmentResults, true).Should().BeFalse();
         adjustmentResults.SelectMany(value => value.MemberNames).Should().Contain(nameof(CreateStockAdjustmentDto.ReasonCode));
         adjustmentResults.SelectMany(value => value.MemberNames).Should().Contain(nameof(CreateStockAdjustmentDto.IdempotencyKey));
+    }
+
+    [Fact]
+    public void Return_details_are_optional_but_length_is_still_limited()
+    {
+        var request = new ReturnRequisitionDto { ReasonCode = "UNUSED", RowVersion = "AQID", IdempotencyKey = "return-test" };
+        Validator.TryValidateObject(request, new ValidationContext(request), new List<ValidationResult>(), true).Should().BeTrue();
+        request.Reason = new string('x', 1001);
+        var errors = new List<ValidationResult>();
+        Validator.TryValidateObject(request, new ValidationContext(request), errors, true).Should().BeFalse();
+        errors.SelectMany(value => value.MemberNames).Should().Contain(nameof(ReturnRequisitionDto.Reason));
+    }
+
+    [Theory]
+    [InlineData(true, null, true)]
+    [InlineData(true, "", true)]
+    [InlineData(true, "   ", true)]
+    [InlineData(false, null, false)]
+    [InlineData(false, "   ", false)]
+    [InlineData(false, "Incorrect quantity", true)]
+    public void Approval_comments_are_optional_but_rejection_reasons_remain_required(bool approved, string? comment, bool valid)
+    {
+        var request = new DecideInventoryReturnVoucherRequest { Approved = approved, Comment = comment, RowVersion = "AQID", IdempotencyKey = "decision-test" };
+        Validator.TryValidateObject(request, new ValidationContext(request), new List<ValidationResult>(), true).Should().Be(valid);
+    }
+
+    [Fact]
+    public void Optional_return_details_preserve_the_selected_reason_and_server_independence_guards()
+    {
+        var source = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Core", "Services", "Inventory", "InventoryReturnControlService.cs"));
+        source.Should().Contain("Normalize(request.Reason, 1000) ?? InventoryReturnReasonCodes.All[reasonCode]");
+        source.Should().NotContain("INV_RETURN_REASON_DETAIL_REQUIRED");
+        var decision = source[source.IndexOf("public async Task<InventoryReturnVoucherDto> DecideAsync", StringComparison.Ordinal)..source.IndexOf("public Task<InventoryReturnVoucherDto> PostAsync", StringComparison.Ordinal)];
+        decision.Should().Contain("voucher.RequestedById == _currentUser.UserId");
+        decision.Should().Contain("SOD-INITIATOR-APPROVER");
+        decision.Should().Contain("_workflow.CanUserApproveAsync");
+        decision.IndexOf("INV_RETURN_REJECTION_REASON_REQUIRED", StringComparison.Ordinal).Should().BeLessThan(decision.IndexOf("_workflow.ProcessApprovalAsync", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -361,7 +398,7 @@ public sealed class InventoryReturnAdjustmentControlTests : IDisposable
         repository.Should().Contain("sa.TenantId == tenantId && sa.AdjustmentNumber.StartsWith",
             "number generation must include deleted numbers without crossing tenant boundaries");
         var financePosting = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "src", "ErpSystem.Api", "Services", "Finance",
-            "InventoryAdjustmentFinancePostingService.cs"));
+            "StockAdjustmentValuationIntentBuilder.cs"));
         financePosting.Should().Contain("var expenseAccount = expense");
         financePosting.Should().Contain("var recoveryAccount = recovery");
         financePosting.Should().NotContain("Guid? expense = !isOpeningStock",

@@ -37,7 +37,8 @@ const initialForm: FormState = {
   name: '', description: '', location: '', purpose: '', zoningClassification: '',
   planningComplianceStatus: '', gisLayerReference: '', cadastreDescription: '', region: '', district: '', town: '',
   areaValue: '', areaUnit: 'sq ft', surveyorName: '', surveyDate: '',
-  surveyPlanNumber: '', mapSheetNumber: '', valuationAmount: '', currency: 'GHS', notes: '',
+  surveyPlanNumber: '', mapSheetNumber: '', valuationAmount: '', ownerConsiderationCost: '',
+  externalSurveyorCost: '', stampDutyCost: '', otherAcquisitionCost: '', currency: 'GHS', notes: '',
 };
 
 const initialBeacons = (): Beacon[] => Array.from({ length: 4 }, (_, index) => ({
@@ -116,6 +117,16 @@ export default function ExistingLandDialog({
     () => toSquareMeters(form.areaValue, form.areaUnit),
     [form.areaUnit, form.areaValue]
   );
+  const capitalizedCost = React.useMemo(() => {
+    const values = [
+      form.ownerConsiderationCost,
+      form.externalSurveyorCost,
+      form.stampDutyCost,
+      form.otherAcquisitionCost,
+    ].map((value) => Number(value));
+    const total = values.reduce((sum, value) => sum + (Number.isFinite(value) && value > 0 ? value : 0), 0);
+    return total > 0 ? total : Number(form.valuationAmount);
+  }, [form.externalSurveyorCost, form.otherAcquisitionCost, form.ownerConsiderationCost, form.stampDutyCost, form.valuationAmount]);
 
   const setValue = (key: string, value: string) => setForm((current) => ({ ...current, [key]: value }));
   const reset = () => {
@@ -124,16 +135,18 @@ export default function ExistingLandDialog({
   };
 
   const missing = React.useMemo(() => {
-    const required = Object.entries(form).filter(([key]) => !['description', 'notes'].includes(key));
+    const optional = ['description', 'notes', 'ownerConsiderationCost', 'externalSurveyorCost', 'stampDutyCost', 'otherAcquisitionCost'];
+    const required = Object.entries(form).filter(([key]) => !optional.includes(key));
     if (required.some(([, value]) => !value.trim())) return true;
     if (areaSquareMeters <= 0) return true;
+    if (!Number.isFinite(capitalizedCost) || capitalizedCost <= 0) return true;
     if (beacons.some((item) => !item.beacon.trim() || !item.northing.trim() || !item.easting.trim())) return true;
     if (owners.filter((owner) => owner.isCurrentOwner).length !== 1) return true;
     return owners.some((owner) => !owner.ownerName.trim() || !owner.ownershipType.trim() || !owner.interestHeld.trim() ||
       !owner.identificationType.trim() || !owner.identificationNumber.trim() || !owner.contactNumber.trim() ||
       !owner.address.trim() || !owner.ownershipStartDate || (!owner.isCurrentOwner && !owner.ownershipEndDate) ||
       owner.ownershipPercentage <= 0);
-  }, [areaSquareMeters, form, beacons, owners]);
+  }, [areaSquareMeters, capitalizedCost, form, beacons, owners]);
 
   const save = async () => {
     if (missing) return toast.error('Complete all required land, cadastral, beacon, and owner inputs.');
@@ -145,7 +158,13 @@ export default function ExistingLandDialog({
     const payload: CreateManualExistingLand = {
       ...(form as unknown as Omit<CreateManualExistingLand, 'areaValue' | 'areaSquareMeters' | 'valuationAmount' | 'beaconCount' | 'boundaryCoordinates' | 'boundaryVerified' | 'isReadyForProjectManagement' | 'ownershipHistory'>),
       areaValue: Number(form.areaValue), areaSquareMeters,
-      valuationAmount: Number(form.valuationAmount), beaconCount: beacons.length, boundaryCoordinates,
+      valuationAmount: capitalizedCost,
+      ownerConsiderationCost: Number(form.ownerConsiderationCost) || null,
+      externalSurveyorCost: Number(form.externalSurveyorCost) || null,
+      stampDutyCost: Number(form.stampDutyCost) || null,
+      otherAcquisitionCost: Number(form.otherAcquisitionCost) || null,
+      totalCapitalizedCost: capitalizedCost,
+      beaconCount: beacons.length, boundaryCoordinates,
       boundaryVerified, isReadyForProjectManagement: false, ownershipHistory: owners,
     };
     try {
@@ -202,8 +221,29 @@ export default function ExistingLandDialog({
             {[
               ['name', 'Land Name'], ['location', 'Location'], ['purpose', 'Purpose'],
               ['zoningClassification', 'Zoning Classification'], ['planningComplianceStatus', 'Planning Compliance Status'],
-              ['valuationAmount', 'Valuation Amount'], ['currency', 'Currency'],
+              ['valuationAmount', 'Fallback Valuation Amount'], ['currency', 'Currency'],
             ].map(([key, label]) => <div key={key} className="space-y-2"><RequiredLabel>{label}</RequiredLabel><Input type={key === 'valuationAmount' ? 'number' : 'text'} value={form[key]} onChange={(event) => setValue(key, event.target.value)} /></div>)}
+            <div className="grid gap-4 rounded-md border bg-muted/20 p-4 md:col-span-2 md:grid-cols-2">
+              <div className="space-y-1 md:col-span-2">
+                <h3 className="text-sm font-semibold">Land cost breakdown</h3>
+                <p className="text-xs text-muted-foreground">These values set the capitalized land value used for demarcation costing.</p>
+              </div>
+              {[
+                ['ownerConsiderationCost', 'Owner / Vendor Consideration'],
+                ['externalSurveyorCost', 'External Surveyor Cost'],
+                ['stampDutyCost', 'Stamp Duty Cost'],
+                ['otherAcquisitionCost', 'Other Acquisition Cost'],
+              ].map(([key, label]) => (
+                <div key={key} className="space-y-2">
+                  <Label>{label}</Label>
+                  <Input type="number" min="0" step="0.01" value={form[key]} onChange={(event) => setValue(key, event.target.value)} />
+                </div>
+              ))}
+              <div className="space-y-2 md:col-span-2">
+                <Label>Total Capitalized Land Cost</Label>
+                <Input value={Number.isFinite(capitalizedCost) && capitalizedCost > 0 ? capitalizedCost.toFixed(2) : ''} disabled />
+              </div>
+            </div>
             <div className="space-y-2 md:col-span-2"><Label>Description</Label><Textarea value={form.description} onChange={(event) => setValue('description', event.target.value)} /></div>
             <div className="space-y-2 md:col-span-2"><Label>Notes</Label><Textarea value={form.notes} onChange={(event) => setValue('notes', event.target.value)} /></div>
           </TabsContent>

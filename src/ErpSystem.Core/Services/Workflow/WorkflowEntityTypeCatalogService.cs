@@ -23,6 +23,7 @@ public sealed class WorkflowEntityTypeCatalogService : IWorkflowEntityTypeCatalo
             new("Asset", "Inventory", "Assets and equipment", "Database", "#10B981", 50),
             new("Inventory", "Inventory", "Inventory records", "Database", "#14B8A6", 60),
             new("InventoryTransfer", "Inventory", "Inventory transfers", "Truck", "#A855F7", 65),
+            new("PurchaseReturn", "Inventory", "Supplier returns from accepted stock receipts", "PackageMinus", "#B45309", 66),
             new("InventoryRequisition", "Inventory", "Inventory requisitions", "ClipboardList", "#0EA5E9", 68),
             new("Employee", "Human Resources", "Human resources employees", "Users", "#6366F1", 70),
             new("PayrollRun", "Human Resources", "HR payroll runs, payslip generation, and posting", "WalletCards", "#0EA5E9", 72),

@@ -5,6 +5,7 @@ using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
@@ -37,6 +38,9 @@ public sealed class BankingSettlementService : IBankingSettlementService
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IFinancePostingEngine _postingEngine;
     private readonly IFinanceAuditService? _audit;
+    private readonly IFinanceSourceDimensionService? _sourceDimensions;
+    private readonly IFinanceSettlementDimensionService? _settlementDimensions;
+    private readonly IFinancePaymentDimensionAdapter? _paymentDimensions;
 
     public BankingSettlementService(
         ApplicationDbContext context,
@@ -44,7 +48,10 @@ public sealed class BankingSettlementService : IBankingSettlementService
         IDocumentNumberingService numbering,
         IWorkflowIntegrationService workflow,
         IFinancePostingEngine postingEngine,
-        IFinanceAuditService? audit = null)
+        IFinanceAuditService? audit = null,
+        IFinanceSourceDimensionService? sourceDimensions = null,
+        IFinanceSettlementDimensionService? settlementDimensions = null,
+        IFinancePaymentDimensionAdapter? paymentDimensions = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -52,6 +59,9 @@ public sealed class BankingSettlementService : IBankingSettlementService
         _workflow = workflow;
         _postingEngine = postingEngine;
         _audit = audit;
+        _sourceDimensions = sourceDimensions;
+        _settlementDimensions = settlementDimensions;
+        _paymentDimensions = paymentDimensions;
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -484,7 +494,14 @@ public sealed class BankingSettlementService : IBankingSettlementService
         var tenantId = TenantId;
         var deposit = await DepositQuery()
             .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == id, cancellationToken);
-        return deposit == null ? null : MapDeposit(deposit);
+        if (deposit == null)
+        {
+            return null;
+        }
+
+        var result = MapDeposit(deposit);
+        await HydrateDepositDimensionsAsync(result, deposit, cancellationToken);
+        return result;
     }
 
     public async Task<BankDepositDto> CreateDepositAsync(
@@ -492,35 +509,60 @@ public sealed class BankingSettlementService : IBankingSettlementService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        var prepared = await PrepareDepositAsync(dto.BankAccountId, dto.Allocations, cancellationToken);
-        var deposit = new BankDepositBatch
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var depositId = await strategy.ExecuteAsync(async () =>
         {
-            TenantId = tenantId,
-            DepositNumber = await _numbering.GenerateAsync(
-                DocumentNumberingModules.Finance,
-                FinanceDocumentTypes.BankDeposit,
-                tenantId,
-                dto.DepositDate,
-                DepositWorkflowEntityType,
-                cancellationToken: cancellationToken),
-            BankAccountId = dto.BankAccountId,
-            DepositDate = dto.DepositDate.Date,
-            DepositReference = RequireText(dto.DepositReference, "Deposit reference", 100),
-            Currency = prepared.Currency,
-            PolicySnapshot = prepared.Settings.BankDepositPolicy,
-            TotalReceipts = prepared.TotalReceipts,
-            TotalDeductions = prepared.TotalDeductions,
-            NetAmount = prepared.NetAmount,
-            Notes = Clean(dto.Notes),
-            CreatedById = UserId,
-            CreatedBy = _currentUser.UserName
-        };
-        _context.BankDepositBatches.Add(deposit);
-        ReserveAllocations(deposit, dto.Allocations, prepared.Entries);
-        await _context.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return await GetDepositAsync(deposit.Id, cancellationToken)
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var prepared = await PrepareDepositAsync(dto.BankAccountId, dto.Allocations, cancellationToken);
+                var deposit = new BankDepositBatch
+                {
+                    TenantId = tenantId,
+                    DepositNumber = await _numbering.GenerateAsync(
+                        DocumentNumberingModules.Finance,
+                        FinanceDocumentTypes.BankDeposit,
+                        tenantId,
+                        dto.DepositDate,
+                        DepositWorkflowEntityType,
+                        cancellationToken: cancellationToken),
+                    BankAccountId = dto.BankAccountId,
+                    DepositDate = dto.DepositDate.Date,
+                    DepositReference = RequireText(dto.DepositReference, "Deposit reference", 100),
+                    Currency = prepared.Currency,
+                    PolicySnapshot = prepared.Settings.BankDepositPolicy,
+                    TotalReceipts = prepared.TotalReceipts,
+                    TotalDeductions = prepared.TotalDeductions,
+                    NetAmount = prepared.NetAmount,
+                    Notes = Clean(dto.Notes),
+                    CreatedById = UserId,
+                    CreatedBy = _currentUser.UserName
+                };
+                _context.BankDepositBatches.Add(deposit);
+                ReserveAllocations(deposit, dto.Allocations, prepared.Entries);
+                await _context.SaveChangesAsync(cancellationToken);
+                await SynchronizeDepositDimensionsAsync(deposit.Id, dto.FinanceDimensions, cancellationToken);
+                await SynchronizeDepositSettlementDimensionsAsync(deposit.Id, cancellationToken);
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+                return deposit.Id;
+            }
+            catch
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+                if (transaction is not null)
+                    _context.ChangeTracker.Clear();
+                throw;
+            }
+        });
+        return await GetDepositAsync(depositId, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the bank deposit.");
     }
 
@@ -530,38 +572,76 @@ public sealed class BankingSettlementService : IBankingSettlementService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        await using var transaction = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
-        var deposit = await _context.BankDepositBatches
-            .Include(item => item.Allocations)
-            .ThenInclude(item => item.LiquidityAccountEntry)
-            .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == id, cancellationToken)
-            ?? throw new KeyNotFoundException("Bank deposit was not found.");
-        EnsureEditable(deposit);
-        SetRowVersion(deposit, dto.RowVersion);
-
-        foreach (var allocation in deposit.Allocations)
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
         {
-            allocation.LiquidityAccountEntry.AllocatedAmount -= allocation.Amount;
-        }
-        _context.BankDepositAllocations.RemoveRange(deposit.Allocations);
-        await _context.SaveChangesAsync(cancellationToken);
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var deposit = await _context.BankDepositBatches
+                    .Include(item => item.Allocations)
+                    .ThenInclude(item => item.LiquidityAccountEntry)
+                    .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == id, cancellationToken)
+                    ?? throw new KeyNotFoundException("Bank deposit was not found.");
+                EnsureEditable(deposit);
+                SetRowVersion(deposit, dto.RowVersion);
 
-        var prepared = await PrepareDepositAsync(dto.BankAccountId, dto.Allocations, cancellationToken);
-        deposit.BankAccountId = dto.BankAccountId;
-        deposit.DepositDate = dto.DepositDate.Date;
-        deposit.DepositReference = RequireText(dto.DepositReference, "Deposit reference", 100);
-        deposit.Currency = prepared.Currency;
-        deposit.PolicySnapshot = prepared.Settings.BankDepositPolicy;
-        deposit.TotalReceipts = prepared.TotalReceipts;
-        deposit.TotalDeductions = prepared.TotalDeductions;
-        deposit.NetAmount = prepared.NetAmount;
-        deposit.Notes = Clean(dto.Notes);
-        StampModified(deposit);
-        ReserveAllocations(deposit, dto.Allocations, prepared.Entries);
-        await _context.SaveChangesAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
-        return await GetDepositAsync(deposit.Id, cancellationToken)
+                foreach (var allocation in deposit.Allocations)
+                {
+                    allocation.LiquidityAccountEntry.AllocatedAmount -= allocation.Amount;
+                }
+
+                var prepared = await PrepareDepositAsync(dto.BankAccountId, dto.Allocations, cancellationToken);
+                deposit.BankAccountId = dto.BankAccountId;
+                deposit.DepositDate = dto.DepositDate.Date;
+                deposit.DepositReference = RequireText(dto.DepositReference, "Deposit reference", 100);
+                deposit.Currency = prepared.Currency;
+                deposit.PolicySnapshot = prepared.Settings.BankDepositPolicy;
+                deposit.TotalReceipts = prepared.TotalReceipts;
+                deposit.TotalDeductions = prepared.TotalDeductions;
+                deposit.NetAmount = prepared.NetAmount;
+                deposit.Notes = Clean(dto.Notes);
+                StampModified(deposit);
+                ReconcileDepositAllocations(deposit, dto.Allocations, prepared.Entries);
+                await _context.SaveChangesAsync(cancellationToken);
+                await SynchronizeDepositDimensionsAsync(deposit.Id, dto.FinanceDimensions, cancellationToken);
+                await SynchronizeDepositSettlementDimensionsAsync(deposit.Id, cancellationToken);
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync(cancellationToken);
+                }
+            }
+            catch
+            {
+                if (transaction is not null)
+                {
+                    await transaction.RollbackAsync(cancellationToken);
+                }
+                if (transaction is not null)
+                    _context.ChangeTracker.Clear();
+                throw;
+            }
+        });
+        return await GetDepositAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the bank deposit.");
+    }
+
+    public async Task<BankDepositDto> UpdateDepositDimensionsAsync(
+        Guid id,
+        FinanceSourceDocumentDimensionInputDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        await ExecuteDimensionMutationAsync(async () =>
+        {
+            var deposit = await LoadDepositForActionAsync(id, cancellationToken);
+            EnsureEditable(deposit);
+            await SynchronizeDepositDimensionsAsync(id, dto, cancellationToken);
+            await SynchronizeDepositSettlementDimensionsAsync(id, cancellationToken);
+        }, cancellationToken);
+        return await GetDepositAsync(id, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to reload the bank deposit dimensions.");
     }
 
     public async Task<BankDepositDto> LinkDepositAttachmentAsync(
@@ -631,6 +711,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
             throw new InvalidOperationException("A primary deposit slip or equivalent bank evidence is required before submission.");
         }
 
+        await ValidateAndFreezeDepositDimensionsAsync(id, cancellationToken);
+
         var result = await _workflow.SubmitAsync(DepositWorkflowEntityType, id);
         deposit.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? deposit.WorkflowInstanceId;
         deposit.Status = result.Outcome == WorkflowOutcome.Approved
@@ -665,6 +747,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new UnauthorizedAccessException("The current user cannot approve this deposit.");
         }
+
+        await ValidateAndFreezeDepositDimensionsAsync(id, cancellationToken);
 
         var result = await _workflow.ProcessApprovalAsync(DepositWorkflowEntityType, id, UserId, "Approve", comments);
         deposit.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? deposit.WorkflowInstanceId;
@@ -738,6 +822,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
         deposit.RejectionReason = Clean(comments);
         StampModified(deposit);
         await _context.SaveChangesAsync(cancellationToken);
+        await SynchronizeDepositDimensionsAsync(id, input: null, cancellationToken);
+        await SynchronizeDepositSettlementDimensionsAsync(id, cancellationToken);
         return await GetDepositAsync(id, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the returned deposit.");
     }
@@ -776,6 +862,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new InvalidOperationException("Only a fully approved deposit can be posted.");
         }
+
+        await ValidateAndFreezeDepositDimensionsAsync(id, cancellationToken);
 
         await PostDepositAsync(deposit, cancellationToken);
         return await GetDepositAsync(id, cancellationToken)
@@ -902,90 +990,141 @@ public sealed class BankingSettlementService : IBankingSettlementService
         CancellationToken cancellationToken = default)
     {
         var tenantId = TenantId;
-        var payment = await _context.Set<CustomerPayment>()
-            .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == dto.CustomerPaymentId, cancellationToken)
-            ?? throw new KeyNotFoundException("Customer receipt was not found.");
-        if (string.IsNullOrWhiteSpace(payment.CheckNumber))
+        var strategy = _context.Database.CreateExecutionStrategy();
+        var returnedChequeId = await strategy.ExecuteAsync(async () =>
         {
-            throw new InvalidOperationException("Only a cheque receipt can be processed as a returned cheque.");
-        }
-        if (payment.Status.Equals("Bounced", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException("This cheque receipt has already been marked as bounced.");
-        }
-        if (payment.JournalEntryId == null)
-        {
-            throw new InvalidOperationException("The cheque receipt must be posted before it can be returned.");
-        }
-        if (await _context.ReturnedChequeCases.AnyAsync(
-                item => item.TenantId == tenantId
-                        && item.CustomerPaymentId == payment.Id
-                        && item.Status != ReturnedChequeCaseStatus.Rejected,
-                cancellationToken))
-        {
-            throw new InvalidOperationException(
-                "An active returned-cheque case already exists for this receipt.");
-        }
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                var payment = await _context.Set<CustomerPayment>()
+                    .FirstOrDefaultAsync(item => item.TenantId == tenantId && item.Id == dto.CustomerPaymentId, cancellationToken)
+                    ?? throw new KeyNotFoundException("Customer receipt was not found.");
+                if (string.IsNullOrWhiteSpace(payment.CheckNumber))
+                    throw new InvalidOperationException("Only a cheque receipt can be processed as a returned cheque.");
+                if (payment.Status.Equals("Bounced", StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidOperationException("This cheque receipt has already been marked as bounced.");
+                if (payment.JournalEntryId == null)
+                    throw new InvalidOperationException("The cheque receipt must be posted before it can be returned.");
+                if (await _context.ReturnedChequeCases.AnyAsync(
+                        item => item.TenantId == tenantId
+                                && item.CustomerPaymentId == payment.Id
+                                && item.Status != ReturnedChequeCaseStatus.Rejected,
+                        cancellationToken))
+                    throw new InvalidOperationException("An active returned-cheque case already exists for this receipt.");
 
-        var deposit = dto.BankDepositBatchId.HasValue
-            ? await _context.BankDepositBatches
-                .FirstOrDefaultAsync(
-                    item => item.TenantId == tenantId &&
-                            item.Id == dto.BankDepositBatchId.Value &&
-                            item.Status == BankDepositStatus.Posted,
-                    cancellationToken)
-            : await _context.BankDepositBatches
-                .Where(item => item.TenantId == tenantId && item.Status == BankDepositStatus.Posted)
-                .Where(item => item.Allocations.Any(
-                    allocation => allocation.LiquidityAccountEntry.SourceDocumentType == "CustomerPayment" &&
-                                  allocation.LiquidityAccountEntry.SourceDocumentId == payment.Id))
-                .OrderByDescending(item => item.DepositDate)
-                .FirstOrDefaultAsync(cancellationToken);
-        if (deposit == null)
-        {
-            throw new InvalidOperationException("The cheque must belong to a posted bank deposit before it can be returned.");
-        }
-        if (deposit.BankAccountId != dto.BankAccountId)
-        {
-            throw new InvalidOperationException("The returned cheque bank account must match the posted deposit.");
-        }
-        if (dto.ReturnDate.Date < deposit.DepositDate.Date)
-        {
-            throw new InvalidOperationException("The cheque return date cannot be before its deposit date.");
-        }
+                var deposit = dto.BankDepositBatchId.HasValue
+                    ? await _context.BankDepositBatches.FirstOrDefaultAsync(
+                        item => item.TenantId == tenantId
+                                && item.Id == dto.BankDepositBatchId.Value
+                                && item.Status == BankDepositStatus.Posted,
+                        cancellationToken)
+                    : await _context.BankDepositBatches
+                        .Where(item => item.TenantId == tenantId && item.Status == BankDepositStatus.Posted)
+                        .Where(item => item.Allocations.Any(
+                            allocation => allocation.LiquidityAccountEntry.SourceDocumentType == "CustomerPayment"
+                                          && allocation.LiquidityAccountEntry.SourceDocumentId == payment.Id))
+                        .OrderByDescending(item => item.DepositDate)
+                        .FirstOrDefaultAsync(cancellationToken);
+                if (deposit == null)
+                    throw new InvalidOperationException("The cheque must belong to a posted bank deposit before it can be returned.");
+                if (deposit.BankAccountId != dto.BankAccountId)
+                    throw new InvalidOperationException("The returned cheque bank account must match the posted deposit.");
+                if (dto.ReturnDate.Date < deposit.DepositDate.Date)
+                    throw new InvalidOperationException("The cheque return date cannot be before its deposit date.");
 
-        var (customerCharge, expenseCharge) = SplitCharge(dto);
-        var item = new ReturnedChequeCase
-        {
-            TenantId = tenantId,
-            CaseNumber = await _numbering.GenerateAsync(
-                DocumentNumberingModules.Finance,
-                FinanceDocumentTypes.ReturnedCheque,
-                tenantId,
-                dto.ReturnDate,
-                ReturnedChequeWorkflowEntityType,
-                cancellationToken: cancellationToken),
-            CustomerPaymentId = payment.Id,
-            BankDepositBatchId = deposit.Id,
-            BankAccountId = deposit.BankAccountId,
-            ChequeNumber = payment.CheckNumber,
-            DrawerBank = Clean(dto.DrawerBank ?? payment.ChequeDrawerBank),
-            ReturnDate = dto.ReturnDate.Date,
-            BankReference = RequireText(dto.BankReference, "Bank reference", 100),
-            ReturnReason = RequireText(dto.ReturnReason, "Return reason", 500),
-            ReturnedAmount = payment.TotalAmount,
-            BankChargeAmount = dto.BankChargeAmount,
-            ChargeTreatment = dto.ChargeTreatment,
-            CustomerRecoverableChargeAmount = customerCharge,
-            ExpenseChargeAmount = expenseCharge,
-            Notes = Clean(dto.Notes),
-            CreatedById = UserId,
-            CreatedBy = _currentUser.UserName
-        };
-        _context.ReturnedChequeCases.Add(item);
-        await _context.SaveChangesAsync(cancellationToken);
-        return await GetReturnedChequeAsync(item.Id, cancellationToken)
+                var (customerCharge, expenseCharge) = SplitCharge(dto);
+                var item = new ReturnedChequeCase
+                {
+                    TenantId = tenantId,
+                    CaseNumber = await _numbering.GenerateAsync(
+                        DocumentNumberingModules.Finance,
+                        FinanceDocumentTypes.ReturnedCheque,
+                        tenantId,
+                        dto.ReturnDate,
+                        ReturnedChequeWorkflowEntityType,
+                        cancellationToken: cancellationToken),
+                    CustomerPaymentId = payment.Id,
+                    BankDepositBatchId = deposit.Id,
+                    BankAccountId = deposit.BankAccountId,
+                    ChequeNumber = payment.CheckNumber,
+                    DrawerBank = Clean(dto.DrawerBank ?? payment.ChequeDrawerBank),
+                    ReturnDate = dto.ReturnDate.Date,
+                    BankReference = RequireText(dto.BankReference, "Bank reference", 100),
+                    ReturnReason = RequireText(dto.ReturnReason, "Return reason", 500),
+                    ReturnedAmount = payment.TotalAmount,
+                    BankChargeAmount = dto.BankChargeAmount,
+                    ChargeTreatment = dto.ChargeTreatment,
+                    CustomerRecoverableChargeAmount = customerCharge,
+                    ExpenseChargeAmount = expenseCharge,
+                    Notes = Clean(dto.Notes),
+                    CreatedById = UserId,
+                    CreatedBy = _currentUser.UserName
+                };
+                _context.ReturnedChequeCases.Add(item);
+                await _context.SaveChangesAsync(cancellationToken);
+                await SynchronizeReturnedChequeDimensionsAsync(item.Id, dto.FinanceDimensions, cancellationToken);
+                await SynchronizeReturnedChequeSettlementDimensionsAsync(item.Id, cancellationToken);
+                if (transaction is not null)
+                    await transaction.CommitAsync(cancellationToken);
+                return item.Id;
+            }
+            catch
+            {
+                if (transaction is not null)
+                    await transaction.RollbackAsync(cancellationToken);
+                if (transaction is not null)
+                    _context.ChangeTracker.Clear();
+                throw;
+            }
+        });
+        return await GetReturnedChequeAsync(returnedChequeId, cancellationToken)
             ?? throw new InvalidOperationException("Failed to reload the returned cheque.");
+    }
+
+    public async Task<ReturnedChequeCaseDto> UpdateReturnedChequeDimensionsAsync(
+        Guid id,
+        FinanceSourceDocumentDimensionInputDto dto,
+        CancellationToken cancellationToken = default)
+    {
+        await ExecuteDimensionMutationAsync(async () =>
+        {
+            var item = await LoadReturnedChequeForActionAsync(id, cancellationToken);
+            if (item.Status is not ReturnedChequeCaseStatus.Draft and not ReturnedChequeCaseStatus.Returned)
+                throw new InvalidOperationException("Finance dimensions can only be changed while the returned-cheque case is draft or returned.");
+            await SynchronizeReturnedChequeDimensionsAsync(id, dto, cancellationToken);
+            await SynchronizeReturnedChequeSettlementDimensionsAsync(id, cancellationToken);
+        }, cancellationToken);
+        return await GetReturnedChequeAsync(id, cancellationToken)
+            ?? throw new InvalidOperationException("Failed to reload the returned-cheque dimensions.");
+    }
+
+    private async Task ExecuteDimensionMutationAsync(
+        Func<Task> mutation,
+        CancellationToken cancellationToken)
+    {
+        var strategy = _context.Database.CreateExecutionStrategy();
+        await strategy.ExecuteAsync(async () =>
+        {
+            await using var transaction = _context.Database.IsRelational()
+                ? await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken)
+                : null;
+            try
+            {
+                await mutation();
+                if (transaction is not null)
+                    await transaction.CommitAsync(cancellationToken);
+            }
+            catch
+            {
+                if (transaction is not null)
+                    await transaction.RollbackAsync(cancellationToken);
+                if (transaction is not null)
+                    _context.ChangeTracker.Clear();
+                throw;
+            }
+        });
     }
 
     public async Task<ReturnedChequeCaseDto> LinkReturnedChequeAttachmentAsync(
@@ -1038,6 +1177,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
             throw new InvalidOperationException("Primary bank-return evidence is required before submission.");
         }
 
+        await ValidateAndFreezeReturnedChequeDimensionsAsync(id, cancellationToken);
+
         var result = await _workflow.SubmitAsync(ReturnedChequeWorkflowEntityType, id);
         item.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? item.WorkflowInstanceId;
         item.Status = result.Outcome == WorkflowOutcome.Approved
@@ -1070,6 +1211,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
         {
             throw new UnauthorizedAccessException("The current user cannot approve this returned cheque.");
         }
+
+        await ValidateAndFreezeReturnedChequeDimensionsAsync(id, cancellationToken);
 
         var result = await _workflow.ProcessApprovalAsync(ReturnedChequeWorkflowEntityType, id, UserId, "Approve", comments);
         item.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId ?? item.WorkflowInstanceId;
@@ -1122,6 +1265,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
             return;
         }
 
+        await ValidateAndFreezeDepositDimensionsAsync(deposit.Id, cancellationToken);
+
         var tenantId = TenantId;
         var loaded = await _context.BankDepositBatches
             .Include(item => item.BankAccount)
@@ -1138,6 +1283,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
             throw new InvalidOperationException("A bank deposit must have a positive net amount.");
         }
 
+        var sourceDimensions = _sourceDimensions is null
+            ? new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>()
+            : (await _sourceDimensions.GetPostingDimensionsAsync(
+                DepositProducer(), loaded.Id, cancellationToken)).ToDictionary(item => item.Key, item => item.Value);
+
         var lines = new List<FinancePostingLineDto>
         {
             new()
@@ -1148,7 +1298,10 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 TransactionCurrency = loaded.Currency,
                 TransactionDebitAmount = loaded.NetAmount,
                 Description = $"Bank deposit {loaded.DepositNumber}",
-                SourceReferenceNumber = loaded.DepositReference
+                SourceReferenceNumber = loaded.DepositReference,
+                SourceDocumentLineId = loaded.Id,
+                Dimensions = sourceDimensions.GetValueOrDefault(loaded.Id)
+                    ?? Array.Empty<FinancePostingDimensionValueDto>()
             }
         };
         foreach (var allocation in loaded.Allocations.OrderBy(item => item.CreatedAt))
@@ -1162,13 +1315,16 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 TransactionDebitAmount = allocation.AllocationType == BankDepositAllocationType.Deduction ? allocation.Amount : 0m,
                 TransactionCreditAmount = allocation.AllocationType == BankDepositAllocationType.Receipt ? allocation.Amount : 0m,
                 Description = allocation.Notes ?? allocation.LiquidityAccountEntry.Description,
-                SourceReferenceNumber = allocation.LiquidityAccountEntry.ReferenceNumber
+                SourceReferenceNumber = allocation.LiquidityAccountEntry.ReferenceNumber,
+                SourceDocumentLineId = allocation.Id,
+                Dimensions = sourceDimensions.GetValueOrDefault(allocation.Id)
+                    ?? Array.Empty<FinancePostingDimensionValueDto>()
             });
         }
 
-        var posting = await _postingEngine.PostAsync(new FinancePostingRequestDto
+        var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
-            SourceModule = "CashManagement",
+            SourceModule = "CASHBANK",
             OriginModuleCode = FinanceModuleLockCatalog.Finance,
             SourceDocumentType = DepositWorkflowEntityType,
             SourceDocumentId = loaded.Id,
@@ -1180,7 +1336,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             JournalType = "Bank Deposit",
             IdempotencyKey = $"bank-deposit:{tenantId:N}:{loaded.Id:N}:post",
             Lines = lines
-        }, cancellationToken);
+        }, DepositProducer(), cancellationToken);
 
         var cashTransaction = await _context.Set<CashTransaction>()
             .FirstOrDefaultAsync(
@@ -1232,6 +1388,8 @@ public sealed class BankingSettlementService : IBankingSettlementService
             return;
         }
 
+        await ValidateAndFreezeReturnedChequeDimensionsAsync(item.Id, cancellationToken);
+
         var tenantId = TenantId;
         var loaded = await _context.ReturnedChequeCases
             .Include(value => value.BankAccount)
@@ -1263,59 +1421,181 @@ public sealed class BankingSettlementService : IBankingSettlementService
         }
 
         var totalBankCredit = loaded.ReturnedAmount + loaded.BankChargeAmount;
-        var lines = new List<FinancePostingLineDto>
+        var sourceDimensions = _sourceDimensions is null
+            ? new Dictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>()
+            : (await _sourceDimensions.GetPostingDimensionsAsync(
+                ReturnedChequeProducer(), loaded.Id, cancellationToken)).ToDictionary(item => item.Key, item => item.Value);
+        var settlementEvidence = _settlementDimensions is null
+            ? Array.Empty<FinanceSettlementDimensionComponentDto>()
+            : (await _settlementDimensions.GetAsync(
+                ReturnedChequeProducer(), loaded.Id, cancellationToken)).ToArray();
+        var lines = new List<FinancePostingLineDto>();
+        var principalEvidence = settlementEvidence
+            .Where(value => value.ComponentType == FinanceSettlementComponentType.Principal)
+            .OrderBy(value => value.SettlementSourceLineId)
+            .ThenBy(value => value.OriginatingSourceLineId)
+            .ToArray();
+        if (principalEvidence.Length > 0)
         {
-            new()
+            foreach (var share in AllocateEvidenceAmount(loaded.ReturnedAmount, principalEvidence))
+            {
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = settings.ControlAccountArId.Value,
+                    DebitAmount = share.Amount,
+                    TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
+                    TransactionDebitAmount = share.Amount,
+                    Description = $"Reopen customer receivable for returned cheque {loaded.ChequeNumber}",
+                    SourceReferenceNumber = loaded.BankReference,
+                    SourceDocumentLineId = share.Evidence.SettlementSourceLineId,
+                    Dimensions = await _settlementDimensions!.ResolvePostingDimensionsAsync(
+                        ReturnedChequeProducer(), share.Evidence.Id, settings.ControlAccountArId.Value,
+                        loaded.ReturnDate, cancellationToken)
+                });
+            }
+        }
+        else
+        {
+            var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
+            lines.Add(new FinancePostingLineDto
             {
                 AccountId = settings.ControlAccountArId.Value,
-                DebitAmount = loaded.ReturnedAmount + loaded.CustomerRecoverableChargeAmount + discountToReverse,
-                CreditAmount = 0m,
+                DebitAmount = loaded.ReturnedAmount,
                 TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
-                TransactionDebitAmount = loaded.ReturnedAmount + loaded.CustomerRecoverableChargeAmount + discountToReverse,
+                TransactionDebitAmount = loaded.ReturnedAmount,
                 Description = $"Reopen customer receivable for returned cheque {loaded.ChequeNumber}",
-                SourceReferenceNumber = loaded.BankReference
-            },
-            new()
+                SourceReferenceNumber = loaded.BankReference,
+                SourceDocumentLineId = customerLineId,
+                Dimensions = sourceDimensions.GetValueOrDefault(customerLineId)
+                    ?? Array.Empty<FinancePostingDimensionValueDto>()
+            });
+        }
+
+        if (loaded.CustomerRecoverableChargeAmount > 0m)
+        {
+            var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
+            lines.Add(new FinancePostingLineDto
             {
-                AccountId = loaded.BankAccount.GLAccountId.Value,
-                DebitAmount = 0m,
-                CreditAmount = totalBankCredit,
+                AccountId = settings.ControlAccountArId.Value,
+                DebitAmount = loaded.CustomerRecoverableChargeAmount,
                 TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
-                TransactionCreditAmount = totalBankCredit,
-                Description = $"Bank debit for returned cheque {loaded.ChequeNumber}",
-                SourceReferenceNumber = loaded.BankReference
-            }
-        };
+                TransactionDebitAmount = loaded.CustomerRecoverableChargeAmount,
+                Description = $"Customer-recoverable bank charge for returned cheque {loaded.ChequeNumber}",
+                SourceReferenceNumber = loaded.BankReference,
+                SourceDocumentLineId = customerLineId,
+                Dimensions = sourceDimensions.GetValueOrDefault(customerLineId)
+                    ?? Array.Empty<FinancePostingDimensionValueDto>()
+            });
+        }
+
+        var bankLineId = ReturnedChequeBankLineId(loaded.Id);
+        lines.Add(new FinancePostingLineDto
+        {
+            AccountId = loaded.BankAccount.GLAccountId.Value,
+            CreditAmount = totalBankCredit,
+            TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
+            TransactionCreditAmount = totalBankCredit,
+            Description = $"Bank debit for returned cheque {loaded.ChequeNumber}",
+            SourceReferenceNumber = loaded.BankReference,
+            SourceDocumentLineId = bankLineId,
+            Dimensions = sourceDimensions.GetValueOrDefault(bankLineId)
+                ?? Array.Empty<FinancePostingDimensionValueDto>()
+        });
         if (loaded.ExpenseChargeAmount > 0)
         {
+            var expenseLineId = ReturnedChequeExpenseLineId(loaded.Id);
             lines.Add(new FinancePostingLineDto
             {
                 AccountId = settings.ReturnedChequeBankChargeAccountId!.Value,
                 DebitAmount = loaded.ExpenseChargeAmount,
-                CreditAmount = 0m,
                 TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
                 TransactionDebitAmount = loaded.ExpenseChargeAmount,
                 Description = $"Bank charge for returned cheque {loaded.ChequeNumber}",
-                SourceReferenceNumber = loaded.BankReference
+                SourceReferenceNumber = loaded.BankReference,
+                SourceDocumentLineId = expenseLineId,
+                Dimensions = sourceDimensions.GetValueOrDefault(expenseLineId)
+                    ?? Array.Empty<FinancePostingDimensionValueDto>()
             });
         }
         if (discountToReverse > 0m)
         {
-            lines.Add(new FinancePostingLineDto
+            var discountEvidence = settlementEvidence
+                .Where(value => value.ComponentType == FinanceSettlementComponentType.Discount)
+                .OrderBy(value => value.SettlementSourceLineId)
+                .ThenBy(value => value.OriginatingSourceLineId)
+                .ToArray();
+            if (discountEvidence.Length > 0)
             {
-                AccountId = settings.DiscountAllowedAccountId!.Value,
-                DebitAmount = 0m,
-                CreditAmount = discountToReverse,
-                TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
-                TransactionCreditAmount = discountToReverse,
-                Description = $"Reverse payment discount for returned cheque {loaded.ChequeNumber}",
-                SourceReferenceNumber = loaded.BankReference
-            });
+                foreach (var share in AllocateEvidenceAmount(discountToReverse, discountEvidence))
+                {
+                    var arDimensions = await _settlementDimensions!.ResolvePostingDimensionsAsync(
+                        ReturnedChequeProducer(), share.Evidence.Id, settings.ControlAccountArId.Value,
+                        loaded.ReturnDate, cancellationToken);
+                    var discountDimensions = await _settlementDimensions.ResolvePostingDimensionsAsync(
+                        ReturnedChequeProducer(), share.Evidence.Id, settings.DiscountAllowedAccountId!.Value,
+                        loaded.ReturnDate, cancellationToken);
+                    lines.Add(new FinancePostingLineDto
+                    {
+                        AccountId = settings.ControlAccountArId.Value,
+                        DebitAmount = share.Amount,
+                        TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
+                        TransactionDebitAmount = share.Amount,
+                        Description = $"Reopen discount for returned cheque {loaded.ChequeNumber}",
+                        SourceReferenceNumber = loaded.BankReference,
+                        SourceDocumentLineId = share.Evidence.SettlementSourceLineId,
+                        Dimensions = arDimensions
+                    });
+                    lines.Add(new FinancePostingLineDto
+                    {
+                        AccountId = settings.DiscountAllowedAccountId.Value,
+                        CreditAmount = share.Amount,
+                        TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
+                        TransactionCreditAmount = share.Amount,
+                        Description = $"Reverse payment discount for returned cheque {loaded.ChequeNumber}",
+                        SourceReferenceNumber = loaded.BankReference,
+                        SourceDocumentLineId = share.Evidence.SettlementSourceLineId,
+                        Dimensions = discountDimensions
+                    });
+                }
+            }
+            else
+            {
+                var customerLineId = ReturnedChequeCustomerLineId(loaded.Id);
+                var discountDimensions = _sourceDimensions is null
+                    ? sourceDimensions.GetValueOrDefault(customerLineId)
+                        ?? Array.Empty<FinancePostingDimensionValueDto>()
+                    : await _sourceDimensions.ResolvePostingDimensionsAsync(
+                        ReturnedChequeProducer(), loaded.Id, customerLineId,
+                        settings.DiscountAllowedAccountId!.Value, loaded.ReturnDate, cancellationToken);
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = settings.ControlAccountArId.Value,
+                    DebitAmount = discountToReverse,
+                    TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
+                    TransactionDebitAmount = discountToReverse,
+                    Description = $"Reopen discount for returned cheque {loaded.ChequeNumber}",
+                    SourceReferenceNumber = loaded.BankReference,
+                    SourceDocumentLineId = customerLineId,
+                    Dimensions = sourceDimensions.GetValueOrDefault(customerLineId)
+                        ?? Array.Empty<FinancePostingDimensionValueDto>()
+                });
+                lines.Add(new FinancePostingLineDto
+                {
+                    AccountId = settings.DiscountAllowedAccountId!.Value,
+                    CreditAmount = discountToReverse,
+                    TransactionCurrency = loaded.CustomerPayment.CurrencyCode,
+                    TransactionCreditAmount = discountToReverse,
+                    Description = $"Reverse payment discount for returned cheque {loaded.ChequeNumber}",
+                    SourceReferenceNumber = loaded.BankReference,
+                    SourceDocumentLineId = customerLineId,
+                    Dimensions = discountDimensions
+                });
+            }
         }
 
-        var posting = await _postingEngine.PostAsync(new FinancePostingRequestDto
+        var posting = await _postingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
-            SourceModule = "AccountsReceivable",
+            SourceModule = "CASHBANK",
             OriginModuleCode = FinanceModuleLockCatalog.Finance,
             SourceDocumentType = ReturnedChequeWorkflowEntityType,
             SourceDocumentId = loaded.Id,
@@ -1327,7 +1607,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             JournalType = "Returned Cheque",
             IdempotencyKey = $"returned-cheque:{tenantId:N}:{loaded.Id:N}:post",
             Lines = lines
-        }, cancellationToken);
+        }, ReturnedChequeProducer(), cancellationToken);
 
         foreach (var allocation in activeAllocations)
         {
@@ -1521,6 +1801,470 @@ public sealed class BankingSettlementService : IBankingSettlementService
         }
     }
 
+    private void ReconcileDepositAllocations(
+        BankDepositBatch deposit,
+        IReadOnlyCollection<BankDepositAllocationRequestDto> requests,
+        IReadOnlyDictionary<Guid, LiquidityAccountEntry> entries)
+    {
+        var requestedByEntry = requests.ToDictionary(item => item.LiquidityAccountEntryId);
+        var existingByEntry = deposit.Allocations.ToDictionary(item => item.LiquidityAccountEntryId);
+        foreach (var existing in deposit.Allocations
+                     .Where(item => !requestedByEntry.ContainsKey(item.LiquidityAccountEntryId))
+                     .ToArray())
+        {
+            _context.BankDepositAllocations.Remove(existing);
+        }
+
+        foreach (var request in requests)
+        {
+            var entry = entries[request.LiquidityAccountEntryId];
+            entry.AllocatedAmount += request.Amount;
+            if (existingByEntry.TryGetValue(request.LiquidityAccountEntryId, out var allocation))
+            {
+                allocation.AllocationType = request.AllocationType;
+                allocation.Amount = request.Amount;
+                allocation.Notes = Clean(request.Notes);
+                allocation.UpdatedAt = DateTime.UtcNow;
+                allocation.UpdatedBy = _currentUser.UserName;
+                allocation.LastModifiedById = UserId;
+                continue;
+            }
+
+            deposit.Allocations.Add(new BankDepositAllocation
+            {
+                TenantId = deposit.TenantId,
+                LiquidityAccountEntryId = entry.Id,
+                AllocationType = request.AllocationType,
+                Amount = request.Amount,
+                Notes = Clean(request.Notes),
+                CreatedById = deposit.CreatedById,
+                CreatedBy = deposit.CreatedBy
+            });
+        }
+    }
+
+    private async Task SynchronizeDepositDimensionsAsync(
+        Guid depositId,
+        FinanceSourceDocumentDimensionInputDto? input,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is null)
+            return;
+        var deposit = await LoadDepositDimensionAggregateAsync(depositId, cancellationToken);
+        var lines = BuildDepositDimensionLines(deposit);
+        var aliases = new Dictionary<Guid, Guid>
+        {
+            [deposit.Id] = deposit.Id,
+            [deposit.BankAccountId] = deposit.Id
+        };
+        foreach (var allocation in deposit.Allocations)
+        {
+            aliases[allocation.Id] = allocation.Id;
+            aliases[allocation.LiquidityAccountEntryId] = allocation.Id;
+        }
+        var trusted = NormalizeDimensionInput(input, lines, aliases, "bank deposit");
+        await _sourceDimensions.SynchronizeDraftAsync(
+            DepositProducer(), deposit.Id, deposit.DepositDate, lines, trusted,
+            inheritDefaultForUnassignedLines: true,
+            budgetReservationSourceDocumentType: null,
+            reason: "Bank-deposit Finance dimensions synchronized from stable bank and allocation lines.",
+            cancellationToken);
+    }
+
+    private async Task SynchronizeDepositSettlementDimensionsAsync(
+        Guid depositId,
+        CancellationToken cancellationToken)
+    {
+        if (_settlementDimensions is null || _sourceDimensions is null)
+            return;
+        var deposit = await LoadDepositDimensionAggregateAsync(depositId, cancellationToken);
+        var assignments = await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted
+                && item.RouteId == FinanceDimensionRouteId.FinanceBankDeposit
+                && item.SourceDocumentId == deposit.Id && item.SourceLineId.HasValue)
+            .ToDictionaryAsync(item => item.SourceLineId!.Value, cancellationToken);
+        var inputs = new List<FinanceSettlementAllocationInput>();
+        foreach (var allocation in deposit.Allocations.OrderBy(item => item.Id))
+        {
+            assignments.TryGetValue(allocation.Id, out var assignment);
+            var comparison = await ResolveLiquidityComparisonRateAsync(
+                allocation.LiquidityAccountEntry, cancellationToken);
+            inputs.Add(new FinanceSettlementAllocationInput(
+                allocation.Id,
+                allocation.Id,
+                allocation.LiquidityAccountEntry.SourceDocumentId,
+                new[]
+                {
+                    new FinanceSettlementComponentAmountInput(
+                        FinanceSettlementComponentType.Principal,
+                        deposit.Currency,
+                        allocation.Amount,
+                        allocation.Amount,
+                        ExchangeRateId: null,
+                        ExchangeRate: 1m,
+                        ComparisonExchangeRateId: comparison.ExchangeRateId,
+                        ComparisonExchangeRate: comparison.ExchangeRate)
+                },
+                new[]
+                {
+                    new FinanceSettlementOriginLineInput(
+                        allocation.LiquidityAccountEntryId,
+                        allocation.Amount,
+                        assignment?.FinanceDimensionSetId,
+                        assignment?.FinanceDimensionSnapshotId)
+                }));
+        }
+        await _settlementDimensions.SynchronizeDraftAsync(
+            DepositProducer(), deposit.Id, inputs, cancellationToken);
+    }
+
+    private async Task ValidateAndFreezeDepositDimensionsAsync(
+        Guid depositId,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is null)
+            return;
+        var deposit = await LoadDepositDimensionAggregateAsync(depositId, cancellationToken);
+        if (!await HasDimensionProvenanceAsync(
+                FinanceDimensionRouteId.FinanceBankDeposit, deposit.Id, cancellationToken))
+            await SynchronizeDepositDimensionsAsync(deposit.Id, input: null, cancellationToken);
+        var result = await _sourceDimensions.ValidateAndFreezeAsync(
+            DepositProducer(), deposit.Id, deposit.DepositDate,
+            BuildDepositDimensionLines(deposit), requireCurrentBudgetEvidence: false, cancellationToken);
+        ThrowIfRequiredDimensionsMissing(result, "bank deposit");
+        await SynchronizeDepositSettlementDimensionsAsync(deposit.Id, cancellationToken);
+        if (_settlementDimensions is not null)
+            await _settlementDimensions.ValidateAndFreezeAsync(
+                DepositProducer(), deposit.Id,
+                deposit.Allocations.Select(item => item.Id).ToArray(), cancellationToken);
+    }
+
+    private async Task SynchronizeReturnedChequeDimensionsAsync(
+        Guid returnedChequeId,
+        FinanceSourceDocumentDimensionInputDto? input,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is null)
+            return;
+        var item = await LoadReturnedChequeDimensionAggregateAsync(returnedChequeId, cancellationToken);
+        var lines = await BuildReturnedChequeDimensionLinesAsync(item, cancellationToken);
+        var aliases = new Dictionary<Guid, Guid>();
+        foreach (var line in lines)
+        {
+            aliases[line.SourceLineId] = line.SourceLineId;
+            if (!aliases.TryAdd(line.AccountId, line.SourceLineId) && aliases[line.AccountId] != line.SourceLineId)
+                aliases.Remove(line.AccountId);
+        }
+        aliases[item.BankAccountId] = ReturnedChequeBankLineId(item.Id);
+        var trusted = NormalizeDimensionInput(input, lines, aliases, "returned cheque");
+        await _sourceDimensions.SynchronizeDraftAsync(
+            ReturnedChequeProducer(), item.Id, item.ReturnDate, lines, trusted,
+            inheritDefaultForUnassignedLines: true,
+            budgetReservationSourceDocumentType: null,
+            reason: "Returned-cheque Finance dimensions synchronized from stable bank and charge lines.",
+            cancellationToken);
+    }
+
+    private async Task SynchronizeReturnedChequeSettlementDimensionsAsync(
+        Guid returnedChequeId,
+        CancellationToken cancellationToken)
+    {
+        if (_settlementDimensions is null || _paymentDimensions is null)
+            return;
+        var item = await LoadReturnedChequeDimensionAggregateAsync(returnedChequeId, cancellationToken);
+        var paymentEvidence = await _paymentDimensions.GetCustomerPaymentAsync(
+            item.CustomerPaymentId, cancellationToken);
+        var inputs = paymentEvidence
+            .Where(value => value.ComponentType is FinanceSettlementComponentType.Principal
+                or FinanceSettlementComponentType.Discount)
+            .Where(value => value.OriginatingSourceLineId.HasValue)
+            .OrderBy(value => value.SettlementSourceLineId)
+            .ThenBy(value => value.OriginatingSourceLineId)
+            .ThenBy(value => value.ComponentType)
+            .Select(value => new FinanceSettlementAllocationInput(
+                FinanceBankingDimensionIdentity.ReturnedChequeInheritedSettlementLine(item.Id, value.Id),
+                value.SettlementAllocationId,
+                value.OriginatingDocumentId,
+                new[]
+                {
+                    new FinanceSettlementComponentAmountInput(
+                        value.ComponentType,
+                        value.TransactionCurrencyCode,
+                        value.TransactionAmount,
+                        value.FunctionalAmount,
+                        value.ExchangeRateId,
+                        value.ExchangeRate,
+                        value.ComparisonExchangeRateId,
+                        value.ComparisonExchangeRate)
+                },
+                new[]
+                {
+                    new FinanceSettlementOriginLineInput(
+                        value.OriginatingSourceLineId!.Value,
+                        Math.Max(Math.Abs(value.TransactionAmount), Math.Abs(value.FunctionalAmount)) > 0m
+                            ? Math.Max(Math.Abs(value.TransactionAmount), Math.Abs(value.FunctionalAmount))
+                            : 1m,
+                        value.FinanceDimensionSetId,
+                        value.FinanceDimensionSnapshotId)
+                }))
+            .ToArray();
+        await _settlementDimensions.SynchronizeDraftAsync(
+            ReturnedChequeProducer(), item.Id, inputs, cancellationToken);
+    }
+
+    private async Task ValidateAndFreezeReturnedChequeDimensionsAsync(
+        Guid returnedChequeId,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is null)
+            return;
+        var item = await LoadReturnedChequeDimensionAggregateAsync(returnedChequeId, cancellationToken);
+        if (!await HasDimensionProvenanceAsync(
+                FinanceDimensionRouteId.FinanceReturnedCheque, item.Id, cancellationToken))
+            await SynchronizeReturnedChequeDimensionsAsync(item.Id, input: null, cancellationToken);
+        var result = await _sourceDimensions.ValidateAndFreezeAsync(
+            ReturnedChequeProducer(), item.Id, item.ReturnDate,
+            await BuildReturnedChequeDimensionLinesAsync(item, cancellationToken),
+            requireCurrentBudgetEvidence: false, cancellationToken);
+        ThrowIfRequiredDimensionsMissing(result, "returned cheque");
+        await SynchronizeReturnedChequeSettlementDimensionsAsync(item.Id, cancellationToken);
+        if (_settlementDimensions is not null)
+        {
+            var evidence = await _settlementDimensions.GetAsync(
+                ReturnedChequeProducer(), item.Id, cancellationToken);
+            if (result.CertificationState == FinanceDimensionCertificationState.Enforced
+                && evidence.Count == 0)
+                throw new InvalidOperationException(
+                    "The returned cheque has no trusted originating receipt-allocation dimension evidence. Recall or remediate the original receipt before approval or posting.");
+            await _settlementDimensions.ValidateAndFreezeAsync(
+                ReturnedChequeProducer(), item.Id,
+                evidence.Select(value => value.SettlementSourceLineId).Distinct().ToArray(),
+                cancellationToken);
+        }
+    }
+
+    private async Task HydrateDepositDimensionsAsync(
+        BankDepositDto dto,
+        BankDepositBatch deposit,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is not null && await HasDimensionProvenanceAsync(
+                FinanceDimensionRouteId.FinanceBankDeposit, deposit.Id, cancellationToken))
+            dto.FinanceDimensions = await _sourceDimensions.GetAsync(
+                DepositProducer(), deposit.Id, deposit.DepositDate,
+                BuildDepositDimensionLines(deposit), cancellationToken);
+        if (_settlementDimensions is not null)
+            dto.SettlementDimensionEvidence = await _settlementDimensions.GetAsync(
+                DepositProducer(), deposit.Id, cancellationToken);
+    }
+
+    private async Task HydrateReturnedChequeDimensionsAsync(
+        ReturnedChequeCaseDto dto,
+        CancellationToken cancellationToken)
+    {
+        if (_sourceDimensions is not null && await HasDimensionProvenanceAsync(
+                FinanceDimensionRouteId.FinanceReturnedCheque, dto.Id, cancellationToken))
+        {
+            var item = await LoadReturnedChequeDimensionAggregateAsync(dto.Id, cancellationToken);
+            dto.FinanceDimensions = await _sourceDimensions.GetAsync(
+                ReturnedChequeProducer(), item.Id, item.ReturnDate,
+                await BuildReturnedChequeDimensionLinesAsync(item, cancellationToken), cancellationToken);
+        }
+        if (_settlementDimensions is not null)
+            dto.SettlementDimensionEvidence = await _settlementDimensions.GetAsync(
+                ReturnedChequeProducer(), dto.Id, cancellationToken);
+    }
+
+    private async Task<BankDepositBatch> LoadDepositDimensionAggregateAsync(
+        Guid depositId,
+        CancellationToken cancellationToken) =>
+        await _context.BankDepositBatches.AsNoTracking()
+            .Include(item => item.BankAccount)
+            .Include(item => item.Allocations)
+                .ThenInclude(item => item.LiquidityAccountEntry)
+                    .ThenInclude(item => item.LiquidityAccount)
+            .SingleAsync(item => item.TenantId == TenantId && item.Id == depositId, cancellationToken);
+
+    private async Task<ReturnedChequeCase> LoadReturnedChequeDimensionAggregateAsync(
+        Guid returnedChequeId,
+        CancellationToken cancellationToken) =>
+        await _context.ReturnedChequeCases.AsNoTracking()
+            .Include(item => item.BankAccount)
+            .Include(item => item.CustomerPayment)
+            .SingleAsync(item => item.TenantId == TenantId && item.Id == returnedChequeId, cancellationToken);
+
+    private static IReadOnlyList<FinanceSourceDocumentLineContext> BuildDepositDimensionLines(
+        BankDepositBatch deposit)
+    {
+        var bankAccountId = deposit.BankAccount.GLAccountId
+            ?? throw new InvalidOperationException("The destination bank account must be linked to a GL account before Finance dimensions can be captured.");
+        return new[] { new FinanceSourceDocumentLineContext(deposit.Id, bankAccountId) }
+            .Concat(deposit.Allocations.OrderBy(item => item.Id).Select(item =>
+                new FinanceSourceDocumentLineContext(
+                    item.Id,
+                    item.LiquidityAccountEntry.LiquidityAccount.GLAccountId)))
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyList<FinanceSourceDocumentLineContext>> BuildReturnedChequeDimensionLinesAsync(
+        ReturnedChequeCase item,
+        CancellationToken cancellationToken)
+    {
+        var settings = await GetSettingsAsync(cancellationToken);
+        var bankAccountId = item.BankAccount.GLAccountId
+            ?? throw new InvalidOperationException("The returned-cheque bank account must be linked to a GL account before Finance dimensions can be captured.");
+        var controlAccountId = settings.ControlAccountArId
+            ?? throw new InvalidOperationException("Configure the AR control account before capturing returned-cheque dimensions.");
+        var lines = new List<FinanceSourceDocumentLineContext>
+        {
+            new(ReturnedChequeBankLineId(item.Id), bankAccountId),
+            new(ReturnedChequeCustomerLineId(item.Id), controlAccountId)
+        };
+        if (item.ExpenseChargeAmount > 0m)
+            lines.Add(new FinanceSourceDocumentLineContext(
+                ReturnedChequeExpenseLineId(item.Id),
+                settings.ReturnedChequeBankChargeAccountId
+                ?? throw new InvalidOperationException("Configure the returned-cheque bank charge expense account.")));
+        return lines;
+    }
+
+    private static FinanceSourceDocumentDimensionInputDto? NormalizeDimensionInput(
+        FinanceSourceDocumentDimensionInputDto? input,
+        IReadOnlyList<FinanceSourceDocumentLineContext> authoritativeLines,
+        IReadOnlyDictionary<Guid, Guid> aliases,
+        string routeLabel)
+    {
+        if (input is null)
+            return null;
+        var contexts = authoritativeLines.ToDictionary(item => item.SourceLineId);
+        var normalized = new List<FinanceSourceLineDimensionInputDto>();
+        foreach (var supplied in input.Lines)
+        {
+            var suppliedId = supplied.SourceLineId
+                ?? throw new InvalidOperationException($"Every {routeLabel} Finance dimension line requires a source-line id.");
+            var sourceLineId = contexts.ContainsKey(suppliedId)
+                ? suppliedId
+                : aliases.GetValueOrDefault(suppliedId);
+            if (sourceLineId == Guid.Empty || !contexts.TryGetValue(sourceLineId, out var context))
+                throw new InvalidOperationException($"A Finance dimension line does not belong to this {routeLabel}.");
+            if (context.AccountId != supplied.AccountId)
+                throw new InvalidOperationException($"A {routeLabel} Finance dimension line cannot change its server-resolved account.");
+            if (normalized.Any(item => item.SourceLineId == sourceLineId))
+                throw new InvalidOperationException($"A {routeLabel} source line may receive only one Finance dimension assignment.");
+            normalized.Add(new FinanceSourceLineDimensionInputDto
+            {
+                SourceLineId = sourceLineId,
+                AccountId = context.AccountId,
+                Dimensions = supplied.Dimensions
+            });
+        }
+        return new FinanceSourceDocumentDimensionInputDto
+        {
+            DefaultDimensions = input.DefaultDimensions,
+            ApplyDefaultToEligibleLines = input.ApplyDefaultToEligibleLines,
+            Lines = normalized
+        };
+    }
+
+    private async Task<bool> HasDimensionProvenanceAsync(
+        FinanceDimensionRouteId routeId,
+        Guid sourceDocumentId,
+        CancellationToken cancellationToken) =>
+        await _context.FinanceSourceDimensionAssignments.AsNoTracking()
+            .AnyAsync(item => item.TenantId == TenantId && !item.IsDeleted
+                && item.RouteId == routeId && item.SourceDocumentId == sourceDocumentId
+                && !item.SourceLineId.HasValue, cancellationToken);
+
+    private async Task<RateEvidence> ResolveLiquidityComparisonRateAsync(
+        LiquidityAccountEntry entry,
+        CancellationToken cancellationToken)
+    {
+        if (entry.SourceDocumentType.Equals("CustomerPayment", StringComparison.OrdinalIgnoreCase))
+        {
+            var payment = await _context.Set<CustomerPayment>().AsNoTracking()
+                .Where(item => item.TenantId == TenantId && item.Id == entry.SourceDocumentId)
+                .Select(item => new { item.ExchangeRateId, item.ExchangeRate })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (payment is not null)
+                return new RateEvidence(payment.ExchangeRateId, payment.ExchangeRate > 0m ? payment.ExchangeRate : 1m);
+        }
+        if (entry.SourceDocumentType.Equals(nameof(AccountTransaction), StringComparison.OrdinalIgnoreCase))
+        {
+            var transaction = await _context.Set<AccountTransaction>().AsNoTracking()
+                .Where(item => item.TenantId == TenantId && item.Id == entry.SourceDocumentId)
+                .Select(item => new { item.ExchangeRateId, item.ExchangeRate })
+                .SingleOrDefaultAsync(cancellationToken);
+            if (transaction is not null)
+                return new RateEvidence(
+                    transaction.ExchangeRateId,
+                    transaction.ExchangeRate is > 0m ? transaction.ExchangeRate.Value : 1m);
+        }
+        return new RateEvidence(null, 1m);
+    }
+
+    private static void ThrowIfRequiredDimensionsMissing(
+        FinanceSourceDocumentDimensionDto result,
+        string routeLabel)
+    {
+        if (result.ReadinessWarnings.Any(message =>
+                message.Contains(" is required ", StringComparison.OrdinalIgnoreCase)))
+            throw new InvalidOperationException(
+                $"Required Finance dimensions are missing from one or more {routeLabel} economic lines.");
+    }
+
+    private static IReadOnlyList<EvidenceAmountShare> AllocateEvidenceAmount(
+        decimal total,
+        IReadOnlyCollection<FinanceSettlementDimensionComponentDto> evidence)
+    {
+        var ordered = evidence
+            .OrderBy(item => item.SettlementSourceLineId)
+            .ThenBy(item => item.OriginatingSourceLineId)
+            .ThenBy(item => item.Id)
+            .ToArray();
+        if (ordered.Length == 0)
+            return Array.Empty<EvidenceAmountShare>();
+        var weights = ordered.Select(item => Math.Max(
+            Math.Abs(item.TransactionAmount), Math.Abs(item.FunctionalAmount))).ToArray();
+        var totalWeight = weights.Sum();
+        if (totalWeight <= 0m)
+        {
+            weights = ordered.Select(_ => 1m).ToArray();
+            totalWeight = weights.Length;
+        }
+        var result = new List<EvidenceAmountShare>(ordered.Length);
+        decimal allocated = 0m;
+        for (var index = 0; index < ordered.Length; index++)
+        {
+            var independentlyRounded = RoundMoney(total * weights[index] / totalWeight);
+            var amount = index == ordered.Length - 1
+                ? RoundMoney(total - allocated)
+                : independentlyRounded;
+            result.Add(new EvidenceAmountShare(
+                ordered[index], amount, index == ordered.Length - 1,
+                index == ordered.Length - 1 ? RoundMoney(amount - independentlyRounded) : 0m));
+            allocated += amount;
+        }
+        if (RoundMoney(result.Sum(item => item.Amount)) != RoundMoney(total))
+            throw new InvalidOperationException(
+                "Returned-cheque dimension allocation did not reconcile to the exact source amount.");
+        return result;
+    }
+
+    private static FinancePostingProducerContext DepositProducer() =>
+        new(FinanceDimensionRouteId.FinanceBankDeposit);
+
+    private static FinancePostingProducerContext ReturnedChequeProducer() =>
+        new(FinanceDimensionRouteId.FinanceReturnedCheque);
+
+    private static Guid ReturnedChequeBankLineId(Guid returnedChequeId) =>
+        FinanceBankingDimensionIdentity.ReturnedChequeBankLine(returnedChequeId);
+
+    private static Guid ReturnedChequeCustomerLineId(Guid returnedChequeId) =>
+        FinanceBankingDimensionIdentity.ReturnedChequeCustomerLine(returnedChequeId);
+
+    private static Guid ReturnedChequeExpenseLineId(Guid returnedChequeId) =>
+        FinanceBankingDimensionIdentity.ReturnedChequeExpenseLine(returnedChequeId);
+
     private async Task ReleaseDepositReservationsAsync(
         BankDepositBatch deposit,
         CancellationToken cancellationToken)
@@ -1648,6 +2392,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             DepositNumber = item.DepositNumber,
             BankAccountId = item.BankAccountId,
             BankAccountName = item.BankAccount.AccountName,
+            BankGLAccountId = item.BankAccount.GLAccountId,
             DepositDate = item.DepositDate,
             DepositReference = item.DepositReference,
             Currency = item.Currency,
@@ -1697,6 +2442,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
                 EntryNumber = allocation.LiquidityAccountEntry.EntryNumber,
                 EntryDate = allocation.LiquidityAccountEntry.EntryDate,
                 LiquidityAccountName = allocation.LiquidityAccountEntry.LiquidityAccount.Name,
+                GLAccountId = allocation.LiquidityAccountEntry.LiquidityAccount.GLAccountId,
                 EntryType = allocation.LiquidityAccountEntry.EntryType,
                 AllocationType = allocation.AllocationType,
                 Amount = allocation.Amount,
@@ -1721,7 +2467,7 @@ public sealed class BankingSettlementService : IBankingSettlementService
             .AsNoTracking()
             .Where(item => item.TenantId == TenantId && customerIds.Contains(item.Id))
             .ToDictionaryAsync(item => item.Id, item => item.PartnerName, cancellationToken);
-        return cases.Select(item => new ReturnedChequeCaseDto
+        var results = cases.Select(item => new ReturnedChequeCaseDto
         {
             Id = item.Id,
             CaseNumber = item.CaseNumber,
@@ -1756,6 +2502,11 @@ public sealed class BankingSettlementService : IBankingSettlementService
             Attachments = item.Attachments.Select(MapAttachment).ToArray(),
             RowVersion = Convert.ToBase64String(item.RowVersion)
         }).ToArray();
+        foreach (var result in results)
+        {
+            await HydrateReturnedChequeDimensionsAsync(result, cancellationToken);
+        }
+        return results;
     }
 
     private static BankingAttachmentDto MapAttachment(BankDepositAttachment item)
@@ -2003,6 +2754,17 @@ public sealed class BankingSettlementService : IBankingSettlementService
 
     private static string? Clean(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static decimal RoundMoney(decimal amount) =>
+        decimal.Round(amount, 2, MidpointRounding.AwayFromZero);
+
+    private readonly record struct RateEvidence(Guid? ExchangeRateId, decimal ExchangeRate);
+
+    private sealed record EvidenceAmountShare(
+        FinanceSettlementDimensionComponentDto Evidence,
+        decimal Amount,
+        bool IsFinalResidualRecipient,
+        decimal RoundingResidual);
 
     private sealed record PreparedDeposit(
         BankAccount Bank,

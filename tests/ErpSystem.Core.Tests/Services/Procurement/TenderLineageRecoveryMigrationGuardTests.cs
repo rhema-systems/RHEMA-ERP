@@ -27,7 +27,7 @@ public sealed class TenderLineageRecoveryMigrationGuardTests
                 directory.FullName,
                 "src",
                 "ErpSystem.Data",
-                "Migrations",
+                "LegacyMigrationsArchive",
                 "20260901033000_AllowGovernedTenderLineageRecovery.cs");
             if (File.Exists(candidate))
                 return candidate;

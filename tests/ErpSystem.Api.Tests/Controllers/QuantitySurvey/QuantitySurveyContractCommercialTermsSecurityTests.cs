@@ -50,7 +50,7 @@ public sealed class QuantitySurveyContractCommercialTermsSecurityTests
     [Fact]
     public void Migration_enforces_relational_and_post_draft_controls()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260811043000_ExtendWorksContractCommercialTerms.cs");
 
         source.Should().Contain("FK_Contracts_PaymentTerms_PaymentTermId")

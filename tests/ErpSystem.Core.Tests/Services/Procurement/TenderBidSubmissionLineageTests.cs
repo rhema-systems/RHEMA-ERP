@@ -1,12 +1,18 @@
+using System.Linq.Expressions;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Events;
+using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.QuantitySurvey;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Data;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -512,10 +518,14 @@ public sealed class TenderBidSubmissionLineageTests
             TenderFeeId = fee.Id,
             BusinessPartnerId = fixture.Bid.BusinessPartnerId,
             Status = "Pending",
-            PaymentReference = "PAY-PENDING"
+            PaymentReference = "PAY-PENDING",
+            Amount = fee.Amount,
+            Currency = fee.Currency,
+            PaymentMethod = fee.PaymentMethod
         };
         fixture.Payments.Setup(repository => repository.GetByIdAsync(payment.Id))
             .ReturnsAsync(payment);
+        using var finance = fixture.ConfigurePaymentPosting(fee, payment);
 
         var first = await fixture.Service.VerifyPaymentAsync(
             fixture.Bid.Id, payment.Id, new VerifyPaymentDto { IsApproved = true });
@@ -525,6 +535,11 @@ public sealed class TenderBidSubmissionLineageTests
         first.Status.Should().Be("Verified");
         retry.Status.Should().Be("Verified");
         fixture.Payments.Verify(repository => repository.UpdateAsync(payment), Times.Once);
+        payment.PostingEventId.Should().NotBeNull();
+        payment.JournalEntryId.Should().NotBeNull();
+        payment.PostedAtUtc.Should().NotBeNull();
+        fixture.FinancePosting.Verify(engine => engine.PostAsync(
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -553,6 +568,7 @@ public sealed class TenderBidSubmissionLineageTests
     public async Task BidSummaryUsesVerifiedPaymentFromExactTenderAndTenant()
     {
         var fixture = new Fixture(advancedSourcingCase: false);
+        fixture.Bid.OpenedDate = DateTime.UtcNow;
         var fee = fixture.AddMandatoryFee(100m);
         fixture.Bids.Setup(repository => repository.GetBidsAsync(
                 1, 10, null, null, fixture.Tender.Id))
@@ -604,6 +620,30 @@ public sealed class TenderBidSubmissionLineageTests
         AssignmentType = "AllUsers"
     };
 
+    [Theory]
+    [InlineData("SUPPLIER_BLACKLISTED")]
+    [InlineData("SUPPLIER_NOT_APPROVED")]
+    [InlineData("SUPPLIER_EVIDENCE_NOT_READY")]
+    [InlineData("TENDER_BID_SOURCE_LINEAGE_INVALID")]
+    public async Task SubmissionRechecksEligibilityBeforeWritingOrAdmittingSealedBid(string code)
+    {
+        var fixture = new Fixture(advancedSourcingCase: true);
+        fixture.SupplierValidation.Setup(service => service.ValidateForTenderBidAsync(
+                fixture.Bid.BusinessPartnerId, fixture.Tender.Id, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(SupplierValidationResult.Fail("Current eligibility was revoked.", code));
+
+        var submit = () => fixture.Service.SubmitBidAsync(fixture.Bid.Id, new SubmitTenderBidDto());
+
+        await submit.Should().ThrowAsync<TenderBidInitiationValidationException>()
+            .Where(exception => exception.Code == code);
+        fixture.Bid.Status.Should().Be("Draft");
+        fixture.DocumentControl.Verify(service => service.EnsureSubmissionReadyAsync(
+            It.IsAny<ProcurementTenderDocumentSourceType>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+            It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        fixture.Bids.Verify(repository => repository.UpdateAsync(It.IsAny<TenderBid>()), Times.Never);
+        fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     private sealed class Fixture
     {
         public Mock<ITenderBidRepository> Bids { get; } = new();
@@ -613,9 +653,82 @@ public sealed class TenderBidSubmissionLineageTests
         public Mock<IProcurementTenderControlService> TenderControl { get; } = new();
         public Mock<IProcurementTenderDocumentControlService> DocumentControl { get; } = new();
         public Mock<IUnitOfWork> UnitOfWork { get; } = new();
+        public Mock<ISupplierValidationService> SupplierValidation { get; } = new();
+        public Mock<IFinancePostingEngine> FinancePosting { get; } = new();
         public Tender Tender { get; }
         public TenderBid Bid { get; }
         public TenderBidService Service { get; }
+
+        public ApplicationDbContext ConfigurePaymentPosting(TenderFee fee, TenderPayment payment)
+        {
+            var options = new DbContextOptionsBuilder<ApplicationDbContext>()
+                .UseInMemoryDatabase($"tender-submission-payment-{Guid.NewGuid():N}")
+                .Options;
+            var db = new ApplicationDbContext(options, Bid.TenantId);
+            var receivingAccount = new Account
+            {
+                Id = Guid.NewGuid(),
+                TenantId = Bid.TenantId,
+                AccountCode = "100-1001-0000",
+                AccountNumber = "100-1001-0000",
+                AccountName = "Tender fee receipts",
+                AccountType = AccountType.Asset,
+                Status = AccountStatus.Active,
+                CurrencyCode = "GHS",
+                AllowDirectPosting = true
+            };
+            var revenueAccount = new Account
+            {
+                Id = Guid.NewGuid(),
+                TenantId = Bid.TenantId,
+                AccountCode = "000-4300-0000",
+                AccountNumber = "000-4300-0000",
+                AccountName = "Tender fee income",
+                AccountType = AccountType.Revenue,
+                Status = AccountStatus.Active,
+                CurrencyCode = "GHS",
+                AllowDirectPosting = true
+            };
+            db.Accounts.AddRange(receivingAccount, revenueAccount);
+            db.FinanceSettings.Add(new FinanceSettings
+            {
+                Id = Guid.NewGuid(),
+                TenantId = Bid.TenantId,
+                BaseCurrency = "GHS"
+            });
+            db.SaveChanges();
+            fee.ReceivingAccountId = receivingAccount.Id;
+            fee.RevenueAccountId = revenueAccount.Id;
+
+            var accounts = new Mock<IGenericRepository<Account>>();
+            accounts.Setup(repository => repository.GetQueryable(
+                    It.IsAny<Expression<Func<Account, bool>>>()))
+                .Returns((Expression<Func<Account, bool>> predicate) => db.Accounts.Where(predicate));
+            var settings = new Mock<IGenericRepository<FinanceSettings>>();
+            settings.Setup(repository => repository.GetQueryable(
+                    It.IsAny<Expression<Func<FinanceSettings, bool>>>()))
+                .Returns((Expression<Func<FinanceSettings, bool>> predicate) => db.FinanceSettings.Where(predicate));
+            UnitOfWork.Setup(unit => unit.Repository<Account>()).Returns(accounts.Object);
+            UnitOfWork.Setup(unit => unit.Repository<FinanceSettings>()).Returns(settings.Object);
+            FinancePosting.Setup(engine => engine.PostAsync(
+                    It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new FinancePostingResultDto
+                {
+                    PostingEventId = Guid.NewGuid(),
+                    JournalEntryId = Guid.NewGuid(),
+                    JournalEntryNumber = "JE-SUBMISSION-TEST",
+                    PostingStatus = "Posted",
+                    FunctionalCurrencyCode = "GHS",
+                    TotalDebitAmount = payment.Amount,
+                    TotalCreditAmount = payment.Amount,
+                    SourceModule = "Procurement",
+                    OriginModuleCode = "PROC",
+                    SourceDocumentType = "TenderFeePayment",
+                    SourceDocumentId = payment.Id,
+                    PostingAction = "Post"
+                });
+            return db;
+        }
 
         public TenderFee AddMandatoryFee(decimal amount)
         {
@@ -731,8 +844,23 @@ public sealed class TenderBidSubmissionLineageTests
                 .Returns(Task.CompletedTask);
             UnitOfWork.Setup(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()))
                 .ReturnsAsync(1);
+            UnitOfWork.Setup(unit => unit.ExecuteInStrategyAsync(
+                    It.IsAny<Func<Task>>(), It.IsAny<CancellationToken>()))
+                .Returns((Func<Task> operation, CancellationToken _) => operation());
+            UnitOfWork.Setup(unit => unit.BeginTransactionAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            UnitOfWork.Setup(unit => unit.AcquireTransactionLockAsync(
+                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            UnitOfWork.Setup(unit => unit.CommitAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            UnitOfWork.Setup(unit => unit.RollbackAsync(It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
             currentUser.SetupGet(provider => provider.TenantId).Returns(tenantId);
             currentUser.SetupGet(provider => provider.UserId).Returns(Guid.NewGuid());
+            SupplierValidation.Setup(service => service.ValidateForTenderBidAsync(
+                    Bid.BusinessPartnerId, Tender.Id, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new SupplierValidationResult { IsValid = true });
 
             Service = new TenderBidService(
                 Bids.Object,
@@ -747,7 +875,7 @@ public sealed class TenderBidSubmissionLineageTests
                 notification.Object,
                 Mock.Of<IBusinessPartnerRepository>(),
                 Mock.Of<IBusinessPartnerUserRepository>(),
-                Mock.Of<ISupplierValidationService>(),
+                SupplierValidation.Object,
                 UnitOfWork.Object,
                 currentUser.Object,
                 events.Object,
@@ -755,7 +883,8 @@ public sealed class TenderBidSubmissionLineageTests
                 DocumentControl.Object,
                 exceptionalSourcing.Object,
                 quantitySurvey.Object,
-                Mock.Of<ILogger<TenderBidService>>());
+                Mock.Of<ILogger<TenderBidService>>(),
+                FinancePosting.Object);
         }
     }
 }

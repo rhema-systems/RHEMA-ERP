@@ -5,6 +5,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Interfaces.Services;
+using ErpSystem.Core.Services;
 using ErpSystem.Core.Services.Procurement;
 using ErpSystem.Data;
 using ErpSystem.Shared;
@@ -12,6 +13,7 @@ using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -19,6 +21,257 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementEvaluationCommitteeControlServiceTests
 {
+    [Fact]
+    public async Task AttendanceAfterFailedQuorumReopensMeetingAndRequiresFreshConfirmation()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var meeting = await fixture.Service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical,
+                MeetingMode = "InPerson", MeetingChannel = "UAT room",
+                ScheduledAtUtc = DateTime.UtcNow,
+                CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "retry-meeting"
+            }, "retry-meeting");
+        var failed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
+            new ConfirmProcurementEvaluationQuorumRequest
+            {
+                RowVersion = meeting.RowVersion, IdempotencyKey = "premature-quorum"
+            }, "premature-quorum");
+        failed.Status.Should().Be(ProcurementEvaluationMeetingStatus.QuorumFailed);
+        failed.SignedVotingAttendanceCount.Should().Be(0);
+        var failedRecord = await fixture.Context.ProcurementEvaluationMeetings.AsNoTracking()
+            .SingleAsync(item => item.Id == meeting.Id);
+        var failedSnapshot = failedRecord.QuorumSnapshotJson;
+        var failedHash = failedRecord.QuorumIntegrityHash;
+
+        foreach (var member in control.Members)
+        {
+            fixture.SwitchUser(member.UserId);
+            var current = await fixture.Service.GetAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+            var request = new SignProcurementEvaluationAttendanceRequest
+            {
+                IsPresent = true,
+                MeetingRowVersion = current.Meetings.Single().RowVersion,
+                AppointmentRowVersion = current.Members.Single(item => item.Id == member.Id).RowVersion,
+                IdempotencyKey = $"retry-attendance-{member.Id}"
+            };
+            var signed = await fixture.Service.SignAttendanceAsync(meeting.Id, request, "retry-attendance");
+            var reopened = await fixture.Service.GetAsync(
+                ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+            reopened.Meetings.Single().Status.Should().Be(ProcurementEvaluationMeetingStatus.Draft);
+            reopened.Meetings.Single().QuorumMet.Should().BeFalse();
+            request.MeetingRowVersion = reopened.Meetings.Single().RowVersion;
+            (await fixture.Service.SignAttendanceAsync(meeting.Id, request, "replay-attendance"))
+                .Id.Should().Be(signed.Id);
+            (await fixture.Service.EnsureScorerEligibleAsync(ProcurementEvaluationSourceType.Tender,
+                fixture.Tender.Id, ProcurementEvaluationPhase.Technical, "before-reconfirmation"))
+                .Allowed.Should().BeFalse();
+        }
+
+        var pending = await fixture.Context.ProcurementEvaluationMeetings.AsNoTracking()
+            .SingleAsync(item => item.Id == meeting.Id);
+        pending.QuorumSnapshotJson.Should().Be(failedSnapshot);
+        pending.QuorumIntegrityHash.Should().Be(failedHash);
+        (await fixture.Context.ProcurementEvaluationAttendanceRecords.CountAsync())
+            .Should().Be(control.Members.Count);
+
+        fixture.SwitchAdministrator();
+        var ready = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        var confirmed = await fixture.Service.ConfirmQuorumAsync(meeting.Id,
+            new ConfirmProcurementEvaluationQuorumRequest
+            {
+                RowVersion = ready.Meetings.Single().RowVersion, IdempotencyKey = "fresh-quorum"
+            }, "fresh-quorum");
+        confirmed.Status.Should().Be(ProcurementEvaluationMeetingStatus.QuorumConfirmed);
+        confirmed.QuorumMet.Should().BeTrue();
+        confirmed.SignedVotingAttendanceCount.Should().Be(control.Members.Count(item => item.IsVoting));
+        fixture.SwitchUser(control.Members[0].UserId);
+        var lateAttendance = () => fixture.Service.SignAttendanceAsync(meeting.Id,
+            new SignProcurementEvaluationAttendanceRequest { IdempotencyKey = "after-confirmation" }, "late");
+        await lateAttendance.Should().ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(error => error.Code == "EVALUATION_ATTENDANCE_CLOSED");
+    }
+
+    [Fact]
+    public async Task TenderProjectionCreatesEveryVotingSeatOnceAndPreservesSignedCommittee()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeWithQuorumAsync();
+        var before = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        fixture.SwitchUser(control.Members[0].UserId);
+        var first = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "projection-first");
+        var repeated = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "projection-retry");
+        first.Should().NotBeNull();
+        repeated!.Id.Should().Be(first!.Id);
+        var assignments = await fixture.Context.TenderEvaluators.ToListAsync();
+        var votingMembers = control.Members.Where(item => item.IsVoting && item.MemberKind != ProcurementCommitteeMemberKind.Observer);
+        assignments.Should().HaveCount(votingMembers.Count());
+        assignments.Select(item => item.UserId).Should().BeEquivalentTo(votingMembers.Select(item => item.UserId));
+        assignments.Should().OnlyContain(item => item.TenantId == fixture.TenantId && item.TenderId == fixture.Tender.Id);
+        var after = await fixture.Service.GetAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        after.Members.Should().BeEquivalentTo(before.Members);
+        after.Meetings.Should().BeEquivalentTo(before.Meetings);
+        after.ScoreSheets.Should().BeEmpty();
+        (await fixture.Context.TenderEvaluations.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task AcceptedMemberCanPrepareDraftProjectionBeforeQuorumButCannotLock()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchUser(control.Members[0].UserId);
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "draft-before-quorum"))
+            .Should().NotBeNull();
+        (await fixture.Service.EnsureScorerEligibleAsync(ProcurementEvaluationSourceType.Tender,
+            fixture.Tender.Id, ProcurementEvaluationPhase.Combined, "still-no-quorum")).Allowed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ProjectionReusesExistingAssignmentAndKeepsPendingVotingSeatInRoster()
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var actor = control.Members[0];
+        var existing = new TenderEvaluator
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = fixture.Tender.Id,
+            UserId = actor.UserId, Status = "Accepted", Notes = "Existing assignment retained."
+        };
+        fixture.Context.TenderEvaluators.Add(existing);
+        var pending = await fixture.Context.ProcurementEvaluationCommitteeAppointments.FindAsync(control.Members[1].Id);
+        pending!.Status = ProcurementEvaluationAppointmentStatus.Pending;
+        var observer = await fixture.Context.ProcurementEvaluationCommitteeAppointments.FindAsync(control.Members[2].Id);
+        observer!.MemberKind = ProcurementCommitteeMemberKind.Observer;
+        observer.IsVoting = false;
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        fixture.SwitchUser(actor.UserId);
+        var assignment = await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "reuse-projection");
+        assignment!.Id.Should().Be(existing.Id);
+        assignment.Notes.Should().Be("Existing assignment retained.");
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(2);
+        (await fixture.Service.GetTenderScoringUserIdsAsync(fixture.Tender.Id))
+            .Should().BeEquivalentTo(new[] { actor.UserId, pending.UserId });
+    }
+
+    [Theory]
+    [InlineData("outsider")]
+    [InlineData("observer")]
+    [InlineData("nonvoting")]
+    [InlineData("deleted")]
+    [InlineData("declined")]
+    [InlineData("withdrawn")]
+    [InlineData("expired")]
+    [InlineData("conflict")]
+    [InlineData("inactive")]
+    public async Task TenderProjectionNeverGrantsScoringToIneligibleActor(string reason)
+    {
+        await using var fixture = new Fixture();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        var member = await fixture.Context.ProcurementEvaluationCommitteeAppointments
+            .Include(item => item.ConflictDeclarations).FirstAsync(item => item.CommitteeControlId == control.Id);
+        fixture.SwitchUser(reason == "outsider" ? Guid.NewGuid() : member.UserId);
+        switch (reason)
+        {
+            case "observer": member.MemberKind = ProcurementCommitteeMemberKind.Observer; break;
+            case "nonvoting": member.IsVoting = false; break;
+            case "deleted": member.IsDeleted = true; break;
+            case "declined": member.Status = ProcurementEvaluationAppointmentStatus.Declined; break;
+            case "withdrawn": member.Status = ProcurementEvaluationAppointmentStatus.Withdrawn; break;
+            case "expired": member.EffectiveToUtc = DateTime.UtcNow.AddDays(-1); break;
+            case "conflict": member.ConflictDeclarations.Single().Outcome = ProcurementEvaluationConflictOutcome.ConflictDeclared; break;
+            case "inactive": (await fixture.Context.ProcurementEvaluationCommitteeControls.FindAsync(control.Id))!.Status = ProcurementEvaluationCommitteeControlStatus.Closed; break;
+        }
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        Func<Task> action = () => fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "denied-projection");
+        await action.Should().ThrowAsync<Exception>().Where(exception =>
+            exception is ProcurementEvaluationCommitteeAuthorizationException ||
+            exception is ProcurementEvaluationCommitteeConflictException);
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProjectionDoesNotUseOtherTenantCommitteeOrCreateStandaloneAssignments()
+    {
+        await using var fixture = new Fixture();
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "no-committee")).Should().BeNull();
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchUser(control.Members[0].UserId);
+        fixture.SwitchTenant(Guid.NewGuid());
+        (await fixture.Service.EnsureTenderEvaluatorAsync(fixture.Tender.Id, "other-tenant")).Should().BeNull();
+        (await fixture.Context.TenderEvaluators.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task StandardPublishedTenderWithOnTimeBidCanConstituteWithoutAdvancedControl()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var readiness = await fixture.Service.GetReadinessAsync(ProcurementEvaluationSourceType.Tender, fixture.Tender.Id);
+        readiness.AllowedActions.Should().Contain("bind");
+        var control = await fixture.BindDraftAsync();
+        control.Status.Should().Be(ProcurementEvaluationCommitteeControlStatus.Draft);
+        (await fixture.Context.ProcurementTenderControls.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData("Draft", -1, false)]
+    [InlineData("Withdrawn", -1, false)]
+    [InlineData("Submitted", 1, false)]
+    [InlineData("Submitted", -1, true)]
+    public async Task StandardTenderDoesNotAcceptDraftWithdrawnLateOrOtherTenantBid(string status, int minutes, bool otherTenant)
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1), status, minutes, otherTenant);
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync()).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED");
+    }
+
+    [Theory]
+    [InlineData(ProcurementMethodType.QualityBasedSelection, false)]
+    [InlineData(ProcurementMethodType.QualityAndCostBasedSelection, false)]
+    [InlineData(ProcurementMethodType.NationalCompetitiveTendering, true)]
+    public async Task MissingAdvancedControlCannotDowngradeToStandard(ProcurementMethodType method, bool partialAuthority)
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var source = fixture.Context.Set<ProcurementSourcingCase>().Single();
+        source.SelectedMethod = method;
+        if (partialAuthority) source.AuthorityRouteReference = "AUTH-REQUIRED";
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+        await fixture.Service.Invoking(_ => fixture.BindDraftAsync()).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED");
+    }
+
+    [Fact]
+    public async Task StandardCommitteeStillCannotMeetBeforeClosing()
+    {
+        await using var fixture = new Fixture();
+        fixture.SetStandardTender(DateTime.UtcNow.AddHours(1));
+        var control = await fixture.PrepareEligibleCommitteeAsync();
+        fixture.SwitchAdministrator();
+        await fixture.Service.Invoking(service => service.CreateMeetingAsync(control.Id,
+            new CreateProcurementEvaluationMeetingRequest
+            {
+                Phase = ProcurementEvaluationPhase.Technical, MeetingMode = "InPerson",
+                MeetingChannel = "UAT room", ScheduledAtUtc = DateTime.UtcNow,
+                EvidenceReference = "LOCAL-UAT", CommitteeRowVersion = control.RowVersion,
+                IdempotencyKey = "standard-early-meeting"
+            }, "standard-early-meeting")).Should()
+            .ThrowAsync<ProcurementEvaluationCommitteeConflictException>()
+            .Where(ex => ex.Code == "EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE");
+        (await fixture.Context.ProcurementEvaluationMeetings.CountAsync()).Should().Be(0);
+    }
+
     [Fact]
     public void SqlCommitteeLineageGuardIsRecognisedForStructuredErrorMapping()
     {
@@ -840,11 +1093,56 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
         decided.Status.Should().Be(ProcurementEvaluationScoreRecallStatus.Approved);
         decided.AuthorizedNewAttempt.Should().Be(2);
         decided.DecisionEvidenceReference.Should().Be("evidence://recall-decision");
+        var sodEvent = await fixture.Context.ProcurementControlEvents.SingleAsync(item =>
+            item.EventType == "SegregationOfDutiesDecision");
+        sodEvent.RuleCode.Should().Be("SOD-INITIATOR-APPROVER");
+        sodEvent.Result.Should().Be(ProcurementControlEventResult.Allowed);
+        sodEvent.ActorUserId.Should().Be(fixture.AdministratorId);
+        (await fixture.Context.ProcurementEvaluationScoreSheets.SingleAsync(item => item.Id == seeded.Locked.Id))
+            .ScoreSnapshotJson.Should().Be(seeded.Locked.ScoreSnapshotJson);
         fixture.Access.Verify(service => service.EnforceCapabilityAsync(
                 It.Is<ProcurementAccessCapabilityRequest>(request =>
                     request.PermissionCode == "procurement.tender.approve" &&
                     request.CommitteeCode == null),
                 It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("scorer")]
+    [InlineData("requester")]
+    public async Task RealMakerCheckerGuardRejectsRecallDecisionByEitherPriorParticipant(string decidingParticipant)
+    {
+        await using var fixture = new Fixture();
+        var seeded = await fixture.SeedRecallDecisionAsync(
+            WorkflowInstanceStatus.Completed, Guid.NewGuid());
+        // Retain distinct prior identities to prove both caller-supplied actors
+        // remain prohibited, even when the workflow processor is independent.
+        var requesterId = Guid.NewGuid();
+        seeded.Recall.RequestedByUserId = requesterId;
+        await fixture.Context.SaveChangesAsync();
+        var actorId = decidingParticipant == "scorer" ? seeded.Locked.SubmittedByUserId : requesterId;
+        fixture.SwitchUser(actorId);
+
+        await fixture.Service.Invoking(service => service.DecideScoreRecallAsync(
+                seeded.Recall.Id, fixture.Decision(seeded.Recall, approve: true), "conflicting-recall-decision"))
+            .Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+
+        var retained = await fixture.Context.ProcurementEvaluationScoreRecalls.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.Recall.Id);
+        retained.Status.Should().Be(ProcurementEvaluationScoreRecallStatus.PendingApproval);
+        retained.AuthorizedNewAttempt.Should().BeNull();
+        retained.DecidedByUserId.Should().BeNull();
+        var sheet = await fixture.Context.ProcurementEvaluationScoreSheets.AsNoTracking()
+            .SingleAsync(item => item.Id == seeded.Locked.Id);
+        sheet.ScoreSnapshotJson.Should().Be(seeded.Locked.ScoreSnapshotJson);
+        sheet.IntegrityHash.Should().Be(seeded.Locked.IntegrityHash);
+        var sodEvent = await fixture.Context.ProcurementControlEvents.SingleAsync(item =>
+            item.EventType == "SegregationOfDutiesDecision");
+        sodEvent.RuleCode.Should().Be("SOD-INITIATOR-APPROVER");
+        sodEvent.Result.Should().Be(ProcurementControlEventResult.Denied);
+        sodEvent.ActorUserId.Should().Be(actorId);
+        sodEvent.InputValuesJson.Should().Contain(requesterId.ToString()).And.Contain(seeded.Locked.SubmittedByUserId.ToString());
+        (await fixture.Context.AuditLogs.SingleAsync()).Action.Should().Be("SOD_BYPASS_BLOCKED");
     }
 
     [Fact]
@@ -1147,14 +1445,11 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             Access = new Mock<IProcurementAccessControlService>();
             SetCapabilityAllowed(true);
             var access = Access;
-            var sod = new Mock<IProcurementSodGuardService>();
-            sod.Setup(item => item.EnforceAsync(
-                    It.IsAny<ProcurementSodGuardRequest>(),
-                    It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .ReturnsAsync(new ProcurementSodGuardDecisionDto
-                {
-                    Allowed = true
-                });
+            var sod = new ProcurementSodGuardService(
+                _unitOfWork, _current.Object, Mock.Of<IProcurementPolicyService>(), Mock.Of<IRoleService>(),
+                new ProcurementControlEventService(_unitOfWork, _current.Object,
+                    NullLogger<ProcurementControlEventService>.Instance),
+                NullLogger<ProcurementSodGuardService>.Instance);
             var events = new Mock<IProcurementControlEventService>();
             events.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
@@ -1190,7 +1485,7 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
                     CurrencyCode = SourcingCase.CurrencyCode
                 });
             Service = new ProcurementEvaluationCommitteeControlService(
-                _unitOfWork, _current.Object, access.Object, sod.Object,
+                _unitOfWork, _current.Object, access.Object, sod,
                 events.Object, SourcingCases.Object, workflowInstances.Object,
                 Notifications.Object, configuration.Object);
         }
@@ -1226,6 +1521,27 @@ public sealed class ProcurementEvaluationCommitteeControlServiceTests
             Context.ProcurementTenderControls.RemoveRange(
                 Context.ProcurementTenderControls.Where(item =>
                     item.TenderId == Tender.Id));
+            Context.SaveChanges();
+            Context.ChangeTracker.Clear();
+        }
+
+        public void SetStandardTender(DateTime deadline, string bidStatus = "Submitted", int minutes = -1, bool otherTenant = false)
+        {
+            Context.ProcurementTenderSubmissionReceipts.RemoveRange(Context.ProcurementTenderSubmissionReceipts);
+            Context.ProcurementTenderControls.RemoveRange(Context.ProcurementTenderControls);
+            var source = Context.Set<ProcurementSourcingCase>().Single(item => item.Id == SourcingCase.Id);
+            source.AuthorityRouteId = null;
+            source.AuthorityRouteReference = null;
+            var tender = Context.Tenders.Single(item => item.Id == Tender.Id);
+            tender.Status = "Published";
+            tender.PublishDate = DateTime.UtcNow.AddDays(-1);
+            tender.SubmissionDeadline = deadline;
+            Context.Set<TenderBid>().Add(new TenderBid
+            {
+                Id = Guid.NewGuid(), TenantId = otherTenant ? Guid.NewGuid() : TenantId,
+                TenderId = tender.Id, BusinessPartnerId = Guid.NewGuid(), BidNumber = "BID-STANDARD-1",
+                Status = bidStatus, SubmittedDate = minutes < 0 ? DateTime.UtcNow.AddMinutes(minutes) : deadline.AddMinutes(minutes), Currency = "GHS"
+            });
             Context.SaveChanges();
             Context.ChangeTracker.Clear();
         }

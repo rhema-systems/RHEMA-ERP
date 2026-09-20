@@ -15,9 +15,14 @@ import {
     XCircle,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { getProcurementProblemMessage as getApiProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Table,
@@ -35,6 +40,7 @@ function getStatusBadge(status: UnitJournalEntryStatus) {
         Draft: 'bg-gray-500',
         PendingApproval: 'bg-orange-500',
         Approved: 'bg-blue-500',
+        ReadyToPost: 'bg-emerald-700',
         Posted: 'bg-green-600',
         Rejected: 'bg-red-500',
         Reversed: 'bg-purple-500',
@@ -43,6 +49,7 @@ function getStatusBadge(status: UnitJournalEntryStatus) {
         Draft: 'Draft',
         PendingApproval: 'Pending Approval',
         Approved: 'Approved',
+        ReadyToPost: 'Ready to Post',
         Posted: 'Posted',
         Rejected: 'Rejected',
         Reversed: 'Reversed',
@@ -75,6 +82,7 @@ function totalQuantity(lines: UnitJournalEntryLine[] = []) {
 }
 
 export default function UnitJournalEntryDetailPage() {
+    const { hasPermission } = useAuth();
     const params = useParams();
     const router = useRouter();
     const id = params.id as string;
@@ -82,6 +90,8 @@ export default function UnitJournalEntryDetailPage() {
     const [entry, setEntry] = useState<UnitJournalEntry | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isWorking, setIsWorking] = useState(false);
+    const [confirmation, setConfirmation] = useState<'reject' | 'reverse' | 'delete' | null>(null);
+    const [reason, setReason] = useState('');
 
     const loadEntry = useCallback(async () => {
         try {
@@ -89,7 +99,7 @@ export default function UnitJournalEntryDetailPage() {
             const data = await unitAccountsDataService.getUnitJournalEntryById(id);
             setEntry(data);
         } catch (error: any) {
-            toast.error(error?.message || 'Failed to load unit journal entry.');
+            toast.error(getApiProblemMessage(error, 'Failed to load unit journal entry.'));
             setEntry(null);
         } finally {
             setIsLoading(false);
@@ -100,14 +110,16 @@ export default function UnitJournalEntryDetailPage() {
         loadEntry();
     }, [loadEntry]);
 
-    const runAction = async (action: () => Promise<UnitJournalEntry>, successMessage: string) => {
+    const runAction = async (action: () => Promise<UnitJournalEntry>, successMessage: string | ((result: UnitJournalEntry) => string)) => {
         try {
             setIsWorking(true);
             const updated = await action();
-            setEntry(updated);
-            toast.success(successMessage);
+            setEntry(current => ({ ...current, ...updated, lines: updated.lines ?? current?.lines }));
+            toast.success(typeof successMessage === 'function' ? successMessage(updated) : successMessage);
+            return true;
         } catch (error: any) {
-            toast.error(error?.message || 'Action failed.');
+            toast.error(getApiProblemMessage(error, 'Action failed.'));
+            return false;
         } finally {
             setIsWorking(false);
         }
@@ -115,7 +127,7 @@ export default function UnitJournalEntryDetailPage() {
 
     const handleSubmit = () => runAction(
         () => unitAccountsDataService.submitUnitJournalEntry(id),
-        'Unit journal entry submitted for approval.'
+        result => result.approvalRequired === false ? 'Unit journal entry is ready to post.' : 'Unit journal entry submitted for approval.'
     );
 
     const handleApprove = () => runAction(
@@ -129,40 +141,41 @@ export default function UnitJournalEntryDetailPage() {
     );
 
     const handleReject = async () => {
-        const reason = window.prompt('Enter rejection reason:');
-        if (!reason?.trim()) return;
-        await runAction(
+        if (!reason.trim()) return false;
+        return runAction(
             () => unitAccountsDataService.rejectUnitJournalEntry(id, reason.trim()),
             'Unit journal entry rejected.'
         );
     };
 
     const handleReverse = async () => {
-        const reason = window.prompt('Enter reversal reason:');
-        if (!reason?.trim()) return;
+        if (!reason.trim()) return false;
 
         try {
             setIsWorking(true);
             const reversal = await unitAccountsDataService.reverseUnitJournalEntry(id, reason.trim());
             toast.success(`Reversal ${reversal.entryNumber} posted.`);
             router.push(`/finance/unit-journal-entries/${reversal.id}`);
+            return true;
         } catch (error: any) {
-            toast.error(error?.message || 'Failed to reverse unit journal entry.');
+            toast.error(getApiProblemMessage(error, 'Failed to reverse unit journal entry.'));
+            return false;
         } finally {
             setIsWorking(false);
         }
     };
 
     const handleDelete = async () => {
-        if (!window.confirm('Delete this unit journal entry?')) return;
 
         try {
             setIsWorking(true);
             await unitAccountsDataService.deleteUnitJournalEntry(id);
             toast.success('Unit journal entry deleted.');
             router.push('/finance/unit-journal-entries');
+            return true;
         } catch (error: any) {
-            toast.error(error?.message || 'Failed to delete unit journal entry.');
+            toast.error(getApiProblemMessage(error, 'Failed to delete unit journal entry.'));
+            return false;
         } finally {
             setIsWorking(false);
         }
@@ -194,11 +207,12 @@ export default function UnitJournalEntryDetailPage() {
     }
 
     const lines = entry.lines ?? [];
-    const canDelete = entry.status === 'Draft' || entry.status === 'Rejected';
-    const canSubmit = entry.status === 'Draft' || entry.status === 'Rejected';
-    const canApprove = entry.status === 'PendingApproval';
-    const canPost = entry.status === 'Approved';
-    const canReverse = entry.status === 'Posted';
+    const canDelete = hasPermission('Finance.JournalEntries.Delete') && (entry.status === 'Draft' || entry.status === 'Rejected');
+    const canSubmit = hasPermission('Finance.JournalEntries.SubmitForApproval') && (entry.status === 'Draft' || entry.status === 'Rejected');
+    const canApprove = hasPermission('Finance.JournalEntries.Approve') && entry.approvalRequired !== false && entry.status === 'PendingApproval';
+    const canPost = hasPermission('Finance.JournalEntries.Post') && (entry.approvalRequired === false
+        ? entry.status === 'ReadyToPost' : entry.status === 'Approved');
+    const canReverse = hasPermission('Finance.JournalEntries.Reverse') && entry.status === 'Posted';
 
     return (
         <div className="space-y-6">
@@ -306,7 +320,7 @@ export default function UnitJournalEntryDetailPage() {
                                 {canSubmit && (
                                     <Button onClick={handleSubmit} disabled={isWorking}>
                                         <Send className="mr-2 h-4 w-4" />
-                                        Submit for Approval
+                                        Submit
                                     </Button>
                                 )}
                                 {canApprove && (
@@ -315,7 +329,7 @@ export default function UnitJournalEntryDetailPage() {
                                             <CheckCircle className="mr-2 h-4 w-4" />
                                             Approve
                                         </Button>
-                                        <Button variant="destructive" onClick={handleReject} disabled={isWorking}>
+                                        <Button variant="destructive" onClick={() => { setReason(''); setConfirmation('reject'); }} disabled={isWorking}>
                                             <XCircle className="mr-2 h-4 w-4" />
                                             Reject
                                         </Button>
@@ -324,17 +338,17 @@ export default function UnitJournalEntryDetailPage() {
                                 {canPost && (
                                     <Button onClick={handlePost} disabled={isWorking} className="bg-green-600 hover:bg-green-700">
                                         <CheckCircle className="mr-2 h-4 w-4" />
-                                        Post Entry
+                                        Post
                                     </Button>
                                 )}
                                 {canReverse && (
-                                    <Button variant="outline" onClick={handleReverse} disabled={isWorking}>
+                                    <Button variant="outline" onClick={() => { setReason(''); setConfirmation('reverse'); }} disabled={isWorking}>
                                         <RotateCcw className="mr-2 h-4 w-4" />
                                         Reverse
                                     </Button>
                                 )}
                                 {canDelete && (
-                                    <Button variant="outline" onClick={handleDelete} disabled={isWorking}>
+                                    <Button variant="outline" onClick={() => setConfirmation('delete')} disabled={isWorking}>
                                         <Trash2 className="mr-2 h-4 w-4" />
                                         Delete
                                     </Button>
@@ -384,10 +398,10 @@ export default function UnitJournalEntryDetailPage() {
                     {(entry.approvedAt || entry.postedAt) && (
                         <Card>
                             <CardHeader>
-                                <CardTitle className="text-base">Workflow History</CardTitle>
+                                <CardTitle className="text-base">{entry.approvalRequired === false ? 'History' : 'Workflow History'}</CardTitle>
                             </CardHeader>
                             <CardContent className="space-y-4">
-                                {entry.approvedAt && (
+                                {entry.approvalRequired !== false && entry.approvedAt && (
                                     <div className="flex items-start gap-3">
                                         <CheckCircle className="h-4 w-4 text-green-600 mt-1" />
                                         <div>
@@ -409,7 +423,7 @@ export default function UnitJournalEntryDetailPage() {
                         </Card>
                     )}
 
-                    {entry.rejectionReason && (
+                    {entry.approvalRequired !== false && entry.rejectionReason && (
                         <Card className="border-destructive">
                             <CardHeader>
                                 <CardTitle className="text-base text-destructive">Rejection Reason</CardTitle>
@@ -421,6 +435,17 @@ export default function UnitJournalEntryDetailPage() {
                     )}
                 </div>
             </div>
+            <ConfirmationDialog open={confirmation !== null}
+                onOpenChange={open => { if (!open) setConfirmation(null); }}
+                title={confirmation === 'reject' ? 'Reject unit journal entry' : confirmation === 'reverse' ? 'Reverse unit journal entry' : 'Delete unit journal entry'}
+                description={confirmation === 'delete' ? 'Delete this saved draft?' : 'Enter a reason for this action.'}
+                confirmText={confirmation === 'reject' ? 'Reject' : confirmation === 'reverse' ? 'Reverse' : 'Delete'}
+                variant="destructive" isLoading={isWorking}
+                confirmDisabled={confirmation !== 'delete' && !reason.trim()}
+                onConfirm={() => confirmation === 'reject' ? handleReject() : confirmation === 'reverse' ? handleReverse() : handleDelete()}>
+                {confirmation !== 'delete' && <div className="space-y-2"><Label htmlFor="unit-journal-reason">Reason</Label>
+                    <Textarea id="unit-journal-reason" value={reason} onChange={event => setReason(event.target.value)} maxLength={500} /></div>}
+            </ConfirmationDialog>
         </div>
     );
 }

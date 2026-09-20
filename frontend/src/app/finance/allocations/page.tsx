@@ -101,6 +101,8 @@ function getAllocationTypeBadge(type: AllocationType) {
 
 function getRunBatchStatusBadge(status: AllocationRunBatchStatus) {
     switch (status) {
+        case 'ReadyToPost':
+            return <Badge className="bg-blue-100 text-blue-800">Ready to post</Badge>;
         case 'Draft':
             return <Badge variant="secondary">Draft</Badge>;
         case 'PendingApproval':

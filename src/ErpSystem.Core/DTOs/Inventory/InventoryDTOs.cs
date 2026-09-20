@@ -10,6 +10,7 @@ namespace ErpSystem.Core.DTOs.Inventory;
 /// </summary>
 public class InventoryItemDto
 {
+    public InventoryItemPostingAccountsDto PostingAccounts { get; set; } = new();
     public Guid Id { get; set; }
     public string ItemCode { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
@@ -145,6 +146,8 @@ public class InventoryItemDetailDto : InventoryItemDto
 /// </summary>
 public class CreateInventoryItemDto
 {
+    // Omitted values preserve mappings; explicit null account values clear them.
+    public InventoryItemPostingAccountsDto? PostingAccounts { get; set; }
     // === BASIC INFO TAB ===
     [Required]
     public string ItemCode { get; set; } = string.Empty;
@@ -724,6 +727,7 @@ public class WarehouseLocationDto
     public string? Description { get; set; }
     public string LocationType { get; set; } = string.Empty;
     public Guid? ParentLocationId { get; set; }
+    public bool IsDefault { get; set; }
     public bool IsActive { get; set; }
     public bool IsPickingLocation { get; set; }
     public bool IsReceivingLocation { get; set; }
@@ -819,6 +823,7 @@ public class CreateWarehouseLocationDto
     public string LocationType { get; set; } = "Bin";
 
     public Guid? ParentLocationId { get; set; }
+    public bool IsDefault { get; set; }
 
     public bool IsPickingLocation { get; set; } = true;
     public bool IsReceivingLocation { get; set; } = true;
@@ -1082,6 +1087,7 @@ public class ReorderRequiredDto
 /// </summary>
 public class StockAdjustmentDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string AdjustmentNumber { get; set; } = string.Empty;
     public DateTime AdjustmentDate { get; set; }

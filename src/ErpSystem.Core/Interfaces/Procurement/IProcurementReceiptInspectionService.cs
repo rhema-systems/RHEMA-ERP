@@ -24,7 +24,7 @@ public interface IProcurementReceiptInspectionStore
     Task SetMutationContextAsync(Guid inspectionCaseId, CancellationToken cancellationToken = default);
     Task SetWorkflowRebindContextAsync(
         Guid inspectionCaseId,
-        Guid workflowDefinitionId,
+        Guid? workflowDefinitionId,
         CancellationToken cancellationToken = default);
     Task ClearMutationContextAsync(CancellationToken cancellationToken = default);
 }

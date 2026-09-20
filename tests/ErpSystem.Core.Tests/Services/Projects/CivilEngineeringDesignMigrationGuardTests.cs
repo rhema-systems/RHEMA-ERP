@@ -12,9 +12,9 @@ public sealed class CivilEngineeringDesignMigrationGuardTests
     {
         var root = FindRepositoryRoot();
         var migration = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
         var metadata = File.ReadAllText(Path.Combine(
-            root, "src", "ErpSystem.Data", "Migrations", "FastBuildMigrationMetadata.cs"));
+            root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "FastBuildMigrationMetadata.cs"));
         var preflight = File.ReadAllText(Path.Combine(
             root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
 

@@ -242,11 +242,13 @@ public class GlobalExceptionHandlingMiddleware
                 response.Detail = conflictEx.Message ?? "The request conflicts with the current state of the resource.";
                 break;
 
-            case InvalidOperationException:
+            case InvalidOperationException invalidOperationException:
                 response.Title = "Invalid Operation";
                 response.Code = "INVALID_OPERATION";
                 response.Status = (int)HttpStatusCode.BadRequest;
-                response.Detail = "The operation is not valid for the current state of the object.";
+                response.Detail = string.IsNullOrWhiteSpace(invalidOperationException.Message)
+                    ? "The operation is not valid for the current state of the object."
+                    : invalidOperationException.Message;
                 break;
 
             case ArgumentException:

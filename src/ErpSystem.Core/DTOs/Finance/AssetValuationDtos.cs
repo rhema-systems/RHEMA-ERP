@@ -28,6 +28,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? ValuationReportReference { get; set; }
         public string? Reason { get; set; }
         public string? Notes { get; set; }
+        public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
     }
 
     /// <summary>
@@ -49,6 +50,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public string? ValuationReportReference { get; set; }
         public string? Reason { get; set; }
         public string? Notes { get; set; }
+        public FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
     }
 
     /// <summary>
@@ -102,6 +104,7 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime? FailedAt { get; set; }
         public string? FailureReason { get; set; }
         public DateTime CreatedAt { get; set; }
+        public FinanceSourceDocumentDimensionDto? FinanceDimensions { get; set; }
     }
 
     public sealed class RequestAssetValuationCorrectionDto

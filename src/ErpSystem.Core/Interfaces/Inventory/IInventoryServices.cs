@@ -197,6 +197,9 @@ public interface IInventoryTransferService
 /// </summary>
 public interface IPhysicalCountService
 {
+    Task<bool> ReviewCountAsync(Guid countId, Guid userId, PhysicalCountMutationRequest request);
+    Task<bool> SubmitReviewedCountAsync(Guid countId, Guid userId, PhysicalCountMutationRequest request);
+    Task RetainImportedCountSheetAsync(Guid countId, PhysicalCountSheetBinding sheet, Guid userId, string idempotencyKey);
     // Query operations
     Task<IEnumerable<PhysicalCountDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null);
     Task<IEnumerable<PhysicalCountDto>> GetFilteredAsync(PhysicalCountFilterDto filter);
@@ -250,6 +253,15 @@ public interface IInventoryValuationService
     /// A retry must never reuse entities that were detached by a rolled-back attempt.
     /// </summary>
     void ResetProcessingAttempt();
+
+    /// <summary>Restores (or reverses) the captured original issue value of a governed Store Return Voucher line.</summary>
+    Task<decimal> ProcessReturnAsync(Guid returnVoucherLineId, bool reverse = false);
+
+    /// <summary>Moves a governed transfer line into its retained in-transit carrying-value ledger.</summary>
+    Task<decimal> ProcessTransferDispatchAsync(Guid transferItemId, Guid actionId, Guid warehouseId, Guid locationId, decimal quantity);
+
+    /// <summary>Receives a governed transfer line at its retained outbound value, not a new purchase cost.</summary>
+    Task<decimal> ProcessTransferReceiptAsync(Guid transferItemId, Guid actionId, Guid warehouseId, Guid locationId, decimal quantity, bool returnToSource = false);
 
     Task<InventoryValuationSummaryDto> GetItemValuationAsync(Guid inventoryItemId);
     Task<IEnumerable<InventoryCostLayerDto>> GetCostLayersAsync(Guid inventoryItemId, Guid? warehouseId = null);
@@ -308,7 +320,10 @@ public interface IInventoryValuationService
         string? lotNumber = null,
         string? serialNumber = null,
         DateTime? expirationDate = null,
-        Guid? reversalSourceId = null);
+        Guid? reversalSourceId = null,
+        DateTime? valuationTimestamp = null,
+        decimal? fifoOpeningFallbackCost = null,
+        Guid? reversalAdjustmentLineId = null);
 }
 
 /// <summary>
@@ -319,7 +334,11 @@ public interface ILandedCostService
     Task<IEnumerable<LandedCostDto>> GetAllAsync();
     Task<IEnumerable<LandedCostDto>> GetByGRNAsync(Guid grnId);
     Task<LandedCostDetailDto?> GetByIdAsync(Guid id);
+    Task<List<LandedCostDetailDto>> GetByPurchaseOrderAsync(Guid purchaseOrderId);
+    Task<List<LandedCostDetailDto>> GetByInvoiceAsync(Guid invoiceId);
+    Task<LandedCostDetailDto> LinkInvoiceAsync(Guid id, Guid itemId, Guid invoiceId, Guid userId);
     Task<LandedCostDto> CreateAsync(CreateLandedCostDto dto, Guid userId);
+    Task<LandedCostDto> UpdateDraftAsync(Guid id, UpdateLandedCostDto dto, Guid userId);
     Task<LandedCostDto> InitializeFromPurchaseOrderPlanAsync(Guid goodsReceiptNoteId, Guid userId);
     Task<bool> AllocateCostsAsync(Guid landedCostId, Guid userId);
     Task<bool> SetManualAllocationsAsync(Guid landedCostId, Guid landedCostItemId, SetManualLandedCostAllocationsDto dto, Guid userId);
@@ -333,6 +352,7 @@ public interface ILandedCostService
 /// </summary>
 public interface IPurchaseReturnService
 {
+    Task<IEnumerable<GoodsReceiptNoteDetailDto>> GetSourceGrnsAsync();
     Task<IEnumerable<PurchaseReturnDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null);
     Task<IEnumerable<PurchaseReturnDto>> GetBySupplierAsync(Guid supplierId);
     Task<IEnumerable<PurchaseReturnDto>> GetByWarehouseAsync(Guid warehouseId);
@@ -340,6 +360,7 @@ public interface IPurchaseReturnService
     Task<PurchaseReturnDetailDto?> GetByIdAsync(Guid id);
     Task<PurchaseReturnDetailDto?> GetByReturnNumberAsync(string returnNumber);
     Task<PurchaseReturnDto> CreateAsync(CreatePurchaseReturnDto dto, Guid userId);
+    Task<PurchaseReturnDto> UpdateAsync(Guid id, CreatePurchaseReturnDto dto, Guid userId);
     Task<bool> SubmitForApprovalAsync(Guid returnId, Guid userId);
     Task<bool> ApproveAsync(Guid returnId, Guid userId);
     Task<bool> RejectAsync(Guid returnId, string reason, Guid userId);

@@ -11,6 +11,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services;
+using ErpSystem.Core.Services.Inventory;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -45,6 +46,7 @@ public class InventoryItemsController : ControllerBase
     private readonly IProcurementAccessControlService _access;
     private readonly IAuditLogService? _auditLog;
     private readonly IUnitOfWork? _unitOfWork;
+    private readonly IWarehouseDefaultLocationService? _defaultLocations;
 
     public InventoryItemsController(
         ICurrentUserProvider currentUserProvider,
@@ -66,7 +68,8 @@ public class InventoryItemsController : ControllerBase
         IInventoryItemIdentifierService? identifierService = null,
         IAuditLogService? auditLog = null,
         IUnitOfWork? unitOfWork = null,
-        IInventoryItemProfileService? profileService = null)
+        IInventoryItemProfileService? profileService = null,
+        IWarehouseDefaultLocationService? defaultLocations = null)
     {
         _currentUserProvider = currentUserProvider;
         _inventoryItemRepository = inventoryItemRepository;
@@ -88,6 +91,32 @@ public class InventoryItemsController : ControllerBase
         _profileService = profileService;
         _auditLog = auditLog;
         _unitOfWork = unitOfWork;
+        _defaultLocations = defaultLocations ?? (unitOfWork == null ? null : new WarehouseDefaultLocationService(unitOfWork, currentUserProvider));
+    }
+
+    /// <summary>
+    /// Minimal GL identities for the existing internal, tenant-scoped item editor, without Finance-wide access.
+    /// </summary>
+    [HttpGet("posting-accounts")]
+    public async Task<ActionResult<IReadOnlyList<BusinessPartnerPostingAccountOptionDto>>> GetPostingAccounts()
+    {
+        // This is an item-editor lookup, not a governed master-data mutation. Requiring the
+        // Stores Manager mutation privilege here denied both ordinary stores users and the
+        // administrator while the existing item editor and partner lookup remained available.
+        // Saving still uses the existing maker/checker and posting-account validation paths.
+        if (_currentUserProvider.IsExternalUser || User.Identity?.IsAuthenticated != true ||
+            !Guid.TryParse(User.FindFirst("tenant_id")?.Value, out var tenantId) || tenantId == Guid.Empty ||
+            _currentUserProvider.TenantId != tenantId)
+            return Forbid();
+        if (_unitOfWork is null) return StatusCode(StatusCodes.Status503ServiceUnavailable);
+        var accounts = await _unitOfWork.Repository<ErpSystem.Core.Entities.Finance.Account>()
+            .GetQueryable(account => account.TenantId == tenantId && !account.IsDeleted &&
+                account.Status == AccountStatus.Active && (account.AllowDirectPosting || account.IsControlAccount))
+            .AsNoTracking().OrderBy(account => account.AccountNumber).ThenBy(account => account.AccountName)
+            .Select(account => new BusinessPartnerPostingAccountOptionDto(account.Id, account.AccountCode, account.AccountNumber,
+                account.AccountName, account.AccountType, account.Status, account.AllowDirectPosting, account.IsControlAccount))
+            .ToListAsync(HttpContext.RequestAborted);
+        return Ok(accounts);
     }
 
     /// <summary>
@@ -325,6 +354,7 @@ public class InventoryItemsController : ControllerBase
             }
             else
             {
+                await ValidatePostingAccountsWithoutProfileServiceAsync(inventoryItem);
                 NormalizeIdentifiers(inventoryItem);
                 if (_identifierService is not null)
                 {
@@ -338,9 +368,37 @@ public class InventoryItemsController : ControllerBase
                 }
             }
 
-            var createdItem = await _inventoryItemRepository.AddAsync(inventoryItem);
-            var auditQueued = await QueueAuditAsync("InventoryItem.Created", createdItem, null);
-            await _inventoryItemRepository.SaveChangesAsync();
+            var assignWarehouse = createDto.DefaultWarehouseId.HasValue && createDto.DefaultWarehouseId != Guid.Empty &&
+                createDto.ItemType is ItemType.StockItem or ItemType.FixedAsset;
+            if (assignWarehouse)
+            {
+                var warehouse = await _warehouseRepository.GetByIdAsync(createDto.DefaultWarehouseId!.Value);
+                if (warehouse == null || warehouse.TenantId != inventoryItem.TenantId || warehouse.IsDeleted || !warehouse.IsActive)
+                    return BadRequest("Select an active default warehouse in the current tenant.");
+                if (_unitOfWork == null || _defaultLocations == null)
+                    throw new InvalidOperationException("Default warehouse assignment is unavailable.");
+            }
+            var createdItem = inventoryItem;
+            var auditQueued = false;
+            async Task PersistCreatedAsync(CancellationToken ct)
+            {
+                createdItem = await _inventoryItemRepository.AddAsync(inventoryItem);
+                auditQueued = await QueueAuditAsync("InventoryItem.Created", createdItem, null);
+                await _inventoryItemRepository.SaveChangesAsync();
+                if (assignWarehouse)
+                {
+                    await _warehouseQuantityRepository.AddAsync(new WarehouseQuantity
+                    {
+                        TenantId = inventoryItem.TenantId, WarehouseId = createDto.DefaultWarehouseId!.Value,
+                        InventoryItemId = createdItem.Id, AverageCost = createdItem.AverageCost,
+                        CreatedById = _currentUserProvider.UserId
+                    });
+                    await _unitOfWork!.SaveChangesAsync(ct);
+                    await _defaultLocations!.EnsureItemAssignmentAsync(createDto.DefaultWarehouseId!.Value, createdItem.Id, _currentUserProvider.UserId, ct);
+                }
+            }
+            if (_unitOfWork != null) await _unitOfWork.ExecuteInTransactionAsync(PersistCreatedAsync, HttpContext.RequestAborted);
+            else await PersistCreatedAsync(HttpContext.RequestAborted);
             if (!auditQueued) await AuditFallbackAsync("InventoryItem.Created", createdItem, null);
 
             var itemDto = _mapper.Map<InventoryItemDto>(createdItem);
@@ -358,6 +416,7 @@ public class InventoryItemsController : ControllerBase
         {
             return Forbid();
         }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error creating inventory item");
@@ -416,6 +475,7 @@ public class InventoryItemsController : ControllerBase
             }
             else
             {
+                await ValidatePostingAccountsWithoutProfileServiceAsync(existingItem);
                 NormalizeIdentifiers(existingItem);
                 if (_identifierService is not null)
                 {
@@ -1302,7 +1362,10 @@ public class InventoryItemsController : ControllerBase
                 CurrentStock = wq.CurrentStock,
                 AvailableStock = wq.AvailableStock,
                 AllocatedStock = wq.AllocatedStock,
-                UnitCost = wq.InventoryItem.StandardCost,
+                // This is stock held by the selected warehouse, not today's
+                // standard/purchase price. Posting still derives exact carrying
+                // value from the governed bin valuation ledger.
+                UnitCost = wq.AverageCost,
                 DailyRentalRate = wq.InventoryItem.DailyRentalRate,
                 CategoryName = wq.InventoryItem.Category?.Name
             });
@@ -1458,8 +1521,16 @@ public class InventoryItemsController : ControllerBase
         }
     };
 
+    private async Task ValidatePostingAccountsWithoutProfileServiceAsync(InventoryItem item)
+    {
+        if (!InventoryItemPostingAccounts.GetMappings(item).Any(mapping => mapping.AccountId.HasValue)) return;
+        if (_unitOfWork is null) throw new InvalidOperationException("Inventory posting-account validation is unavailable.");
+        await InventoryItemPostingAccounts.ValidateAsync(_unitOfWork, item, HttpContext.RequestAborted);
+    }
+
     private static object SnapshotProfile(InventoryItem item) => new
     {
+        PostingAccounts = InventoryItemPostingAccounts.Read(item),
         item.ItemCode,
         item.Name,
         item.Description,

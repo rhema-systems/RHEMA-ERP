@@ -57,6 +57,7 @@ public sealed class EhcTicketListItemDto
     public DateTime? FeedbackSubmittedAt { get; set; }
 
     // Internal-only (not populated for external users)
+    public string? AssignedOrganizationUnitName { get; set; }
     public string? AssignedDepartmentName { get; set; }
     public string? AssignedToName { get; set; }
     public string? RequesterName { get; set; }
@@ -65,6 +66,7 @@ public sealed class EhcTicketListItemDto
 
 public sealed class EhcTicketDetailDto
 {
+    public EhcPropertyListingContextDto? PropertyListing { get; set; }
     public Guid Id { get; set; }
     public string TicketNumber { get; set; } = string.Empty;
     public EhcTicketType TicketType { get; set; }
@@ -91,6 +93,8 @@ public sealed class EhcTicketDetailDto
     public DateTime? ClosedAt { get; set; }
 
     // Internal-only (not populated for external users)
+    public Guid? AssignedOrganizationUnitId { get; set; }
+    public string? AssignedOrganizationUnitName { get; set; }
     public Guid? AssignedDepartmentId { get; set; }
     public string? AssignedDepartmentName { get; set; }
     public Guid? AssignedToUserId { get; set; }

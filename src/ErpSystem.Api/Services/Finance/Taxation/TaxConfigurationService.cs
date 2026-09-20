@@ -54,7 +54,10 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             return taxes.Select(MapToTaxDto).ToList();
         }
 
-        public async Task<IReadOnlyList<TaxDto>> GetActiveTaxesAsync(TaxApplicability? applicability = null, CancellationToken cancellationToken = default)
+        public async Task<IReadOnlyList<TaxDto>> GetActiveTaxesAsync(
+            TaxApplicability? applicability = null,
+            TaxCategory? category = null,
+            CancellationToken cancellationToken = default)
         {
             var query = _context.Set<Tax>()
                 .Where(t => t.TenantId == TenantId && t.IsActive && !t.IsDeleted);
@@ -62,6 +65,11 @@ namespace ErpSystem.Api.Services.Finance.Taxation
             if (applicability.HasValue)
             {
                 query = query.Where(t => t.Applicability == applicability.Value || t.Applicability == TaxApplicability.Both);
+            }
+
+            if (category.HasValue)
+            {
+                query = query.Where(t => t.Category == category.Value);
             }
 
             var taxes = await query.OrderBy(t => t.Code).ToListAsync(cancellationToken);

@@ -24,6 +24,7 @@ export enum ProcurementQualifiedListEntryStatus {
 }
 
 export interface ProcurementPrequalificationSummary {
+  approvalRequired?: boolean;
   id: string;
   reference: string;
   title: string;
@@ -97,7 +98,7 @@ export interface ProcurementPrequalificationExercise extends ProcurementPrequali
   policySetCode: string;
   policySetVersion: number;
   sourceConfigurationProfileId: string;
-  workflowDefinitionId: string;
+  workflowDefinitionId?: string | null;
   workflowInstanceId?: string;
   advertisementReference?: string;
   advertisementEvidenceReference?: string;
@@ -118,6 +119,7 @@ export interface ProcurementPrequalificationExercise extends ProcurementPrequali
 }
 
 export interface ProcurementPrequalificationReadiness {
+  approvalRequired?: boolean;
   categories: Array<{ id: string; code: string; name: string }>;
   policies: Array<{ id: string; code: string; name: string; version: number; sourceConfigurationProfileId: string }>;
   workflows: Array<{ id: string; name: string; version: number }>;
@@ -134,7 +136,7 @@ export interface CreateProcurementPrequalificationExercise {
   validityMonths: number;
   passingScore: number;
   policySetId: string;
-  workflowDefinitionId: string;
+  workflowDefinitionId?: string | null;
   criteria: Array<{
     code: string;
     name: string;

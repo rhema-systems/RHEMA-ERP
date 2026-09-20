@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { ArrowLeft, CheckCircle2, Copy, Edit, Eye, FileCheck2, RefreshCw, ShieldCheck, Trash2 } from 'lucide-react';
 
 import { ProcurementDecisionEditor } from '@/components/procurement/configuration/ProcurementDecisionEditor';
+import { WithdrawSupplierPolicyDecision } from '@/components/procurement/configuration/WithdrawSupplierPolicyDecision';
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -34,6 +35,7 @@ const errorMessage = (error: unknown) => {
 };
 
 const statusBadge = (decision: ProcurementConfigurationDecision) => {
+  if (decision.status === 'Withdrawn') return <Badge variant="secondary">Withdrawn · inactive</Badge>;
   if (decision.isComplete) return <Badge><CheckCircle2 className="mr-1 h-3 w-3" />Complete</Badge>;
   if (decision.status === 'Rejected') return <Badge variant="destructive">Rejected</Badge>;
   return <Badge variant="secondary">{decision.status}</Badge>;
@@ -43,9 +45,10 @@ export default function ProcurementPolicyProfileDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const { hasRole } = useAuth();
+  const { hasRole, hasPermission } = useAuth();
   const { toast } = useToast();
   const isSuperAdmin = hasRole('SuperAdmin');
+  const canManagePolicy = isSuperAdmin || hasPermission('procurement.access.manage');
   const [selectedDecisionKey, setSelectedDecisionKey] = useState<string>();
   const [profileEditorOpen, setProfileEditorOpen] = useState(false);
   const [cloneOpen, setCloneOpen] = useState(false);
@@ -147,7 +150,7 @@ export default function ProcurementPolicyProfileDetailPage() {
         </div>
       </div>
 
-      {profile.lifecycleStatus !== 'Draft' && <Alert><Eye className="h-4 w-4" /><AlertTitle>Immutable policy version</AlertTitle><AlertDescription>Published and retired profiles are read-only. Clone this version to make governed changes.</AlertDescription></Alert>}
+      {profile.lifecycleStatus !== 'Draft' && <Alert><Eye className="h-4 w-4" /><AlertTitle>Controlled policy version</AlertTitle><AlertDescription>Published values and evidence are read-only. Clone this version for revisions. Authorized administrators can separately withdraw the optional supplier policy with an audited reason.</AlertDescription></Alert>}
       {!isSuperAdmin && editable && <Alert><ShieldCheck className="h-4 w-4" /><AlertTitle>Preparation access</AlertTitle><AlertDescription>Tenant administrators can prepare and validate drafts. Only a SuperAdmin can approve decisions or publish the profile.</AlertDescription></Alert>}
       {conflictMessage && <Alert variant="destructive"><AlertTitle>Concurrent change detected</AlertTitle><AlertDescription className="flex flex-wrap items-center justify-between gap-3"><span>{conflictMessage}</span><Button variant="outline" size="sm" onClick={() => refresh()}>Reload profile</Button></AlertDescription></Alert>}
 
@@ -195,6 +198,7 @@ export default function ProcurementPolicyProfileDetailPage() {
       <Dialog open={Boolean(selectedDecision)} onOpenChange={open => { if (!open) setSelectedDecisionKey(undefined); }}>
         <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-4xl">
           {selectedDecision && <><DialogHeader><DialogTitle>{selectedDecision.decisionKey} · {selectedDecision.displayName}</DialogTitle><DialogDescription>{selectedDecision.description}</DialogDescription></DialogHeader><ProcurementDecisionEditor key={`${selectedDecision.id}-${selectedDecision.rowVersion}`} profileId={id} decision={selectedDecision} editable={editable} isSuperAdmin={isSuperAdmin} onChanged={refresh} /></>}
+          {selectedDecision && <WithdrawSupplierPolicyDecision profileId={id} profileStatus={profile.lifecycleStatus} decision={selectedDecision} canManage={canManagePolicy} onChanged={refresh} />}
         </DialogContent>
       </Dialog>
 

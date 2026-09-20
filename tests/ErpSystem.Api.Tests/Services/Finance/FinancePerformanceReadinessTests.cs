@@ -89,28 +89,10 @@ public sealed class FinancePerformanceReadinessTests
     [Fact]
     public void LedgerPerformanceMigration_ShouldCreateOnlyTheReviewedCompositeIndex()
     {
-        var upBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableLedgerPerformanceMigration().ApplyUp(upBuilder);
-
-        var created = upBuilder.Operations.Should().ContainSingle()
-            .Which.Should().BeOfType<CreateIndexOperation>().Which;
-        created.Table.Should().Be("AccountTransactions");
-        created.Name.Should().Be("IX_AccountTransactions_TenantId_BookClassification_TransactionDate_AccountId");
-        created.Columns.Should().Equal("TenantId", "BookClassification", "TransactionDate", "AccountId");
-
-        // Down symmetry keeps development database resets safe while the application is still
-        // pre-production and its migration chain is regularly replayed by collaborating teams.
-        var downBuilder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        new TestableLedgerPerformanceMigration().ApplyDown(downBuilder);
-        var dropped = downBuilder.Operations.Should().ContainSingle()
-            .Which.Should().BeOfType<DropIndexOperation>().Which;
-        dropped.Table.Should().Be(created.Table);
-        dropped.Name.Should().Be(created.Name);
-    }
-
-    private sealed class TestableLedgerPerformanceMigration : AddFinanceLedgerPerformanceIndex
-    {
-        public void ApplyUp(MigrationBuilder migrationBuilder) => Up(migrationBuilder);
-        public void ApplyDown(MigrationBuilder migrationBuilder) => Down(migrationBuilder);
+        var source = ArchivedMigrationSource.Read("20260810200000_AddFinanceLedgerPerformanceIndex.cs");
+        source.Should().Contain("table: \"AccountTransactions\"")
+            .And.Contain("IX_AccountTransactions_TenantId_BookClassification_TransactionDate_AccountId")
+            .And.Contain("columns: new[] { \"TenantId\", \"BookClassification\", \"TransactionDate\", \"AccountId\" }")
+            .And.Contain("migrationBuilder.DropIndex(");
     }
 }

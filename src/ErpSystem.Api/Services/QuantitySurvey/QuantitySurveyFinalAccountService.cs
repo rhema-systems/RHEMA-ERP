@@ -175,7 +175,7 @@ public sealed class QuantitySurveyFinalAccountService(
             if (result.Outcome != WorkflowOutcome.Pending)
                 throw Conflict("The final-account workflow must stop at an independent review and approval step.");
             workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.FinalAccount)
-                .ApplySubmitOutcome(entity, result.Outcome, UserId);
+                .ApplySubmitOutcome(entity, result, UserId);
             entity.Status = ProjectFinalAccountStatuses.PendingApproval;
             entity.ApprovalStatus = "Pending";
             entity.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId;

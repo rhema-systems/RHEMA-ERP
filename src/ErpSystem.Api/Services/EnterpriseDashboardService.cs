@@ -264,6 +264,20 @@ public sealed class EnterpriseDashboardService
                     Available = true
                 });
         }
+        catch (Exception ex) when (ex is InventoryAnalyticsAuthorizationException or ProcurementAccessAuthorizationException)
+        {
+            _logger.LogInformation("Enterprise dashboard module {Module} is outside the actor's assigned access", module);
+
+            return new ModuleResult<T>(
+                fallback,
+                new EnterpriseDashboardModuleStatusDto
+                {
+                    Module = module,
+                    Available = false,
+                    AccessRestricted = true,
+                    Error = ex.Message
+                });
+        }
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Enterprise dashboard module {Module} failed", module);

@@ -17,8 +17,94 @@ using Xunit;
 
 namespace ErpSystem.Core.Tests.Services.Procurement;
 
-public sealed class TenderEvaluationServiceCommitteeTests
+public sealed partial class TenderEvaluationServiceCommitteeTests
 {
+    [Fact]
+    public async Task CommitteeProjectionAllowsFirstDraftWithoutStandaloneAssignment()
+    {
+        var fixture = new Fixture();
+        fixture.Evaluators.Setup(item => item.GetByUserIdAsync(fixture.UserId)).ReturnsAsync([]);
+        fixture.Committee.Setup(item => item.EnsureTenderEvaluatorAsync(fixture.TenderId,
+                It.IsAny<string>(), It.IsAny<CancellationToken>())).ReturnsAsync(fixture.Evaluator);
+        var draft = await fixture.Service.CreateEvaluationAsync(new CreateEvaluationDto
+            { TenderBidId = fixture.Bids[0].Id, TechnicalScore = 90 });
+        draft.Status.Should().Be("Draft");
+        fixture.Evaluations.Verify(item => item.CreateAsync(It.Is<TenderEvaluation>(evaluation =>
+            evaluation.TenderEvaluatorId == fixture.Evaluator.Id)), Times.Once);
+        fixture.Bids[0].Status.Should().Be("UnderEvaluation");
+        fixture.Evaluators.Verify(item => item.GetByUserIdAsync(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("update")]
+    [InlineData("submit")]
+    public async Task StandaloneAssignmentCannotBypassCommitteeMembership(string stage)
+    {
+        var fixture = new Fixture();
+        fixture.Committee.Setup(item => item.EnsureTenderEvaluatorAsync(fixture.TenderId,
+                It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new ProcurementEvaluationCommitteeAuthorizationException("Not appointed."));
+        var evaluation = fixture.Evaluation(fixture.Bids[0], fixture.Evaluator, "Draft");
+        fixture.Evaluations.Setup(item => item.GetByIdAsync(evaluation.Id)).ReturnsAsync(evaluation);
+        Func<Task> action = stage switch
+        {
+            "create" => () => fixture.Service.CreateEvaluationAsync(new CreateEvaluationDto { TenderBidId = fixture.Bids[0].Id }),
+            "update" => () => fixture.Service.UpdateEvaluationAsync(evaluation.Id, new UpdateEvaluationDto()),
+            _ => () => fixture.Service.SubmitEvaluationAsync(evaluation.Id, new SubmitEvaluationDto { ConfirmSubmission = true })
+        };
+        await action.Should().ThrowAsync<ProcurementEvaluationCommitteeAuthorizationException>();
+        fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ReportWaitsForAllCommitteeMembersEvenWhenTheirProjectionIsMissing(bool projectOtherMembers)
+    {
+        var fixture = new Fixture();
+        var second = new TenderEvaluator { Id = Guid.NewGuid(), TenantId = fixture.TenantId, UserId = Guid.NewGuid() };
+        var third = new TenderEvaluator { Id = Guid.NewGuid(), TenantId = fixture.TenantId, UserId = Guid.NewGuid() };
+        fixture.Committee.Setup(item => item.GetTenderScoringUserIdsAsync(fixture.TenderId,
+                It.IsAny<CancellationToken>())).ReturnsAsync(new[] { fixture.UserId, second.UserId, third.UserId });
+        fixture.Evaluators.Setup(item => item.GetByTenderIdAsync(fixture.TenderId))
+            .ReturnsAsync(projectOtherMembers ? [fixture.Evaluator, second, third] : [fixture.Evaluator]);
+        fixture.Evaluations.Setup(item => item.GetByBidIdAsync(fixture.Bids[0].Id))
+            .ReturnsAsync([fixture.Evaluation(fixture.Bids[0], fixture.Evaluator, "Submitted")]);
+        fixture.Evaluations.Setup(item => item.GetByBidIdAsync(fixture.Bids[1].Id)).ReturnsAsync([]);
+        var report = await fixture.Service.GetTenderEvaluationReportAsync(fixture.TenderId);
+        report.EvaluatedBids.Should().Be(0);
+        report.BidEvaluations.Single(item => item.BidId == fixture.Bids[0].Id).BidStatus.Should().NotBe("Evaluated");
+    }
+
+    [Theory]
+    [InlineData("create")]
+    [InlineData("update")]
+    [InlineData("submit")]
+    public async Task MismatchBlocksDraftAndFinalScoringBeforeAnyWrite(string stage)
+    {
+        var fixture = new Fixture();
+        var template = new EvaluationTemplate { Id = Guid.NewGuid(), TenantId = fixture.TenantId, ScoringMethod = "QCBS" };
+        fixture.Tenders.Setup(item => item.GetByIdAsync(fixture.TenderId)).ReturnsAsync(new Tender
+            { Id = fixture.TenderId, TenantId = fixture.TenantId, EvaluationTemplateId = template.Id, UseQCBSEvaluation = false });
+        var templates = new Mock<IGenericRepository<EvaluationTemplate>>();
+        templates.Setup(item => item.GetByIdAsync(template.Id)).ReturnsAsync(template);
+        fixture.UnitOfWork.Setup(item => item.Repository<EvaluationTemplate>()).Returns(templates.Object);
+        var evaluation = fixture.Evaluation(fixture.Bids[0], fixture.Evaluator, "Draft");
+        fixture.Evaluations.Setup(item => item.GetByIdAsync(evaluation.Id)).ReturnsAsync(evaluation);
+        Func<Task> action = stage switch
+        {
+            "create" => () => fixture.Service.CreateEvaluationAsync(new CreateEvaluationDto { TenderBidId = fixture.Bids[0].Id }),
+            "update" => () => fixture.Service.UpdateEvaluationAsync(evaluation.Id, new UpdateEvaluationDto { TechnicalScore = 90 }),
+            _ => () => fixture.Service.SubmitEvaluationAsync(evaluation.Id, new SubmitEvaluationDto { ConfirmSubmission = true })
+        };
+        (await action.Should().ThrowAsync<TenderEvaluationConfigurationException>())
+            .Which.Code.Should().Be("TENDER_EVALUATION_METHOD_MISMATCH");
+        fixture.Bids[0].Status.Should().Be("Opened");
+        evaluation.Status.Should().Be("Draft");
+        fixture.UnitOfWork.Verify(item => item.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task AssignedEvaluatorCanCreateDraftBeforeCommitteeIsActive()
     {
@@ -273,6 +359,8 @@ public sealed class TenderEvaluationServiceCommitteeTests
 
             CurrentUser.SetupGet(item => item.UserId).Returns(UserId);
             CurrentUser.SetupGet(item => item.TenantId).Returns(TenantId);
+            Tenders.Setup(repository => repository.GetByIdAsync(TenderId))
+                .ReturnsAsync(new Tender { Id = TenderId, TenantId = TenantId });
             BidsRepository.Setup(repository => repository.GetByIdAsync(Bids[0].Id))
                 .ReturnsAsync(Bids[0]);
             BidsRepository.Setup(repository => repository.GetByTenderIdAsync(TenderId))

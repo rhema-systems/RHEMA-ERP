@@ -60,6 +60,7 @@ public class PurchaseOrdersController : ControllerBase
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProcurementBudgetCommitmentLifecycleService _budgetCommitments;
     private readonly ILogger<PurchaseOrdersController> _logger;
+    private readonly PurchaseOrderLandedCostPlanService? _landedCostPlans;
 
     private const string SpreadToItemCost = "SpreadToItemCost";
     private const string GLExpense = "GLExpense";
@@ -91,7 +92,8 @@ public class PurchaseOrdersController : ControllerBase
         IProcurementReceiptDocumentService receiptDocuments,
         IProcurementControlEventService controlEvents,
         IProcurementBudgetCommitmentLifecycleService budgetCommitments,
-        ILogger<PurchaseOrdersController> logger)
+        ILogger<PurchaseOrdersController> logger,
+        PurchaseOrderLandedCostPlanService? landedCostPlans = null)
     {
         _purchaseOrderRepository = purchaseOrderRepository;
         _purchaseOrderItemRepository = purchaseOrderItemRepository;
@@ -117,6 +119,7 @@ public class PurchaseOrdersController : ControllerBase
         _controlEvents = controlEvents;
         _budgetCommitments = budgetCommitments;
         _logger = logger;
+        _landedCostPlans = landedCostPlans;
     }
 
     [HttpGet("source-options")]
@@ -269,6 +272,38 @@ public class PurchaseOrdersController : ControllerBase
         }
     }
 
+    private async Task<string?> ValidatePurchaseOrderLinesAsync(
+        IEnumerable<CreatePurchaseOrderItemDto> lines, string? orderType)
+    {
+        var index = 0;
+        foreach (var line in lines)
+        {
+            index++;
+            if (line.InventoryItemId == Guid.Empty) line.InventoryItemId = null;
+            InventoryItem? catalogue = null;
+            if (line.InventoryItemId.HasValue)
+                catalogue = await _unitOfWork.Repository<InventoryItem>().GetQueryable(item =>
+                    item.Id == line.InventoryItemId && item.TenantId == _currentUserService.TenantId &&
+                    !item.IsDeleted && item.Status == ItemStatus.Active)
+                    .SingleOrDefaultAsync(HttpContext.RequestAborted);
+            var error = PurchaseOrderLineRules.Validate(line.LineType, line.ItemDescription,
+                line.OrderedQuantity, line.UnitOfMeasure, line.UnitPrice, line.InventoryItemId, catalogue?.ItemType);
+            if (error != null) return $"Line {index}: {error}";
+            if (!PurchaseOrderLineRules.RequiresStock(line.LineType))
+            {
+                if (string.Equals(orderType, "Consignment", StringComparison.OrdinalIgnoreCase))
+                    return $"Line {index}: consignment orders require stock or fixed-asset lines.";
+                line.WarehouseId = null;
+            }
+            if (!line.InventoryItemId.HasValue)
+            {
+                line.ItemUnitOfMeasureId = null;
+                line.PriceListLineId = null;
+            }
+        }
+        return null;
+    }
+
     private async Task<List<ReceiptInventoryItemLink>>
         ResolveReceiptInventoryItemsAsync(
             PurchaseOrder purchaseOrder,
@@ -295,6 +330,14 @@ public class PurchaseOrdersController : ControllerBase
                     "The receipt line does not belong to the governed purchase order.");
             }
 
+            if (!PurchaseOrderLineRules.RequiresStock(poLine.LineType))
+            {
+                if (poLine.LineType == ItemType.Service && string.IsNullOrWhiteSpace(request.Notes))
+                    throw new ReceiptInventoryItemValidationException("RCV_SERVICE_EVIDENCE_REQUIRED", poLine.Id,
+                        "Record the service completion or acceptance evidence reference in the line notes.");
+                continue;
+            }
+
             if (poLine.InventoryItemId.HasValue &&
                 poLine.InventoryItemId.Value != Guid.Empty)
             {
@@ -303,6 +346,7 @@ public class PurchaseOrdersController : ControllerBase
                     .GetQueryable(item =>
                         item.TenantId == purchaseOrder.TenantId &&
                         item.Id == poLine.InventoryItemId.Value &&
+                        item.ItemType == poLine.LineType &&
                         !item.IsDeleted &&
                         item.Status == ItemStatus.Active)
                     .AnyAsync(cancellationToken);
@@ -337,6 +381,7 @@ public class PurchaseOrdersController : ControllerBase
                     item.TenantId == purchaseOrder.TenantId &&
                     !item.IsDeleted &&
                     item.Status == ItemStatus.Active &&
+                    item.ItemType == poLine.LineType &&
                     item.Name == itemName &&
                     item.UnitOfMeasure == uom)
                 .OrderBy(item => item.CreatedAt)
@@ -401,7 +446,7 @@ public class PurchaseOrdersController : ControllerBase
                 StandardCost = poLine.UnitPrice,
                 AverageCost = poLine.UnitPrice,
                 LastPurchaseCost = poLine.UnitPrice,
-                ItemType = ItemType.StockItem,
+                ItemType = poLine.LineType,
                 Status = ItemStatus.Active,
                 IsSerialTracked = category.DefaultSerialTracking,
                 IsLotTracked = category.DefaultLotTracking,
@@ -584,6 +629,7 @@ public class PurchaseOrdersController : ControllerBase
                 RequiredDate = po.RequiredDate,
                 PromisedDate = po.PromisedDate,
                 Status = po.Status,
+                ApprovalRequired = po.ApprovalRequired,
                 TotalAmount = po.TotalAmount,
                 Currency = po.Currency,
                 ItemCount = po.Items?.Count ?? 0,
@@ -642,6 +688,7 @@ public class PurchaseOrdersController : ControllerBase
                 PromisedDate = purchaseOrder.PromisedDate,
                 ReceivedDate = purchaseOrder.ReceivedDate,
                 Status = purchaseOrder.Status,
+                ApprovalRequired = purchaseOrder.ApprovalRequired,
                 ApprovedByName = purchaseOrder.ApprovedBy?.FirstName + " " + purchaseOrder.ApprovedBy?.LastName,
                 ApprovedAt = purchaseOrder.ApprovedAt,
                 SubTotal = purchaseOrder.SubTotal,
@@ -657,6 +704,7 @@ public class PurchaseOrdersController : ControllerBase
                 TotalAmount = purchaseOrder.TotalAmount,
                 Currency = purchaseOrder.Currency,
                 PaymentTerms = purchaseOrder.PaymentTerms,
+                SupplierDefaults = BusinessPartnerPostingDefaults.ReadSnapshot(purchaseOrder.SupplierDefaultsSnapshotJson),
                 ShippingTerms = purchaseOrder.ShippingTerms,
                 Terms = purchaseOrder.Terms,
                 Notes = purchaseOrder.Notes,
@@ -703,6 +751,7 @@ public class PurchaseOrdersController : ControllerBase
                     Id = item.Id,
                     PurchaseOrderId = item.PurchaseOrderId,
                     InventoryItemId = item.InventoryItemId ?? Guid.Empty,
+                    LineType = item.LineType,
                     SupplierItemCode = item.BusinessPartnerItemCode,
                     ItemDescription = item.ItemDescription,
                     OrderedQuantity = item.OrderedQuantity,
@@ -766,6 +815,44 @@ public class PurchaseOrdersController : ControllerBase
     /// </summary>
     [HttpPost]
     public async Task<ActionResult<PurchaseOrderDetailDto>> CreatePurchaseOrder([FromBody] CreatePurchaseOrderDto createDto)
+    {
+        try
+        {
+            return await _unitOfWork.ExecuteInStrategyAsync<ActionResult<PurchaseOrderDetailDto>>(
+                () => CreatePurchaseOrderAttemptAsync(createDto), HttpContext.RequestAborted);
+        }
+        catch (SupplierEligibilityException ex)
+        {
+            _logger.LogWarning(ex,
+                "Supplier eligibility denied purchase order creation for {SupplierId}", createDto.SupplierId);
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, eligibility = ex.Result });
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "PO_SOURCE_FORBIDDEN", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { code = "PO_SOURCE_FORBIDDEN", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (Exception ex) when (ex is ArgumentException or ValidationException)
+        {
+            return BadRequest(new { code = "PO_LANDED_COST_OR_LINE_INVALID", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error creating purchase order");
+            return StatusCode(500, "An error occurred while creating the purchase order");
+        }
+    }
+
+    // The source reservation and PO writes must share the retry strategy and
+    // serializable transaction. Each failed attempt rolls back before retry.
+    private async Task<ActionResult<PurchaseOrderDetailDto>> CreatePurchaseOrderAttemptAsync(CreatePurchaseOrderDto createDto)
     {
         var ownsSourceClaimTransaction = false;
         try
@@ -854,6 +941,9 @@ public class PurchaseOrdersController : ControllerBase
                     }
                 }
             }
+
+            var lineError = await ValidatePurchaseOrderLinesAsync(createDto.Items, orderType);
+            if (lineError != null) return BadRequest(lineError);
 
             // Generate purchase order number
             var orderNumber = await _purchaseOrderRepository.GenerateOrderNumberAsync();
@@ -947,6 +1037,7 @@ public class PurchaseOrdersController : ControllerBase
                 Id = Guid.NewGuid(),
                 PurchaseOrderId = purchaseOrder.Id,
                 InventoryItemId = itemDto.InventoryItemId,
+                LineType = itemDto.LineType,
                 BusinessPartnerItemCode = itemDto.SupplierItemCode,
                 ItemDescription = itemDto.ItemDescription,
                 OrderedQuantity = itemDto.OrderedQuantity,
@@ -969,6 +1060,11 @@ public class PurchaseOrdersController : ControllerBase
                 costAllocationMethod,
                 costApportionmentBasis);
             purchaseOrder.CostsAllocated = costAllocationMethod == SpreadToItemCost && totalAdditionalCost > 0;
+
+            if (_landedCostPlans != null)
+                await _landedCostPlans.StageAsync(purchaseOrder, newItems, createDto.PlannedLandedCostPlan, true);
+            else if (createDto.PlannedLandedCostPlan != null)
+                throw new InvalidOperationException("Planned landed cost service is unavailable.");
 
             // Create purchase order items
             foreach (var item in newItems)
@@ -998,56 +1094,13 @@ public class PurchaseOrdersController : ControllerBase
             var createdPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
             return CreatedAtAction(nameof(GetPurchaseOrder), new { id = purchaseOrder.Id }, createdPurchaseOrder);
         }
-        catch (SupplierEligibilityException ex)
-        {
-            _logger.LogWarning(ex,
-                "Supplier eligibility denied purchase order creation for {SupplierId}", createDto.SupplierId);
-            return UnprocessableEntity(new
-            {
-                code = ex.Code,
-                message = ex.Message,
-                eligibility = ex.Result
-            });
-        }
-        catch (ProcurementPurchaseOrderSourceValidationException ex)
-        {
-            return UnprocessableEntity(new
-            {
-                code = ex.Code,
-                message = ex.Message,
-                correlationId = CorrelationId()
-            });
-        }
-        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                code = "PO_SOURCE_FORBIDDEN",
-                message = ex.Message,
-                correlationId = CorrelationId()
-            });
-        }
-        catch (ProcurementAccessAuthorizationException ex)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new
-            {
-                code = "PO_SOURCE_FORBIDDEN",
-                message = ex.Message,
-                correlationId = CorrelationId()
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error creating purchase order");
-            return StatusCode(500, "An error occurred while creating the purchase order");
-        }
         finally
         {
             if (ownsSourceClaimTransaction && _unitOfWork.HasActiveTransaction)
             {
                 try
                 {
-                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                    await _unitOfWork.RollbackAsync(CancellationToken.None);
                 }
                 catch (Exception rollbackException)
                 {
@@ -1065,7 +1118,43 @@ public class PurchaseOrdersController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<PurchaseOrderDetailDto>> UpdatePurchaseOrder(Guid id, [FromBody] CreatePurchaseOrderDto updateDto)
     {
+        try
+        {
+            return await _unitOfWork.ExecuteInStrategyAsync<ActionResult<PurchaseOrderDetailDto>>(
+                () => UpdatePurchaseOrderAttemptAsync(id, updateDto), HttpContext.RequestAborted);
+        }
+        catch (ProcurementPurchaseOrderSourceValidationException ex)
+        {
+            return UnprocessableEntity(new { code = ex.Code, message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (ProcurementPurchaseOrderSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { code = "PO_SOURCE_FORBIDDEN", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (ProcurementAccessAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { code = "PO_SOURCE_FORBIDDEN", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (Exception ex) when (ex is ArgumentException or ValidationException)
+        {
+            return BadRequest(new { code = "PO_LANDED_COST_OR_LINE_INVALID", message = ex.Message, correlationId = CorrelationId() });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error updating purchase order {PurchaseOrderId}", id);
+            return StatusCode(500, "An error occurred while updating the purchase order");
+        }
+    }
+
+    // Resolve, reserve and replace the draft lines inside one retry attempt.
+    // Exceptions must escape this method so the provider can retry after rollback.
+    private async Task<ActionResult<PurchaseOrderDetailDto>> UpdatePurchaseOrderAttemptAsync(
+        Guid id, CreatePurchaseOrderDto updateDto)
+    {
         var ownsSourceCapacityTransaction = false;
+        var completed = false;
         try
         {
             if (!ModelState.IsValid)
@@ -1122,6 +1211,8 @@ public class PurchaseOrdersController : ControllerBase
                 .Where(item => !item.IsDeleted)
                 .ToList();
             var preserveExistingItems = updateDto.Items.Count == 0;
+            var lineError = await ValidatePurchaseOrderLinesAsync(updateDto.Items, updateDto.OrderType);
+            if (lineError != null) return BadRequest(lineError);
             if (preserveExistingItems && existingItems.Count == 0)
             {
                 return BadRequest("The purchase order has no existing lines to preserve.");
@@ -1258,27 +1349,31 @@ public class PurchaseOrdersController : ControllerBase
 
             await _purchaseOrderRepository.UpdatePurchaseOrderAsync(purchaseOrder);
 
+            var suppliedIds = updateDto.Items.Where(i => i.Id.HasValue).Select(i => i.Id!.Value).ToList();
+            if (suppliedIds.Distinct().Count() != suppliedIds.Count || suppliedIds.Any(lineId =>
+                !existingItems.Any(i => i.Id == lineId && i.TenantId == tenantId && !i.IsDeleted)))
+                throw new ArgumentException("A purchase-order line ID is duplicated or does not belong to this order.");
             var persistedItems = existingItems;
             if (!preserveExistingItems)
             {
-                foreach (var existingItem in existingItems)
+                foreach (var existingItem in existingItems.Where(i => !suppliedIds.Contains(i.Id)))
                 {
-                    await _purchaseOrderItemRepository.DeleteItemAsync(existingItem.Id);
+                    // Retain the line identity for old estimates and receipt references.
+                    existingItem.IsDeleted = true;
+                    existingItem.DeletedAt = DateTime.UtcNow;
+                    await _purchaseOrderItemRepository.UpdateItemAsync(existingItem);
                 }
 
                 persistedItems = new List<PurchaseOrderItem>();
                 foreach (var itemDto in updateDto.Items)
                 {
-                    if (itemDto.InventoryItemId == Guid.Empty)
+                    var line = itemDto.Id.HasValue ? existingItems.Single(i => i.Id == itemDto.Id.Value) : new PurchaseOrderItem();
+                    var values = new PurchaseOrderItem
                     {
-                        return BadRequest("Every replacement purchase-order line must reference a valid inventory item. Send no lines for a header-only update.");
-                    }
-
-                    persistedItems.Add(new PurchaseOrderItem
-                    {
-                        Id = Guid.NewGuid(),
+                        Id = line.Id,
                         PurchaseOrderId = purchaseOrder.Id,
                         InventoryItemId = itemDto.InventoryItemId,
+                        LineType = itemDto.LineType,
                         BusinessPartnerItemCode = itemDto.SupplierItemCode,
                         ItemDescription = itemDto.ItemDescription,
                         OrderedQuantity = itemDto.OrderedQuantity,
@@ -1292,9 +1387,30 @@ public class PurchaseOrdersController : ControllerBase
                         ExpectedDeliveryDate = itemDto.ExpectedDeliveryDate,
                         Notes = itemDto.Notes,
                         TenantId = tenantId
-                    });
+                    };
+                    line.PurchaseOrderId = values.PurchaseOrderId;
+                    line.InventoryItemId = values.InventoryItemId;
+                    line.LineType = values.LineType;
+                    line.BusinessPartnerItemCode = values.BusinessPartnerItemCode;
+                    line.ItemDescription = values.ItemDescription;
+                    line.OrderedQuantity = values.OrderedQuantity;
+                    line.UnitOfMeasure = values.UnitOfMeasure;
+                    line.ItemUnitOfMeasureId = values.ItemUnitOfMeasureId;
+                    line.WarehouseId = values.WarehouseId;
+                    line.UnitPrice = values.UnitPrice;
+                    line.PriceListLineId = values.PriceListLineId;
+                    line.LineTotal = values.LineTotal;
+                    line.ExpectedDeliveryDate = values.ExpectedDeliveryDate;
+                    line.Notes = values.Notes;
+                    line.TenantId = tenantId;
+                    persistedItems.Add(line);
                 }
             }
+
+            if (_landedCostPlans != null)
+                await _landedCostPlans.StageAsync(purchaseOrder, persistedItems, updateDto.PlannedLandedCostPlan, true);
+            else if (updateDto.PlannedLandedCostPlan != null)
+                throw new InvalidOperationException("Planned landed cost service is unavailable.");
 
             await ApplyPurchaseOrderCostAllocationAsync(
                 purchaseOrder,
@@ -1306,32 +1422,20 @@ public class PurchaseOrdersController : ControllerBase
 
             foreach (var item in persistedItems)
             {
-                if (!preserveExistingItems)
+                if (!preserveExistingItems && !suppliedIds.Contains(item.Id))
                     await _purchaseOrderItemRepository.CreateItemAsync(item);
+                else
+                    await _purchaseOrderItemRepository.UpdateItemAsync(item);
             }
 
             // CRITICAL: Save changes to database
             await _unitOfWork.SaveChangesAsync(HttpContext.RequestAborted);
+            // Read the response before committing: a failed projection must not replay a committed update.
+            var updatedPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
             if (ownsSourceCapacityTransaction)
                 await _unitOfWork.CommitAsync(HttpContext.RequestAborted);
-
-            // Return the updated purchase order
-            var updatedPurchaseOrder = await GetPurchaseOrderDetailDto(purchaseOrder.Id);
+            completed = true;
             return Ok(updatedPurchaseOrder);
-        }
-        catch (ProcurementPurchaseOrderSourceValidationException ex)
-        {
-            return UnprocessableEntity(new
-            {
-                code = ex.Code,
-                message = ex.Message,
-                correlationId = CorrelationId()
-            });
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating purchase order {PurchaseOrderId}", id);
-            return StatusCode(500, "An error occurred while updating the purchase order");
         }
         finally
         {
@@ -1339,7 +1443,7 @@ public class PurchaseOrdersController : ControllerBase
             {
                 try
                 {
-                    await _unitOfWork.RollbackAsync(HttpContext.RequestAborted);
+                    await _unitOfWork.RollbackAsync(CancellationToken.None);
                 }
                 catch (Exception rollbackException)
                 {
@@ -1348,6 +1452,8 @@ public class PurchaseOrdersController : ControllerBase
                         "Failed to roll back purchase-order source capacity reservation");
                 }
             }
+            if (!completed && !_unitOfWork.HasActiveTransaction)
+                _unitOfWork.ClearTrackedChanges();
         }
     }
 
@@ -1769,17 +1875,6 @@ public class PurchaseOrdersController : ControllerBase
                 return BadRequest($"Purchase order cannot be submitted in current status: {purchaseOrder.Status}");
             }
 
-            if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(
-                    "PurchaseOrder"))
-            {
-                return UnprocessableEntity(new
-                {
-                    code = "PO_APPROVAL_WORKFLOW_NOT_CONFIGURED",
-                    message = "A published Purchase Order approval workflow with an independent approver must be configured before submission.",
-                    correlationId
-                });
-            }
-
             ownsWorkflowTransaction = !_unitOfWork.HasActiveTransaction;
             if (ownsWorkflowTransaction)
             {
@@ -1806,17 +1901,10 @@ public class PurchaseOrdersController : ControllerBase
                 return BadRequest(ex.Message);
             }
 
-            if (!workflowResult.ApprovalRequired)
-            {
-                return UnprocessableEntity(new
-                {
-                    code = "PO_APPROVAL_WORKFLOW_NOT_CONFIGURED",
-                    message = "A published Purchase Order approval workflow with an independent approver must be configured before submission.",
-                    correlationId
-                });
-            }
+            if (!workflowResult.ExecutionResult.Success)
+                return BadRequest(workflowResult.ExecutionResult.Message ?? "Purchase order submission failed.");
 
-            if (ProcurementPurchaseOrderSodRules.IsAutomaticApproval(
+            if (workflowResult.ApprovalRequired && ProcurementPurchaseOrderSodRules.IsAutomaticApproval(
                     workflowResult.Outcome))
             {
                 if (ownsWorkflowTransaction && _unitOfWork.HasActiveTransaction)
@@ -1831,8 +1919,20 @@ public class PurchaseOrdersController : ControllerBase
                     HttpContext.RequestAborted);
             }
 
+            if (!workflowResult.ApprovalRequired)
+            {
+                // Direct completion still creates the exact formal budget exposure.
+                // The ledger and final state remain in this same serializable transaction.
+                await _purchaseOrderSources.EnsureBudgetCommitmentForIssueAsync(
+                    purchaseOrder, correlationId, HttpContext.RequestAborted);
+                await _budgetCommitments.CommitPurchaseOrderAsync(
+                    purchaseOrder, correlationId, HttpContext.RequestAborted);
+                await _unitOfWork.SaveChangesAsync();
+            }
+
+            purchaseOrder.ApprovalRequired = workflowResult.ApprovalRequired;
             var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("PurchaseOrder");
-            statusAdapter.ApplySubmitOutcome(purchaseOrder, workflowResult.Outcome, _currentUserService.UserId);
+            statusAdapter.ApplySubmitOutcome(purchaseOrder, workflowResult, _currentUserService.UserId);
 
             purchaseOrder.UpdatedAt = DateTime.UtcNow;
 
@@ -2219,10 +2319,16 @@ public class PurchaseOrdersController : ControllerBase
                     return BadRequest($"ReceivedQuantity ({itemDto.ReceivedQuantity}) cannot exceed remaining quantity to receipt ({remainingToReceipt}).");
                 }
 
+                var isStockLine = PurchaseOrderLineRules.RequiresStock(poItem.LineType);
                 var effectiveWarehouseId = itemDto.WarehouseId ??
                                            poItem.WarehouseId ??
                                            purchaseOrder.DeliveryWarehouseId;
                 var effectiveLocationId = itemDto.LocationId;
+                if (!isStockLine)
+                {
+                    effectiveWarehouseId = null;
+                    effectiveLocationId = null;
+                }
 
                 if (effectiveLocationId.HasValue &&
                     effectiveLocationId.Value != Guid.Empty)
@@ -2242,8 +2348,8 @@ public class PurchaseOrdersController : ControllerBase
                         location.InventoryWarehouseId;
                 }
 
-                if (!effectiveLocationId.HasValue ||
-                    effectiveLocationId.Value == Guid.Empty)
+                if (isStockLine && (!effectiveLocationId.HasValue ||
+                    effectiveLocationId.Value == Guid.Empty))
                 {
                     return BadRequest("LocationId is required for received items. Please select a storage location for each line item.");
                 }
@@ -2561,6 +2667,7 @@ public class PurchaseOrdersController : ControllerBase
                 RequiredDate = po.RequiredDate,
                 PromisedDate = po.PromisedDate,
                 Status = po.Status,
+                ApprovalRequired = po.ApprovalRequired,
                 TotalAmount = po.TotalAmount,
                 Currency = po.Currency,
                 ItemCount = po.Items?.Count ?? 0,
@@ -2600,6 +2707,7 @@ public class PurchaseOrdersController : ControllerBase
                 RequiredDate = po.RequiredDate,
                 PromisedDate = po.PromisedDate,
                 Status = po.Status,
+                ApprovalRequired = po.ApprovalRequired,
                 TotalAmount = po.TotalAmount,
                 Currency = po.Currency,
                 ItemCount = po.Items?.Count ?? 0,
@@ -2826,6 +2934,7 @@ public class PurchaseOrdersController : ControllerBase
             PromisedDate = purchaseOrder.PromisedDate,
             ReceivedDate = purchaseOrder.ReceivedDate,
             Status = purchaseOrder.Status,
+            ApprovalRequired = purchaseOrder.ApprovalRequired,
             ApprovedByName = purchaseOrder.ApprovedBy?.FirstName + " " + purchaseOrder.ApprovedBy?.LastName,
             ApprovedAt = purchaseOrder.ApprovedAt,
             SubTotal = purchaseOrder.SubTotal,
@@ -2841,6 +2950,7 @@ public class PurchaseOrdersController : ControllerBase
             TotalAmount = purchaseOrder.TotalAmount,
             Currency = purchaseOrder.Currency,
             PaymentTerms = purchaseOrder.PaymentTerms,
+            SupplierDefaults = BusinessPartnerPostingDefaults.ReadSnapshot(purchaseOrder.SupplierDefaultsSnapshotJson),
             ShippingTerms = purchaseOrder.ShippingTerms,
             Terms = purchaseOrder.Terms,
             Notes = purchaseOrder.Notes,
@@ -2887,6 +2997,7 @@ public class PurchaseOrdersController : ControllerBase
                 Id = item.Id,
                 PurchaseOrderId = item.PurchaseOrderId,
                 InventoryItemId = item.InventoryItemId ?? Guid.Empty,
+                LineType = item.LineType,
                 SupplierItemCode = item.BusinessPartnerItemCode,
                 ItemDescription = item.ItemDescription,
                 OrderedQuantity = item.OrderedQuantity,
@@ -3315,7 +3426,9 @@ public class PurchaseOrdersController : ControllerBase
                 return;
             }
 
-            // Skip inventory processing if no inventory item is linked (e.g., from tender)
+            if (!PurchaseOrderLineRules.RequiresStock(poItem.LineType)) return;
+
+            // Stock receipt still requires a mapped inventory item.
             if (!poItem.InventoryItemId.HasValue || poItem.InventoryItemId.Value == Guid.Empty)
             {
                 _logger.LogWarning("Skipping inventory receipt for PO item {ItemId} - no inventory item linked", poItem.Id);

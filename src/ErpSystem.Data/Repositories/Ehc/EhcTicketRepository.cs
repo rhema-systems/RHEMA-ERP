@@ -31,6 +31,7 @@ public sealed class EhcTicketRepository : IEhcTicketRepository
             .Include(t => t.RequesterUser)
             .Include(t => t.AssignedToUser)
             .Include(t => t.AssignedDepartment)
+            .Include(t => t.AssignedOrganizationUnit)
             .Include(t => t.Attachments)
             .Include(t => t.Messages)
                 .ThenInclude(m => m.AuthorUser)
@@ -156,6 +157,7 @@ public sealed class EhcTicketRepository : IEhcTicketRepository
             .Include(t => t.RequesterUser)
             .Include(t => t.AssignedToUser)
             .Include(t => t.AssignedDepartment)
+            .Include(t => t.AssignedOrganizationUnit)
             .Where(t => t.TenantId == tenantId && !t.IsDeleted)
             .OrderByDescending(t => t.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -175,6 +177,7 @@ public sealed class EhcTicketRepository : IEhcTicketRepository
             .Include(t => t.RequesterUser)
             .Include(t => t.AssignedToUser)
             .Include(t => t.AssignedDepartment)
+            .Include(t => t.AssignedOrganizationUnit)
             .Where(t => t.TenantId == tenantId && t.Status.ToString() == status && !t.IsDeleted)
             .OrderByDescending(t => t.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -206,6 +209,7 @@ public sealed class EhcTicketRepository : IEhcTicketRepository
             .Include(t => t.RequesterUser)
             .Include(t => t.AssignedToUser)
             .Include(t => t.AssignedDepartment)
+            .Include(t => t.AssignedOrganizationUnit)
             .Where(t => t.TenantId == tenantId && !t.IsDeleted);
 
         if (status.HasValue)

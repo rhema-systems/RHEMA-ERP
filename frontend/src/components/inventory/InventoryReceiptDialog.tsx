@@ -441,7 +441,7 @@ export function InventoryReceiptDialog({ open, onOpenChange, mode, receiptId, on
             </DialogTitle>
             <div className="flex items-center gap-2">
               <span className="text-sm text-muted-foreground">
-                {isCreateMode ? 'Prepare a signed, location-specific adjustment for independent approval' : isEditMode ? 'Edit the Draft adjustment' : 'Review control evidence and lifecycle'}
+                {isCreateMode ? 'Prepare an adjustment with exact locations and supporting evidence' : isEditMode ? 'Edit the Draft adjustment' : 'Review control evidence and lifecycle'}
               </span>
               {receiptDetail && getStatusBadge(receiptDetail.status)}
             </div>

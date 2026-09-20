@@ -10,12 +10,13 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.DependencyInjection;
 using Moq;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services;
 
-public class DatabaseSeedingServiceTests
+public partial class DatabaseSeedingServiceTests
 {
     [Fact]
     public void FinanceRoleSeeder_ShouldGrantChiefAccountantAssignedPaymentApprovalPermission()
@@ -50,28 +51,55 @@ public class DatabaseSeedingServiceTests
     }
 
     [Fact]
-    public void FinanceRoleSeeder_ShouldKeepDemoAuditorReadOnly()
+    public void FinanceRoleSeeder_ShouldNotCreateOrImplicitlyGrantTheLegacyDemoAuditorRole()
     {
         var root = FindRepositoryRoot();
         var source = File.ReadAllText(Path.Combine(
             root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
-        var auditorStart = source.IndexOf("[\"Finance Auditor\"] = new[]", StringComparison.Ordinal);
-        var budgetOfficerStart = source.IndexOf("[\"Budget Officer\"] = new[]", auditorStart, StringComparison.Ordinal);
 
-        auditorStart.Should().BeGreaterThan(-1);
-        budgetOfficerStart.Should().BeGreaterThan(auditorStart);
-        var auditorPermissions = source[auditorStart..budgetOfficerStart];
-
-        auditorPermissions.Should().Contain("\"Finance.Read\"");
-        auditorPermissions.Should().Contain("\"Finance.Reports.Run\"");
-        auditorPermissions.Should().NotContain("\"Finance.Write\"");
-        auditorPermissions.Should().NotContain("\"Finance.Workflow.Approve\"");
-        auditorPermissions.Should().NotContain("\"Finance.JournalEntries.Post\"");
-        auditorPermissions.Should().NotContain("\"Finance.JournalEntries.Reverse\"");
+        source.Should().NotContain("\"Finance Auditor\"",
+            "the legacy demo role is no longer seeded or assigned implicit Finance permissions; " +
+            "this does not assert or change permissions on an existing tenant-owned role");
     }
 
     [Fact]
-    public async Task EnsureFinanceWorkflowsSeededAsync_ShouldPublishAndRepairPaymentRuntimeDefinitions()
+    public void FinanceRoleSeeder_ShouldKeepManagingDirectorLimitedToReadAndAssignedApproval()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(
+            root, "src", "ErpSystem.Api", "Services", "DatabaseSeedingService.cs"));
+        var mapping = System.Text.RegularExpressions.Regex.Match(
+            source,
+            "\\[\"Managing Director\"\\]\\s*=\\s*new\\[\\]\\s*\\{(?<permissions>.*?)\\}",
+            System.Text.RegularExpressions.RegexOptions.Singleline);
+
+        mapping.Success.Should().BeTrue("the current executive role must have an explicit narrow permission mapping");
+        var permissions = System.Text.RegularExpressions.Regex.Matches(
+                mapping.Groups["permissions"].Value, "\"(Finance\\.[^\"]+)\"")
+            .Select(match => match.Groups[1].Value)
+            .ToArray();
+
+        permissions.Should().BeEquivalentTo(new[]
+        {
+            "Finance.Read",
+            "Finance.AP.Payments.Approve",
+            "Finance.Workflow.Approve",
+            "Finance.Workflow.Reject",
+            "Finance.Workflow.RequestChanges",
+            "Finance.Reports.Run",
+            "Finance.Reports.Export"
+        }, "executive approval authority must not implicitly grant preparation, posting, reversal or administration");
+        permissions.Should().NotContain(new[]
+        {
+            "Finance.Write",
+            "Finance.JournalEntries.Post",
+            "Finance.JournalEntries.Reverse",
+            "Finance.Workflow.PostAfterApproval"
+        });
+    }
+
+    [Fact]
+    public async Task EnsureFinanceWorkflowsSeededAsync_ShouldCreateMissingAndPreserveExistingPaymentDefinitions()
     {
         await using var context = CreateContext();
         var tenant = new Tenant
@@ -98,6 +126,26 @@ public class DatabaseSeedingServiceTests
 
         seedMethod.Should().NotBeNull();
         await ((Task)seedMethod!.Invoke(service, null)!).ConfigureAwait(false);
+
+        var bookWorkflowCodes = new[]
+        {
+            "AccountingBookInitialization", "AccountingBookPeriodLifecycle", "AccountingBookLifecycle"
+        };
+        var bookDefinitions = await context.WorkflowDefinitions
+            .Include(definition => definition.EntityType)
+            .Include(definition => definition.Steps)
+            .Where(definition => definition.TenantId == tenant.Id &&
+                bookWorkflowCodes.Contains(definition.EntityType.Code))
+            .ToListAsync();
+        bookDefinitions.Should().HaveCount(3);
+        bookDefinitions.Select(definition => definition.EntityType.Code).Should().BeEquivalentTo(bookWorkflowCodes);
+        bookDefinitions.Should().OnlyContain(definition => definition.IsActive &&
+            definition.LifecycleStatus == WorkflowDefinitionLifecycleStatus.Published &&
+            definition.Steps.Count(step => step.StepType == WorkflowStepType.Approval && !step.IsDeleted) == 1);
+        bookDefinitions.SelectMany(definition => definition.Steps)
+            .Where(step => step.StepType == WorkflowStepType.Approval)
+            .Should().OnlyContain(step => step.Name == "Financial Controller Review" &&
+                step.Configuration != null && step.Configuration.Contains("Financial Controller"));
 
         var paymentDefinitions = await context.WorkflowDefinitions
             .Include(definition => definition.EntityType)
@@ -144,9 +192,9 @@ public class DatabaseSeedingServiceTests
 
         await ((Task)seedMethod.Invoke(service, null)!).ConfigureAwait(false);
 
-        paymentBatch.IsActive.Should().BeTrue();
-        paymentBatch.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Published);
-        paymentBatch.PublishedAt.Should().NotBeNull();
+        paymentBatch.IsActive.Should().BeFalse();
+        paymentBatch.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Draft);
+        paymentBatch.PublishedAt.Should().BeNull();
 
         var activeVendorPaymentDefinitions = await context.WorkflowDefinitions
             .Include(definition => definition.EntityType)
@@ -162,10 +210,10 @@ public class DatabaseSeedingServiceTests
             .Where(step => step.StepType == WorkflowStepType.Approval && !step.IsDeleted)
             .OrderBy(step => step.Order)
             .Select(step => step.Name)
-            .Should().Equal("Finance Manager Approval", "Financial Controller Final Approval");
-        vendorPayment.IsActive.Should().BeFalse();
-        vendorPayment.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Retired);
-        vendorPayment.RetiredAt.Should().NotBeNull();
+            .Should().Equal("Accounts Officer Review", "Financial Controller Final Approval");
+        vendorPayment.IsActive.Should().BeTrue();
+        vendorPayment.LifecycleStatus.Should().Be(WorkflowDefinitionLifecycleStatus.Published);
+        vendorPayment.RetiredAt.Should().BeNull();
     }
 
     [Fact]
@@ -313,10 +361,14 @@ public class DatabaseSeedingServiceTests
             module.TenantId == tenant.Id && module.ModuleName == "Project Management")).Should().Be(1);
     }
 
+    private static readonly ServiceProvider WorkflowSeedTestServices = new ServiceCollection()
+        .AddEntityFrameworkInMemoryDatabase().BuildServiceProvider();
+
     private static ApplicationDbContext CreateContext()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
+            .UseInternalServiceProvider(WorkflowSeedTestServices)
             .Options;
 
         return new ApplicationDbContext(options);

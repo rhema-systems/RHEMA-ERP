@@ -24,24 +24,19 @@ public class WorkflowIntegrationService : IWorkflowIntegrationService
     public Task<bool> HasActiveApprovalWorkflowAsync(string entityType)
         => _workflowService.HasActiveApprovalWorkflowAsync(entityType);
 
+    public Task<bool> HasActiveApprovalInstanceAsync(string entityType, Guid entityId)
+        => _workflowService.HasActiveApprovalInstanceAsync(entityType, entityId);
+
     public async Task<WorkflowIntegrationResult> SubmitAsync(string entityType, Guid entityId)
     {
-        if (!await _workflowService.HasActiveApprovalWorkflowAsync(entityType))
+        if (!await RequiresApprovalAsync(entityType, entityId))
         {
             _logger.LogInformation(
                 "Approval workflow is disabled for {EntityType}; {EntityId} will use the direct lifecycle",
                 entityType,
                 entityId);
 
-            return new WorkflowIntegrationResult(
-                new WorkflowExecutionResult
-                {
-                    Success = true,
-                    Status = WorkflowInstanceStatus.Completed,
-                    Message = "No active approval workflow is configured; approval is not required."
-                },
-                WorkflowOutcome.Approved,
-                approvalRequired: false);
+            return DirectLifecycleResult();
         }
 
         var executionResult = await _workflowService.StartApprovalWorkflowAsync(entityType, entityId);
@@ -53,10 +48,34 @@ public class WorkflowIntegrationService : IWorkflowIntegrationService
         Guid entityId,
         Guid workflowDefinitionId)
     {
+        if (!await RequiresApprovalAsync(entityType, entityId))
+        {
+            return DirectLifecycleResult();
+        }
         var executionResult = await _workflowService.StartApprovalWorkflowAsync(
             entityType, entityId, workflowDefinitionId);
         return CreateResult(entityType, entityId, executionResult, "submit selected definition");
     }
+
+    private async Task<bool> RequiresApprovalAsync(string entityType, Guid entityId)
+    {
+        if (string.IsNullOrWhiteSpace(entityType)) throw new ArgumentException("Entity type is required.", nameof(entityType));
+        if (entityId == Guid.Empty) throw new ArgumentException("Entity id is required.", nameof(entityId));
+        // A retired definition stops new approvals; it does not silently approve
+        // records already submitted against that definition's retained version.
+        return await _workflowService.HasActiveApprovalInstanceAsync(entityType, entityId) ||
+            await _workflowService.HasActiveApprovalWorkflowAsync(entityType);
+    }
+
+    private static WorkflowIntegrationResult DirectLifecycleResult() => new(
+        new WorkflowExecutionResult
+        {
+            Success = true,
+            Status = WorkflowInstanceStatus.Completed,
+            Message = "No active approval workflow is configured; approval is not required."
+        },
+        WorkflowOutcome.Approved,
+        approvalRequired: false);
 
     public async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
         string entityType,

@@ -76,6 +76,14 @@ public sealed class TenderControlsController : ControllerBase
     private async Task<IActionResult> ExecuteAsync<T>(Func<Task<T>> action)
     {
         try { return Ok(await action()); }
+        catch (TenderEvaluationConfigurationException configurationError)
+        {
+            return UnprocessableEntity(new ProblemDetails
+            {
+                Status = 422, Title = "Evaluation configuration needs correction", Detail = configurationError.Message,
+                Extensions = { ["code"] = configurationError.Code }
+            });
+        }
         catch (ProcurementTenderControlNotFoundException exception)
         { return NotFound(ControlProblem(404, exception.Code, exception.Message)); }
         catch (ProcurementTenderControlConflictException exception)

@@ -8,7 +8,12 @@ public sealed class ProcurementTenderControlConfiguration : IEntityTypeConfigura
 {
     public void Configure(EntityTypeBuilder<ProcurementTenderControl> builder)
     {
-        builder.ToTable("ProcurementTenderControls", table => table.HasTrigger("TR_ProcurementTenderControls_Lifecycle"));
+        builder.ToTable("ProcurementTenderControls", table =>
+        {
+            table.HasTrigger("TR_ProcurementTenderControls_Lifecycle");
+            table.HasTrigger("TR_ProcurementTenderControls_ApprovalPolicy");
+        });
+        builder.Property(item => item.ApprovalRequired).HasDefaultValue(true);
         builder.HasIndex(item => new { item.TenantId, item.TenderId }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.SourcingCaseId });
         builder.HasOne(item => item.Tender).WithMany().HasForeignKey(item => item.TenderId).OnDelete(DeleteBehavior.Restrict);

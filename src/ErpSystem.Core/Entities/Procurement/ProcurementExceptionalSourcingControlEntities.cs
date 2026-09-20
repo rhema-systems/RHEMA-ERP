@@ -12,7 +12,7 @@ public sealed class ProcurementExceptionalSourcingControl : TenantEntity
     public Guid SourcingCaseId { get; set; }
     public Guid MethodRuleId { get; set; }
     public Guid ExceptionRuleId { get; set; }
-    public Guid AuthorityRouteId { get; set; }
+    public Guid? AuthorityRouteId { get; set; }
     public ProcurementMethodType Method { get; set; }
     [Required, StringLength(100)] public string MethodRuleCode { get; set; } = string.Empty;
     [Required, StringLength(100)] public string ExceptionRuleCode { get; set; } = string.Empty;
@@ -31,7 +31,8 @@ public sealed class ProcurementExceptionalSourcingControl : TenantEntity
     public bool BoardApprovalRequired { get; set; }
     public bool ManagingDirectorApprovalRequired { get; set; }
     public bool PpaApprovalRequired { get; set; } = true;
-    public Guid WorkflowDefinitionId { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? WorkflowDefinitionId { get; set; }
     public Guid? WorkflowInstanceId { get; set; }
     [StringLength(300)] public string? BoardApprovalReference { get; set; }
     [StringLength(300)] public string? ManagingDirectorApprovalReference { get; set; }
@@ -83,8 +84,8 @@ public sealed class ProcurementExceptionalSourcingControl : TenantEntity
     public ProcurementSourcingCase SourcingCase { get; set; } = null!;
     public ProcurementPolicyMethodRule MethodRule { get; set; } = null!;
     public ProcurementPolicyExceptionRule ExceptionRule { get; set; } = null!;
-    public ProcurementRequisitionAuthorityRoute AuthorityRoute { get; set; } = null!;
-    public WorkflowDefinition WorkflowDefinition { get; set; } = null!;
+    public ProcurementRequisitionAuthorityRoute? AuthorityRoute { get; set; }
+    public WorkflowDefinition? WorkflowDefinition { get; set; }
     public WorkflowInstance? WorkflowInstance { get; set; }
     public TenderNegotiation? Negotiation { get; set; }
 }

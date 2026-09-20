@@ -148,12 +148,14 @@ public class BusinessPartnerRepository : GenericRepository<BusinessPartner>, IBu
 
         if (!string.IsNullOrWhiteSpace(search))
         {
-            var searchLower = search.ToLower();
+            // Keep the predicate server-translatable: the StringComparison
+            // overload of Contains is not supported by the SQL Server provider.
+            var searchLower = search.Trim().ToLowerInvariant();
             query = query.Where(bp =>
-                bp.PartnerName.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase) ||
-                bp.PartnerCode.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase) ||
-                (bp.PrimaryEmail != null && bp.PrimaryEmail.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase)) ||
-                (bp.BusinessRegistrationNumber != null && bp.BusinessRegistrationNumber.Contains(searchLower, StringComparison.CurrentCultureIgnoreCase)));
+                bp.PartnerName.ToLower().Contains(searchLower) ||
+                bp.PartnerCode.ToLower().Contains(searchLower) ||
+                (bp.PrimaryEmail != null && bp.PrimaryEmail.ToLower().Contains(searchLower)) ||
+                (bp.BusinessRegistrationNumber != null && bp.BusinessRegistrationNumber.ToLower().Contains(searchLower)));
         }
 
         if (!string.IsNullOrWhiteSpace(partnerType))

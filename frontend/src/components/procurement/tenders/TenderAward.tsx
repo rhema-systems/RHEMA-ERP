@@ -10,7 +10,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Checkbox } from '@/components/ui/checkbox';
-import { Award, TrendingUp, CheckCircle2, AlertCircle, Trophy, FileText, DollarSign, ClipboardCheck } from 'lucide-react';
+import { Award, TrendingUp, CheckCircle2, AlertCircle, Trophy, FileText, ClipboardCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import * as tenderAwardService from '@/services/tenderAwardService';
@@ -22,16 +22,20 @@ import type { ProcurementAwardReadinessDecision } from '@/types/procurement-awar
 import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import { useAuth } from '@/hooks/use-auth';
 import { isFinalTenderAward } from '@/lib/tender-award-lifecycle';
+import { formatProcurementMoney, getTenderBidCurrency, normalizeProcurementCurrency } from '@/lib/procurement-currency';
 
 interface TenderAwardProps {
   tenderId: string;
   tenderNumber: string;
   tenderTitle: string;
+  tenderCurrency?: string;
+  bids?: ReadonlyArray<{ id: string; currency?: string }>;
   onAwardCreated?: () => void;
 }
 
-export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreated }: TenderAwardProps) {
+export function TenderAward({ tenderId, tenderNumber, tenderTitle, tenderCurrency, bids, onAwardCreated }: TenderAwardProps) {
   const { hasPermission } = useAuth();
+  const getBidCurrency = (bidId?: string) => getTenderBidCurrency(bidId, bids, tenderCurrency);
   const canSubmitAwardRecommendation = hasPermission('procurement.tender.administer');
   const [loading, setLoading] = useState(true);
   const [recommendation, setRecommendation] = useState<tenderAwardService.AwardRecommendationDto | null>(null);
@@ -120,6 +124,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         tenderId,
         tenderBidId: selectedBidId,
         awardedAmount: parseFloat(awardAmount),
+        currency: getBidCurrency(selectedBidId),
         awardJustification: awardJustification.trim() || undefined,
         awardDate: new Date().toISOString(),
       };
@@ -193,6 +198,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
           businessPartnerName: bidder.businessPartnerName || bid?.businessPartnerName || '',
           bidNumber: bid?.bidNumber || '',
           totalBidAmount: bid?.totalBidAmount || 0,
+          currency: getBidCurrency(bidder.tenderBidId),
         };
       }) || [];
     }
@@ -205,6 +211,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         businessPartnerName: bid.businessPartnerName,
         bidNumber: bid.bidNumber,
         totalBidAmount: bid.totalBidAmount,
+        currency: getBidCurrency(bid.bidId),
       }));
   };
 
@@ -267,7 +274,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
             <div>
               <Label className="text-muted-foreground">Recommended amount</Label>
               <p className="font-medium">
-                {existingAward.currency || 'GHS'} {existingAward.awardedAmount.toLocaleString()}
+                {formatProcurementMoney(existingAward.awardedAmount, existingAward.currency || tenderCurrency)}
               </p>
             </div>
           </div>
@@ -335,7 +342,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
             <div className="mb-6 rounded-xl bg-gradient-to-r from-amber-50 via-yellow-50 to-amber-50 border-2 border-amber-200 p-6 text-center">
               <p className="text-sm font-medium text-amber-700 uppercase tracking-wider mb-1">Award Amount</p>
               <p className="text-4xl font-bold text-amber-900">
-                {existingAward.currency || 'GHS'} {existingAward.awardedAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                {formatProcurementMoney(existingAward.awardedAmount, existingAward.currency || tenderCurrency)}
               </p>
             </div>
 
@@ -502,7 +509,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
               <div className="p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
                 <p className="text-sm text-gray-600">Recommended Amount</p>
                 <p className="text-2xl font-bold text-yellow-900">
-                  ${recommendation.recommendedAmount.toLocaleString()}
+                  {formatProcurementMoney(recommendation.recommendedAmount, getBidCurrency(recommendation.recommendedBidId))}
                 </p>
               </div>
             </div>
@@ -583,7 +590,7 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
                       </TableCell>
                       <TableCell className="font-medium">{bid.businessPartnerName}</TableCell>
                       <TableCell>{bid.bidNumber}</TableCell>
-                      <TableCell>${bid.totalBidAmount.toLocaleString()}</TableCell>
+                      <TableCell>{formatProcurementMoney(bid.totalBidAmount, getBidCurrency(bid.bidId))}</TableCell>
                       <TableCell>
                         <Badge variant={bid.averageScore >= 80 ? 'default' : bid.averageScore >= 60 ? 'secondary' : 'outline'}>
                           {bid.averageScore.toFixed(2)}
@@ -645,9 +652,8 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="awardAmount">Award Amount *</Label>
+            <Label htmlFor="awardAmount">Award Amount ({getBidCurrency(selectedBidId)}) *</Label>
             <div className="flex items-center gap-2">
-              <DollarSign className="h-5 w-5 text-gray-400" />
               <Input
                 id="awardAmount"
                 type="number"
@@ -689,9 +695,12 @@ export function TenderAward({ tenderId, tenderNumber, tenderTitle, onAwardCreate
         open={showVerificationDialog}
         onOpenChange={setShowVerificationDialog}
         tenderId={tenderId}
+        tenderCurrency={tenderCurrency}
         bidders={getSelectedBiddersInfo()}
         onVerificationComplete={handleVerificationComplete}
-        onAwardBidder={(bidId, bidAmount) => handleSelectBid(bidId, bidAmount)}
+        onAwardBidder={canSubmitAwardRecommendation && readinessDecision?.isReady && readinessDecision.isCurrent
+          ? (bidId, bidAmount) => handleSelectBid(bidId, bidAmount)
+          : undefined}
       />
     </>
   );

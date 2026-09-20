@@ -36,6 +36,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProjectService _projects;
     private readonly IInventoryIssueFinanceAssetService _issueFinanceAssets;
+    private readonly IInventoryValuationService _valuation;
     private readonly ICurrentUserProvider _currentUser;
 
     public InventoryReturnControlService(
@@ -55,6 +56,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         IProcurementControlEventService controlEvents,
         IProjectService projects,
         IInventoryIssueFinanceAssetService issueFinanceAssets,
+        IInventoryValuationService valuation,
         ICurrentUserProvider currentUser)
     {
         _unitOfWork = unitOfWork;
@@ -73,6 +75,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         _controlEvents = controlEvents;
         _projects = projects;
         _issueFinanceAssets = issueFinanceAssets;
+        _valuation = valuation;
         _currentUser = currentUser;
     }
 
@@ -95,7 +98,9 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         var reasonCode = Required(request.ReasonCode, "INV_RETURN_REASON_REQUIRED", "A controlled return reason code is required.", 50).ToUpperInvariant();
         if (!InventoryReturnReasonCodes.All.ContainsKey(reasonCode))
             throw Validation("INV_RETURN_REASON_INVALID", "The selected return reason code is not supported.");
-        var reason = Required(request.Reason, "INV_RETURN_REASON_DETAIL_REQUIRED", "A return reason is required.", 1000);
+        // The selected controlled reason is sufficient. Retain its label when no
+        // additional detail is supplied, including for the immutable SQL audit.
+        var reason = Normalize(request.Reason, 1000) ?? InventoryReturnReasonCodes.All[reasonCode];
         if (request.Items.Count == 0 || request.Items.Any(x => x.ReturnedQuantity <= 0))
             throw Validation("INV_RETURN_LINES_REQUIRED", "At least one positive return line is required.");
         if (request.Items.GroupBy(x => new
@@ -154,7 +159,8 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 var pending = await _unitOfWork.Repository<InventoryReturnVoucherLine>().GetQueryable().AsNoTracking()
                     .Where(x => x.InventoryReturnVoucher.InventoryRequisitionId == requisitionId &&
                         (x.InventoryReturnVoucher.Status == InventoryReturnVoucherStatus.PendingApproval ||
-                         x.InventoryReturnVoucher.Status == InventoryReturnVoucherStatus.Approved))
+                         x.InventoryReturnVoucher.Status == InventoryReturnVoucherStatus.Approved ||
+                         x.InventoryReturnVoucher.Status == InventoryReturnVoucherStatus.ReadyToPost))
                     .GroupBy(x => x.InventoryRequisitionItemId)
                     .Select(x => new { Id = x.Key, Quantity = x.Sum(y => y.Quantity) })
                     .ToDictionaryAsync(x => x.Id, x => x.Quantity, cancellationToken);
@@ -191,9 +197,6 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                         ?? throw Validation("INV_RETURN_LINE_NOT_FOUND", $"Requisition line {input.ItemId} was not found.");
                     var locationId = input.LocationId ?? source.LocationId ?? requisition.LocationId;
                     await ValidateLocationAsync(requisition.WarehouseId, locationId, cancellationToken);
-                    if (source.UnitCost <= 0)
-                        throw Validation("INV_RETURN_COST_REQUIRED", $"A server-derived issue cost is required for {source.ItemCode}.");
-
                     var line = new InventoryReturnVoucherLine
                     {
                         TenantId = voucher.TenantId,
@@ -201,8 +204,6 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                         InventoryItemId = source.InventoryItemId,
                         LocationId = locationId,
                         Quantity = input.ReturnedQuantity,
-                        UnitCost = source.UnitCost,
-                        TotalValue = decimal.Round(input.ReturnedQuantity * source.UnitCost, 2),
                         LotNumber = Normalize(input.LotNumber, 100) ?? source.LotNumber,
                         BatchNumber = Normalize(input.BatchNumber, 100) ?? source.BatchNumber,
                         SerialNumber = Normalize(input.SerialNumber, 100) ?? source.SerialNumber,
@@ -210,6 +211,10 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                         ExpiryDate = input.ExpiryDate ?? source.ExpiryDate,
                         InventoryTrackingExceptionId = input.InventoryTrackingExceptionId ?? source.InventoryTrackingExceptionId
                     };
+                    // The requisition unit cost is an approval estimate, not the issued cost.
+                    // Capture the same original, unreversed issue lineage that Finance checks at posting.
+                    line.TotalValue = await OriginalIssueValueAsync(requisition.Id, line, cancellationToken);
+                    line.UnitCost = Math.Round(line.TotalValue / line.Quantity, 4, MidpointRounding.AwayFromZero);
                     line.IntegrityHash = LineHash(line);
                     voucher.Lines.Add(line);
                     voucher.TotalValue += line.TotalValue;
@@ -240,11 +245,18 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 var workflow = await _workflow.SubmitAsync(WorkflowEntityType, voucher.Id);
                 if (!workflow.ExecutionResult.Success)
                     throw Conflict("INV_RETURN_WORKFLOW_SUBMIT_FAILED", workflow.ExecutionResult.Message ?? "The return approval workflow could not be started.");
-                if (workflow.Outcome != WorkflowOutcome.Pending || !workflow.ExecutionResult.WorkflowInstanceId.HasValue)
+                if (workflow.ApprovalRequired && (workflow.Outcome != WorkflowOutcome.Pending || !workflow.ExecutionResult.WorkflowInstanceId.HasValue))
                     throw Conflict("INV_RETURN_INDEPENDENT_APPROVAL_REQUIRED", "The return workflow must contain an independent approval step.");
-                voucher.WorkflowInstanceId = workflow.ExecutionResult.WorkflowInstanceId;
+                InventoryOptionalApprovalPolicy.ApplySubmission(voucher, workflow);
                 voucher.IntegrityHash = VoucherHash(voucher);
                 await _unitOfWork.Repository<InventoryReturnVoucher>().UpdateAsync(voucher);
+                if (!voucher.ApprovalRequired)
+                {
+                    await _unitOfWork.SaveChangesAsync(cancellationToken);
+                    await AddActionAsync(voucher, InventoryReturnVoucherActionType.ApprovalNotRequired,
+                        $"no-approval:{Hash(key)[..24]}", InventoryOptionalApprovalPolicy.NoApprovalComment, cancellationToken);
+                    await AddAuditAsync("ApprovalNotRequired", voucher, null, Snapshot(voucher), cancellationToken);
+                }
                 await RecordEventAsync(voucher, "Submit", ProcurementControlEventResult.Allowed, null, Snapshot(voucher), cancellationToken);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
                 if (ownsTransaction) await _unitOfWork.CommitAsync(cancellationToken);
@@ -265,12 +277,16 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
     public async Task<InventoryReturnVoucherDto> DecideAsync(Guid voucherId, DecideInventoryReturnVoucherRequest request, CancellationToken cancellationToken = default)
     {
         var key = Required(request.IdempotencyKey, "INV_RETURN_DECISION_KEY_REQUIRED", "A decision idempotency key is required.", 100);
+        // Validate rejection before invoking the shared workflow. Approval notes
+        // are optional and must never be borrowed from the return request.
+        var comment = request.Approved ? Normalize(request.Comment, 1000) ?? string.Empty
+            : Required(request.Comment, "INV_RETURN_REJECTION_REASON_REQUIRED", "A rejection reason is required.", 1000);
         return await ExecuteAsync(voucherId, async voucher =>
         {
             var actionType = request.Approved ? InventoryReturnVoucherActionType.Approved : InventoryReturnVoucherActionType.Rejected;
             await RequireAccessAsync("procurement.inventory.adjust.approve", voucher.WarehouseId,
                 voucher.Lines.Select(x => x.LocationId), voucher.VoucherNumber, cancellationToken);
-            var replayHash = ReturnActionPayloadHash(voucher.Id, actionType, _currentUser.UserId, request.Comment);
+            var replayHash = ReturnActionPayloadHash(voucher.Id, actionType, _currentUser.UserId, comment);
             if (await ReplayActionAsync(voucher, key, actionType, replayHash, cancellationToken)) return voucher;
             EnsureRowVersion(voucher.RowVersion, request.RowVersion, "INV_RETURN_STALE");
             if (voucher.Status != InventoryReturnVoucherStatus.PendingApproval)
@@ -289,7 +305,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             await RevalidateEvidenceAsync(voucher, cancellationToken);
             var before = Snapshot(voucher);
             var result = await _workflow.ProcessApprovalAsync(WorkflowEntityType, voucher.Id, _currentUser.UserId,
-                request.Approved ? "Approve" : "Reject", request.Comment);
+                request.Approved ? "Approve" : "Reject", comment);
             if (!result.ExecutionResult.Success)
                 throw Conflict("INV_RETURN_WORKFLOW_DECISION_FAILED", result.ExecutionResult.Message ?? "The return workflow decision failed.");
             if (result.Outcome == WorkflowOutcome.Pending) return voucher;
@@ -309,14 +325,14 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
                 voucher.Status = InventoryReturnVoucherStatus.Rejected;
                 voucher.RejectedById = _currentUser.UserId;
                 voucher.RejectedAtUtc = DateTime.UtcNow;
-                voucher.RejectionReason = Required(request.Comment, "INV_RETURN_REJECTION_REASON_REQUIRED", "A rejection reason is required.", 1000);
+                voucher.RejectionReason = comment;
             }
             voucher.IntegrityHash = VoucherHash(voucher);
             // Persist the controlled lifecycle state before appending its immutable action.
             // SQL validates each action against the durable voucher state; both saves remain
             // inside this serializable transaction and therefore still commit or roll back together.
             await _unitOfWork.SaveChangesAsync(cancellationToken);
-            await AddActionAsync(voucher, actionType, key, request.Comment, cancellationToken);
+            await AddActionAsync(voucher, actionType, key, comment, cancellationToken);
             await AddAuditAsync(request.Approved ? "Approve" : "Reject", voucher, before, Snapshot(voucher), cancellationToken);
             await RecordEventAsync(voucher, request.Approved ? "Approve" : "Reject",
                 request.Approved ? ProcurementControlEventResult.Allowed : ProcurementControlEventResult.Rejected, before, Snapshot(voucher), cancellationToken);
@@ -335,9 +351,9 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             if (await ReplayActionAsync(voucher, key, InventoryReturnVoucherActionType.Posted, replayHash, cancellationToken))
                 return voucher;
             EnsureRowVersion(voucher.RowVersion, request.RowVersion, "INV_RETURN_STALE");
-            if (voucher.Status != InventoryReturnVoucherStatus.Approved)
+            if (!InventoryOptionalApprovalPolicy.CanPostState(voucher))
                 throw Conflict("INV_RETURN_STATE_CONFLICT", $"The Store Return Voucher is already {voucher.Status}.");
-            if (voucher.RequestedById == _currentUser.UserId)
+            if (voucher.ApprovalRequired && voucher.RequestedById == _currentUser.UserId)
                 throw new InventoryReturnAuthorizationException("The return requester cannot post the same return.");
             await RevalidateEvidenceAsync(voucher, cancellationToken);
             var requisition = await _requisitions.GetWithItemsAsync(voucher.InventoryRequisitionId)
@@ -354,7 +370,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             foreach (var line in voucher.Lines.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id))
                 await ApplyLineAsync(voucher, requisition, line, reverse: false, cancellationToken);
-            ApplyRequisitionStatus(requisition);
+            await ApplyRequisitionStatusAsync(requisition, cancellationToken);
             await _requisitions.UpdateAsync(requisition);
             await _issueFinanceAssets.PostReturnAsync(voucher.Id, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -393,7 +409,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             await _unitOfWork.SaveChangesAsync(cancellationToken);
             foreach (var line in voucher.Lines.OrderBy(x => x.CreatedAt).ThenBy(x => x.Id))
                 await ApplyLineAsync(voucher, requisition, line, reverse: true, cancellationToken);
-            ApplyRequisitionStatus(requisition);
+            await ApplyRequisitionStatusAsync(requisition, cancellationToken);
             await _requisitions.UpdateAsync(requisition);
             await _issueFinanceAssets.ReverseReturnAsync(voucher.Id, reason, cancellationToken);
             await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -405,6 +421,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
     {
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
+            _valuation.ResetProcessingAttempt();
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable, cancellationToken);
             try
             {
@@ -468,7 +485,9 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         var delta = reverse ? -quantity : quantity;
         source.IssuedQuantity -= delta;
         source.TrackingSequence = trackingSequence;
-        source.LineValue = source.IssuedQuantity * source.UnitCost;
+        source.LineValue += reverse ? line.TotalValue : -line.TotalValue;
+        if (source.LineValue < 0)
+            throw Conflict("INV_RETURN_VALUE_EXCEEDS_ISSUED", "The return exceeds the remaining original issue value.");
         await _requisitionItems.UpdateAsync(source);
         warehouseQuantity.CurrentStock += delta;
         warehouseQuantity.AvailableStock += delta;
@@ -499,7 +518,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             throw Conflict("INV_RETURN_LOCATION_STOCK_UNAVAILABLE", $"Available exact-location stock is insufficient to reverse {source.ItemCode}.");
         inventoryLocation.Quantity += delta;
         inventoryLocation.AvailableQuantity = inventoryLocation.Quantity - inventoryLocation.AllocatedQuantity;
-        inventoryLocation.AverageCost = line.UnitCost;
+        inventoryLocation.AverageCost = await _valuation.ProcessReturnAsync(line.Id, reverse);
         inventoryLocation.LastMovementDate = DateTime.UtcNow;
         if (isNewInventoryLocation)
             await inventoryLocationRepository.AddAsync(inventoryLocation);
@@ -543,6 +562,38 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         await _movements.AddAsync(movement);
         await _consignmentSettlement.TryCreateFromStockMovementAsync(movement);
     }
+
+    private async Task<decimal> OriginalIssueValueAsync(Guid requisitionId, InventoryReturnVoucherLine line, CancellationToken cancellationToken)
+    {
+        var candidates = await _unitOfWork.Repository<InventoryIssueFinanceLineage>()
+            .GetQueryable(value => value.TenantId == _currentUser.TenantId && !value.IsDeleted &&
+                value.InventoryIssueVoucherLine.InventoryIssueVoucher.InventoryRequisitionId == requisitionId &&
+                value.InventoryIssueVoucherLine.InventoryRequisitionItemId == line.InventoryRequisitionItemId &&
+                value.ReturnedQuantity < value.IssuedQuantity)
+            .Include(value => value.InventoryIssueVoucherLine).ThenInclude(value => value.InventoryIssueVoucher)
+            .OrderBy(value => value.InventoryIssueVoucherLine.InventoryIssueVoucher.IssuedAtUtc)
+            .ThenBy(value => value.CreatedAt).ThenBy(value => value.Id)
+            .ToListAsync(cancellationToken);
+        var remaining = line.Quantity;
+        var total = 0m;
+        foreach (var candidate in candidates.Where(value =>
+            SameTracking(value.InventoryIssueVoucherLine.SerialNumber, line.SerialNumber) &&
+            SameTracking(value.InventoryIssueVoucherLine.LotNumber, line.LotNumber) &&
+            SameTracking(value.InventoryIssueVoucherLine.BatchNumber, line.BatchNumber)))
+        {
+            if (remaining <= 0) break;
+            var quantity = Math.Min(remaining, candidate.IssuedQuantity - candidate.ReturnedQuantity);
+            total += Math.Round(quantity * candidate.IssuedValue / candidate.IssuedQuantity, 2, MidpointRounding.AwayFromZero);
+            remaining -= quantity;
+        }
+        if (remaining > 0 || total <= 0)
+            throw Conflict("INV_RETURN_ISSUE_LINEAGE_INSUFFICIENT",
+                "The return quantity cannot be reconciled to the original posted issue and tracking lineage.");
+        return total;
+    }
+
+    private static bool SameTracking(string? left, string? right) =>
+        string.Equals(left?.Trim(), right?.Trim(), StringComparison.OrdinalIgnoreCase);
 
     private async Task<IReadOnlyList<InventoryReturnVoucherDto>> GetListAsync(Guid? requisitionId, CancellationToken cancellationToken)
     {
@@ -750,23 +801,22 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
             }).ToList()
         }, cancellationToken);
 
-    private static void ApplyRequisitionStatus(InventoryRequisition requisition)
+    private async Task ApplyRequisitionStatusAsync(InventoryRequisition requisition, CancellationToken cancellationToken)
     {
-        var anyIssued = requisition.Items.Any(x => x.IssuedQuantity > 0);
-        var allIssued = requisition.Items.All(x => x.IssuedQuantity >= x.ApprovedQuantity && x.ApprovedQuantity > 0);
-        requisition.Status = allIssued ? RequisitionStatus.Issued : anyIssued ? RequisitionStatus.PartiallyIssued : RequisitionStatus.Approved;
-        if (requisition.Status != RequisitionStatus.Completed) requisition.CompletedDate = null;
+        var returns = await InventoryRequisitionFulfilment.LoadReturnsAsync(
+            _unitOfWork, _currentUser.TenantId, new[] { requisition.Id }, cancellationToken);
+        requisition.Status = InventoryRequisitionFulfilment.Status(requisition, returns);
     }
 
     private static object Snapshot(InventoryReturnVoucher voucher) => new
     {
-        voucher.Id, voucher.VoucherNumber, voucher.InventoryRequisitionId, voucher.WarehouseId, voucher.Status,
+        voucher.Id, voucher.VoucherNumber, voucher.InventoryRequisitionId, voucher.WarehouseId, voucher.Status, voucher.ApprovalRequired,
         voucher.ReasonCode, voucher.Reason, voucher.RequestedById, voucher.WorkflowInstanceId, voucher.ApprovedById,
         voucher.PostedById, voucher.ReversedById, voucher.TotalValue, voucher.IntegrityHash
     };
 
     private static string LineHash(InventoryReturnVoucherLine line) => Hash($"{line.InventoryRequisitionItemId:N}|{line.InventoryItemId:N}|{line.LocationId:N}|{line.Quantity}|{line.UnitCost}|{line.TotalValue}|{line.LotNumber}|{line.BatchNumber}|{line.SerialNumber}|{line.ExpiryDate:O}");
-    private static string VoucherHash(InventoryReturnVoucher voucher) => Hash($"{voucher.Id:N}|{voucher.TenantId:N}|{voucher.VoucherNumber}|{voucher.InventoryRequisitionId:N}|{voucher.WarehouseId:N}|{voucher.RequestedById:N}|{(int)voucher.Status}|{voucher.ReasonCode}|{voucher.Reason}|{voucher.TotalValue}|{voucher.IdempotencyKey}|{voucher.PayloadHash}|{voucher.ApprovedById:N}|{voucher.PostedById:N}|{voucher.ReversedById:N}");
+    private static string VoucherHash(InventoryReturnVoucher voucher) => Hash($"{voucher.Id:N}|{voucher.TenantId:N}|{voucher.VoucherNumber}|{voucher.InventoryRequisitionId:N}|{voucher.WarehouseId:N}|{voucher.RequestedById:N}|{(int)voucher.Status}|{voucher.ReasonCode}|{voucher.Reason}|{voucher.TotalValue}|{voucher.IdempotencyKey}|{voucher.PayloadHash}|{voucher.ApprovedById:N}|{voucher.PostedById:N}|{voucher.ReversedById:N}" + (voucher.ApprovalRequired ? string.Empty : "|ApprovalNotRequired"));
     private static string ReturnActionPayloadHash(Guid voucherId, InventoryReturnVoucherActionType type,
         Guid actorUserId, string? comment) => Hash(JsonSerializer.Serialize(new
         {
@@ -814,6 +864,7 @@ public sealed class InventoryReturnControlService : IInventoryReturnControlServi
         WarehouseId = voucher.WarehouseId,
         WarehouseName = voucher.Warehouse?.Name ?? string.Empty,
         Status = voucher.Status.ToString(),
+        ApprovalRequired = voucher.ApprovalRequired,
         ReasonCode = voucher.ReasonCode,
         Reason = voucher.Reason,
         Notes = voucher.Notes,

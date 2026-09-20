@@ -58,6 +58,11 @@ public interface IOpeningBalanceService
         string? comment = null,
         CancellationToken cancellationToken = default);
 
+    Task<OpeningBalanceBatchReversalDto> RequestReversalAsync(Guid batchId, RequestOpeningBalanceBatchReversalDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchReversalDto> ReviewReversalAsync(Guid batchId, Guid requestId, ReviewOpeningBalanceBatchReversalDto dto, CancellationToken cancellationToken = default);
+    Task<OpeningBalanceBatchReversalDto> PostReversalAsync(Guid batchId, Guid requestId, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<OpeningBalanceBatchReversalDto>> GetReversalsAsync(Guid batchId, CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<OpeningBalanceDiagnosticDto>> GetDiagnosticsAsync(
         CancellationToken cancellationToken = default);
 }

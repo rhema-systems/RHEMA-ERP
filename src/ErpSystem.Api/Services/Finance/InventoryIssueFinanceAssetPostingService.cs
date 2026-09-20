@@ -90,15 +90,9 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
         }
 
         var settings = await GetFinanceSettingsAsync(voucher.TenantId, cancellationToken);
-        var inventoryAccountId = settings.ControlAccountInventoryId
-            ?? throw Control("INV_ISSUE_INVENTORY_ACCOUNT_MISSING",
-                "Inventory Control Account is not configured in Finance Settings.");
-        await RequirePostingAccountAsync(voucher.TenantId, inventoryAccountId, "Inventory Control Account", cancellationToken);
-
         var currency = Currency(settings.BaseCurrency);
         var lines = new List<FinancePostingLineDto>();
         var sequence = 1;
-        decimal total = 0m;
         foreach (var (line, rule) in resolved)
         {
             var amount = Money(line.TotalValue);
@@ -108,6 +102,14 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             var debitAccountId = rule.Treatment == InventoryIssueAccountingTreatment.FixedAsset
                 ? rule.FixedAssetCategory!.AssetAccountId
                 : rule.ExpenseAccountId!.Value;
+            if (rule.Treatment == InventoryIssueAccountingTreatment.Expense)
+                debitAccountId = await InventoryPostingAccountResolution.ResolveAsync(_db, voucher.TenantId,
+                    movementReason == InventoryIssueMovementReasons.MaintenanceConsumption
+                        ? line.InventoryItem.InServiceAccountId : line.InventoryItem.InUseAccountId,
+                    debitAccountId, "Inventory issue expense", cancellationToken, AccountType.Expense);
+            var inventoryAccountId = await InventoryPostingAccountResolution.ResolveAsync(_db, voucher.TenantId,
+                line.InventoryItem.InventoryAccountId, settings.ControlAccountInventoryId, "Inventory", cancellationToken, AccountType.Asset);
+            await RequirePostingAccountAsync(voucher.TenantId, inventoryAccountId, "Inventory Control Account", cancellationToken);
             var token = line.Id.ToString("N");
             lines.Add(Line(
                 debitAccountId,
@@ -120,20 +122,11 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
                 $"InventoryIssueVoucherLineId={token}",
                 rule.Treatment == InventoryIssueAccountingTreatment.FixedAsset
                     ? $"INV-ISSUE-FA-{token}" : $"INV-ISSUE-EXP-{token}"));
-            total += amount;
+            lines.Add(Line(inventoryAccountId, $"Inventory control release {voucher.VoucherNumber}", 0m, amount,
+                currency, sequence++, voucher.VoucherNumber, $"InventoryIssueVoucherLineId={token}", $"INV-ISSUE-CTL-{token}"));
         }
-        lines.Add(Line(
-            inventoryAccountId,
-            $"Inventory control release {voucher.VoucherNumber}",
-            0m,
-            Money(total),
-            currency,
-            sequence,
-            voucher.VoucherNumber,
-            $"InventoryIssueVoucherId={voucher.Id:N}",
-            "INV-ISSUE-CONTROL"));
 
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -145,7 +138,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Governed inventory issue {voucher.VoucherNumber} - {movementReason}",
             PostingDate = voucher.IssuedAtUtc,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryIssueVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -249,8 +242,12 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             .ThenBy(value => value.Id)
             .ToListAsync(cancellationToken);
 
+        var originalJournalIds = candidates.Select(value => value.JournalEntryId).Distinct().ToArray();
+        var originalEntries = await _db.AccountTransactions.AsNoTracking().Where(value => value.TenantId == voucher.TenantId &&
+            originalJournalIds.Contains(value.JournalEntryId) && !value.IsDeleted && value.PostingStatus == "Posted")
+            .ToListAsync(cancellationToken);
         var planned = new List<(InventoryReturnVoucherLine ReturnLine, InventoryIssueFinanceLineage Lineage,
-            decimal Quantity, decimal Value, Guid CreditAccountId)>();
+            decimal Quantity, decimal Value, Guid CreditAccountId, Guid InventoryAccountId)>();
         foreach (var returnLine in voucher.Lines.OrderBy(value => value.CreatedAt).ThenBy(value => value.Id))
         {
             var remaining = returnLine.Quantity;
@@ -270,10 +267,9 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
                         "A fixed asset must be returned as its complete serial-tracked unit.");
                 var unitValue = lineage.IssuedValue / lineage.IssuedQuantity;
                 var value = Money(quantity * unitValue);
-                var accountId = lineage.Treatment == InventoryIssueAccountingTreatment.FixedAsset
-                    ? lineage.InventoryIssueAccountingRule.FixedAssetCategory!.AssetAccountId
-                    : lineage.InventoryIssueAccountingRule.ExpenseAccountId!.Value;
-                planned.Add((returnLine, lineage, quantity, value, accountId));
+                var originalAccounts = ResolveOriginalIssueAccounts(originalEntries, lineage.JournalEntryId, lineage.InventoryIssueVoucherLineId);
+                // A store return reverses its original issue, not today's master defaults.
+                planned.Add((returnLine, lineage, quantity, value, originalAccounts.DebitAccountId, originalAccounts.InventoryAccountId));
                 remaining -= quantity;
             }
             if (remaining > 0m)
@@ -286,21 +282,17 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
         }
 
         var settings = await GetFinanceSettingsAsync(voucher.TenantId, cancellationToken);
-        var inventoryAccountId = settings.ControlAccountInventoryId
-            ?? throw Control("INV_RETURN_INVENTORY_ACCOUNT_MISSING",
-                "Inventory Control Account is not configured in Finance Settings.");
-        await RequirePostingAccountAsync(voucher.TenantId, inventoryAccountId, "Inventory Control Account", cancellationToken);
         var currency = Currency(settings.BaseCurrency);
         var postingLines = new List<FinancePostingLineDto>();
         var sequence = 1;
         foreach (var group in planned.GroupBy(value => value.ReturnLine.Id))
         {
-            var amount = Money(group.Sum(value => value.Value));
             var sourceLine = group.First().ReturnLine;
             var token = sourceLine.Id.ToString("N");
-            postingLines.Add(Line(inventoryAccountId,
-                $"Store return {voucher.VoucherNumber}", amount, 0m, currency, sequence++, voucher.VoucherNumber,
-                $"InventoryReturnVoucherLineId={token}", $"INV-RET-CTL-{token}"));
+            foreach (var inventoryGroup in group.GroupBy(value => value.InventoryAccountId))
+                postingLines.Add(Line(inventoryGroup.Key,
+                    $"Store return {voucher.VoucherNumber}", Money(inventoryGroup.Sum(value => value.Value)), 0m, currency, sequence++, voucher.VoucherNumber,
+                    $"InventoryReturnVoucherLineId={token}", $"INV-RET-CTL-{token}"));
             foreach (var allocation in group)
                 postingLines.Add(Line(allocation.CreditAccountId,
                     $"Reverse issue value {voucher.VoucherNumber}", 0m, allocation.Value, currency, sequence++,
@@ -309,7 +301,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
                         ? $"INV-RETURN-FA-{token}" : $"INV-RETURN-EXP-{token}"));
         }
 
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -321,7 +313,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Governed Store Return Voucher {voucher.VoucherNumber}",
             PostingDate = voucher.PostedAtUtc ?? DateTime.UtcNow,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = currency,
             IdempotencyKey = $"InventoryReturnVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Post",
             ReturnExistingOnDuplicate = true,
@@ -420,7 +412,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             PreserveFixedAssetReversalLineage(plan.ReversalLines, originalLines, fixedAssetAllocations, reason);
         }
         var settings = await GetFinanceSettingsAsync(voucher.TenantId, cancellationToken);
-        var result = await _posting.PostAsync(new FinancePostingRequestDto
+        var result = await _posting.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = FinanceModuleLockCatalog.Inventory,
@@ -435,7 +427,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             Description = $"Reversal of Store Return Voucher {voucher.VoucherNumber}",
             PostingDate = plan.ReversalDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = Currency(settings.BaseCurrency),
             IdempotencyKey = $"InventoryReturnVoucher:{voucher.TenantId:N}:{voucher.Id:N}:Reverse",
             ReturnExistingOnDuplicate = true,
@@ -542,6 +534,19 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
             .SingleOrDefaultAsync(value => value.TenantId == tenantId && !value.IsDeleted, cancellationToken)
            ?? throw Control("INV_FINANCE_SETTINGS_MISSING", "Finance settings are not configured for this tenant.");
 
+    internal static (Guid DebitAccountId, Guid InventoryAccountId) ResolveOriginalIssueAccounts(
+        IEnumerable<AccountTransaction> entries, Guid journalId, Guid issueLineId)
+    {
+        var token = issueLineId.ToString("N");
+        var journalEntries = entries.Where(entry => entry.JournalEntryId == journalId).ToArray();
+        var debit = journalEntries.SingleOrDefault(entry => entry.TransactionTag == $"INV-ISSUE-FA-{token}" || entry.TransactionTag == $"INV-ISSUE-EXP-{token}");
+        var inventory = journalEntries.SingleOrDefault(entry => entry.TransactionTag == $"INV-ISSUE-CTL-{token}")
+            ?? journalEntries.SingleOrDefault(entry => entry.TransactionTag == "INV-ISSUE-CONTROL");
+        if (debit == null || inventory == null)
+            throw Control("INV_RETURN_ORIGINAL_ACCOUNTS_MISSING", "The original issue journal accounts could not be identified for this return.");
+        return (debit.AccountId, inventory.AccountId);
+    }
+
     private async Task RequirePostingAccountAsync(
         Guid tenantId,
         Guid accountId,
@@ -550,7 +555,7 @@ public sealed class InventoryIssueFinanceAssetPostingService : IInventoryIssueFi
     {
         var valid = await _db.Accounts.AsNoTracking().AnyAsync(value =>
             value.TenantId == tenantId && value.Id == accountId && value.Status == AccountStatus.Active &&
-            value.AllowDirectPosting && !value.IsDeleted,
+            (value.AllowDirectPosting || value.IsControlAccount) && !value.IsDeleted,
             cancellationToken);
         if (!valid) throw Control("INV_ISSUE_ACCOUNT_INVALID", $"{role} must be an active posting account for this tenant.");
     }

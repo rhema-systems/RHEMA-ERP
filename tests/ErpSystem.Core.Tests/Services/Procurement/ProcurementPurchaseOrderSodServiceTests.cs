@@ -17,6 +17,38 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 public sealed class ProcurementPurchaseOrderSodServiceTests
 {
     [Fact]
+    public async Task DirectFinalizedOrderDoesNotAdvertiseApprovalButRetainsReceivingIndependence()
+    {
+        var requester = Guid.NewGuid();
+        var creator = Guid.NewGuid();
+        await using var fixture = new Fixture(requester, creator, requester);
+        fixture.PurchaseOrder.ApprovalRequired = false;
+
+        var readiness = await fixture.Service.EnforceReceiptAsync(fixture.PurchaseOrder, "direct-receipt");
+
+        readiness.ApprovalRequired.Should().BeFalse();
+        readiness.CanApprove.Should().BeFalse();
+        readiness.CanReceive.Should().BeTrue();
+        readiness.Code.Should().Be("PO_SOD_READY");
+        readiness.Checks.Single(check => check.Key == "approval").Code.Should().Be("PO_APPROVAL_NOT_REQUIRED");
+        fixture.EnforcedRequests.Should().OnlyContain(request =>
+            request.ControlCode == ProcurementPurchaseOrderSodRules.ReceiptControl);
+    }
+
+    [Fact]
+    public async Task DirectFinalizedOrderStillRejectsCreatorReceivingOwnOrder()
+    {
+        var creator = Guid.NewGuid();
+        await using var fixture = new Fixture(Guid.NewGuid(), creator, creator);
+        fixture.PurchaseOrder.ApprovalRequired = false;
+
+        var action = () => fixture.Service.EnforceReceiptAsync(fixture.PurchaseOrder, "direct-creator-receipt");
+
+        (await action.Should().ThrowAsync<ProcurementPurchaseOrderSodBlockedException>())
+            .Which.Code.Should().Be("PO_SOD_RECEIPT_BLOCKED");
+    }
+
+    [Fact]
     public async Task RequesterCannotApproveAndDenialRecordsAllDecisionKeys()
     {
         var requester = Guid.NewGuid();
@@ -136,7 +168,7 @@ public sealed class ProcurementPurchaseOrderSodServiceTests
         exception.Which.Readiness.ReceiptActionCoverage.Should()
             .Equal(ProcurementPurchaseOrderSodRules.ReceiptActionCoverage);
         fixture.AccessRequests.Should().ContainSingle(request =>
-            request.PermissionCode == "procurement.purchase-order.approve" &&
+            request.PermissionCode == "procurement.inventory.receive" &&
             request.WarehouseId ==
             fixture.PurchaseOrder.DeliveryWarehouseId);
         fixture.ControlEvents.Should().ContainSingle(item =>

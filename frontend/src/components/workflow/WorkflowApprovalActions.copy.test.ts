@@ -6,8 +6,8 @@ describe('workflow submission copy', () => {
     expect(shouldUseApprovalSubmitCopy(true)).toBe(false);
   });
 
-  it('uses Submit for Approval when the caller explicitly requires approval copy', () => {
-    expect(shouldUseApprovalSubmitCopy(true, 'approval')).toBe(true);
+  it('does not let a legacy copy override imply an approval the server says is not required', () => {
+    expect(shouldUseApprovalSubmitCopy(true, 'approval')).toBe(false);
   });
 
   it('uses approval copy when an approval workflow is active', () => {

@@ -1,6 +1,14 @@
 using System.Security.Claims;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Interfaces.Inventory;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.DTOs.Procurement;
+using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Finance.Integration;
+using ErpSystem.Data;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -13,13 +21,26 @@ public class LandedCostsController : ControllerBase
 {
     private readonly ILandedCostService _landedCostService;
     private readonly ILogger<LandedCostsController> _logger;
+    private readonly ApplicationDbContext? _db;
+    private readonly ICurrentUserService? _currentUser;
+    private readonly IVendorInvoiceService? _invoices;
+    private readonly IProcurementAccessControlService? _access;
+    private readonly ICurrentUserProvider? _actor;
 
     public LandedCostsController(
         ILandedCostService landedCostService,
-        ILogger<LandedCostsController> logger)
+        ILogger<LandedCostsController> logger,
+        ApplicationDbContext? db = null,
+        ICurrentUserService? currentUser = null,
+        IVendorInvoiceService? invoices = null,
+        IProcurementAccessControlService? access = null,
+        ICurrentUserProvider? actor = null)
     {
         _landedCostService = landedCostService;
         _logger = logger;
+        _db = db;
+        _currentUser = currentUser;
+        _invoices = invoices; _access = access; _actor = actor;
     }
 
     private Guid GetCurrentUserId()
@@ -65,6 +86,38 @@ public class LandedCostsController : ControllerBase
         }
     }
 
+    [HttpGet("by-po/{purchaseOrderId:guid}")]
+    public async Task<ActionResult<List<LandedCostDetailDto>>> GetByPurchaseOrder(Guid purchaseOrderId)
+        => Ok(await _landedCostService.GetByPurchaseOrderAsync(purchaseOrderId));
+
+    [HttpGet("by-invoice/{invoiceId:guid}")]
+    public async Task<ActionResult<List<LandedCostDetailDto>>> GetByInvoice(Guid invoiceId)
+    {
+        try { return Ok(await _landedCostService.GetByInvoiceAsync(invoiceId)); }
+        catch (ArgumentException ex) { return NotFound(ex.Message); }
+    }
+
+    public sealed class InvoiceLinkRequest { public Guid InvoiceId { get; set; } }
+
+    [HttpPut("{id:guid}/items/{itemId:guid}/invoice")]
+    public async Task<ActionResult<LandedCostDetailDto>> LinkInvoice(Guid id, Guid itemId, InvoiceLinkRequest request)
+    {
+        // Linking is an AP-authorized reference action. No invoice amount, approval or posting is changed.
+        if (_db == null || _currentUser?.TenantId == null || GetCurrentUserId() == Guid.Empty) return Forbid();
+        var allowed = _currentUser.IsInRole("SuperAdmin") || _currentUser.IsInRole("TenantAdmin");
+        if (!allowed)
+        {
+            var names = await _db.UserRoles.Where(r => r.UserId == GetCurrentUserId())
+                .SelectMany(r => r.Role.RolePermissions.Select(p => p.Permission.Name)).ToListAsync();
+            allowed = names.Any(p => new[] { "Finance.AP.Invoices.Edit", "Finance.AP.Invoices.Write", "Finance.AP.Invoices.Create" }
+                .Contains(p, StringComparer.OrdinalIgnoreCase));
+        }
+        if (!allowed) return Forbid();
+        try { return Ok(await _landedCostService.LinkInvoiceAsync(id, itemId, request.InvoiceId, GetCurrentUserId())); }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (InvalidOperationException ex) { return BadRequest(ex.Message); }
+    }
+
     [HttpGet("{id}")]
     public async Task<ActionResult<LandedCostDetailDto>> GetById(Guid id)
     {
@@ -105,6 +158,17 @@ public class LandedCostsController : ControllerBase
             _logger.LogError(ex, "Error creating landed cost");
             return StatusCode(500, "An error occurred while creating the landed cost");
         }
+    }
+
+    [HttpPut("{id}/draft")]
+    public async Task<ActionResult<LandedCostDto>> UpdateDraft(Guid id, [FromBody] UpdateLandedCostDto dto)
+    {
+        try
+        {
+            return Ok(await _landedCostService.UpdateDraftAsync(id, dto, GetCurrentUserId()));
+        }
+        catch (ArgumentException ex) { return BadRequest(ex.Message); }
+        catch (InvalidOperationException ex) { return Conflict(ex.Message); }
     }
 
     [HttpPost("initialize-from-po/{grnId}")]
@@ -202,6 +266,34 @@ public class LandedCostsController : ControllerBase
             _logger.LogError(ex, "Error approving landed cost {Id}", id);
             return StatusCode(500, "An error occurred while approving landed cost");
         }
+    }
+
+    // Receiving permission permits only source-bound draft generation as a posting
+    // side effect. It does not grant manual AP creation, tax edit, approval or payment.
+    [HttpPost("{id:guid}/post")]
+    public async Task<ActionResult<PostLandedCostResultDto>> Post(Guid id, PostLandedCostDto dto)
+    {
+        if (_db == null || _invoices == null || _access == null || _actor == null ||
+            _actor.IsExternalUser || _actor.UserId == Guid.Empty || _actor.TenantId == Guid.Empty) return Forbid();
+        var source = await _db.LandedCosts.AsNoTracking().Where(c =>
+            c.Id == id && c.TenantId == _actor.TenantId && !c.IsDeleted &&
+            c.GoodsReceiptNote.TenantId == _actor.TenantId && !c.GoodsReceiptNote.IsDeleted)
+            .Select(c => new { c.LandedCostNumber, c.GoodsReceiptNote.WarehouseId }).SingleOrDefaultAsync(HttpContext.RequestAborted);
+        if (source == null) return NotFound();
+        try
+        {
+            var decision = await _access.EnforceCapabilityAsync(new ProcurementAccessCapabilityRequest
+            {
+                PermissionCode = "procurement.inventory.receive", WarehouseId = source.WarehouseId,
+                SourceType = "InventoryLandedCost", SourceReference = source.LandedCostNumber
+            }, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+            if (!decision.Allowed) return StatusCode(403, new { message = decision.Message });
+            return Ok(await _invoices.PostLandedCostAsync(id, dto,
+                new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceApVendorInvoice), HttpContext.RequestAborted));
+        }
+        catch (ProcurementAccessAuthorizationException) { return Forbid(); }
+        catch (ArgumentException ex) { return BadRequest(new { code = "LANDED_COST_BILLING_REQUIRED", message = ex.Message }); }
+        catch (InvalidOperationException ex) { return UnprocessableEntity(new { code = "LANDED_COST_POST_NOT_READY", message = ex.Message }); }
     }
 
     [HttpPost("{id}/post-to-inventory")]

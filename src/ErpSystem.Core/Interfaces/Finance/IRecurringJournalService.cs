@@ -17,4 +17,17 @@ public interface IRecurringJournalService
     Task<RecurringJournalOccurrenceDto> RejectOccurrenceAsync(Guid occurrenceId, string comment, CancellationToken cancellationToken = default);
     Task<RecurringJournalOccurrenceDto> PostOccurrenceAsync(Guid occurrenceId, CancellationToken cancellationToken = default);
     Task<RecurringJournalGenerationResultDto> GenerateDueAsync(DateOnly asOfDate, CancellationToken cancellationToken = default);
+    Task<RecurringJournalReversalProcessingResultDto> ProcessDueReversalsAsync(DateOnly asOfDate, Guid? occurrenceId = null, CancellationToken cancellationToken = default);
+}
+
+/// <summary>
+/// Finance-internal boundary for tenant-explicit system postings. It exists so a
+/// background worker never impersonates a browser user or administrator.
+/// </summary>
+public interface IFinanceSystemPostingEngine
+{
+    Task<FinanceReversalPlanDto> GetReversalPlanAsync(Guid tenantId, Guid postingEventId, string reason,
+        DateTime reversalDate, string systemActor, CancellationToken cancellationToken = default);
+    Task<FinancePostingResultDto> PostAsync(Guid tenantId, FinancePostingRequestV2Dto request,
+        string systemActor, CancellationToken cancellationToken = default);
 }

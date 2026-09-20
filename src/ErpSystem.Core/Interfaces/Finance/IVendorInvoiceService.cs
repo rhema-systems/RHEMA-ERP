@@ -14,6 +14,18 @@ namespace ErpSystem.Core.Interfaces.Finance;
 /// </summary>
 public interface IVendorInvoiceService
 {
+    Task<VendorInvoiceDistributionDto> GetDistributionAsync(Guid id, CancellationToken cancellationToken = default);
+    Task<ErpSystem.Core.DTOs.Procurement.PurchaseOrderSupplierDefaultsDto?> GetSupplierDefaultsAsync(
+        Guid supplierId, Guid? purchaseOrderId = null, CancellationToken cancellationToken = default, DateTime? invoiceDate = null);
+    Task<PostLandedCostResultDto> PostLandedCostAsync(Guid landedCostId,
+        PostLandedCostDto dto, FinancePostingProducerContext producer, CancellationToken cancellationToken = default);
+    Task<List<VendorInvoiceDto>> CreateFromLandedCostAsync(Guid landedCostId,
+        CreateLandedCostInvoicesDto dto, FinancePostingProducerContext producer,
+        CancellationToken cancellationToken = default);
+    /// <summary>Read-only Goods entry quantities from governed acceptance, less other committed invoices.</summary>
+    Task<ApGoodsInvoiceEntryDto> GetGoodsInvoiceEntryAsync(Guid purchaseOrderId,
+        Guid? currentInvoiceId = null, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Retrieves a vendor invoice by ID, including line items and payment allocations.
     /// </summary>

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import {
@@ -18,6 +18,7 @@ import {
     Trash2,
 } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { EligibleDraftJournalCombobox } from '@/components/finance/journal-batches/eligible-draft-journal-combobox';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
@@ -28,6 +29,9 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useToast } from '@/components/ui/use-toast';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { useAuth } from '@/hooks/use-auth';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { journalBatchDataService } from '@/services/finance/journal-batch-data.service';
 import type { Account, CreateAccountTransactionDto } from '@/types/finance';
@@ -35,6 +39,7 @@ import type {
     JournalBatchDetail,
     JournalBatchItem,
     JournalBatchValidation,
+    EligibleJournalBatchDraft,
     ReviewJournalBatchItem,
 } from '@/types/journal-batches';
 
@@ -56,11 +61,22 @@ const money = (value: number, currency: string) =>
     new Intl.NumberFormat('en-GH', { style: 'currency', currency }).format(value);
 
 const today = () => new Date().toISOString().slice(0, 10);
+const errorDescription = (error: any) => {
+    const problem = error?.response?.data ?? error?.response ?? error;
+    const detail = problem?.detail ?? problem?.message ?? error?.message ?? 'The action could not be completed.';
+    const code = problem?.code ?? problem?.extensions?.code;
+    return code ? `${detail} (${code})` : detail;
+};
 
 export default function JournalBatchDetailPage() {
     const { id } = useParams<{ id: string }>();
     const router = useRouter();
     const { toast } = useToast();
+    const { hasPermission } = useAuth();
+    const workflow = useWorkflowSummary({ entityType: 'JournalBatch', entityId: id });
+    const [confirmation, setConfirmation] = useState<'submit' | 'post' | 'reverse' | null>(null);
+    const [reversalReason, setReversalReason] = useState('');
+    const [reversalDate, setReversalDate] = useState(today());
     const [batch, setBatch] = useState<JournalBatchDetail | null>(null);
     const [accounts, setAccounts] = useState<Account[]>([]);
     const [validation, setValidation] = useState<JournalBatchValidation | null>(null);
@@ -70,7 +86,13 @@ export default function JournalBatchDetailPage() {
     const [reviewDecisions, setReviewDecisions] = useState<Record<string, 'Approved' | 'Rejected'>>({});
     const [reviewComments, setReviewComments] = useState<Record<string, string>>({});
     const [stageComment, setStageComment] = useState('');
-    const [existingJournalId, setExistingJournalId] = useState('');
+    const [selectedDraftJournal, setSelectedDraftJournal] = useState<EligibleJournalBatchDraft>();
+    const [eligibleDrafts, setEligibleDrafts] = useState<EligibleJournalBatchDraft[]>([]);
+    const [eligibleDraftSearch, setEligibleDraftSearch] = useState('');
+    const [eligibleDraftsLoading, setEligibleDraftsLoading] = useState(false);
+    const [eligibleDraftsError, setEligibleDraftsError] = useState<string>();
+    const [eligibleDraftsOpen, setEligibleDraftsOpen] = useState(false);
+    const eligibleDraftRequest = useRef(0);
     const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
     const [entry, setEntry] = useState({
         transactionDate: today(),
@@ -104,8 +126,35 @@ export default function JournalBatchDetailPage() {
             .catch(() => undefined);
     }, []);
 
-    const readyItems = useMemo(() => batch?.items.filter((item) => item.reviewStatus === 'Approved' && item.postingStatus === 'Ready') ?? [], [batch]);
+    const loadEligibleDrafts = useCallback(async (search: string) => {
+        const requestId = ++eligibleDraftRequest.current;
+        try {
+            setEligibleDraftsLoading(true);
+            setEligibleDraftsError(undefined);
+            const result = await journalBatchDataService.getEligibleDraftJournals(id, search);
+            if (requestId !== eligibleDraftRequest.current) return;
+            setEligibleDrafts(result);
+        } catch (error: any) {
+            if (requestId !== eligibleDraftRequest.current) return;
+            setEligibleDrafts([]);
+            setEligibleDraftsError(error.message || 'Eligible draft journals could not be loaded.');
+        } finally {
+            if (requestId === eligibleDraftRequest.current) setEligibleDraftsLoading(false);
+        }
+    }, [id]);
+
+    useEffect(() => {
+        if (!batch?.canEdit) return;
+        const timeout = window.setTimeout(() => loadEligibleDrafts(eligibleDraftSearch), 250);
+        return () => window.clearTimeout(timeout);
+    }, [batch?.canEdit, eligibleDraftSearch, loadEligibleDrafts]);
+
+    const readyItems = useMemo(() => batch?.items.filter((item) =>
+        item.reviewStatus === (batch.approvalRequired === false ? 'NotRequired' : 'Approved') && item.postingStatus === 'Ready') ?? [], [batch]);
     const pendingItems = useMemo(() => batch?.items.filter((item) => item.reviewStatus === 'Pending') ?? [], [batch]);
+    const showReview = batch?.approvalRequired !== false && (batch?.approvalStatus !== 'Draft' || !workflow.visibility.direct);
+    const canReview = showReview && batch?.canReview && hasPermission('Finance.JournalBatches.Approve');
+    const canPost = batch?.canPostAny && hasPermission('Finance.JournalBatches.Post');
     const lineDebit = lines.filter((line) => line.transactionType === 'Debit').reduce((sum, line) => sum + Number(line.amount || 0), 0);
     const lineCredit = lines.filter((line) => line.transactionType === 'Credit').reduce((sum, line) => sum + Number(line.amount || 0), 0);
 
@@ -121,8 +170,10 @@ export default function JournalBatchDetailPage() {
             await action();
             toast({ title: success });
             if (reload) await load();
+            return true;
         } catch (error: any) {
-            toast({ title: `${success} failed`, description: error.message, variant: 'destructive' });
+            toast({ title: `${success} failed`, description: errorDescription(error), variant: 'destructive' });
+            return false;
         } finally {
             setBusy(null);
         }
@@ -139,6 +190,19 @@ export default function JournalBatchDetailPage() {
         } finally {
             setBusy(null);
         }
+    };
+
+    const attachExistingJournal = async () => {
+        if (!selectedDraftJournal) return;
+        const attached = await run(
+            'attach',
+            () => journalBatchDataService.attachJournal(id, selectedDraftJournal.id),
+            'Journal attached',
+        );
+        if (!attached) return;
+        setSelectedDraftJournal(undefined);
+        setEligibleDraftSearch('');
+        await loadEligibleDrafts('');
     };
 
     const saveEntry = async () => {
@@ -224,19 +288,34 @@ export default function JournalBatchDetailPage() {
     };
 
     const reverse = async () => {
-        const reason = window.prompt('Reason for reversing the entire batch:');
-        if (!reason?.trim()) return;
-        const reversalDate = window.prompt('Reversal date (YYYY-MM-DD):', today());
-        if (!reversalDate) return;
+        if (!reversalReason.trim() || !reversalDate) return false;
         try {
             setBusy('reverse');
-            const reversal = await journalBatchDataService.createReversal(id, reason, reversalDate);
+            const reversal = await journalBatchDataService.createReversal(id, reversalReason.trim(), reversalDate);
             router.push(`/finance/journal-batches/${reversal.id}`);
+            return true;
         } catch (error: any) {
-            toast({ title: 'Reversal failed', description: error.message, variant: 'destructive' });
+            toast({ title: 'Reversal failed', description: errorDescription(error), variant: 'destructive' });
+            return false;
         } finally {
             setBusy(null);
         }
+    };
+
+    const submit = async () => {
+        if (!workflow.visibility.known || !hasPermission('Finance.JournalBatches.SubmitForApproval')) return false;
+        try {
+            setBusy('submit');
+            const result = await journalBatchDataService.submit(id);
+            setBatch(result);
+            void workflow.refresh();
+            toast({ title: result.approvalRequired === false ? 'Ready to post' : 'Batch submitted',
+                description: result.approvalRequired === false ? 'No approval process is active. Select the entries and post when ready.' : undefined });
+            return true;
+        } catch (error: any) {
+            toast({ title: 'Submission failed', description: errorDescription(error), variant: 'destructive' });
+            return false;
+        } finally { setBusy(null); }
     };
 
     const copyBatch = async (rejectedOnly: boolean) => {
@@ -265,7 +344,7 @@ export default function JournalBatchDetailPage() {
                     <Button variant="outline" onClick={() => journalBatchDataService.exportBatch(id, batch.batchNumber)}><Download className="mr-2 h-4 w-4" />Export</Button>
                     <Button variant="outline" onClick={() => copyBatch(false)} disabled={busy !== null}><Copy className="mr-2 h-4 w-4" />Copy</Button>
                     {batch.rejectedEntryCount > 0 && <Button variant="outline" onClick={() => copyBatch(true)} disabled={busy !== null}>Copy rejected</Button>}
-                    {batch.canReverseBatch && <Button variant="destructive" onClick={reverse} disabled={busy !== null}><RotateCcw className="mr-2 h-4 w-4" />Reverse entire batch</Button>}
+                    {batch.canReverseBatch && hasPermission('Finance.JournalBatches.Reverse') && <Button variant="destructive" onClick={() => setConfirmation('reverse')} disabled={busy !== null}><RotateCcw className="mr-2 h-4 w-4" />Reverse entire batch</Button>}
                 </div>
             </div>
 
@@ -288,11 +367,13 @@ export default function JournalBatchDetailPage() {
                 <CardHeader><CardTitle>Control actions</CardTitle><CardDescription>Validation is read-only. Submission freezes a content fingerprint for every entry.</CardDescription></CardHeader>
                 <CardContent className="flex flex-wrap gap-2">
                     <Button variant="outline" onClick={validate} disabled={busy !== null}>{busy === 'validate' ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileCheck2 className="mr-2 h-4 w-4" />}Validate</Button>
-                    {batch.canSubmit && <Button onClick={() => run('submit', () => journalBatchDataService.submit(id), 'Batch submitted')} disabled={busy !== null}><Send className="mr-2 h-4 w-4" />Submit for approval</Button>}
-                    {batch.approvalStatus === 'PendingApproval' && <Button variant="outline" onClick={() => run('withdraw', () => journalBatchDataService.withdraw(id), batch.batchType === 'Reversal' ? 'Reversal cancelled' : 'Batch withdrawn')} disabled={busy !== null}>{batch.batchType === 'Reversal' ? 'Cancel reversal' : 'Withdraw'}</Button>}
+                    {batch.canSubmit && hasPermission('Finance.JournalBatches.SubmitForApproval') && <Button onClick={() => setConfirmation('submit')} disabled={busy !== null || !workflow.visibility.known}><Send className="mr-2 h-4 w-4" />{workflow.visibility.direct ? 'Prepare to post' : 'Submit for approval'}</Button>}
+                    {batch.approvalStatus === 'PendingApproval' && hasPermission('Finance.JournalBatches.SubmitForApproval') && <Button variant="outline" onClick={() => run('withdraw', () => journalBatchDataService.withdraw(id), batch.batchType === 'Reversal' ? 'Reversal cancelled' : 'Batch withdrawn')} disabled={busy !== null}>{batch.batchType === 'Reversal' ? 'Cancel reversal' : 'Withdraw'}</Button>}
                     <Button variant="ghost" onClick={load}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button>
                 </CardContent>
             </Card>
+
+            {batch.canSubmit && workflow.error && <div role="alert" className="text-sm text-destructive">{workflow.error}<Button variant="link" onClick={() => void workflow.refresh()}>Retry workflow check</Button></div>}
 
             {validation && (
                 <Alert variant={validation.isValid ? 'default' : 'destructive'}>
@@ -305,26 +386,26 @@ export default function JournalBatchDetailPage() {
             )}
 
             <Card>
-                <CardHeader><CardTitle>Journal entries</CardTitle><CardDescription>Each row is an independently balanced journal. Approval and posting can be selective.</CardDescription></CardHeader>
+                <CardHeader><CardTitle>Journal entries</CardTitle><CardDescription>Each row is independently balanced. Select posting-ready entries for each posting run.</CardDescription></CardHeader>
                 <CardContent className="space-y-4">
                     <div className="overflow-x-auto rounded-md border">
                         <table className="w-full text-sm">
-                            <thead className="bg-muted/50"><tr><th className="p-3 text-center">Post</th><th className="p-3 text-left">Journal</th><th className="p-3 text-left">Description</th><th className="p-3 text-right">Debit</th><th className="p-3 text-left">Review</th><th className="p-3 text-left">Posting</th><th className="p-3 text-right">Actions</th></tr></thead>
+                            <thead className="bg-muted/50"><tr><th className="p-3 text-center">Post</th><th className="p-3 text-left">Journal</th><th className="p-3 text-left">Description</th><th className="p-3 text-right">Debit</th>{showReview && <th className="p-3 text-left">Review</th>}<th className="p-3 text-left">Posting</th><th className="p-3 text-right">Actions</th></tr></thead>
                             <tbody>
                                 {batch.items.map((item) => (
                                     <tr className="border-t align-top" key={item.id}>
-                                        <td className="p-3 text-center"><Checkbox disabled={item.postingStatus !== 'Ready'} checked={postSelection.includes(item.id)} onCheckedChange={(checked) => setPostSelection((current) => checked === true ? [...new Set([...current, item.id])] : current.filter((value) => value !== item.id))} /></td>
+                                        <td className="p-3 text-center"><Checkbox aria-label={`Select ${item.journalEntryNumber} for posting`} disabled={!canPost || !readyItems.some((ready) => ready.id === item.id)} checked={postSelection.includes(item.id)} onCheckedChange={(checked) => setPostSelection((current) => checked === true ? [...new Set([...current, item.id])] : current.filter((value) => value !== item.id))} /></td>
                                         <td className="p-3"><Link className="font-mono text-primary hover:underline" href={`/finance/journal-entries/${item.journalEntryId}`}>{item.journalEntryNumber}</Link><div className="text-xs text-muted-foreground">{new Date(item.entryDate).toLocaleDateString()}</div></td>
                                         <td className="p-3">{item.description}<div className="text-xs text-muted-foreground">{item.lineCount} lines</div></td>
                                         <td className="p-3 text-right">{money(item.totalDebit, batch.controlCurrencyCode)}</td>
-                                        <td className="p-3">
-                                            {item.reviewStatus === 'Pending' && batch.canReview ? (
+                                        {showReview && <td className="p-3">
+                                            {item.reviewStatus === 'Pending' && canReview ? (
                                                 <div className="min-w-52 space-y-2">
                                                     <Select value={reviewDecisions[item.id] || 'Approved'} onValueChange={(value: 'Approved' | 'Rejected') => setReviewDecisions({ ...reviewDecisions, [item.id]: value })}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="Approved">Approve</SelectItem><SelectItem value="Rejected">Reject</SelectItem></SelectContent></Select>
                                                     {reviewDecisions[item.id] === 'Rejected' && <Input placeholder="Required rejection reason" value={reviewComments[item.id] || ''} onChange={(event) => setReviewComments({ ...reviewComments, [item.id]: event.target.value })} />}
                                                 </div>
                                             ) : <><Badge variant={item.reviewStatus === 'Rejected' ? 'destructive' : 'outline'}>{item.reviewStatus}</Badge>{item.finalRejectionReason && <div className="mt-1 max-w-xs text-xs text-destructive">{item.finalRejectionReason}</div>}</>}
-                                        </td>
+                                        </td>}
                                         <td className="p-3"><Badge variant="outline">{item.postingStatus}</Badge></td>
                                         <td className="p-3 text-right">
                                             {batch.canEdit && <Button size="sm" variant="ghost" onClick={() => editItem(item)}>Edit</Button>}
@@ -332,22 +413,22 @@ export default function JournalBatchDetailPage() {
                                         </td>
                                     </tr>
                                 ))}
-                                {batch.items.length === 0 && <tr><td colSpan={7} className="p-8 text-center text-muted-foreground">No journal entries have been added.</td></tr>}
+                                {batch.items.length === 0 && <tr><td colSpan={showReview ? 7 : 6} className="p-8 text-center text-muted-foreground">No journal entries have been added.</td></tr>}
                             </tbody>
                         </table>
                     </div>
 
-                    {batch.canReview && pendingItems.length > 0 && (
+                    {canReview && pendingItems.length > 0 && (
                         <div className="flex flex-wrap items-end justify-between gap-3 rounded-md border p-4">
                             <div className="min-w-72 flex-1 space-y-2"><Label>Stage comment</Label><Input value={stageComment} onChange={(event) => setStageComment(event.target.value)} placeholder="Optional comment applying to this workflow stage" /></div>
                             <Button onClick={submitReview} disabled={busy !== null}><CheckCircle2 className="mr-2 h-4 w-4" />Submit all {pendingItems.length} decisions</Button>
                         </div>
                     )}
 
-                    {readyItems.length > 0 && (
+                    {canPost && readyItems.length > 0 && (
                         <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border p-4">
-                            <div><div className="font-medium">{postSelection.length} of {readyItems.length} approved entries selected</div><div className="text-sm text-muted-foreground">Each posting run is atomic; unselected approved entries remain ready for a later run.</div></div>
-                            <div className="flex gap-2"><Button variant="outline" onClick={() => setPostSelection(readyItems.map((item) => item.id))}>Select all ready</Button><Button onClick={() => run('post', () => journalBatchDataService.post(id, postSelection), 'Posting run completed')} disabled={postSelection.length === 0 || busy !== null}>Post selected</Button></div>
+                            <div><div className="font-medium">{postSelection.length} of {readyItems.length} posting-ready entries selected</div><div className="text-sm text-muted-foreground">Each posting run is atomic; unselected entries remain ready for a later run.</div></div>
+                            <div className="flex gap-2"><Button variant="outline" onClick={() => setPostSelection(readyItems.map((item) => item.id))}>Select all ready</Button><Button onClick={() => setConfirmation('post')} disabled={postSelection.length === 0 || busy !== null}>Post selected</Button></div>
                         </div>
                     )}
                 </CardContent>
@@ -379,8 +460,40 @@ export default function JournalBatchDetailPage() {
                             <div className="flex gap-2">{editingJournalId && <Button variant="outline" onClick={resetEntry}>Cancel edit</Button>}<Button onClick={saveEntry} disabled={busy !== null}><Save className="mr-2 h-4 w-4" />{editingJournalId ? 'Update journal' : 'Add journal'}</Button></div>
                         </div>
                         <div className="grid gap-3 border-t pt-4 md:grid-cols-[1fr_auto]">
-                            <div className="space-y-2"><Label>Attach an existing draft journal by ID</Label><Input value={existingJournalId} onChange={(event) => setExistingJournalId(event.target.value)} placeholder="00000000-0000-0000-0000-000000000000" /></div>
-                            <Button className="self-end" variant="outline" onClick={() => run('attach', () => journalBatchDataService.attachJournal(id, existingJournalId), 'Journal attached')} disabled={!existingJournalId || busy !== null}>Attach</Button>
+                            <div className="space-y-2">
+                                <Label>Attach an existing draft journal</Label>
+                                <EligibleDraftJournalCombobox
+                                    options={eligibleDrafts}
+                                    selected={selectedDraftJournal}
+                                    search={eligibleDraftSearch}
+                                    onSearchChange={setEligibleDraftSearch}
+                                    onSelect={setSelectedDraftJournal}
+                                    open={eligibleDraftsOpen}
+                                    onOpenChange={setEligibleDraftsOpen}
+                                    loading={eligibleDraftsLoading}
+                                    error={eligibleDraftsError}
+                                    currencyCode={batch.controlCurrencyCode}
+                                    disabled={busy !== null}
+                                />
+                                {selectedDraftJournal && (
+                                    <div className="text-xs text-muted-foreground">
+                                        Same period and book · <Link className="text-primary hover:underline" href={`/finance/journal-entries/${selectedDraftJournal.id}`} target="_blank">Open journal</Link>
+                                    </div>
+                                )}
+                                {!selectedDraftJournal && !eligibleDraftsLoading && !eligibleDraftsError && eligibleDrafts.length === 0 && (
+                                    <p className="text-xs text-muted-foreground">
+                                        {batch.batchType === 'Reversal'
+                                            ? 'Only system-generated reversal journals belonging to this reversal batch can be selected.'
+                                            : 'Create or save a balanced manual journal as Draft in this batch\'s period and accounting book first.'}
+                                    </p>
+                                )}
+                                {eligibleDraftsError && (
+                                    <Button type="button" variant="link" className="h-auto p-0 text-xs" onClick={() => loadEligibleDrafts(eligibleDraftSearch)}>Retry loading journals</Button>
+                                )}
+                            </div>
+                            <Button className="self-end" variant="outline" onClick={attachExistingJournal} disabled={!selectedDraftJournal || busy !== null}>
+                                {busy === 'attach' && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Attach
+                            </Button>
                         </div>
                     </CardContent>
                 </Card>
@@ -392,6 +505,20 @@ export default function JournalBatchDetailPage() {
                     <CardContent><div className="space-y-2">{batch.postingRuns.map((runItem) => <div className="flex flex-wrap justify-between gap-2 rounded-md border p-3" key={runItem.id}><div><span className="font-medium">Run {runItem.runNumber}</span> <Badge variant="outline">{runItem.status}</Badge><div className="text-xs text-muted-foreground">{new Date(runItem.requestedAt).toLocaleString()}</div></div><div className="text-right">{runItem.selectedEntryCount} entries<div className="font-medium">{money(runItem.selectedDebitTotal, batch.controlCurrencyCode)}</div></div></div>)}</div></CardContent>
                 </Card>
             )}
+            <ConfirmationDialog open={confirmation === 'submit'} onOpenChange={(open) => { if (!open) setConfirmation(null); }}
+                title={workflow.visibility.direct ? 'Prepare batch for posting?' : 'Submit batch for approval?'}
+                description={workflow.visibility.direct ? 'Validate and freeze the entries. Posting remains a separate action.' : 'Validate and freeze the entries for the configured approval process.'}
+                confirmText={workflow.visibility.direct ? 'Prepare to post' : 'Submit for approval'} onConfirm={submit} isLoading={busy === 'submit'} confirmDisabled={!workflow.visibility.known} />
+            <ConfirmationDialog open={confirmation === 'post'} onOpenChange={(open) => { if (!open) setConfirmation(null); }}
+                title="Post selected journals?" description={`${postSelection.length} selected journal(s) will post to the General Ledger in one atomic run.`}
+                confirmText="Post selected" onConfirm={() => canPost ? run('post', () => journalBatchDataService.post(id, postSelection), 'Posting run completed') : false}
+                isLoading={busy === 'post'} confirmDisabled={!canPost || postSelection.length === 0} />
+            <ConfirmationDialog open={confirmation === 'reverse'} onOpenChange={(open) => { if (!open) setConfirmation(null); }} title="Reverse entire batch?"
+                description="Create a reversal batch. Its configured approval process, if active, still applies before posting."
+                confirmText="Create reversal" variant="destructive" onConfirm={reverse} isLoading={busy === 'reverse'} confirmDisabled={!reversalReason.trim() || !reversalDate}>
+                <Label htmlFor="batch-reversal-reason">Reversal reason</Label><Textarea id="batch-reversal-reason" value={reversalReason} onChange={(event) => setReversalReason(event.target.value)} />
+                <Label htmlFor="batch-reversal-date">Reversal date</Label><Input id="batch-reversal-date" type="date" value={reversalDate} onChange={(event) => setReversalDate(event.target.value)} />
+            </ConfirmationDialog>
         </div>
     );
 }

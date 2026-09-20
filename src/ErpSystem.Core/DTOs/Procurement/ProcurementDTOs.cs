@@ -163,6 +163,7 @@ public class SupplierItemCatalogDto
 /// </summary>
 public class PurchaseOrderSummaryDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string OrderNumber { get; set; } = string.Empty;
     public string OrderType { get; set; } = "Standard";
@@ -190,6 +191,7 @@ public class PurchaseOrderSummaryDto
 /// </summary>
 public class PurchaseOrderDetailDto : PurchaseOrderSummaryDto
 {
+    public PurchaseOrderSupplierDefaultsDto? SupplierDefaults { get; set; }
     public DateTime? ReceivedDate { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedAt { get; set; }
@@ -284,6 +286,7 @@ public sealed class PurchaseOrderBudgetCommitmentHistoryDto
 /// </summary>
 public class PurchaseOrderItemDto
 {
+    public ItemType LineType { get; set; } = ItemType.StockItem;
     public Guid Id { get; set; }
     public Guid PurchaseOrderId { get; set; }
     public Guid InventoryItemId { get; set; }
@@ -318,6 +321,7 @@ public class PurchaseOrderItemDto
 /// </summary>
 public class CreatePurchaseOrderDto
 {
+    public UpsertPurchaseOrderLandedCostPlanDto? PlannedLandedCostPlan { get; set; }
     [Required]
     public ProcurementPurchaseOrderSourceType? SourceType { get; set; }
 
@@ -365,8 +369,9 @@ public class CreatePurchaseOrderDto
 /// </summary>
 public class CreatePurchaseOrderItemDto
 {
-    [Required]
-    public Guid InventoryItemId { get; set; }
+    public Guid? Id { get; set; }
+    public Guid? InventoryItemId { get; set; }
+    public ItemType LineType { get; set; } = ItemType.StockItem;
 
     public string? SupplierItemCode { get; set; }
     public string? ItemDescription { get; set; }
@@ -532,6 +537,7 @@ public class ReceivePurchaseOrderItemDto
 /// </summary>
 public class PurchaseRequisitionSummaryDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public DateTime RequisitionDate { get; set; }
@@ -540,6 +546,7 @@ public class PurchaseRequisitionSummaryDto
     public string Status { get; set; } = string.Empty;
     public string Priority { get; set; } = string.Empty;
     public string? Department { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
     public decimal TotalAmount { get; set; }
     public string Currency { get; set; } = string.Empty;
     public int ItemCount { get; set; }
@@ -614,6 +621,9 @@ public class CreatePurchaseRequisitionDto
     /// retained as the display snapshot for legacy reporting only.
     /// </summary>
     public Guid? DepartmentId { get; set; }
+
+    /// <summary>Current HR Organisation Structure → Level → Unit selection.</summary>
+    public Guid? OrganizationUnitId { get; set; }
 
     /// <summary>
     /// Requested transaction currency for an unlinked requisition. When a
@@ -715,6 +725,8 @@ public sealed class PurchaseRequisitionLinkageOptionDto
     public string? BudgetCode { get; set; }
     public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public Guid? InventoryItemId { get; set; }
     public decimal? Quantity { get; set; }
     public string? UnitOfMeasure { get; set; }

@@ -10,7 +10,8 @@ public enum InventoryReturnVoucherStatus
     Approved = 2,
     Rejected = 3,
     Posted = 4,
-    Reversed = 5
+    Reversed = 5,
+    ReadyToPost = 6
 }
 
 public enum InventoryReturnVoucherActionType
@@ -19,7 +20,8 @@ public enum InventoryReturnVoucherActionType
     Approved = 2,
     Rejected = 3,
     Posted = 4,
-    Reversed = 5
+    Reversed = 5,
+    ApprovalNotRequired = 6
 }
 
 public sealed class InventoryReturnVoucher : TenantEntity
@@ -28,6 +30,7 @@ public sealed class InventoryReturnVoucher : TenantEntity
     public Guid InventoryRequisitionId { get; set; }
     public Guid WarehouseId { get; set; }
     public Guid RequestedById { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? WorkflowInstanceId { get; set; }
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAtUtc { get; set; }

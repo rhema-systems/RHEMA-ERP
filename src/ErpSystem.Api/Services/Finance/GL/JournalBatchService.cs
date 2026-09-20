@@ -23,6 +23,7 @@ public sealed class JournalBatchService : IJournalBatchService
     private readonly IJournalEntryService _journalEntries;
     private readonly IDocumentNumberingService _numbering;
     private readonly IWorkflowService _workflow;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IFinanceAuditService? _audit;
     private readonly ILogger<JournalBatchService> _logger;
 
@@ -33,7 +34,8 @@ public sealed class JournalBatchService : IJournalBatchService
         IDocumentNumberingService numbering,
         IWorkflowService workflow,
         ILogger<JournalBatchService> logger,
-        IFinanceAuditService? audit = null)
+        IFinanceAuditService? audit = null,
+        IWorkflowIntegrationService? workflowIntegration = null)
     {
         _context = context;
         _currentUser = currentUser;
@@ -42,6 +44,8 @@ public sealed class JournalBatchService : IJournalBatchService
         _workflow = workflow;
         _logger = logger;
         _audit = audit;
+        _workflowIntegration = workflowIntegration ?? new ErpSystem.Core.Services.Workflow.WorkflowIntegrationService(
+            workflow, Microsoft.Extensions.Logging.Abstractions.NullLogger<ErpSystem.Core.Services.Workflow.WorkflowIntegrationService>.Instance);
     }
 
     private Guid TenantId => _currentUser.GetRequiredFinanceTenantId();
@@ -220,6 +224,97 @@ public sealed class JournalBatchService : IJournalBatchService
         return await RequireDetailAsync(id, cancellationToken);
     }
 
+    public async Task<IReadOnlyList<EligibleJournalBatchDraftDto>> GetEligibleDraftJournalsAsync(
+        Guid id,
+        string? search,
+        int take = 50,
+        CancellationToken cancellationToken = default)
+    {
+        var batch = await RequireBatchAsync(id, cancellationToken);
+        EnsureDraft(batch);
+
+        var activeWorkflowJournalIds = _context.WorkflowInstances
+            .Where(instance =>
+                instance.TenantId == TenantId &&
+                instance.EntityType.Code == "JournalEntry" &&
+                instance.Status != WorkflowInstanceStatus.Completed &&
+                instance.Status != WorkflowInstanceStatus.Cancelled &&
+                instance.Status != WorkflowInstanceStatus.Failed)
+            .Select(instance => instance.EntityId);
+
+        var attachedJournalIds = _context.JournalBatchItems
+            .Where(item => item.TenantId == TenantId && !item.IsDeleted)
+            .Select(item => item.JournalEntryId);
+
+        var normalizedBook = batch.BookClassification.ToUpper();
+
+        var query = _context.JournalEntries
+            .AsNoTracking()
+            .Where(journal =>
+                journal.TenantId == TenantId &&
+                !journal.IsDeleted &&
+                journal.PostingStatus == "Draft" &&
+                journal.FiscalPeriodId == batch.FiscalPeriodId &&
+                journal.BookClassification.ToUpper() == normalizedBook &&
+                !attachedJournalIds.Contains(journal.Id) &&
+                !activeWorkflowJournalIds.Contains(journal.Id));
+
+        if (batch.BatchType == JournalBatchType.Reversal)
+        {
+            var sourceJournalIds = _context.JournalBatchItems
+                .Where(item =>
+                    item.TenantId == TenantId &&
+                    item.JournalBatchId == batch.ReversalOfJournalBatchId &&
+                    item.PostingStatus == JournalBatchItemPostingStatus.Posted &&
+                    !item.IsDeleted)
+                .Select(item => item.JournalEntryId);
+
+            query = query.Where(journal =>
+                journal.SourceModule != null && journal.SourceModule.ToUpper() == "GL" &&
+                journal.SourceDocumentType == "JournalBatchReversal" &&
+                journal.SourceDocumentId.HasValue &&
+                sourceJournalIds.Contains(journal.SourceDocumentId.Value) &&
+                (!journal.OriginalJournalEntryId.HasValue || journal.OriginalJournalEntryId == journal.SourceDocumentId));
+        }
+        else
+        {
+            query = query.Where(journal =>
+                (journal.SourceModule == null || journal.SourceModule == "" || journal.SourceModule.ToUpper() == "GL" || journal.SourceModule.ToUpper() == "MANUAL") &&
+                !journal.IsRecurring &&
+                !journal.IsRevaluationEntry &&
+                !journal.IsAutoReversalEntry &&
+                !journal.OriginalJournalEntryId.HasValue);
+        }
+
+        var normalizedSearch = search?.Trim();
+        if (normalizedSearch?.Length > 100)
+            normalizedSearch = normalizedSearch[..100];
+        if (!string.IsNullOrWhiteSpace(normalizedSearch))
+        {
+            query = query.Where(journal =>
+                journal.JournalEntryNumber.Contains(normalizedSearch) ||
+                journal.Description.Contains(normalizedSearch) ||
+                journal.ReferenceNumber != null && journal.ReferenceNumber.Contains(normalizedSearch));
+        }
+
+        return await query
+            .OrderByDescending(journal => journal.EntryDate)
+            .ThenBy(journal => journal.JournalEntryNumber)
+            .Take(Math.Clamp(take, 1, 100))
+            .Select(journal => new EligibleJournalBatchDraftDto
+            {
+                Id = journal.Id,
+                JournalEntryNumber = journal.JournalEntryNumber,
+                EntryDate = journal.EntryDate,
+                Description = journal.Description,
+                ReferenceNumber = journal.ReferenceNumber,
+                TotalDebit = journal.TotalDebitAmount,
+                TotalCredit = journal.TotalCreditAmount,
+                LineCount = journal.Transactions.Count(transaction => !transaction.IsDeleted)
+            })
+            .ToListAsync(cancellationToken);
+    }
+
     public async Task<JournalBatchDetailDto> CreateJournalAsync(
         Guid id,
         CreateJournalEntryDto dto,
@@ -371,6 +466,11 @@ public sealed class JournalBatchService : IJournalBatchService
             {
                 batch = await RequireBatchAsync(id, cancellationToken);
                 EnsureDraft(batch);
+                validation = await ValidateAsync(id, cancellationToken);
+                if (!validation.IsValid)
+                    throw new InvalidOperationException(string.Join(" ", validation.Issues.Select(x => x.Message)));
+                var requiresApproval = await _workflowIntegration.HasActiveApprovalInstanceAsync(WorkflowEntityType, id) ||
+                    await _workflowIntegration.HasActiveApprovalWorkflowAsync(WorkflowEntityType);
                 var items = await _context.JournalBatchItems
                     .Include(x => x.JournalEntry)
                         .ThenInclude(x => x.Transactions)
@@ -382,11 +482,14 @@ public sealed class JournalBatchService : IJournalBatchService
                 foreach (var item in items)
                 {
                     item.SubmittedContentFingerprint = ComputeItemFingerprint(item);
-                    item.ReviewStatus = JournalBatchItemReviewStatus.Pending;
-                    item.PostingStatus = JournalBatchItemPostingStatus.NotEligible;
-                    item.JournalEntry.PostingStatus = "Pending Approval";
-                    item.JournalEntry.ApprovalStatus = "Pending";
-                    item.JournalEntry.UpdatedAt = now;
+                    if (requiresApproval)
+                    {
+                        item.ReviewStatus = JournalBatchItemReviewStatus.Pending;
+                        item.PostingStatus = JournalBatchItemPostingStatus.NotEligible;
+                        item.JournalEntry.PostingStatus = "Pending Approval";
+                        item.JournalEntry.ApprovalStatus = "Pending";
+                        item.JournalEntry.UpdatedAt = now;
+                    }
                 }
 
                 batch.ContentFingerprint = ComputeBatchFingerprint(batch, items);
@@ -396,28 +499,80 @@ public sealed class JournalBatchService : IJournalBatchService
                 batch.SubmittedLineCount = validation.LineCount;
                 batch.SubmittedByUserId = UserId;
                 batch.SubmittedAt = now;
-                batch.ApprovalStatus = JournalBatchApprovalStatus.PendingApproval;
+                batch.ApprovalStatus = requiresApproval ? JournalBatchApprovalStatus.PendingApproval : JournalBatchApprovalStatus.Draft;
                 batch.PostingStatus = JournalBatchPostingStatus.NotReady;
                 StampModified(batch);
-                await _context.SaveChangesAsync(cancellationToken);
+                if (requiresApproval) await _context.SaveChangesAsync(cancellationToken);
 
-                var workflowResult = await _workflow.StartApprovalWorkflowAsync(WorkflowEntityType, id);
-                if (!workflowResult.Success || !workflowResult.WorkflowInstanceId.HasValue)
-                    throw new InvalidOperationException(workflowResult.Message ?? "Unable to start the journal batch approval workflow.");
+                var outcome = await _workflowIntegration.SubmitAsync(WorkflowEntityType, id);
+                var workflowResult = outcome.ExecutionResult;
+                if (outcome.ApprovalRequired != requiresApproval)
+                    throw new InvalidOperationException("Approval configuration changed during submission. Refresh the batch and retry.");
+                if (!workflowResult.Success ||
+                    (outcome.ApprovalRequired && !workflowResult.WorkflowInstanceId.HasValue) ||
+                    (!outcome.ApprovalRequired && (outcome.Outcome != WorkflowOutcome.Approved || workflowResult.WorkflowInstanceId.HasValue)))
+                    throw new InvalidOperationException(workflowResult.Message ?? "Approval configuration changed or journal batch submission failed. Refresh and retry.");
 
+                batch.ApprovalRequired = outcome.ApprovalRequired;
                 batch.WorkflowInstanceId = workflowResult.WorkflowInstanceId;
+                if (!outcome.ApprovalRequired)
+                {
+                    if (batch.ApprovedByUserId.HasValue || batch.ApprovedAt.HasValue || batch.ReviewCompletedAt.HasValue ||
+                        items.Any(x => x.FinalReviewedByUserId.HasValue || x.FinalReviewedAt.HasValue ||
+                            x.JournalEntry.ApprovedByUserId.HasValue || x.JournalEntry.ApprovedDate.HasValue ||
+                            !string.IsNullOrWhiteSpace(x.JournalEntry.ApprovalWorkflowId)))
+                        throw new InvalidOperationException("A directly prepared batch cannot replace retained approval history.");
+                    batch.ApprovalStatus = JournalBatchApprovalStatus.ReadyToPost;
+                    batch.PostingStatus = JournalBatchPostingStatus.Ready;
+                    // Persist the mode before child journal guards verify their owning batch.
+                    await _context.SaveChangesAsync(cancellationToken);
+                    foreach (var item in items)
+                    {
+                        item.ReviewStatus = JournalBatchItemReviewStatus.NotRequired;
+                        item.PostingStatus = JournalBatchItemPostingStatus.Ready;
+                        item.JournalEntry.PostingStatus = "Approved"; // Canonical journal posting-ready status, not a human decision.
+                        item.JournalEntry.ApprovalStatus = "Not Required";
+                        item.JournalEntry.RequiresApproval = false;
+                        item.JournalEntry.UpdatedAt = now;
+                    }
+                }
+                else if (outcome.Outcome == WorkflowOutcome.Approved)
+                {
+                    var completed = await _context.WorkflowInstances.AsNoTracking().Include(x => x.EntityType)
+                        .FirstOrDefaultAsync(x => x.Id == batch.WorkflowInstanceId &&
+                        x.TenantId == TenantId && x.EntityId == id && !x.IsDeleted &&
+                        x.Status == WorkflowInstanceStatus.Completed && x.CompletedDate != null &&
+                        x.EntityType.TenantId == TenantId, cancellationToken);
+                    static bool IsBatchEntity(string? value) => string.Equals(
+                        new string((value ?? string.Empty).Where(char.IsLetterOrDigit).ToArray()), WorkflowEntityType, StringComparison.OrdinalIgnoreCase);
+                    if (completed == null || (!IsBatchEntity(completed.EntityType.Code) && !IsBatchEntity(completed.EntityType.Name)))
+                        throw new InvalidOperationException("Completed journal batch approval requires its retained completed workflow.");
+                    batch.ApprovalStatus = JournalBatchApprovalStatus.Approved;
+                    batch.PostingStatus = JournalBatchPostingStatus.Ready;
+                    batch.ReviewCompletedAt = now;
+                    foreach (var item in items)
+                    {
+                        item.ReviewStatus = JournalBatchItemReviewStatus.Approved;
+                        item.PostingStatus = JournalBatchItemPostingStatus.Ready;
+                        item.JournalEntry.PostingStatus = "Approved";
+                        item.JournalEntry.ApprovalStatus = "Approved";
+                    }
+                }
+                else if (outcome.Outcome != WorkflowOutcome.Pending)
+                    throw new InvalidOperationException("The journal batch approval workflow did not accept this submission.");
                 await _context.SaveChangesAsync(cancellationToken);
                 await transaction.CommitAsync(cancellationToken);
             }
             catch
             {
                 await transaction.RollbackAsync(cancellationToken);
+                _context.ChangeTracker.Clear();
                 throw;
             }
         });
 
         batch = await RequireBatchAsync(id, cancellationToken);
-        await AuditAsync("JournalBatchSubmitted", batch, cancellationToken);
+        await AuditAsync(batch.ApprovalRequired ? "JournalBatchSubmitted" : "JournalBatchPreparedForPosting", batch, cancellationToken);
         return await RequireDetailAsync(id, cancellationToken);
     }
 
@@ -636,12 +791,11 @@ public sealed class JournalBatchService : IJournalBatchService
     {
         var batch = await LoadBatchAsync(id, asTracking: true, cancellationToken)
             ?? throw new ArgumentException("Journal batch was not found for this tenant.");
-        if (batch.ApprovalStatus is not (JournalBatchApprovalStatus.Approved or JournalBatchApprovalStatus.PartiallyApproved))
-            throw new InvalidOperationException("Only a finally approved journal batch can be posted.");
+        EnsurePostingEligibility(batch);
 
         var requestedIds = dto.JournalBatchItemIds.Distinct().ToList();
         if (requestedIds.Count == 0)
-            throw new InvalidOperationException("Select at least one approved journal entry to post.");
+            throw new InvalidOperationException("Select at least one posting-ready journal entry to post.");
 
         var existingRun = batch.PostingRuns.FirstOrDefault(x =>
             !x.IsDeleted && string.Equals(x.IdempotencyKey, dto.IdempotencyKey.Trim(), StringComparison.Ordinal));
@@ -656,11 +810,11 @@ public sealed class JournalBatchService : IJournalBatchService
         var selected = ActiveItems(batch).Where(x => requestedIds.Contains(x.Id)).OrderBy(x => x.SequenceNumber).ToList();
         if (selected.Count != requestedIds.Count)
             throw new InvalidOperationException("One or more selected entries do not belong to this journal batch.");
-        if (selected.Any(x => x.ReviewStatus != JournalBatchItemReviewStatus.Approved ||
+        if (selected.Any(x => !IsPostingEligibleReview(batch, x) ||
                               x.PostingStatus != JournalBatchItemPostingStatus.Ready))
-            throw new InvalidOperationException("Only finally approved, unposted entries can be selected.");
+            throw new InvalidOperationException("Only posting-ready, unposted entries can be selected.");
         if (batch.BatchType == JournalBatchType.Reversal &&
-            selected.Count != ActiveItems(batch).Count(x => x.ReviewStatus == JournalBatchItemReviewStatus.Approved))
+            selected.Count != ActiveItems(batch).Count(x => IsPostingEligibleReview(batch, x)))
             throw new InvalidOperationException("A full reversal batch must be posted in one complete run.");
 
         foreach (var item in selected)
@@ -706,6 +860,7 @@ public sealed class JournalBatchService : IJournalBatchService
                         .Include(x => x.Items)
                         .FirstAsync(x => x.TenantId == TenantId && x.Id == run.Id, cancellationToken);
                     var trackedBatch = await RequireBatchAsync(id, cancellationToken);
+                    EnsurePostingEligibility(trackedBatch);
 
                     var trackedItems = await ClaimPostingItemsAsync(
                         id,
@@ -745,7 +900,8 @@ public sealed class JournalBatchService : IJournalBatchService
                              x.JournalBatchId == id &&
                              !x.IsDeleted &&
                              !requestedIds.Contains(x.Id) &&
-                             x.ReviewStatus == JournalBatchItemReviewStatus.Approved &&
+                             (x.ReviewStatus == JournalBatchItemReviewStatus.Approved ||
+                              (!x.JournalBatch.ApprovalRequired && x.ReviewStatus == JournalBatchItemReviewStatus.NotRequired)) &&
                              x.PostingStatus != JournalBatchItemPostingStatus.Posted,
                         cancellationToken);
                     trackedBatch.PostingStatus = remaining
@@ -1068,7 +1224,8 @@ public sealed class JournalBatchService : IJournalBatchService
             item.JournalBatchId == batchId &&
             requestedIds.Contains(item.Id) &&
             !item.IsDeleted &&
-            item.ReviewStatus == JournalBatchItemReviewStatus.Approved &&
+            (item.ReviewStatus == JournalBatchItemReviewStatus.Approved ||
+             (!item.JournalBatch.ApprovalRequired && item.ReviewStatus == JournalBatchItemReviewStatus.NotRequired)) &&
             item.PostingStatus == JournalBatchItemPostingStatus.Ready &&
             item.PostingClaimRunId == null);
 
@@ -1160,7 +1317,8 @@ public sealed class JournalBatchService : IJournalBatchService
             .Where(item =>
                 item.TenantId == TenantId &&
                 item.JournalBatchId == batchId &&
-                item.ReviewStatus == JournalBatchItemReviewStatus.Approved &&
+                (item.ReviewStatus == JournalBatchItemReviewStatus.Approved ||
+                 (!item.JournalBatch.ApprovalRequired && item.ReviewStatus == JournalBatchItemReviewStatus.NotRequired)) &&
                 !item.IsDeleted)
             .Select(item => item.PostingStatus)
             .ToListAsync(cancellationToken);
@@ -1414,6 +1572,26 @@ public sealed class JournalBatchService : IJournalBatchService
     private static List<JournalBatchItem> ActiveItems(JournalBatch batch)
         => batch.Items.Where(x => !x.IsDeleted).OrderBy(x => x.SequenceNumber).ToList();
 
+    private static bool IsPostingEligibleReview(JournalBatch batch, JournalBatchItem item)
+        => batch.ApprovalRequired
+            ? item.ReviewStatus == JournalBatchItemReviewStatus.Approved
+            : item.ReviewStatus == JournalBatchItemReviewStatus.NotRequired;
+
+    private static void EnsurePostingEligibility(JournalBatch batch)
+    {
+        if (batch.IsVoided || (batch.ApprovalRequired
+            ? batch.ApprovalStatus is not (JournalBatchApprovalStatus.Approved or JournalBatchApprovalStatus.PartiallyApproved)
+            : batch.ApprovalStatus != JournalBatchApprovalStatus.ReadyToPost))
+            throw new InvalidOperationException("The journal batch is not ready for posting.");
+        if (!batch.ApprovalRequired && (batch.WorkflowInstanceId.HasValue || batch.ApprovedByUserId.HasValue ||
+            batch.ApprovedAt.HasValue || batch.ReviewCompletedAt.HasValue || ActiveItems(batch).Any(x =>
+                x.Reviews.Any(r => !r.IsDeleted) || x.FinalReviewedByUserId.HasValue || x.FinalReviewedAt.HasValue ||
+                x.JournalEntry.RequiresApproval || x.JournalEntry.ApprovedByUserId.HasValue ||
+                x.JournalEntry.ApprovedDate.HasValue || !string.IsNullOrWhiteSpace(x.JournalEntry.ApprovalWorkflowId) ||
+                x.JournalEntry.ApprovalStatus != "Not Required")))
+            throw new InvalidOperationException("A directly prepared batch cannot claim a workflow or human approval.");
+    }
+
     private static decimal Money(decimal value)
         => decimal.Round(value, 2, MidpointRounding.AwayFromZero);
 
@@ -1504,6 +1682,7 @@ public sealed class JournalBatchService : IJournalBatchService
             ControlCurrencyCode = batch.ControlCurrencyCode,
             BatchType = batch.BatchType,
             ApprovalStatus = batch.ApprovalStatus,
+            ApprovalRequired = batch.ApprovalRequired,
             PostingStatus = batch.PostingStatus,
             ReversalStatus = batch.ReversalStatus,
             IsVoided = batch.IsVoided,
@@ -1529,7 +1708,7 @@ public sealed class JournalBatchService : IJournalBatchService
         var items = ActiveItems(batch);
         var approved = items.Where(x => x.ReviewStatus == JournalBatchItemReviewStatus.Approved).ToList();
         var rejected = items.Where(x => x.ReviewStatus == JournalBatchItemReviewStatus.Rejected).ToList();
-        var posted = approved.Where(x => x.PostingStatus == JournalBatchItemPostingStatus.Posted).ToList();
+        var posted = items.Where(x => x.PostingStatus == JournalBatchItemPostingStatus.Posted).ToList();
         return new JournalBatchDetailDto
         {
             Id = list.Id,
@@ -1541,6 +1720,7 @@ public sealed class JournalBatchService : IJournalBatchService
             ControlCurrencyCode = list.ControlCurrencyCode,
             BatchType = list.BatchType,
             ApprovalStatus = list.ApprovalStatus,
+            ApprovalRequired = list.ApprovalRequired,
             PostingStatus = list.PostingStatus,
             ReversalStatus = list.ReversalStatus,
             IsVoided = list.IsVoided,
@@ -1568,6 +1748,7 @@ public sealed class JournalBatchService : IJournalBatchService
             Notes = batch.Notes,
             SubmittedByUserId = batch.SubmittedByUserId,
             ApprovedByUserId = batch.ApprovedByUserId,
+            WorkflowInstanceId = batch.WorkflowInstanceId,
             ApprovedAt = batch.ApprovedAt,
             ReviewCompletedAt = batch.ReviewCompletedAt,
             ReversalOfJournalBatchId = batch.ReversalOfJournalBatchId,
@@ -1583,10 +1764,12 @@ public sealed class JournalBatchService : IJournalBatchService
             RowVersion = batch.RowVersion.Length == 0 ? string.Empty : Convert.ToBase64String(batch.RowVersion),
             CanEdit = !batch.IsVoided && batch.ApprovalStatus == JournalBatchApprovalStatus.Draft,
             CanSubmit = !batch.IsVoided && batch.ApprovalStatus == JournalBatchApprovalStatus.Draft && items.Count > 0,
-            CanReview = !batch.IsVoided && batch.ApprovalStatus == JournalBatchApprovalStatus.PendingApproval,
+            CanReview = !batch.IsVoided && batch.ApprovalRequired && batch.ApprovalStatus == JournalBatchApprovalStatus.PendingApproval,
             CanPostAny = !batch.IsVoided &&
-                         batch.ApprovalStatus is JournalBatchApprovalStatus.Approved or JournalBatchApprovalStatus.PartiallyApproved &&
-                         approved.Any(x => x.PostingStatus == JournalBatchItemPostingStatus.Ready),
+                         (batch.ApprovalRequired
+                             ? batch.ApprovalStatus is JournalBatchApprovalStatus.Approved or JournalBatchApprovalStatus.PartiallyApproved
+                             : batch.ApprovalStatus == JournalBatchApprovalStatus.ReadyToPost) &&
+                         items.Any(x => IsPostingEligibleReview(batch, x) && x.PostingStatus == JournalBatchItemPostingStatus.Ready),
             CanReverseBatch = !batch.IsVoided &&
                               batch.PostingStatus == JournalBatchPostingStatus.Posted &&
                               batch.ReversalStatus == JournalBatchReversalStatus.NotReversed &&
@@ -1666,6 +1849,7 @@ public sealed class JournalBatchService : IJournalBatchService
         {
             JournalBatchApprovalStatus.PartiallyApproved => "Partially Approved",
             JournalBatchApprovalStatus.PendingApproval => "Pending Approval",
+            JournalBatchApprovalStatus.ReadyToPost => "Ready to Post",
             _ => batch.ApprovalStatus.ToString()
         };
     }

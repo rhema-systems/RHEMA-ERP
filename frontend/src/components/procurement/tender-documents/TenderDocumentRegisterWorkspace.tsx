@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useState } from 'react';
+import React, { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Loader2, RefreshCw } from 'lucide-react';
 
@@ -104,8 +104,11 @@ export function TenderDocumentRegisterWorkspace({
         ],
       }),
     ]);
-    const refreshedReadiness = await readiness.refetch();
-    if (refreshedReadiness.data?.hasRegister) await register.refetch();
+    // A recorded mutation and a failed follow-up read are different outcomes.
+    // Propagate read errors so the action dialog offers refresh, not re-save.
+    const refreshedReadiness = await readiness.refetch({ throwOnError: true });
+    if (refreshedReadiness.data?.hasRegister)
+      await register.refetch({ throwOnError: true });
   };
 
   const backHref = external
@@ -123,7 +126,7 @@ export function TenderDocumentRegisterWorkspace({
       </div>
     );
 
-  if (readiness.isError || !readiness.data)
+  if (!readiness.data)
     return (
       <div className="space-y-4 p-6">
         <Button asChild variant="ghost">
@@ -176,18 +179,29 @@ export function TenderDocumentRegisterWorkspace({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => void refresh()}
+            onClick={() => void refresh().catch(() => undefined)}
           >
             <RefreshCw className="mr-2 h-4 w-4" /> Refresh
           </Button>
         </div>
       </div>
 
+      {(readiness.isError || register.isError) && (
+        <Alert variant="destructive">
+          <AlertTitle>Latest register state could not be refreshed</AlertTitle>
+          <AlertDescription>
+            The last loaded data is shown. Refresh successfully before making another change.
+          </AlertDescription>
+        </Alert>
+      )}
+
       <TenderDocumentRegister
         readiness={readiness.data}
         register={register.data}
         external={external}
-        canApprove={canApprove}
+        canApprove={canApprove && !readiness.isError && !register.isError && !readiness.isFetching && !register.isFetching}
+        onWorkflowUpdated={refresh}
+        workflowDisabled={readiness.isError || register.isError || readiness.isFetching || register.isFetching}
         onDecision={(change, action) => setDecision({ change, action })}
         onAcknowledge={(target, outcome) =>
           setAcknowledgement({ ...target, outcome })
@@ -200,7 +214,7 @@ export function TenderDocumentRegisterWorkspace({
           register={register.data}
           approvedTemplates={approvedTemplates.data?.items ?? []}
           workflows={workflows.data ?? []}
-          canManage={canManage}
+          canManage={canManage && !readiness.isError && !register.isError}
           onChanged={refresh}
         />
       )}

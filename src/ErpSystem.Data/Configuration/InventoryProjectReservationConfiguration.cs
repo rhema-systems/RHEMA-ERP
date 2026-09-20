@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Metadata.Builders;
@@ -12,7 +13,7 @@ public sealed class InventoryProjectReservationConfiguration : IEntityTypeConfig
         builder.ToTable("InventoryAllocations", table =>
         {
             table.HasCheckConstraint("CK_InventoryAllocations_ProjectLineage",
-                "[AllocationType] <> 'ProjectRequisition' OR ([InventoryRequisitionId] IS NOT NULL AND [InventoryRequisitionItemId] IS NOT NULL AND [ProjectId] IS NOT NULL AND [DepartmentId] IS NOT NULL AND [LocationId] IS NOT NULL)");
+                "[AllocationType] <> 'ProjectRequisition' OR ([InventoryRequisitionId] IS NOT NULL AND [InventoryRequisitionItemId] IS NOT NULL AND [ProjectId] IS NOT NULL AND [OrganizationUnitId] IS NOT NULL AND [LocationId] IS NOT NULL)");
             table.HasCheckConstraint("CK_InventoryAllocations_ProjectHashes",
                 "[AllocationType] <> 'ProjectRequisition' OR (LEN([IdempotencyKey]) > 0 AND LEN([PayloadHash]) = 64 AND LEN([CorrelationId]) > 0)");
             table.HasCheckConstraint("CK_InventoryAllocations_Quantities",
@@ -26,6 +27,9 @@ public sealed class InventoryProjectReservationConfiguration : IEntityTypeConfig
             .HasFilter("[AllocationType] = 'ProjectRequisition' AND [IdempotencyKey] IS NOT NULL");
         builder.HasIndex(value => new { value.TenantId, value.ProjectId, value.Status, value.ExpirationDate });
         builder.HasIndex(value => new { value.TenantId, value.DepartmentId, value.Status, value.ExpirationDate });
+        builder.HasIndex(value => new { value.TenantId, value.OrganizationUnitId, value.Status, value.ExpirationDate });
+        builder.HasOne<OrganizationUnit>().WithMany().HasForeignKey(value => value.OrganizationUnitId)
+            .OnDelete(DeleteBehavior.Restrict);
         builder.HasIndex(value => new { value.TenantId, value.InventoryRequisitionItemId, value.Status })
             .IsUnique()
             .HasFilter("[IsDeleted] = 0 AND [AllocationType] = 'ProjectRequisition' AND [Status] IN ('Active','PartiallyFulfilled')");

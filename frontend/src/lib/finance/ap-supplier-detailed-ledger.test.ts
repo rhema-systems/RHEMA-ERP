@@ -41,7 +41,7 @@ describe('AP Supplier Detailed Ledger supplier boundary', () => {
     ]);
   });
 
-  it('does not reintroduce the Procurement business-partner lookup', () => {
+  it('uses the unified Finance supplier projection without a Procurement UI dependency', () => {
     const pageSource = readFileSync(
       join(
         process.cwd(),
@@ -56,7 +56,7 @@ describe('AP Supplier Detailed Ledger supplier boundary', () => {
       'utf8'
     );
 
-    expect(pageSource).toContain('getInvoiceSuppliers');
+    expect(pageSource).toContain('getInvoiceSupplierEntryOptions');
     expect(pageSource).not.toContain('businessPartnerService');
     expect(pageSource).not.toContain('/api/procurement');
   });

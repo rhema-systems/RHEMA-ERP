@@ -3,7 +3,7 @@ using ErpSystem.Core.Finance.Integration;
 
 namespace ErpSystem.Core.Interfaces.Finance;
 
-public sealed record FinanceSourceDocumentLineContext(Guid SourceLineId, Guid AccountId);
+public sealed record FinanceSourceDocumentLineContext(Guid SourceLineId, Guid AccountId, IReadOnlyList<Guid>? AdditionalAccountIds = null);
 
 /// <summary>
 /// Shared Finance-owned orchestration boundary used by certified source routes.  Producer
@@ -41,6 +41,14 @@ public interface IFinanceSourceDimensionService
     Task<IReadOnlyDictionary<Guid, IReadOnlyList<FinancePostingDimensionValueDto>>> GetPostingDimensionsAsync(
         FinancePostingProducerContext producer,
         Guid sourceDocumentId,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<FinancePostingDimensionValueDto>> ResolvePostingDimensionsAsync(
+        FinancePostingProducerContext producer,
+        Guid sourceDocumentId,
+        Guid sourceLineId,
+        Guid postingAccountId,
+        DateTime postingDate,
         CancellationToken cancellationToken = default);
 
     Task MarkBudgetEvidenceCurrentAsync(

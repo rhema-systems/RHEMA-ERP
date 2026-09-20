@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
-import { buttonVariants } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { cn } from '@/lib/utils';
 import {
@@ -50,7 +50,7 @@ const statusPresentation: Record<
   }
 > = {
   unknown: {
-    label: 'Unknown',
+    label: 'Unverified',
     icon: CircleHelp,
     badgeClassName: 'border-slate-200 bg-slate-50 text-slate-700',
     iconClassName: 'text-slate-500',
@@ -137,9 +137,20 @@ export function ProcurementUatFlowSidebar({
               )}
             </div>
             <Badge variant="outline" className="shrink-0 font-normal">
-              {progress.completed}/{progress.total} complete
+              {progress.unverified > 0
+                ? progress.completed > 0
+                  ? `${progress.completed} complete`
+                  : 'Progress unverified'
+                : `${progress.completed}/${progress.total} complete`}
             </Badge>
           </div>
+          <p
+            className="text-xs text-muted-foreground"
+            aria-label="Process progress coverage"
+          >
+            Step {context.current.index + 1} of {progress.total}
+            {progress.unverified > 0 && ` · ${progress.unverified} unverified`}
+          </p>
         </CardHeader>
 
         <CardContent className="space-y-3 p-4 pt-0">
@@ -157,7 +168,12 @@ export function ProcurementUatFlowSidebar({
             >
               <ArrowRight className="h-3.5 w-3.5 rotate-90" />
             </div>
-            <CompactStageRow label="Current" stage={context.current} current />
+            <CompactStageRow
+              label="Current"
+              stage={context.current}
+              current
+              showAction={primaryActionStage?.id === context.current.id}
+            />
             {context.next && (
               <>
                 <div
@@ -166,7 +182,11 @@ export function ProcurementUatFlowSidebar({
                 >
                   <ArrowRight className="h-3.5 w-3.5 rotate-90" />
                 </div>
-                <CompactStageRow label="Next" stage={context.next} />
+                <CompactStageRow
+                  label="Next"
+                  stage={context.next}
+                  showAction={primaryActionStage?.id === context.next.id}
+                />
               </>
             )}
           </div>
@@ -193,21 +213,6 @@ export function ProcurementUatFlowSidebar({
             </div>
           )}
 
-          {primaryActionStage?.state.href && (
-            <Link
-              href={primaryActionStage.state.href}
-              aria-label={`${primaryActionStage.isCurrent ? 'Current' : 'Next'} action: ${
-                primaryActionStage.state.actionLabel ??
-                `Open ${primaryActionStage.label}`
-              }`}
-              className={cn(buttonVariants({ size: 'sm' }), 'w-full')}
-            >
-              {primaryActionStage.state.actionLabel ??
-                `Open ${primaryActionStage.label}`}
-              <ExternalLink className="h-3.5 w-3.5" />
-            </Link>
-          )}
-
           <details className="group rounded-md border">
             <summary className="flex cursor-pointer list-none items-center justify-between gap-2 px-3 py-2 text-sm font-medium [&::-webkit-details-marker]:hidden">
               <span>View full process</span>
@@ -232,10 +237,12 @@ function CompactStageRow({
   label,
   stage,
   current = false,
+  showAction = false,
 }: {
   label: string;
   stage: ProcurementUatFlowStage;
   current?: boolean;
+  showAction?: boolean;
 }) {
   const presentation = statusPresentation[stage.state.status];
   const Icon = presentation.icon;
@@ -244,9 +251,13 @@ function CompactStageRow({
     <div
       className={cn(
         'rounded-md border px-3 py-2',
-        current && 'border-blue-200 bg-blue-50/50'
+        current
+          ? 'border-l-4 border-primary/60 bg-primary/5 py-3 shadow-sm ring-1 ring-primary/15'
+          : 'border-border/70 bg-muted/20'
       )}
       aria-current={current ? 'step' : undefined}
+      role="group"
+      aria-label={`${label}: ${stage.label}`}
     >
       <div className="flex items-start gap-2">
         <Icon
@@ -255,12 +266,26 @@ function CompactStageRow({
         />
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center justify-between gap-1">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            <span
+              className={cn(
+                'text-[11px] uppercase tracking-wide',
+                current
+                  ? 'font-bold text-primary'
+                  : 'font-medium text-muted-foreground'
+              )}
+            >
               {label}
             </span>
             <StatusBadge status={stage.state.status} />
           </div>
-          <p className="mt-0.5 text-sm font-medium leading-tight">
+          <p
+            className={cn(
+              'mt-0.5 text-sm leading-tight',
+              current
+                ? 'font-semibold text-foreground'
+                : 'font-medium text-muted-foreground'
+            )}
+          >
             {stage.label}
           </p>
           {stage.state.responsibleRole && (
@@ -275,6 +300,25 @@ function CompactStageRow({
           )}
         </div>
       </div>
+      {showAction && stage.state.href && (
+        <Button
+          asChild
+          className="mt-3 h-auto min-h-11 w-full cursor-pointer justify-between whitespace-normal rounded-lg border border-primary/80 px-3 py-2.5 text-left font-semibold shadow-md hover:shadow-lg active:translate-y-px active:shadow-sm"
+        >
+          <Link
+            href={stage.state.href}
+            aria-label={`${label} action: ${stage.state.actionLabel ?? `Open ${stage.label}`}`}
+          >
+            <span>{stage.state.actionLabel ?? `Open ${stage.label}`}</span>
+            <span
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-white/20"
+              aria-hidden="true"
+            >
+              <ArrowRight className="h-4 w-4" />
+            </span>
+          </Link>
+        </Button>
+      )}
     </div>
   );
 }

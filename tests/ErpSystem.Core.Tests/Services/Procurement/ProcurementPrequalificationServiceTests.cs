@@ -8,11 +8,13 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -20,6 +22,53 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementPrequalificationServiceTests
 {
+    [Fact]
+    public async Task DirectQualificationCreatesRealCategoryDecisionWithoutAnApprovalInstance()
+    {
+        await using var fixture = new Fixture();
+        fixture.Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("ProcurementSourcing")).ReturnsAsync(false);
+        var request = fixture.CreateRequest();
+        request.WorkflowDefinitionId = null;
+        var draft = await fixture.Service.CreateAsync(request, "direct-create");
+        var advertised = await fixture.AdvertiseAsync(draft);
+        var application = await fixture.SubmitAsync(advertised);
+        await fixture.MoveDeadlineToPastAsync();
+        var closed = await fixture.Service.CloseAsync(draft.Id,
+            new CloseProcurementPrequalificationRequest { RowVersion = advertised.RowVersion }, "direct-close");
+        fixture.CurrentUserId = Guid.NewGuid();
+        await fixture.Service.EvaluateAsync(draft.Id, application.Id, fixture.EvaluationRequest(application), "direct-evaluate");
+        var completed = await fixture.Service.SubmitDecisionAsync(draft.Id,
+            new SubmitProcurementPrequalificationDecisionRequest
+            {
+                RowVersion = closed.RowVersion, DecisionReference = "QUALIFIED-LIST-001",
+                DecisionEvidenceReference = "evidence://actual-signed-decision", Reason = "All completed scorecards reviewed."
+            }, "direct-decision");
+
+        completed.ApprovalRequired.Should().BeFalse();
+        completed.Status.Should().Be(ProcurementPrequalificationStatus.Approved);
+        completed.WorkflowDefinitionId.Should().BeNull();
+        completed.WorkflowInstanceId.Should().BeNull();
+        completed.QualifiedEntries.Should().ContainSingle(item => item.CategoryId == fixture.Category.Id &&
+            item.ApprovalReference == "QUALIFIED-LIST-001");
+        var retained = await fixture.Context.ProcurementPrequalificationExercises.SingleAsync();
+        retained.DecidedById.Should().Be(fixture.CurrentUserId);
+        retained.LifecycleSnapshotJson.Should().Contain("v2.no-approval");
+        (await fixture.Service.CheckEligibilityAsync(fixture.Supplier.Id, fixture.Category.Id, DateTime.UtcNow)).Eligible.Should().BeTrue();
+        fixture.Workflow.Verify(service => service.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>()), Times.Never);
+        fixture.Workflow.Verify(service => service.ProcessApprovalStepAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string?>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task ActivePrequalificationStillRequiresAnExactSelectedDefinition()
+    {
+        await using var fixture = new Fixture();
+        var request = fixture.CreateRequest();
+        request.WorkflowDefinitionId = null;
+        await fixture.Service.Invoking(service => service.CreateAsync(request, "missing-active-definition"))
+            .Should().ThrowAsync<ProcurementPrequalificationValidationException>()
+            .Where(exception => exception.Code == "PREQUAL_WORKFLOW_INVALID");
+    }
+
     [Fact]
     public async Task CreateLocksTenantScopeCriteriaAndAllDecisionKeys()
     {
@@ -324,6 +373,7 @@ public sealed class ProcurementPrequalificationServiceTests
                     Success = true, Status = WorkflowInstanceStatus.InProgress,
                     WorkflowInstanceId = WorkflowInstanceId
                 });
+            Workflow.Setup(service => service.HasActiveApprovalWorkflowAsync("ProcurementSourcing")).ReturnsAsync(true);
             Workflow.Setup(service => service.CanUserApproveAsync(
                     "ProcurementSourcing", It.IsAny<Guid>(), It.IsAny<Guid>()))
                 .ReturnsAsync(true);
@@ -332,7 +382,8 @@ public sealed class ProcurementPrequalificationServiceTests
                 .ReturnsAsync(new NotificationDto());
             Service = new ProcurementPrequalificationService(
                 _unitOfWork, _currentUser.Object, AccessControl.Object, SodGuard.Object,
-                ControlEvents.Object, Workflow.Object, SupplierValidation.Object, Notifications.Object);
+                ControlEvents.Object, Workflow.Object, SupplierValidation.Object, Notifications.Object,
+                new WorkflowIntegrationService(Workflow.Object, NullLogger<WorkflowIntegrationService>.Instance));
         }
 
         public Guid TenantId { get; set; }

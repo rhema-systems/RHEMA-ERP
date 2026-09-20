@@ -18,8 +18,22 @@ public class WorkflowEntityTypeRepository : GenericRepository<WorkflowEntityType
     /// </summary>
     public async Task<WorkflowEntityType?> GetByNameAsync(string name, Guid tenantId, CancellationToken cancellationToken = default)
     {
-        return await _dbSet
+        var exact = await _dbSet
             .FirstOrDefaultAsync(et => et.Name == name && et.TenantId == tenantId && !et.IsDeleted, cancellationToken);
+        if (exact is not null) return exact;
+
+        // An entity type may be disabled after an approval has started. Resolve
+        // its code/name alias without filtering IsActive so that its in-flight
+        // records do not appear to have no workflow. New submissions separately
+        // require an active type and Published definition.
+        static string Key(string value) => new(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
+        var key = Key(name);
+        var candidates = await _dbSet.Where(et => et.TenantId == tenantId && !et.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var matches = candidates.Where(et => Key(et.Code) == key || Key(et.Name) == key).ToList();
+        if (matches.Count > 1)
+            throw new InvalidOperationException("Multiple workflow entity types match this record. Resolve the configuration before continuing.");
+        return matches.SingleOrDefault();
     }
 
     /// <summary>

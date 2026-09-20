@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import {
@@ -54,18 +54,23 @@ import {
   Loader2,
   CheckCircle2,
   AlertCircle,
+  Eye,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   contractService,
   type ContractDto,
+  type ContractDocumentDto,
   type ContractMilestoneDto,
   type ContractAmendmentDto,
   type CreateContractMilestoneDto,
   type CreateContractAmendmentDto,
   type UpdateContractDto,
 } from '@/services/contractService';
+import { procurementDocumentManagementService } from '@/services/procurement-document-management.service';
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import { ContractActivationGate } from '@/components/procurement/ContractActivationGate';
+import { ContractRetentionFields, validateContractRetention } from '@/components/procurement/ContractRetentionFields';
 import { ContractOperationsDashboard } from '@/components/procurement/ContractOperationsDashboard';
 import { WorksCloseoutWorkspace } from '@/components/procurement/WorksCloseoutWorkspace';
 import { QuantitySurveyContractCommercialTermsPanel } from '@/components/quantity-survey/QuantitySurveyContractCommercialTermsPanel';
@@ -121,6 +126,10 @@ export default function ContractDetailPage() {
   const [documentFile, setDocumentFile] = useState<File | null>(null);
   const [documentType, setDocumentType] = useState('Contract');
   const [documentDescription, setDocumentDescription] = useState('');
+  const [openingDocumentId, setOpeningDocumentId] = useState<string | null>(null);
+  const [documentOpenError, setDocumentOpenError] = useState<string | null>(null);
+  const documentOpening = useRef(false);
+  const [documentPreview, setDocumentPreview] = useState<CentralDocumentViewerFile | null>(null);
 
   // Status dialogs
   const [showTerminateDialog, setShowTerminateDialog] = useState(false);
@@ -219,6 +228,7 @@ export default function ContractDetailPage() {
       contractValue: contract.contractValue,
       paymentTerms: contract.paymentTerms,
       retentionPercentage: contract.retentionPercentage,
+      retentionClause: contract.retentionClause,
       startDate: contract.startDate?.split('T')[0],
       endDate: contract.endDate?.split('T')[0],
       durationDays: contract.durationDays,
@@ -234,6 +244,14 @@ export default function ContractDetailPage() {
 
   const handleSaveContract = async () => {
     if (!contract) return;
+    const retentionError = validateContractRetention(
+      editData.retentionPercentage ?? contract.retentionPercentage,
+      editData.retentionClause ?? contract.retentionClause
+    );
+    if (retentionError) {
+      toast.error(retentionError);
+      return;
+    }
     try {
       setSaving(true);
       await contractService.updateContract(contract.id, editData);
@@ -241,7 +259,7 @@ export default function ContractDetailPage() {
       setShowEditDialog(false);
       loadContract(contract.id);
     } catch (error: any) {
-      toast.error(error.message || 'Failed to update contract');
+      toast.error(getProcurementProblemMessage(error, 'Failed to update contract'));
     } finally {
       setSaving(false);
     }
@@ -435,6 +453,47 @@ export default function ContractDetailPage() {
       return false;
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleOpenDocument = async (document: ContractDocumentDto) => {
+    if (documentOpening.current || !document.centralDocumentRecordId || !document.centralDocumentVersionId) return;
+    setDocumentOpenError(null);
+    if (document.contentType?.toLowerCase() === 'application/pdf' || document.fileName.toLowerCase().endsWith('.pdf')) {
+      setDocumentPreview({
+        title: document.fileName,
+        fileName: document.fileName,
+        contentType: 'application/pdf',
+        repositoryPath: `/api/procurement/document-management/records/${encodeURIComponent(document.centralDocumentRecordId)}/versions/${encodeURIComponent(document.centralDocumentVersionId)}/download`,
+        sourceLabel: 'Contract document',
+      });
+      return;
+    }
+    documentOpening.current = true;
+    setOpeningDocumentId(document.id);
+    try {
+      const blob = await procurementDocumentManagementService.download(
+        document.centralDocumentRecordId,
+        document.centralDocumentVersionId
+      );
+      const url = URL.createObjectURL(blob);
+      try {
+        const link = window.document.createElement('a');
+        link.href = url;
+        link.rel = 'noopener noreferrer';
+        link.download = document.fileName;
+        link.click();
+        toast.success('Document download started. Check your downloads.');
+      } finally {
+        window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+      }
+    } catch (error) {
+      const message = getProcurementProblemMessage(error, 'The contract document could not be opened.');
+      setDocumentOpenError(message);
+      toast.error(message);
+    } finally {
+      documentOpening.current = false;
+      setOpeningDocumentId(null);
     }
   };
 
@@ -682,6 +741,12 @@ export default function ContractDetailPage() {
                   label="Retention %"
                   value={`${contract.retentionPercentage}%`}
                 />
+                {(contract.retentionPercentage > 0 || contract.retentionClause) && (
+                  <div className="space-y-1 text-sm">
+                    <p className="text-muted-foreground">Retention clause and release conditions</p>
+                    <p className="whitespace-pre-wrap">{contract.retentionClause || 'Not recorded — review the contract terms.'}</p>
+                  </div>
+                )}
                 <InfoRow
                   label="Total Paid"
                   value={formatCurrency(
@@ -943,6 +1008,7 @@ export default function ContractDetailPage() {
               )}
             </CardHeader>
             <CardContent>
+              {documentOpenError && <p role="alert" className="mb-3 text-sm text-destructive">{documentOpenError}</p>}
               {contract.documents.length === 0 ? (
                 <p className="text-center py-4 text-gray-500">
                   No documents uploaded
@@ -972,6 +1038,18 @@ export default function ContractDetailPage() {
                         </TableCell>
                         <TableCell>{formatDate(d.createdAt)}</TableCell>
                         <TableCell className="text-right">
+                          <div className="flex justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 px-2"
+                            onClick={() => void handleOpenDocument(d)}
+                            aria-label={`Open ${d.fileName}`}
+                            title={d.centralDocumentRecordId && d.centralDocumentVersionId ? 'Open document' : 'Protected document link unavailable'}
+                            disabled={saving || openingDocumentId !== null || !d.centralDocumentRecordId || !d.centralDocumentVersionId}
+                          >
+                            {openingDocumentId === d.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />}
+                          </Button>
                           {canManageContract && <Button
                             size="sm"
                             variant="ghost"
@@ -982,6 +1060,7 @@ export default function ContractDetailPage() {
                           >
                             <Trash2 className="h-3 w-3" />
                           </Button>}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -992,6 +1071,9 @@ export default function ContractDetailPage() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <CentralDocumentViewerDialog file={documentPreview} open={documentPreview !== null}
+        onOpenChange={open => { if (!open) setDocumentPreview(null); }} enableAnnotations={false} />
 
       <ConfirmationDialog
         open={Boolean(pendingConfirmation)}
@@ -1127,19 +1209,11 @@ export default function ContractDetailPage() {
               />
             </div>
             <div>
-              <Label>Retention %</Label>
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                max="100"
-                value={editData.retentionPercentage || ''}
-                onChange={(e) =>
-                  setEditData({
-                    ...editData,
-                    retentionPercentage: parseFloat(e.target.value) || 0,
-                  })
-                }
+              <ContractRetentionFields
+                percentage={editData.retentionPercentage ?? 0}
+                clause={editData.retentionClause}
+                onPercentageChange={(value) => setEditData({ ...editData, retentionPercentage: value })}
+                onClauseChange={(value) => setEditData({ ...editData, retentionClause: value })}
               />
             </div>
             <div className="col-span-2">
@@ -1470,6 +1544,7 @@ export default function ContractDetailPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="Contract">Contract</SelectItem>
+                  <SelectItem value="SignedCopy">Signed copy</SelectItem>
                   <SelectItem value="Amendment">Amendment</SelectItem>
                   <SelectItem value="Addendum">Addendum</SelectItem>
                   <SelectItem value="Specification">Specification</SelectItem>

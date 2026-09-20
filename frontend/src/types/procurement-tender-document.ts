@@ -16,7 +16,8 @@ export type ProcurementTenderDocumentFeeMode = 'Free' | 'Paid';
 export type ProcurementTenderDocumentChangeType =
   | 'Addendum'
   | 'SubmissionDeadlineExtension'
-  | 'BidValidityExtension';
+  | 'BidValidityExtension'
+  | 'UnpublishedScheduleReschedule';
 
 export type ProcurementTenderDocumentChangeStatus =
   | 'PendingApproval'
@@ -188,6 +189,12 @@ export interface ProcurementTenderDocumentContentArtifactOption {
 }
 
 export interface ProcurementTenderDocumentReadiness {
+  sourceStatus?: string;
+  isSourcePublished?: boolean;
+  /** Server-owned permission for a new document recipient, not bidding eligibility. */
+  allowsNewRecipient?: boolean;
+  /** Explicit source recipients, such as the selected external recipients on an RFQ. */
+  allowedExternalRecipientEmails?: string[];
   sourceType: ProcurementTenderDocumentSourceType;
   sourceId: string;
   sourceReference: string;
@@ -200,7 +207,9 @@ export interface ProcurementTenderDocumentReadiness {
   effectiveTemplateVersionId?: string;
   effectiveTemplateReference?: string;
   effectiveSubmissionDeadlineUtc?: string;
+  openingScheduledAtUtc?: string;
   effectiveBidValidityUntilUtc?: string;
+  bidValidityPeriodDays?: number;
   feeMode?: ProcurementTenderDocumentFeeMode;
   feeAmount?: number;
   currencyCode?: string;
@@ -283,6 +292,8 @@ export interface ProcurementTenderDocumentChange {
   newTemplateVersionId?: string;
   previousValueUtc?: string;
   newValueUtc?: string;
+  previousOpeningScheduledAtUtc?: string;
+  newOpeningScheduledAtUtc?: string;
   requiresAcknowledgement: boolean;
   reason: string;
   workflowDefinitionId: string;
@@ -305,6 +316,12 @@ export interface ProcurementTenderDocumentChange {
 }
 
 export interface ProcurementTenderDocumentRegister {
+  sourceStatus?: string;
+  isSourcePublished?: boolean;
+  /** Server-owned permission for a new document recipient, not bidding eligibility. */
+  allowsNewRecipient?: boolean;
+  /** Explicit source recipients, such as the selected external recipients on an RFQ. */
+  allowedExternalRecipientEmails?: string[];
   id: string;
   correlationId: string;
   sourceType: ProcurementTenderDocumentSourceType;
@@ -326,6 +343,7 @@ export interface ProcurementTenderDocumentRegister {
   originalSubmissionDeadlineUtc: string;
   effectiveSubmissionDeadlineUtc: string;
   openingScheduledAtUtc?: string;
+  originalOpeningScheduledAtUtc?: string;
   originalBidValidityUntilUtc: string;
   effectiveBidValidityUntilUtc: string;
   feeMode: ProcurementTenderDocumentFeeMode;
@@ -347,10 +365,19 @@ export interface BindProcurementTenderDocumentRequest {
   templateVersionId: string;
   submissionDeadlineUtc: string;
   openingScheduledAtUtc?: string;
-  bidValidityUntilUtc: string;
+  bidValidityUntilUtc?: string;
+  bidValidityPeriodDays?: number;
+  bidValidityTermsReference?: string;
   feeMode: ProcurementTenderDocumentFeeMode;
   feeAmount: number;
   currencyCode: string;
+  scheduleChange?: {
+    submissionDeadlineUtc: string;
+    openingScheduledAtUtc: string;
+    workflowDefinitionId: string;
+    reason: string;
+    evidenceReference: string;
+  };
 }
 
 export interface IssueProcurementTenderDocumentRegisterRequest {
@@ -376,6 +403,7 @@ export interface CreateProcurementTenderDocumentChangeRequest {
   changeType: ProcurementTenderDocumentChangeType;
   newTemplateVersionId?: string;
   newValueUtc?: string;
+  newOpeningScheduledAtUtc?: string;
   requiresAcknowledgement: boolean;
   reason: string;
   workflowDefinitionId: string;

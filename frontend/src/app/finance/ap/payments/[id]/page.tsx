@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
@@ -8,6 +8,7 @@ import {
     AlertTriangle,
     BookOpen,
     CheckCircle2,
+    Download,
     Printer,
     FileText,
     Loader2,
@@ -25,6 +26,7 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { accountsPayableService } from '@/services/accountsPayableService';
+import { apiService } from '@/services/api.service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { formatCurrency } from '@/lib/utils';
 import { format } from 'date-fns';
@@ -47,6 +49,17 @@ import { DOCUMENT_TYPES, documentOutputService } from '@/services/document-outpu
 import { workflowApiService } from '@/services/workflow-api.service';
 import { InvoicePaymentSodControl } from '@/components/finance/InvoicePaymentSodControl';
 import { SupplierDebitNoteApplicationsCard } from '@/components/finance/ap/SupplierDebitNoteApplicationsCard';
+import {
+    SettlementDimensionEvidence,
+    SourceDocumentDimensionEvidence,
+} from '@/components/finance/dimensions/source-document-dimension-panel';
+
+const evidenceErrorDescription = (error: any) => {
+    const problem = error?.response?.data ?? error?.response ?? error;
+    const detail = problem?.detail ?? problem?.message ?? error?.message ?? 'Unable to save payment evidence.';
+    const code = problem?.code ?? problem?.extensions?.code;
+    return code ? `${detail} (${code})` : detail;
+};
 
 export default function VendorPaymentDetailsPage() {
     const router = useRouter();
@@ -77,13 +90,15 @@ export default function VendorPaymentDetailsPage() {
     const [evidenceExceptionReason, setEvidenceExceptionReason] = useState('');
     const [uploadingRequirementKey, setUploadingRequirementKey] = useState<string | null>(null);
     const [verifyingEvidenceId, setVerifyingEvidenceId] = useState<string | null>(null);
+    const [downloadingEvidenceId, setDownloadingEvidenceId] = useState<string | null>(null);
+    const evidenceUploadRequests = useRef(new Map<string, { fingerprint: string; requestId: string }>());
 
     const { data: payment, isLoading, refetch } = useQuery({
         queryKey: ['vendor-payment', id],
         queryFn: () => accountsPayableService.getPayment(id),
     });
 
-    const { data: paymentControl, isLoading: controlLoading, refetch: refetchControl } = useQuery({
+    const { data: paymentControl, isLoading: controlLoading, error: controlError, refetch: refetchControl } = useQuery({
         queryKey: ['vendor-payment-control', id],
         queryFn: () => accountsPayableService.getPaymentControl(id),
         // The endpoint also returns a Draft policy preview. That gives the maker visibility into
@@ -99,6 +114,18 @@ export default function VendorPaymentDetailsPage() {
         staleTime: 5 * 60 * 1000,
     });
     const minimumReversalReasonLength = financeSettings?.minimumReversalReasonLength ?? 20;
+    const approvalRequired = payment?.status === 'Draft'
+        ? paymentControl?.approvalRequired !== false
+        : payment?.approvalRequired !== false;
+    // Only a successful, explicit server decision permits step-free evidence. Existing approval
+    // instances retain their workflow upload/review path; a missing policy response is not opt-out.
+    const evidenceVerificationNotRequired = paymentControl?.approvalRequired === false;
+    const canUploadDirectEvidence = evidenceVerificationNotRequired && payment?.status === 'Draft'
+        && paymentControl?.canUploadEvidence === true
+        && !payment?.paymentBatchId && canSubmitPayment && !controlError && !controlLoading;
+    const canUploadWorkflowEvidence = paymentControl?.approvalRequired === true
+        && payment?.status === 'PendingAuthorization' && Boolean(paymentControl.currentStepInstanceId)
+        && !controlError && !controlLoading;
 
     const { data: trace, isLoading: traceLoading, refetch: refetchTrace } = useQuery({
         queryKey: ['vendor-payment-trace', id],
@@ -118,7 +145,7 @@ export default function VendorPaymentDetailsPage() {
     } = useQuery({
         queryKey: ['vendor-payment-sod-readiness', id],
         queryFn: () => accountsPayableService.getPaymentSodReadiness(id),
-        enabled: Boolean(id),
+        enabled: Boolean(id) && approvalRequired,
         retry: false,
     });
 
@@ -146,18 +173,20 @@ export default function VendorPaymentDetailsPage() {
 
         setIsSubmitting(true);
         try {
-            await accountsPayableService.submitPayment(payment.id, {
+            const result = await accountsPayableService.submitPayment(payment.id, {
                 isExceptionalPayment,
                 exceptionalPaymentReason: exceptionalPaymentReason.trim() || undefined,
                 requestEvidenceException,
                 evidenceExceptionReason: evidenceExceptionReason.trim() || undefined,
             });
             toast({
-                title: 'Payment submitted',
-                description: 'The applicable evidence and approval policy has been snapshotted for review.',
+                title: result.approvalRequired === false ? 'Payment ready to post' : 'Payment submitted',
+                description: result.approvalRequired === false
+                    ? 'The policy check is saved. Select Post to complete the accounting entry.'
+                    : 'The applicable evidence and approval policy has been snapshotted for review.',
             });
             setSubmitDialogOpen(false);
-            await Promise.all([refetch(), refetchControl(), refetchSod()]);
+            await Promise.all([refetch(), refetchControl(), ...(result.approvalRequired === false ? [] : [refetchSod()])]);
         } catch (error: any) {
             toast({
                 title: 'Submission failed',
@@ -173,25 +202,39 @@ export default function VendorPaymentDetailsPage() {
         requirement: NonNullable<typeof paymentControl>['evidenceRequirements'][number],
         file?: File
     ) => {
-        if (!file || !paymentControl?.currentStepInstanceId) return;
+        if (!file || !payment || (!canUploadDirectEvidence && !canUploadWorkflowEvidence)) return;
 
         setUploadingRequirementKey(requirement.requirementKey);
         try {
-            // Requirement metadata is sent explicitly and validated by the workflow step. This
-            // prevents a generic attachment from being counted against an unrelated policy key.
-            await workflowApiService.uploadStepAttachment(
-                paymentControl.currentStepInstanceId,
-                file,
-                requirement.requirementKey,
-                requirement.documentName,
-                requirement.documentType
-            );
-            toast({ title: 'Evidence uploaded', description: `${file.name} is ready for independent verification.` });
+            if (canUploadDirectEvidence) {
+                const requestKey = `${payment.id}:${requirement.requirementKey}`;
+                const fingerprint = `${file.name}:${file.size}:${file.type}:${file.lastModified}`;
+                const previous = evidenceUploadRequests.current.get(requestKey);
+                const requestId = previous?.fingerprint === fingerprint ? previous.requestId : crypto.randomUUID();
+                evidenceUploadRequests.current.set(requestKey, { fingerprint, requestId });
+                const body = new FormData();
+                body.append('file', file);
+                body.append('requirementKey', requirement.requirementKey);
+                body.append('clientRequestId', requestId);
+                // The payment owner validates the named policy requirement and registers the
+                // clean upload in central DMS without creating an approval step or reviewer.
+                await apiService.request(`/ap/payments/${encodeURIComponent(payment.id)}/evidence`, {
+                    method: 'POST', body,
+                });
+            } else {
+                await workflowApiService.uploadStepAttachment(
+                    paymentControl!.currentStepInstanceId!, file, requirement.requirementKey,
+                    requirement.documentName, requirement.documentType
+                );
+            }
+            toast({ title: 'Evidence uploaded', description: canUploadDirectEvidence
+                ? `${file.name} is attached. Verification is not required.`
+                : `${file.name} is ready for independent verification.` });
             await refetchControl();
         } catch (error: any) {
             toast({
                 title: 'Evidence upload failed',
-                description: error?.message || 'Unable to upload payment evidence.',
+                description: evidenceErrorDescription(error),
                 variant: 'destructive',
             });
         } finally {
@@ -200,6 +243,7 @@ export default function VendorPaymentDetailsPage() {
     };
 
     const handleVerifyEvidence = async (evidenceId: string) => {
+        if (paymentControl?.approvalRequired !== true || !canReviewEvidence) return;
         setVerifyingEvidenceId(evidenceId);
         try {
             await workflowApiService.verifyWorkflowEvidence(
@@ -217,6 +261,31 @@ export default function VendorPaymentDetailsPage() {
             });
         } finally {
             setVerifyingEvidenceId(null);
+        }
+    };
+
+    const handleDownloadEvidence = async (evidence: NonNullable<typeof paymentControl>['evidenceDocuments'][number]) => {
+        if (!payment || !evidenceVerificationNotRequired) return;
+        setDownloadingEvidenceId(evidence.id);
+        try {
+            const blob = await apiService.downloadBlob(
+                `/ap/payments/${encodeURIComponent(payment.id)}/evidence/${encodeURIComponent(evidence.id)}/content`
+            );
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            try {
+                link.href = url;
+                link.download = evidence.fileName;
+                document.body.appendChild(link);
+                link.click();
+            } finally {
+                link.remove();
+                URL.revokeObjectURL(url);
+            }
+        } catch (error) {
+            toast({ title: 'Download failed', description: evidenceErrorDescription(error), variant: 'destructive' });
+        } finally {
+            setDownloadingEvidenceId(null);
         }
     };
 
@@ -291,7 +360,7 @@ export default function VendorPaymentDetailsPage() {
         switch (status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
             case 'PendingAuthorization': return <Badge className="bg-amber-600">Pending authorization</Badge>;
-            case 'Authorized': return <Badge className="bg-emerald-600">Authorized</Badge>;
+            case 'Authorized': return <Badge className="bg-emerald-600">{payment?.approvalRequired === false ? 'Ready to post' : 'Authorized'}</Badge>;
             case 'Processed': return <Badge className="bg-blue-600">Processed</Badge>;
             case 'Cleared': return <Badge className="bg-green-600">Cleared</Badge>;
             case 'Voided': return <Badge variant="outline" className="text-muted-foreground">Voided</Badge>;
@@ -316,8 +385,8 @@ export default function VendorPaymentDetailsPage() {
                 </div>
                 <div className="flex space-x-2">
                     {canSubmitPayment && payment.status === 'Draft' && !payment.paymentBatchId && (
-                        <Button size="sm" onClick={() => setSubmitDialogOpen(true)}>
-                            <ShieldCheck className="mr-2 h-4 w-4" /> Submit for Approval
+                        <Button size="sm" disabled={controlLoading} onClick={() => setSubmitDialogOpen(true)}>
+                            <ShieldCheck className="mr-2 h-4 w-4" /> {approvalRequired ? 'Submit for Approval' : 'Complete'}
                         </Button>
                     )}
                     {!payment.journalEntryId && ['Authorized', 'Processed'].includes(payment.status) && canSubmitPayment && (
@@ -347,11 +416,11 @@ export default function VendorPaymentDetailsPage() {
                 </div>
             </div>
 
-            <InvoicePaymentSodControl
+            {approvalRequired && <InvoicePaymentSodControl
                 readiness={sodReadiness}
                 isLoading={isSodLoading}
                 error={sodError instanceof Error ? sodError.message : sodError ? 'Unable to load the AP-004 control.' : null}
-            />
+            />}
 
             <Card className="print:shadow-none print:border-none">
                 <CardHeader className="flex flex-row justify-between items-start border-b pb-8">
@@ -486,20 +555,28 @@ export default function VendorPaymentDetailsPage() {
             <Card className="no-print">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2">
-                        <ShieldCheck className="h-5 w-5" /> Payment approval controls
+                        <ShieldCheck className="h-5 w-5" /> {approvalRequired ? 'Payment approval controls' : 'Payment policy'}
                     </CardTitle>
                     <p className="text-sm text-muted-foreground">
-                        Effective-dated authority and independently verified evidence required before authorization.
+                        {approvalRequired
+                            ? 'Effective-dated authority and independently verified evidence required before authorization.'
+                            : 'No internal approval workflow applies. Payment policy and accounting checks still apply.'}
                     </p>
                 </CardHeader>
                 <CardContent className="space-y-5">
                     {controlLoading && <Skeleton className="h-32 w-full" />}
+                    {!controlLoading && (controlError || typeof paymentControl?.approvalRequired !== 'boolean') && (
+                        <div role="alert" className="flex items-center justify-between gap-3 rounded-md border p-3 text-sm">
+                            <span>{controlError ? evidenceErrorDescription(controlError) : 'Payment policy could not be confirmed.'}</span>
+                            <Button type="button" size="sm" variant="outline" onClick={() => refetchControl()}>Retry policy check</Button>
+                        </div>
+                    )}
                     {paymentControl && (
                         <>
                             <div className="grid gap-4 rounded-md border bg-muted/30 p-4 md:grid-cols-3">
                                 <div>
                                     <p className="text-xs font-semibold uppercase text-muted-foreground">Applied policy</p>
-                                    <p className="mt-1 font-medium">{paymentControl.policyCode || 'No matching policy'}</p>
+                                    <p className="mt-1 font-medium">{paymentControl.policyCode || (approvalRequired ? 'No matching policy' : 'Standard payment controls')}</p>
                                 </div>
                                 <div>
                                     <p className="text-xs font-semibold uppercase text-muted-foreground">Current stage</p>
@@ -508,7 +585,9 @@ export default function VendorPaymentDetailsPage() {
                                 <div>
                                     <p className="text-xs font-semibold uppercase text-muted-foreground">Authority route</p>
                                     <p className="mt-1 font-medium">
-                                        Chief Accountant{paymentControl.requiresManagingDirectorApproval ? ' then Managing Director' : ''}
+                                        {approvalRequired
+                                            ? <>Configured workflow{paymentControl.requiresManagingDirectorApproval ? ' including Managing Director' : ''}</>
+                                            : paymentControl.requiresManagingDirectorApproval ? 'Separate Managing Director authority required' : 'No approval required'}
                                     </p>
                                 </div>
                             </div>
@@ -548,17 +627,25 @@ export default function VendorPaymentDetailsPage() {
                                                         <span className="font-medium">{requirement.documentName}</span>
                                                     </div>
                                                     <p className="mt-1 text-xs text-muted-foreground">
-                                                        {requirement.verifiedDocumentCount} of {requirement.minimumDocuments} independently verified
+                                                        {evidenceVerificationNotRequired
+                                                            ? `${requirement.currentDocumentCount} of ${requirement.minimumDocuments} attached · Verification: Not required`
+                                                            : `${requirement.verifiedDocumentCount} of ${requirement.minimumDocuments} independently verified`}
                                                         {requirement.documentType ? ` · ${requirement.documentType}` : ''}
                                                     </p>
                                                 </div>
-                                                {payment.status === 'PendingAuthorization' && paymentControl.currentStepInstanceId && (
+                                                {(canUploadDirectEvidence || canUploadWorkflowEvidence) && (
                                                     <Label className="cursor-pointer">
                                                         <Input
                                                             type="file"
+                                                            aria-label={`Upload ${requirement.documentName}`}
                                                             className="hidden"
                                                             disabled={uploadingRequirementKey !== null}
-                                                            onChange={event => handleEvidenceUpload(requirement, event.target.files?.[0])}
+                                                            onChange={event => {
+                                                                const file = event.target.files?.[0];
+                                                                // Selecting the same file again retries the same idempotent request.
+                                                                event.target.value = '';
+                                                                void handleEvidenceUpload(requirement, file);
+                                                            }}
                                                         />
                                                         <span className="inline-flex h-9 items-center rounded-md border bg-background px-3 text-sm font-medium shadow-sm hover:bg-accent">
                                                             {uploadingRequirementKey === requirement.requirementKey
@@ -580,10 +667,21 @@ export default function VendorPaymentDetailsPage() {
                                                                 <div>
                                                                     <p className="font-medium">{document.fileName}</p>
                                                                     <p className="text-xs text-muted-foreground">
-                                                                        {document.verificationStatus} · malware scan {document.malwareScanStatus}
+                                                                        {evidenceVerificationNotRequired ? 'Verification: Not required' : document.verificationStatus} · malware scan {document.malwareScanStatus}
                                                                     </p>
                                                                 </div>
-                                                                {canReviewEvidence && !isVerified && !isOwnUpload && (
+                                                                {evidenceVerificationNotRequired && (
+                                                                    <Button type="button" size="sm" variant="outline"
+                                                                        aria-label={`Download ${document.fileName}`}
+                                                                        disabled={downloadingEvidenceId !== null}
+                                                                        onClick={() => handleDownloadEvidence(document)}>
+                                                                        {downloadingEvidenceId === document.id
+                                                                            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                                                            : <Download className="mr-2 h-4 w-4" />}
+                                                                        Download
+                                                                    </Button>
+                                                                )}
+                                                                {paymentControl.approvalRequired === true && canReviewEvidence && !isVerified && !isOwnUpload && (
                                                                     <Button
                                                                         type="button"
                                                                         size="sm"
@@ -595,8 +693,8 @@ export default function VendorPaymentDetailsPage() {
                                                                         Verify evidence
                                                                     </Button>
                                                                 )}
-                                                                {isVerified && <Badge className="bg-emerald-600">Verified</Badge>}
-                                                                {!isVerified && isOwnUpload && (
+                                                                {!evidenceVerificationNotRequired && isVerified && <Badge className="bg-emerald-600">Verified</Badge>}
+                                                                {!evidenceVerificationNotRequired && !isVerified && isOwnUpload && (
                                                                     <span className="text-xs text-muted-foreground">Requires another reviewer</span>
                                                                 )}
                                                             </div>
@@ -609,9 +707,9 @@ export default function VendorPaymentDetailsPage() {
                                 })}
                             </div>
 
-                            {paymentControl.blockingReasons.length > 0 && payment.status !== 'Draft' && (
+                            {paymentControl.blockingReasons.length > 0 && (payment.status !== 'Draft' || evidenceVerificationNotRequired) && (
                                 <div className="rounded-md border border-amber-200 bg-amber-50/70 p-4">
-                                    <p className="font-medium text-amber-950">Authorization blockers</p>
+                                    <p className="font-medium text-amber-950">{evidenceVerificationNotRequired ? 'Required before completion' : 'Authorization blockers'}</p>
                                     <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
                                         {paymentControl.blockingReasons.map(reason => <li key={reason}>{reason}</li>)}
                                     </ul>
@@ -627,6 +725,11 @@ export default function VendorPaymentDetailsPage() {
                     )}
                 </CardContent>
             </Card>
+
+            <div className="no-print space-y-4">
+                <SourceDocumentDimensionEvidence evidence={payment.financeDimensions} />
+                <SettlementDimensionEvidence evidence={payment.settlementDimensions} />
+            </div>
 
             {payment.journalEntryId && (
                 <Card className="no-print">
@@ -696,9 +799,11 @@ export default function VendorPaymentDetailsPage() {
             <Dialog open={submitDialogOpen} onOpenChange={setSubmitDialogOpen}>
                 <DialogContent>
                     <DialogHeader>
-                        <DialogTitle>Submit vendor payment for approval</DialogTitle>
+                        <DialogTitle>{approvalRequired ? 'Submit vendor payment for approval' : 'Complete payment policy check'}</DialogTitle>
                         <DialogDescription>
-                            Submission freezes policy {paymentControl?.policyCode || '(not resolved)'} for this payment. Supporting evidence is uploaded on the resulting approval step and must be independently verified.
+                            {approvalRequired
+                                ? `Submission freezes policy ${paymentControl?.policyCode || '(not resolved)'} for this payment. Supporting evidence is uploaded on the resulting approval step and must be independently verified.`
+                                : 'Attach the required documents, then complete the policy check to make this payment ready to post. Evidence verification and human approval are not required. Accounting and other payment-policy checks still apply.'}
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-5 py-2">
@@ -760,7 +865,9 @@ export default function VendorPaymentDetailsPage() {
                         )}
                         {!paymentControl?.canSubmit && (
                             <div className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
-                                No active payment approval policy could be resolved. A Finance workflow administrator must publish a matching policy before submission.
+                                {approvalRequired
+                                    ? 'No matching payment approval policy could be resolved. Ask a Finance administrator to check its configuration.'
+                                    : 'Payment-level evidence, separate authority or a signature is still required. These requirements are not waived when an internal approval workflow is inactive.'}
                             </div>
                         )}
                     </div>
@@ -776,7 +883,7 @@ export default function VendorPaymentDetailsPage() {
                             }
                         >
                             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            Submit and Freeze Policy
+                            {approvalRequired ? 'Submit' : 'Complete'}
                         </Button>
                     </DialogFooter>
                 </DialogContent>

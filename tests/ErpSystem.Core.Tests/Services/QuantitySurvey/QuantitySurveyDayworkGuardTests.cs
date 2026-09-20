@@ -8,7 +8,7 @@ public sealed class QuantitySurveyDayworkGuardTests
     [Fact]
     public void Migration_is_scoped_and_enforces_lineage_rates_signatures_evidence_and_parent_readiness()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260811013838_AddQuantitySurveyDayworkLifecycle.cs");
 
         source.Should().Contain("QuantitySurveyDayworkSheets")

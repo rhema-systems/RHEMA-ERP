@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Calendar as CalendarIcon, Eye, FileSpreadsheet, Filter, Plus, Search } from 'lucide-react';
 import { toast } from 'sonner';
+import { getProcurementProblemMessage as getApiProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
@@ -19,12 +20,14 @@ import {
     TableRow,
 } from '@/components/ui/table';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
+import { useAuth } from '@/hooks/use-auth';
 import type { UnitJournalEntry, UnitJournalEntryStatus } from '@/types/unit-accounts';
 
 const statusOptions: UnitJournalEntryStatus[] = [
     'Draft',
     'PendingApproval',
     'Approved',
+    'ReadyToPost',
     'Posted',
     'Rejected',
     'Reversed',
@@ -35,6 +38,7 @@ function getStatusBadge(status: UnitJournalEntryStatus) {
         Draft: 'bg-gray-500 hover:bg-gray-600',
         PendingApproval: 'bg-orange-500 hover:bg-orange-600',
         Approved: 'bg-blue-500 hover:bg-blue-600',
+        ReadyToPost: 'bg-emerald-700 hover:bg-emerald-800',
         Posted: 'bg-green-600 hover:bg-green-700',
         Rejected: 'bg-red-500 hover:bg-red-600',
         Reversed: 'bg-purple-500 hover:bg-purple-600',
@@ -44,6 +48,7 @@ function getStatusBadge(status: UnitJournalEntryStatus) {
         Draft: 'Draft',
         PendingApproval: 'Pending Approval',
         Approved: 'Approved',
+        ReadyToPost: 'Ready to Post',
         Posted: 'Posted',
         Rejected: 'Rejected',
         Reversed: 'Reversed',
@@ -61,6 +66,7 @@ function formatDate(dateString: string) {
 }
 
 export default function UnitJournalEntriesPage() {
+    const { hasPermission } = useAuth();
     const [entries, setEntries] = useState<UnitJournalEntry[]>([]);
     const [searchTerm, setSearchTerm] = useState('');
     const [statusFilter, setStatusFilter] = useState<string>('all');
@@ -77,7 +83,7 @@ export default function UnitJournalEntriesPage() {
                     setEntries(data);
                 }
             } catch (error: any) {
-                toast.error(error?.message || 'Failed to load unit journal entries.');
+                toast.error(getApiProblemMessage(error, 'Failed to load unit journal entries.'));
             } finally {
                 if (isMounted) {
                     setIsLoading(false);
@@ -120,9 +126,9 @@ export default function UnitJournalEntriesPage() {
                     </p>
                 </div>
                 <div className="flex gap-2">
-                    <Link href="/finance/unit-journal-entries/approvals">
+                    {hasPermission('Finance.JournalEntries.Approve') && entries.some(entry => entry.approvalRequired !== false && entry.status === 'PendingApproval') && <Link href="/finance/unit-journal-entries/approvals">
                         <Button variant="outline">Approval Queue</Button>
-                    </Link>
+                    </Link>}
                     <Link href="/finance/unit-journal-entries/new">
                         <Button>
                             <Plus className="mr-2 h-4 w-4" />
@@ -174,7 +180,7 @@ export default function UnitJournalEntriesPage() {
                                 <SelectItem value="all">All Status</SelectItem>
                                 {statusOptions.map((status) => (
                                     <SelectItem key={status} value={status}>
-                                        {status === 'PendingApproval' ? 'Pending Approval' : status}
+                                        {status === 'PendingApproval' ? 'Pending Approval' : status === 'ReadyToPost' ? 'Ready to Post' : status}
                                     </SelectItem>
                                 ))}
                             </SelectContent>

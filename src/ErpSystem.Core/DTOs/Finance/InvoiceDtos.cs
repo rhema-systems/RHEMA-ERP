@@ -21,6 +21,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal PaidAmount { get; set; }
         public decimal BalanceAmount { get; set; }
         public string Status { get; set; } = "Draft";
+        public bool ApprovalRequired { get; set; } = true;
+        public Guid? WorkflowInstanceId { get; set; }
         public string? Notes { get; set; }
         public string? Reference { get; set; }
         public bool IsOpeningBalance { get; set; }
@@ -144,7 +146,8 @@ namespace ErpSystem.Core.DTOs.Finance
         public Guid? TaxGroupId { get; set; }
         public TaxTreatment TaxTreatment { get; set; } = TaxTreatment.Standard;
 
-        public decimal DiscountPercentage { get; set; } = 0; // AR-specific
+        [Range(typeof(decimal), "0", "100")]
+        public decimal DiscountPercentage { get; set; } = 0; // AR line trade discount
 
         [MaxLength(50)]
         public string? Unit { get; set; }

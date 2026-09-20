@@ -9,7 +9,7 @@ public sealed class CivilEngineeringDevelopmentApprovalFileMigrationGuardTests
     public void Migration_preserves_tenant_dms_configuration_and_append_only_controls()
     {
         var root = FindRoot();
-        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles.cs"));
+        var sql = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821110000_AddCivilEngineeringDevelopmentApprovalFiles.cs"));
 
         sql.Should().Contain("ProjectCivilDevelopmentApprovalFiles")
             .And.Contain("ProjectCivilDevelopmentApprovalEvidence")

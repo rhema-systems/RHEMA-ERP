@@ -18,7 +18,7 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class JournalEntryLifecycleBatch5Tests
+public sealed partial class JournalEntryLifecycleBatch5Tests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-5")]
@@ -33,6 +33,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             index.Properties.Select(p => p.Name).SequenceEqual(new[]
             {
                 nameof(FinancePostingEvent.TenantId),
+                nameof(FinancePostingEvent.AccountingBookId),
                 nameof(FinancePostingEvent.SourceDocumentType),
                 nameof(FinancePostingEvent.SourceDocumentId),
                 nameof(FinancePostingEvent.PostingAction)
@@ -59,6 +60,65 @@ public sealed class JournalEntryLifecycleBatch5Tests
 
         updated.Description.Should().Be("Updated draft journal");
         updated.PostingStatus.Should().Be("Draft");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
+    public async Task ForeignDraftJournal_ShouldRetainApprovedExchangeRateEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var rate = new ExchangeRate
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            BaseCurrencyCode = "GHS",
+            TargetCurrencyCode = "USD",
+            Rate = 12.5m,
+            InverseRate = 0.08m,
+            EffectiveDate = new DateTime(2026, 7, 1),
+            RateType = ExchangeRateType.Daily,
+            QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Approved test rate",
+            IsActive = true,
+            ApprovalStatus = RateApprovalStatus.Approved
+        };
+        db.ExchangeRates.Add(rate);
+        await db.SaveChangesAsync();
+        var request = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        request.Transactions[0].CurrencyCode = "USD";
+        request.Transactions[0].ForeignAmount = 8m;
+        request.Transactions[0].ExchangeRate = rate.Rate;
+        request.Transactions[0].ExchangeRateId = rate.Id;
+
+        var journal = await CreateJournalService(db, tenantId).CreateJournalEntryAsync(request);
+
+        var foreignLine = journal.Transactions.Single(line => line.TransactionType == "Debit");
+        foreignLine.ExchangeRateId.Should().Be(rate.Id);
+        foreignLine.ExchangeRate.Should().Be(rate.Rate);
+        (await db.AccountTransactions.SingleAsync(line => line.Id == foreignLine.Id))
+            .ExchangeRateId.Should().Be(rate.Id);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-5")]
+    [Trait("Category", "JournalLifecycle")]
+    public async Task ForeignDraftJournal_ShouldRejectDecimalWithoutRateRecord()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var request = CreateJournalDto(debitAccount.Id, creditAccount.Id);
+        request.Transactions[0].CurrencyCode = "USD";
+        request.Transactions[0].ForeignAmount = 8m;
+        request.Transactions[0].ExchangeRate = 12.5m;
+
+        var act = () => CreateJournalService(db, tenantId).CreateJournalEntryAsync(request);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*requires an approved USD exchange-rate record*");
     }
 
     [Fact]
@@ -102,11 +162,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
             e.SourceDocumentId == journal.Id &&
             e.PostingAction == "Post")).Should().Be(1);
 
-        var storedDebitAccount = await db.Accounts.SingleAsync(a => a.Id == debitAccount.Id);
-        var storedCreditAccount = await db.Accounts.SingleAsync(a => a.Id == creditAccount.Id);
-        // Manual journals use the same posting-engine balance snapshot maintenance as subledger posts.
-        storedDebitAccount.Balance.Should().Be(100m);
-        storedCreditAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == debitAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == creditAccount.Id)).ClosingBalance.Should().Be(-100m);
     }
 
     [Fact]
@@ -202,10 +259,11 @@ public sealed class JournalEntryLifecycleBatch5Tests
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
-        SeedTenant(db, tenantId);
-        var closedPeriod = SeedPeriod(db, tenantId, isOpen: false, isClosed: true);
-        var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
-        var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var (debitAccount, creditAccount) = await SeedTenantPeriodAndAccountsAsync(db, tenantId);
+        var closedPeriod = await db.FiscalPeriods.SingleAsync(period => period.TenantId == tenantId);
+        closedPeriod.IsOpen = false;
+        closedPeriod.IsClosed = true;
+        closedPeriod.PeriodStatus = "Closed";
         var journal = SeedBalancedJournal(db, tenantId, closedPeriod.Id, debitAccount.Id, creditAccount.Id, "Approved");
         await db.SaveChangesAsync();
         var service = CreateJournalService(db, tenantId);
@@ -255,6 +313,13 @@ public sealed class JournalEntryLifecycleBatch5Tests
         var procurementDocumentId = Guid.NewGuid();
         var postingDate = new DateTime(2026, 8, 29);
         await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        db.AccountingBooks.Add(book);
 
         db.JournalEntries.AddRange(
             new JournalEntry
@@ -269,6 +334,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
                 OriginModuleCode = "PROC",
                 SourceDocumentId = procurementDocumentId,
                 SourceDocumentType = "SupplierOnboardingTokenPayment",
+                AccountingBookId = book.Id,
+                BookClassification = book.Code,
                 FiscalPeriodId = fiscalPeriodId,
                 PostingStatus = "Posted",
                 CreatedAt = postingDate
@@ -282,6 +349,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
                 EntryDate = postingDate,
                 Description = "Vendor invoice",
                 SourceModule = "AP",
+                AccountingBookId = book.Id,
+                BookClassification = book.Code,
                 FiscalPeriodId = fiscalPeriodId,
                 PostingStatus = "Posted",
                 CreatedAt = postingDate
@@ -412,7 +481,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
         Guid tenantId,
         Guid? currentUserId = null,
         Mock<INotificationService>? notification = null,
-        IFinanceBudgetControlService? budgetControl = null)
+        IFinanceBudgetControlService? budgetControl = null,
+        IWorkflowService? approvalWorkflow = null)
     {
         var currentUser = CreateCurrentUser(tenantId, currentUserId);
         var engine = new FinancePostingEngine(db, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
@@ -437,6 +507,14 @@ public sealed class JournalEntryLifecycleBatch5Tests
 
         notification ??= new Mock<INotificationService>();
         var books = new Mock<IAccountingBookService>();
+        if (budgetControl is null)
+        {
+            var unbudgetedJournal = new Mock<IFinanceBudgetControlService>();
+            unbudgetedJournal.Setup(control => control.ValidateManualJournalForPostingAsync(
+                    It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(Array.Empty<Guid>());
+            budgetControl = unbudgetedJournal.Object;
+        }
 
         return new JournalEntryService(
             db,
@@ -446,7 +524,8 @@ public sealed class JournalEntryLifecycleBatch5Tests
             notification.Object,
             books.Object,
             engine,
-            budgetControl: budgetControl);
+            budgetControl: budgetControl,
+            approvalWorkflow: approvalWorkflow);
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId, Guid? currentUserId = null)
@@ -465,9 +544,39 @@ public sealed class JournalEntryLifecycleBatch5Tests
     private static async Task<(Account DebitAccount, Account CreditAccount)> SeedTenantPeriodAndAccountsAsync(ApplicationDbContext db, Guid tenantId)
     {
         SeedTenant(db, tenantId);
-        SeedPeriod(db, tenantId);
+        var period = SeedPeriod(db, tenantId);
         var debitAccount = SeedAccount(db, tenantId, "1000", AccountType.Asset);
         var creditAccount = SeedAccount(db, tenantId, "4000", AccountType.Revenue);
+        var book = new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        };
+        var assetClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "ASSET_TEST", Name = "Asset test", CoreAccountType = AccountType.Asset,
+            IsPostingClassification = true, Status = AccountClassificationStatus.Active
+        };
+        var revenueClassification = new AccountClassification
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+            Code = "REVENUE_TEST", Name = "Revenue test", CoreAccountType = AccountType.Revenue,
+            IsPostingClassification = true, Status = AccountClassificationStatus.Active
+        };
+        db.AddRange(book, assetClassification, revenueClassification);
+        db.AccountAccountingBooks.AddRange(
+            new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = debitAccount.Id,
+                AccountingBookId = book.Id, AccountClassificationId = assetClassification.Id, IsEnabled = true
+            },
+            new AccountAccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccount.Id,
+                AccountingBookId = book.Id, AccountClassificationId = revenueClassification.Id, IsEnabled = true
+            });
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
         await db.SaveChangesAsync();
         return (debitAccount, creditAccount);
     }
@@ -491,11 +600,26 @@ public sealed class JournalEntryLifecycleBatch5Tests
         bool isClosed = false,
         bool isLocked = false)
     {
+        var fiscalYear = new FiscalYear
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            FiscalYearName = "Fiscal Year 2026",
+            FiscalYearCode = $"FY26-{tenantId.ToString("N")[..4]}",
+            Year = 2026,
+            StartDate = new DateTime(2026, 1, 1),
+            EndDate = new DateTime(2026, 12, 31),
+            TotalDays = 365,
+            NumberOfPeriods = 12,
+            Status = "Open",
+            IsActive = true
+        };
         var period = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            FiscalYearId = Guid.NewGuid(),
+            FiscalYearId = fiscalYear.Id,
+            FiscalYear = fiscalYear,
             PeriodName = "July 2026",
             PeriodCode = "2026-07",
             PeriodNumber = 7,
@@ -509,6 +633,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             IsLocked = isLocked
         };
 
+        db.FiscalYears.Add(fiscalYear);
         db.FiscalPeriods.Add(period);
         return period;
     }
@@ -575,6 +700,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
         Guid creditAccountId,
         string status)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var journal = new JournalEntry
         {
             Id = Guid.NewGuid(),
@@ -586,6 +712,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             TotalDebitAmount = 100m,
             TotalCreditAmount = 100m,
             IsBalanced = true,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             FiscalPeriodId = fiscalPeriodId,
             PostingStatus = status,
@@ -602,6 +729,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             DebitAmount = 100m,
             CreditAmount = 0m,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             LineNumber = 1
         });
@@ -615,6 +743,7 @@ public sealed class JournalEntryLifecycleBatch5Tests
             DebitAmount = 0m,
             CreditAmount = 100m,
             FiscalPeriodId = fiscalPeriodId,
+            AccountingBookId = book.Id,
             BookClassification = "IFRS",
             LineNumber = 2
         });

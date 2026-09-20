@@ -46,6 +46,9 @@ import { cashManagementDataService } from '@/services/finance/cash-management-da
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { financeService } from '@/services/finance.service';
 import { CreateCashReceiptDto } from '@/types/cash-management';
+import { loadApprovedCashRate } from '@/lib/finance/cash-exchange-rate';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
 
 const receiptSchema = z.object({
     transactionDate: z.date({ message: "Date is required" }),
@@ -53,6 +56,7 @@ const receiptSchema = z.object({
     amount: z.number().min(0.01, "Amount must be greater than 0"),
     currency: z.string().min(1, "Currency is required"),
     exchangeRate: z.number().min(0.0001, "Exchange rate must be greater than 0"),
+    exchangeRateId: z.string().optional(),
     paymentMethodId: z.string().optional(),
     referenceNumber: z.string().optional(),
     description: z.string().optional(),
@@ -67,6 +71,10 @@ export default function RecordReceiptPage() {
     const router = useRouter();
     const { toast } = useToast();
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [sourceLineId] = useState(() => globalThis.crypto.randomUUID());
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [lineDimensionValues, setLineDimensionValues] = useState<Record<string, Record<string, string>>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
 
     // Fetch data
     const { data: bankAccounts } = useQuery({
@@ -84,6 +92,11 @@ export default function RecordReceiptPage() {
         queryFn: () => financeDataService.getAccounts({ status: 'Active' }),
     });
 
+    const { data: financeSettings } = useQuery({
+        queryKey: ['finance-settings'],
+        queryFn: () => financeService.getSettings(),
+    });
+
     const form = useForm<ReceiptFormValues>({
         resolver: zodResolver(receiptSchema),
         defaultValues: {
@@ -91,10 +104,13 @@ export default function RecordReceiptPage() {
             amount: 0,
             currency: 'GHS',
             exchangeRate: 1,
+            exchangeRateId: undefined,
         },
     });
 
     const selectedBankAccountId = form.watch('bankAccountId');
+    const selectedGLAccountId = form.watch('glAccountId');
+    const selectedGLAccount = glAccounts?.find(account => account.id === selectedGLAccountId);
 
     const openCustomerPaymentFlow = () => {
         const values = form.getValues();
@@ -117,16 +133,40 @@ export default function RecordReceiptPage() {
             const account = bankAccounts.find(a => a.id === selectedBankAccountId);
             if (account) {
                 form.setValue('currency', account.currency);
-                if (account.currency === 'GHS') {
-                    form.setValue('exchangeRate', 1);
-                } else {
-                    void financeService.getCurrentExchangeRate(account.currency)
-                        .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
-                        .catch(() => form.setValue('exchangeRate', 1));
-                }
             }
         }
     }, [selectedBankAccountId, bankAccounts, form]);
+
+    const watchedCurrency = form.watch('currency');
+    const watchedTransactionDate = form.watch('transactionDate');
+    const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
+    const [exchangeRateSource, setExchangeRateSource] = useState('Functional currency');
+
+    useEffect(() => {
+        if (!financeSettings || !watchedTransactionDate) return;
+        form.setValue('exchangeRateId', undefined);
+        setExchangeRateSource('Loading approved rate…');
+        let cancelled = false;
+        void loadApprovedCashRate(
+            {
+                transactionCurrency: watchedCurrency,
+                functionalCurrency,
+                transactionDate: watchedTransactionDate,
+                settings: financeSettings,
+            },
+            (code, query) => financeService.getCurrentExchangeRate(code, query),
+        ).then(snapshot => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            setExchangeRateSource(`${snapshot.source} · ${snapshot.quoteSide}`);
+        }).catch(error => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', 0);
+            setExchangeRateSource(error instanceof Error ? error.message : 'Approved rate unavailable');
+        });
+        return () => { cancelled = true; };
+    }, [financeSettings, form, functionalCurrency, watchedCurrency, watchedTransactionDate]);
 
     const onSubmit = async (data: ReceiptFormValues) => {
         setIsSubmitting(true);
@@ -137,6 +177,10 @@ export default function RecordReceiptPage() {
                 setIsSubmitting(false);
                 return;
             }
+            if (data.currency.toUpperCase() !== functionalCurrency && !data.exchangeRateId) {
+                toast({ title: 'Approved exchange rate required', description: exchangeRateSource, variant: 'destructive' });
+                return;
+            }
 
             const payload: CreateCashReceiptDto = {
                 transactionDate: data.transactionDate.toISOString(),
@@ -144,6 +188,7 @@ export default function RecordReceiptPage() {
                 amount: data.amount,
                 currency: data.currency,
                 exchangeRate: data.exchangeRate,
+                exchangeRateId: data.exchangeRateId,
                 paymentMethodId: data.paymentMethodId,
                 referenceNumber: data.referenceNumber,
                 description: data.description,
@@ -156,6 +201,15 @@ export default function RecordReceiptPage() {
             }
             payload.glAccountId = data.glAccountId;
             payload.payerName = data.payerName || 'Miscellaneous';
+            payload.financeDimensions = {
+                defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                lines: [{
+                    sourceLineId,
+                    accountId: data.glAccountId,
+                    dimensions: toFinancePostingDimensionValues(lineDimensionValues[sourceLineId] || {}),
+                }],
+                applyDefaultToEligibleLines: applyDefaultToAll,
+            };
 
             await cashManagementDataService.createCashReceipt(payload);
 
@@ -193,7 +247,7 @@ export default function RecordReceiptPage() {
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-                <div className="lg:col-span-2">
+                <div className="space-y-6 lg:col-span-2">
                     <Card>
                         <form onSubmit={form.handleSubmit(onSubmit)}>
                             <CardHeader>
@@ -291,12 +345,14 @@ export default function RecordReceiptPage() {
                                         <Input
                                             type="number"
                                             step="0.000001"
-                                            disabled={form.watch('currency') === 'GHS'}
+                                            readOnly
+                                            aria-readonly="true"
                                             {...form.register('exchangeRate', { valueAsNumber: true })}
                                         />
                                         <p className="text-xs text-muted-foreground">
-                                            1 {form.watch('currency')} = {form.watch('exchangeRate') || 1} GHS
+                                            1 {form.watch('currency')} = {form.watch('exchangeRate') || 1} {functionalCurrency}
                                         </p>
+                                        <p className="text-xs text-muted-foreground">{exchangeRateSource}</p>
                                         {form.formState.errors.exchangeRate && <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>}
                                     </div>
                                 </div>
@@ -360,6 +416,42 @@ export default function RecordReceiptPage() {
                                 </Button>
                             </CardFooter>
                         </form>
+                    </Card>
+                    <Card>
+                        <CardHeader>
+                            <CardTitle>Finance coding dimensions</CardTitle>
+                            <CardDescription>
+                                The direct income/offset line is authoritative; the bank line resolves its own account rules.
+                            </CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'CASHBANK',
+                                    sourceDocumentType: 'CashBankReceipt',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.cash.receipts.direct',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(form.watch('transactionDate') || new Date(), 'yyyy-MM-dd')}
+                                lines={selectedGLAccountId ? [{
+                                    id: sourceLineId,
+                                    accountId: selectedGLAccountId,
+                                    accountLabel: selectedGLAccount
+                                        ? `${selectedGLAccount.accountCode} - ${selectedGLAccount.accountName}`
+                                        : 'Direct receipt offset',
+                                }] : []}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={lineDimensionValues}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={setLineDimensionValues}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                disabled={isSubmitting}
+                            />
+                        </CardContent>
                     </Card>
                 </div>
 

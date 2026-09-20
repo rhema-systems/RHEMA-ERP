@@ -32,6 +32,7 @@ public class JournalBatchListItemDto
     public string ControlCurrencyCode { get; set; } = string.Empty;
     public JournalBatchType BatchType { get; set; }
     public JournalBatchApprovalStatus ApprovalStatus { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public JournalBatchPostingStatus PostingStatus { get; set; }
     public JournalBatchReversalStatus ReversalStatus { get; set; }
     public bool IsVoided { get; set; }
@@ -63,6 +64,7 @@ public sealed class JournalBatchDetailDto : JournalBatchListItemDto
     public string? Notes { get; set; }
     public Guid? SubmittedByUserId { get; set; }
     public Guid? ApprovedByUserId { get; set; }
+    public Guid? WorkflowInstanceId { get; set; }
     public DateTime? ApprovedAt { get; set; }
     public DateTime? ReviewCompletedAt { get; set; }
     public Guid? ReversalOfJournalBatchId { get; set; }
@@ -164,6 +166,18 @@ public sealed class AddExistingJournalToBatchDto
 {
     [Required]
     public Guid JournalEntryId { get; set; }
+}
+
+public sealed class EligibleJournalBatchDraftDto
+{
+    public Guid Id { get; set; }
+    public string JournalEntryNumber { get; set; } = string.Empty;
+    public DateTime EntryDate { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public string? ReferenceNumber { get; set; }
+    public decimal TotalDebit { get; set; }
+    public decimal TotalCredit { get; set; }
+    public int LineCount { get; set; }
 }
 
 public sealed class CreateJournalBatchEntryDto

@@ -9,6 +9,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -56,8 +57,12 @@ public sealed class VendorPaymentBatchCreationTests
         source.Should().Contain("preserving the committed payment outcome");
     }
 
-    [Fact]
-    public async Task CreatePaymentBatchAsync_AppendsReadinessBeforeAttachingCompleteAggregate()
+    [Theory]
+    [InlineData(true, "GHS", false)]
+    [InlineData(false, "GHS", false)]
+    [InlineData(false, "USD", false)]
+    [InlineData(false, "GHS", true)]
+    public async Task CreatePaymentBatchAsync_AppendsReadinessBeforeAttachingCompleteAggregate(bool approvalRequired, string invoiceCurrency, bool requireEvidence)
     {
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
@@ -87,7 +92,7 @@ public sealed class VendorPaymentBatchCreationTests
             SubTotal = 50m,
             TotalAmount = 50m,
             PaidAmount = 0m,
-            CurrencyCode = "GHS",
+            CurrencyCode = invoiceCurrency,
             ExchangeRate = 1m,
             BaseCurrencyAmount = 50m,
             Status = VendorInvoiceStatus.Approved,
@@ -141,8 +146,9 @@ public sealed class VendorPaymentBatchCreationTests
                 documentType == FinanceDocumentTypes.APPaymentBatch ? "PB-TDC0505" : "VP-TDC0505");
 
         var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(item => item.HasActiveApprovalWorkflowAsync("PaymentBatch")).ReturnsAsync(approvalRequired);
         workflow.Setup(item => item.StartApprovalWorkflowAsync("PaymentBatch", It.IsAny<Guid>()))
-            .ReturnsAsync(new WorkflowExecutionResult { Success = true });
+            .ReturnsAsync(new WorkflowExecutionResult { Success = true, WorkflowInstanceId = Guid.NewGuid() });
 
         var invoiceService = new Mock<IVendorInvoiceService>();
         invoiceService.Setup(item => item.GetThreeWayMatchReadinessAsync(
@@ -164,6 +170,22 @@ public sealed class VendorPaymentBatchCreationTests
             new UnitOfWork(db),
             currentProvider.Object,
             Mock.Of<ILogger<ProcurementControlEventService>>());
+        var approvalPolicy = new Mock<IWorkflowApprovalPolicyResolver>();
+        if (requireEvidence)
+            approvalPolicy.Setup(item => item.ResolveAsync(
+                    It.IsAny<WorkflowApprovalPolicyContext>(), It.IsAny<CancellationToken>()))
+                .ReturnsAsync(new WorkflowApprovalPolicyResolution(Guid.NewGuid(), "PAYMENT-EVIDENCE",
+                    new WorkflowApprovalConfigDto
+                    {
+                        EvidenceRequirements =
+                        [
+                            new WorkflowEvidenceRequirementDto
+                            {
+                                RequirementKey = "bank-instruction", DocumentName = "Bank instruction",
+                                MinimumDocuments = 1, RequireVerification = true
+                            }
+                        ]
+                    }));
         var service = new VendorPaymentService(
             new UnitOfWork(db),
             currentUser.Object,
@@ -173,17 +195,43 @@ public sealed class VendorPaymentBatchCreationTests
             workflow.Object,
             Mock.Of<IFinanceAccessScopeService>(),
             Mock.Of<IFinanceReversalPolicyService>(),
+            financeAuditService: Mock.Of<IFinanceAuditService>(),
+            approvalPolicyResolver: approvalPolicy.Object,
             vendorInvoiceService: invoiceService.Object,
             procurementControlEvents: controlEvents);
 
-        var result = await service.CreatePaymentBatchAsync(new PaymentBatchCreateDto
+        var request = new PaymentBatchCreateDto
         {
             Description = "TDC-0505 aggregate-order regression",
             BatchDate = DateTime.UtcNow.Date,
             InvoiceIds = new List<Guid> { invoice.Id }
-        });
+        };
+        if (requireEvidence)
+        {
+            var create = () => service.CreatePaymentBatchAsync(request);
+            await create.Should().ThrowAsync<InvalidOperationException>()
+                .WithMessage("*Bank instruction*");
+            (await db.Set<PaymentBatch>().CountAsync()).Should().Be(0);
+            (await db.Set<VendorPayment>().CountAsync()).Should().Be(0);
+            workflow.Verify(item => item.StartApprovalWorkflowAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never());
+            return;
+        }
+        if (!approvalRequired && invoiceCurrency != "GHS")
+        {
+            var create = () => service.CreatePaymentBatchAsync(request);
+            var failure = await create.Should().ThrowAsync<VendorPaymentControlException>();
+            failure.Which.Code.Should().Be("AP_PAYMENT_BATCH_SETTLEMENT_RATE_REQUIRED");
+            (await db.Set<PaymentBatch>().CountAsync()).Should().Be(0);
+            (await db.Set<VendorPayment>().CountAsync()).Should().Be(0);
+            workflow.Verify(item => item.StartApprovalWorkflowAsync("PaymentBatch", It.IsAny<Guid>()), Times.Never());
+            return;
+        }
+        var result = await service.CreatePaymentBatchAsync(request);
 
-        result.Status.Should().Be(PaymentBatchStatus.PendingApproval);
+        result.Status.Should().Be(approvalRequired ? PaymentBatchStatus.PendingApproval : PaymentBatchStatus.Approved);
+        result.ApprovalRequired.Should().Be(approvalRequired);
+        result.ApprovedById.Should().BeNull();
+        result.ApprovedDate.Should().BeNull();
         result.Items.Should().ContainSingle();
         result.Items.Single().Invoices.Should().ContainSingle();
         (await db.Set<PaymentBatch>().CountAsync()).Should().Be(1);
@@ -193,11 +241,14 @@ public sealed class VendorPaymentBatchCreationTests
         (await db.ProcurementControlEvents.AnyAsync(item =>
             item.Id == selection.PaymentReadinessControlEventId &&
             item.RuleCode == ProcurementPaymentReadinessRules.RuleCode)).Should().BeTrue();
-        workflow.Verify(item => item.StartApprovalWorkflowAsync("PaymentBatch", result.Id), Times.Once);
+        workflow.Verify(item => item.StartApprovalWorkflowAsync("PaymentBatch", result.Id), approvalRequired ? Times.Once() : Times.Never());
 
         var ownedPayment = await db.Set<VendorPayment>()
             .SingleAsync(item => item.PaymentBatchId == result.Id);
         var ownedBatch = await db.Set<PaymentBatch>().SingleAsync(item => item.Id == result.Id);
+        ownedPayment.ApprovalRequired.Should().Be(approvalRequired);
+        ownedPayment.AuthorizedById.Should().BeNull();
+        ownedPayment.AuthorizedDate.Should().BeNull();
         ownedBatch.Status = PaymentBatchStatus.Approved;
         ownedPayment.Status = VendorPaymentStatus.Authorized;
         await db.SaveChangesAsync();

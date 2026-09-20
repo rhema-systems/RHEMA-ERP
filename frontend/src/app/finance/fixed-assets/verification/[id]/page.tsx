@@ -26,6 +26,8 @@ import {
 } from '@/types/fixed-assets';
 import { useToast } from "@/components/ui/use-toast";
 import { Progress } from "@/components/ui/progress";
+import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
+import type { FixedAssetLocationOption } from '@/types/fixed-assets';
 
 export default function AuditExecutionPage() {
     const params = useParams();
@@ -35,6 +37,7 @@ export default function AuditExecutionPage() {
 
     const [session, setSession] = useState<AssetVerificationSession | null>(null);
     const [items, setItems] = useState<AssetVerificationItem[]>([]);
+    const [locationOptions, setLocationOptions] = useState<FixedAssetLocationOption[]>([]);
     const [loading, setLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState('');
     const [isVerifyDialogOpen, setIsVerifyDialogOpen] = useState(false);
@@ -57,12 +60,14 @@ export default function AuditExecutionPage() {
     const loadData = async () => {
         try {
             setLoading(true);
-            const [sessionData, itemsData] = await Promise.all([
+            const [sessionData, itemsData, locationsData] = await Promise.all([
                 fixedAssetsDataService.getVerificationSession(sessionId),
-                fixedAssetsDataService.getSessionItems(sessionId)
+                fixedAssetsDataService.getSessionItems(sessionId),
+                fixedAssetsDataService.getLocationOptions()
             ]);
             setSession(sessionData);
             setItems(itemsData || []);
+            setLocationOptions(locationsData || []);
         } catch (error) {
             console.error('Failed to load audit data:', error);
             toast({
@@ -373,16 +378,13 @@ export default function AuditExecutionPage() {
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="location">Verification Location</Label>
-                                <div className="relative">
-                                    <MapPin className="absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-                                    <Input
-                                        id="location"
-                                        className="pl-9"
-                                        placeholder="e.g. Server Room, Block A"
-                                        value={verifyData.currentLocation || ''}
-                                        onChange={(e) => setVerifyData({ ...verifyData, currentLocation: e.target.value })}
-                                    />
-                                </div>
+                                <AssetLocationCombobox
+                                    id="location"
+                                    options={locationOptions}
+                                    value={locationOptions.find(option => option.displayName === verifyData.currentLocation)?.id}
+                                    placeholder={verifyData.currentLocation ? `Legacy: ${verifyData.currentLocation}` : undefined}
+                                    onValueChange={(location) => setVerifyData({ ...verifyData, currentLocation: location?.displayName })}
+                                />
                             </div>
                             <div className="space-y-2">
                                 <Label htmlFor="notes">Audit Notes</Label>

@@ -17,6 +17,52 @@ namespace ErpSystem.Api.Tests.Services.Finance;
 public sealed class FiscalYearDeletionGuardTests
 {
     [Fact]
+    public async Task CreateFiscalYearAsync_ShouldRejectRangeThatContainsExistingYear()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedFiscalYear(db, tenantId);
+        await db.SaveChangesAsync();
+
+        var service = CreateService(db, tenantId);
+        var action = () => service.CreateFiscalYearAsync(new ErpSystem.Core.DTOs.Finance.CreateFiscalYearDto
+        {
+            FiscalYearName = "Containing year",
+            FiscalYearCode = "FY25-27",
+            Year = 2027,
+            StartDate = new DateTime(2025, 1, 1),
+            EndDate = new DateTime(2027, 12, 31),
+            NumberOfPeriods = 12,
+            PeriodType = PeriodType.Monthly
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*overlap*");
+    }
+
+    [Fact]
+    public async Task CreateFiscalYearAsync_ShouldRejectEndBeforeStart()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var service = CreateService(db, tenantId);
+
+        var action = () => service.CreateFiscalYearAsync(new ErpSystem.Core.DTOs.Finance.CreateFiscalYearDto
+        {
+            FiscalYearName = "Invalid year",
+            FiscalYearCode = "BAD",
+            Year = 2026,
+            StartDate = new DateTime(2026, 12, 31),
+            EndDate = new DateTime(2026, 1, 1),
+            NumberOfPeriods = 12,
+            PeriodType = PeriodType.Monthly
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*end date*");
+    }
+
+    [Fact]
     [Trait("Category", "FiscalYearProjection")]
     public async Task GetFiscalYearsAsync_ShouldReturnSelectionAndControlFields()
     {

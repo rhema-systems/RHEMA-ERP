@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using ErpSystem.Core.Configuration;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.DTOs.Procurement;
@@ -183,6 +184,12 @@ public sealed class ProcurementConfigurationLifecycleRequest
 {
     [Required] public string RowVersion { get; set; } = string.Empty;
     [StringLength(1000)] public string? Reason { get; set; }
+}
+
+public sealed class WithdrawProcurementConfigurationDecisionRequest
+{
+    [Required] public string RowVersion { get; set; } = string.Empty;
+    [Required, StringLength(1000)] public string Reason { get; set; } = string.Empty;
 }
 
 public sealed class CloneProcurementConfigurationProfileRequest
@@ -431,6 +438,13 @@ public sealed class ProcurementSupplierRiskDecisionValueDto : EffectiveDatedDeci
             {
                 yield return new ValidationResult(
                     "Risk dimensions must use Metric=WeightPercent with a weight above 0 and not above 100.",
+                    new[] { nameof(RiskDimensions) });
+                continue;
+            }
+            if (!ProcurementSupplierRiskDimensionCatalog.TryResolve(parts[0], out _))
+            {
+                yield return new ValidationResult(
+                    $"Risk dimension '{parts[0]}' is not supported. Supported metrics: {string.Join(", ", ProcurementSupplierRiskDimensionCatalog.SupportedNames)}.",
                     new[] { nameof(RiskDimensions) });
                 continue;
             }

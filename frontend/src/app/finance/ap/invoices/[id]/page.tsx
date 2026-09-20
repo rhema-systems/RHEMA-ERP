@@ -1,4 +1,6 @@
 'use client';
+import { ActualLandedCostSummary } from '@/components/procurement/ActualLandedCostSummary';
+import { landedCostTaxReviewPending } from '@/lib/landed-cost-tax';
 
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
@@ -28,12 +30,13 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { accountsPayableService } from '@/services/accountsPayableService';
 import { formatCurrency } from '@/lib/utils';
+import { vendorInvoiceStatusLabel } from '@/lib/vendor-invoice-status';
 import { format } from 'date-fns';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useToast } from '@/components/ui/use-toast';
+import { ToastAction } from '@/components/ui/toast';
 import { useAuth } from '@/hooks/use-auth';
-import { workflowApiService } from '@/services/workflow-api.service';
-import type { WorkflowEntitySummaryDto } from '@/types/workflow';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import {
     InvoiceThreeWayMatchControl,
     invoiceThreeWayMatchQueryKey,
@@ -46,6 +49,7 @@ import {
 import printStyles from '@/components/finance/ap/ApInvoicePrintDocument.module.css';
 import { useTenant } from '@/contexts/TenantContext';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { InvoiceDistribution } from '@/components/finance/ap/InvoiceDistribution';
 
 export default function VendorInvoiceDetailsPage() {
     const router = useRouter();
@@ -55,7 +59,8 @@ export default function VendorInvoiceDetailsPage() {
     const queryClient = useQueryClient();
     const { hasPermission, hasAnyPermission } = useAuth();
     const { currentTenant, currentTenantCode } = useTenant();
-    const [workflowSummary, setWorkflowSummary] = useState<WorkflowEntitySummaryDto | null>(null);
+    const { summary: workflowSummary, visibility: workflowVisibility, error: workflowError, refresh: refreshWorkflow } =
+        useWorkflowSummary({ entityType: 'VendorInvoice', entityId: id });
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['vendor-invoice', id],
@@ -67,20 +72,6 @@ export default function VendorInvoiceDetailsPage() {
         queryFn: () => accountsPayableService.getThreeWayMatchReadiness(id),
         enabled: Boolean(invoice?.purchaseOrderId && !invoice?.isOpeningBalance),
         retry: 1,
-    });
-
-    useQuery({
-        queryKey: ['vendor-invoice-workflow-summary', id],
-        queryFn: async () => {
-            try {
-                const summary = await workflowApiService.getWorkflowEntitySummary('VendorInvoice', id);
-                setWorkflowSummary(summary);
-                return summary;
-            } catch {
-                setWorkflowSummary(null);
-                return null;
-            }
-        },
     });
 
     const voidInvoiceMutation = useMutation({
@@ -123,13 +114,31 @@ export default function VendorInvoiceDetailsPage() {
 
     const submitInvoiceMutation = useMutation({
         mutationFn: (invoiceId: string) => accountsPayableService.submitInvoiceForApproval(invoiceId),
-        onSuccess: () => {
+        onSuccess: (savedInvoice) => {
             queryClient.invalidateQueries({ queryKey: ['vendor-invoice', id] });
             queryClient.invalidateQueries({ queryKey: invoiceThreeWayMatchQueryKey(id) });
-            toast({ title: 'Success', description: 'Vendor invoice submitted for approval.' });
+            void refreshWorkflow();
+            toast({ title: 'Success', description: savedInvoice.approvalRequired === false
+                ? 'Invoice completed. Approval is not required.' : 'Vendor invoice submitted for approval.' });
         },
         onError: (error: any) => {
-            toast({ title: 'Error', description: error.message || 'Failed to submit for approval', variant: 'destructive' });
+            const message = error.message || 'Failed to submit for approval';
+            const budgetCellRequired = message.includes('requires an adopted Finance budget cell');
+            toast({
+                title: budgetCellRequired ? 'Budget cell required' : 'Error',
+                description: budgetCellRequired
+                    ? 'Edit the invoice and select an adopted Finance budget cell for the affected expense line.'
+                    : message,
+                variant: 'destructive',
+                action: budgetCellRequired ? (
+                    <ToastAction
+                        altText="Edit invoice to select a budget cell"
+                        onClick={() => router.push(`/finance/ap/invoices/${id}/edit`)}
+                    >
+                        Edit Invoice
+                    </ToastAction>
+                ) : undefined,
+            });
         },
     });
 
@@ -159,40 +168,46 @@ export default function VendorInvoiceDetailsPage() {
         );
     }
 
-    const getStatusBadge = (status: string) => {
-        switch (status) {
+    const getStatusBadge = (value: Parameters<typeof vendorInvoiceStatusLabel>[0]) => {
+        switch (value.status) {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
             case 'PendingApproval': return <Badge className="bg-yellow-600">Pending Approval</Badge>;
-            case 'Approved': return <Badge className="bg-blue-600">Approved</Badge>;
+            case 'Approved': return <Badge className="bg-blue-600">{vendorInvoiceStatusLabel(value)}</Badge>;
             case 'PartiallyPaid': return <Badge className="bg-indigo-600">Partially Paid</Badge>;
             case 'Paid': return <Badge className="bg-green-600">Paid</Badge>;
             case 'Overdue': return <Badge variant="destructive">Overdue</Badge>;
             case 'Voided': return <Badge variant="outline" className="text-muted-foreground">Voided</Badge>;
             case 'Rejected': return <Badge variant="destructive">Rejected</Badge>;
             case 'OnHold': return <Badge variant="secondary" className="bg-orange-500">On Hold</Badge>;
-            default: return <Badge variant="secondary">{status}</Badge>;
+            default: return <Badge variant="secondary">{value.status}</Badge>;
         }
     };
 
     const mandatoryMatchReady = !invoice.purchaseOrderId || invoice.isOpeningBalance || matchReadiness?.approvalReady === true;
     const hasBudgetLines = invoice.lineItems.some((line) => Boolean(line.budgetEntryId));
     const budgetReady = !hasBudgetLines || invoice.financeDimensions?.budgetEvidenceStatus === 'Current';
+    const taxReviewPending = landedCostTaxReviewPending(invoice.lineItems);
+    const withholdingDecisionPending = Boolean(invoice.withholdingDecisionPending);
 
     return (
         <>
             <div className={`${printStyles.screenRoot} space-y-8 p-8 max-w-[1000px] mx-auto`}>
             {/* Header Actions */}
-            <div className="flex items-center justify-between no-print">
+            <div className="flex flex-wrap items-center justify-between gap-3 no-print">
                 <div className="flex items-center space-x-4">
                     <Button variant="ghost" size="icon" onClick={() => router.push('/finance/ap/invoices')}>
                         <ArrowLeft className="h-4 w-4" />
                     </Button>
                     <div className="flex items-center space-x-2">
                         <h1 className="text-2xl font-bold tracking-tight">Invoice {invoice.invoiceNumber}</h1>
-                        {getStatusBadge(invoice.status)}
+                        {getStatusBadge(invoice)}
                     </div>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex flex-wrap gap-2">
+                    {invoice.status === 'Draft' &&
+                        hasAnyPermission(['Finance.AP.Invoices.Edit', 'Finance.AP.Invoices.Write']) &&
+                        <Button variant="outline" size="sm" onClick={() => router.push(`/finance/ap/invoices/${invoice.id}/edit`)}>Edit invoice</Button>}
+                    <InvoiceDistribution invoiceId={invoice.id} />
                     <Button variant="outline" size="sm" onClick={printApInvoiceDocument}>
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
@@ -216,23 +231,23 @@ export default function VendorInvoiceDetailsPage() {
                             size="sm"
                             variant="outline"
                             onClick={() => submitInvoiceMutation.mutate(invoice.id)}
-                            disabled={submitInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || !budgetReady}
-                            title={!mandatoryMatchReady
+                            disabled={!workflowVisibility.known || submitInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || !budgetReady || taxReviewPending || withholdingDecisionPending}
+                            title={withholdingDecisionPending ? 'Choose Yes or No for withholding in Edit invoice.' : taxReviewPending ? 'Complete tax review in Edit invoice before submission.' : !mandatoryMatchReady
                                 ? 'Resolve the mandatory three-way match before submission.'
                                 : !budgetReady
                                     ? 'Refresh dimension-aware budget evidence before submission.'
                                     : undefined}
                         >
                             {submitInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
-                            Submit for Approval
+                            {workflowVisibility.direct ? (invoice.isOpeningBalance ? 'Complete' : 'Post') : 'Submit for Approval'}
                         </Button>
                     )}
-                    {invoice.status === 'PendingApproval' && hasPermission('Finance.AP.Invoices.Approve') && (workflowSummary?.canCurrentUserApprove ?? true) && (
+                    {invoice.status === 'PendingApproval' && invoice.approvalRequired !== false && workflowVisibility.showApprovalControls && hasPermission('Finance.AP.Invoices.Approve') && workflowSummary?.canCurrentUserApprove === true && (
                         <Button
                             size="sm"
                             onClick={() => approveInvoiceMutation.mutate(invoice.id)}
-                            disabled={approveInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady}
-                            title={!mandatoryMatchReady ? 'Resolve the mandatory three-way match before approval.' : undefined}
+                            disabled={approveInvoiceMutation.isPending || isMatchReadinessLoading || !mandatoryMatchReady || taxReviewPending || withholdingDecisionPending}
+                            title={withholdingDecisionPending ? 'Choose Yes or No for withholding in Edit invoice.' : taxReviewPending ? 'Tax review must be completed before approval.' : !mandatoryMatchReady ? 'Resolve the mandatory three-way match before approval.' : undefined}
                         >
                             {approveInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
                             Approve
@@ -267,6 +282,15 @@ export default function VendorInvoiceDetailsPage() {
             )}
 
             <div className="no-print">
+                {workflowError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">
+                    {workflowError} <Button variant="link" size="sm" onClick={() => void refreshWorkflow()}>Retry</Button>
+                </div>}
+                {taxReviewPending &&
+                    <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                        Tax review pending. Open Edit invoice and select the tax treatment for each landed-cost line before continuing. The displayed total is before any unreviewed tax.
+                    </div>}
+                {withholdingDecisionPending && <div role="status" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Withholding choice pending. Open Edit invoice and select Yes or No before continuing.</div>}
+                {!invoice.isOpeningBalance && <ActualLandedCostSummary invoiceId={invoice.id} purchaseOrderId={invoice.purchaseOrderId} />}
                 <SourceDocumentDimensionEvidence evidence={invoice.financeDimensions} />
             </div>
 
@@ -313,7 +337,7 @@ export default function VendorInvoiceDetailsPage() {
                         </div>
                         <div className="text-right">
                             {/* Workflow info could go here */}
-                            {invoice.approvedByUserId && (
+                            {invoice.approvalRequired !== false && invoice.approvedByUserId && (
                                 <div className="mt-4">
                                     <p className="text-xs text-muted-foreground uppercase font-bold">Approved By</p>
                                     <p className="text-sm font-medium">{invoice.approvedByUserId}</p>

@@ -117,16 +117,36 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinanceDimensionSnapshotItem> FinanceDimensionSnapshotItems { get; set; }
     public DbSet<FinanceSourceDimensionAssignment> FinanceSourceDimensionAssignments { get; set; }
     public DbSet<FinanceSourceDimensionChange> FinanceSourceDimensionChanges { get; set; }
+    public DbSet<FinanceSettlementDimensionComponent> FinanceSettlementDimensionComponents { get; set; }
     public DbSet<FinanceDimensionRouteCertification> FinanceDimensionRouteCertifications { get; set; }
     public DbSet<FinanceDimensionCertificationTransition> FinanceDimensionCertificationTransitions { get; set; }
     public DbSet<FinanceDimensionReadinessAssessment> FinanceDimensionReadinessAssessments { get; set; }
     public DbSet<Account> Accounts { get; set; }
     public DbSet<AccountingBook> AccountingBooks { get; set; }
+    public DbSet<AccountingBookPeriod> AccountingBookPeriods { get; set; }
+    public DbSet<AccountingBookInitialization> AccountingBookInitializations { get; set; }
+    public DbSet<AccountingBookInitializationLine> AccountingBookInitializationLines { get; set; }
+    public DbSet<AccountingBookApplicabilityPolicy> AccountingBookApplicabilityPolicies { get; set; }
+    public DbSet<AccountingBookApplicabilityRule> AccountingBookApplicabilityRules { get; set; }
+    public DbSet<AccountingBookApplicabilityRuleBook> AccountingBookApplicabilityRuleBooks { get; set; }
+    public DbSet<AccountingBookSelectionEvidence> AccountingBookSelectionEvidence { get; set; }
+    public DbSet<AccountingBookSelectionEvidenceBook> AccountingBookSelectionEvidenceBooks { get; set; }
+    public DbSet<AccountingEvent> AccountingEvents { get; set; }
+    public DbSet<AccountingEventPosting> AccountingEventPostings { get; set; }
+    public DbSet<AccountingEventAttempt> AccountingEventAttempts { get; set; }
+    public DbSet<AccountingEventProducerReceipt> AccountingEventProducerReceipts { get; set; }
+    public DbSet<ProducerIntentGroup> ProducerIntentGroups { get; set; }
+    public DbSet<ProducerIntentGroupMember> ProducerIntentGroupMembers { get; set; }
+    public DbSet<ProducerIntentGroupReceipt> ProducerIntentGroupReceipts { get; set; }
+    public DbSet<ProducerIntentGroupAttempt> ProducerIntentGroupAttempts { get; set; }
     public DbSet<AccountAccountingBook> AccountAccountingBooks { get; set; }
+    public DbSet<AccountBookCurrencyPolicy> AccountBookCurrencyPolicies { get; set; }
+    public DbSet<AccountClassification> AccountClassifications { get; set; }
     public DbSet<FinancialStatementLayout> FinancialStatementLayouts { get; set; }
     public DbSet<FinancialStatementLayoutVersion> FinancialStatementLayoutVersions { get; set; }
     public DbSet<FinancialStatementRow> FinancialStatementRows { get; set; }
     public DbSet<FinancialStatementRowMapping> FinancialStatementRowMappings { get; set; }
+    public DbSet<FinancialStatementPublicationAccount> FinancialStatementPublicationAccounts { get; set; }
     public DbSet<AccountSegmentValue> AccountSegmentValues { get; set; }
     public DbSet<FinanceSettings> FinanceSettings { get; set; }
     public DbSet<FinanceAccessScopeGrant> FinanceAccessScopeGrants { get; set; }
@@ -180,13 +200,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<FinancePostingEvent> FinancePostingEvents { get; set; }
     public DbSet<AccountTransaction> AccountTransactions { get; set; }
     public DbSet<AccountBalance> AccountBalances { get; set; }
+    public DbSet<AccountCurrencyExposure> AccountCurrencyExposures { get; set; }
+    public DbSet<FinanceBalanceRebuildRun> FinanceBalanceRebuildRuns { get; set; }
     public DbSet<FxRealizedSettlement> FxRealizedSettlements { get; set; }
     public DbSet<FxRevaluationBatch> FxRevaluationBatches { get; set; }
     public DbSet<FxRevaluationLine> FxRevaluationLines { get; set; }
+    public DbSet<FxRevaluationRateUsage> FxRevaluationRateUsages { get; set; }
     public DbSet<SubledgerSettlementBalance> SubledgerSettlementBalances { get; set; }
     public DbSet<SubledgerSettlementApplication> SubledgerSettlementApplications { get; set; }
     public DbSet<SubledgerUnappliedSettlementBalance> SubledgerUnappliedSettlementBalances { get; set; }
     public DbSet<OpeningBalanceBatch> OpeningBalanceBatches { get; set; }
+    public DbSet<OpeningBalanceBatchReversal> OpeningBalanceBatchReversals { get; set; }
     public DbSet<OpeningBalanceLine> OpeningBalanceLines { get; set; }
     public DbSet<AccountCurrencyLink> AccountCurrencyLinks { get; set; }
     public DbSet<BudgetScenario> BudgetScenarios { get; set; }
@@ -1067,6 +1091,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EhcTicketFeedback> EhcTicketFeedbacks { get; set; }
     public DbSet<EhcTicketWatcher> EhcTicketWatchers { get; set; }
     public DbSet<EhcTicketLink> EhcTicketLinks { get; set; }
+    public DbSet<EhcCrmEngagementLink> EhcCrmEngagementLinks { get; set; }
     public DbSet<EhcProblem> EhcProblems { get; set; }
     public DbSet<EhcProblemTicketLink> EhcProblemTicketLinks { get; set; }
     public DbSet<EhcCapaTask> EhcCapaTasks { get; set; }
@@ -1232,18 +1257,28 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+        ErpSystem.Data.Configurations.InventorySupplierReturnFinanceConfiguration.Configure(builder);
+        ErpSystem.Data.Configurations.BusinessPartnerPostingDefaultsConfiguration.Configure(builder);
 
         // Apply entity configurations
         builder.ApplyConfiguration(new ApplicationUserConfiguration());
         builder.ApplyConfiguration(new TenantConfiguration());
         builder.ApplyConfiguration(new UserTenantConfiguration());
         builder.ApplyConfiguration(new JournalBatchConfiguration());
+        builder.ApplyConfiguration(new JournalBatchEntryApprovalConfiguration());
         builder.ApplyConfiguration(new JournalBatchItemConfiguration());
         builder.ApplyConfiguration(new JournalBatchItemReviewConfiguration());
         builder.ApplyConfiguration(new JournalBatchPostingRunConfiguration());
         builder.ApplyConfiguration(new JournalBatchPostingRunItemConfiguration());
         builder.ApplyConfiguration(new JournalBatchAttachmentConfiguration());
         builder.ApplyConfiguration(new JournalBatchImportSessionConfiguration());
+        builder.ApplyConfiguration(new VendorInvoiceOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<FinancePurchaseOrder>(new FinancePurchasingOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<FinancePurchaseOrderReceipt>(new FinancePurchasingOptionalApprovalConfiguration());
+        builder.ApplyConfiguration(new JournalEntryOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<PhysicalCount>(new InventoryOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<StockAdjustment>(new InventoryOptionalApprovalConfiguration());
+        builder.ApplyConfiguration<InventoryReturnVoucher>(new InventoryOptionalApprovalConfiguration());
         ConfigureBudgeting(builder);
         ConfigureBankingSettlement(builder);
         builder.ApplyConfiguration(new InventoryLabelProfileConfiguration());
@@ -1291,6 +1326,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.ApplyConfiguration(new InventoryTransferControlItemConfiguration());
         builder.ApplyConfiguration(new InventoryCycleCountScheduleConfiguration());
         builder.ApplyConfiguration(new PhysicalCountControlConfiguration());
+        builder.ApplyConfiguration(new WarehouseDefaultLocationConfiguration());
         builder.ApplyConfiguration(new PhysicalCountItemControlConfiguration());
         builder.ApplyConfiguration(new PhysicalCountActionConfiguration());
         builder.ApplyConfiguration(new PhysicalCountWarehouseQuantityConfiguration());
@@ -1324,6 +1360,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         ConfigureProcurementControlEvents(builder);
         ConfigureAuditGovernance(builder);
         ConfigureProcurementMasterDataChanges(builder);
+        // The archived-final checks are SQL Server schema authority. Keep their original
+        // model-configuration order and do not apply SQL Server predicates to InMemory/SQLite.
+        if (Database.IsSqlServer())
+            ArchivedCheckConstraintBaselineModel.Apply(builder);
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
 
@@ -1561,7 +1601,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<Invoice>(entity =>
         {
-            entity.ToTable("Invoices");
+            entity.ToTable("Invoices", table => table.HasTrigger("TR_Invoices_OptionalApproval"));
+            entity.Property(e => e.ApprovalRequired).HasDefaultValue(true).ValueGeneratedNever();
             entity.Property(e => e.InvoiceNumber).HasMaxLength(50).IsRequired();
             entity.Property(e => e.CustomerName).HasMaxLength(200).IsRequired();
             entity.Property(e => e.CustomerAddress).HasMaxLength(500);
@@ -2228,6 +2269,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<VendorInvoiceLineItem>(entity =>
         {
+            entity.HasOne<LandedCostItem>().WithMany().HasForeignKey(e => e.LandedCostItemId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(e => e.LandedCostItemId).IsUnique()
+                .HasFilter("[LandedCostItemId] IS NOT NULL AND [IsDeleted] = 0");
             entity.ToTable("VendorInvoiceLineItem", table =>
                 table.HasTrigger("TR_VendorInvoiceLineItem_TDC0504MatchIntegrity"));
             entity.HasOne(e => e.VendorInvoice)
@@ -2670,10 +2715,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique();
         });
 
+        builder.ApplyConfiguration(new VendorPaymentEvidenceLinkConfiguration());
         builder.Entity<VendorPayment>(entity =>
         {
+            entity.Property(item => item.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("VendorPayment", table =>
-                table.HasTrigger("TR_VendorPayment_TDC0506InvoiceProcessorSod"));
+            {
+                table.HasTrigger("TR_VendorPayment_TDC0506InvoiceProcessorSod");
+                table.HasTrigger("TR_VendorPayment_OptionalApproval");
+                table.HasTrigger("TR_VendorPayment_DirectEvidence");
+            });
             entity.HasOne(e => e.Supplier)
                 .WithMany()
                 .HasForeignKey(e => e.SupplierId)
@@ -2783,8 +2834,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<PaymentBatch>(entity =>
         {
+            entity.Property(item => item.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("PaymentBatch", table =>
             {
+                table.HasTrigger("TR_PaymentBatch_OptionalApproval");
                 table.HasTrigger("TR_PaymentBatch_TDC0505Readiness");
                 table.HasTrigger("TR_PaymentBatch_TDC0506InvoiceProcessorSod");
             });
@@ -2870,6 +2923,41 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         // â”€â”€â”€ General Ledger FK Configurations â”€â”€â”€
 
+        builder.Entity<AccountSegmentStructure>(entity =>
+        {
+            entity.ToTable(table => table.HasCheckConstraint(
+                "CK_AccountSegmentStructures_LifecycleActive",
+                "([LifecycleStatus] IN (2, 3) AND [IsActive] = 1) OR ([LifecycleStatus] IN (1, 4) AND [IsActive] = 0)"));
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.Property(item => item.LifecycleStatus).HasConversion<int>();
+            entity.HasIndex(item => new { item.TenantId, item.SegmentCode }).IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.SegmentPosition }).IsUnique().HasFilter("[IsDeleted] = 0 AND [IsActive] = 1");
+            entity.HasIndex(item => item.TenantId).IsUnique().HasFilter("[IsDeleted] = 0 AND [IsNaturalAccount] = 1 AND [IsActive] = 1");
+        });
+
+        builder.Entity<AccountSegmentValue>(entity =>
+        {
+            entity.HasOne(item => item.Account)
+                .WithMany(item => item.SegmentValues)
+                .HasForeignKey(item => new { item.TenantId, item.AccountId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SegmentStructure)
+                .WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SegmentStructureId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SegmentLookupValue)
+                .WithMany(item => item.AccountSegmentValues)
+                .HasForeignKey(item => new { item.TenantId, item.SegmentLookupValueId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasIndex(item => new { item.TenantId, item.AccountId, item.SegmentStructureId })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.AccountId, item.SegmentPosition })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
+        });
+
         builder.Entity<FiscalYear>(entity =>
         {
             entity.ToTable("FiscalYears");
@@ -2894,6 +2982,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FiscalPeriod>(entity =>
         {
             entity.ToTable("FiscalPeriods");
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id });
             entity.HasOne(e => e.FiscalYear)
                 .WithMany(y => y.FiscalPeriods)
                 .HasForeignKey(e => e.FiscalYearId)
@@ -2906,16 +2995,474 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<AccountingBook>(entity =>
         {
-            entity.ToTable("AccountingBooks");
+            entity.ToTable("AccountingBooks", table =>
+            {
+                // Deleted predecessor rows are retained as historical evidence and were not governed by C3.
+                // Live rows alone participate in the new structural contract and lifecycle invariants.
+                table.HasCheckConstraint("CK_AccountingBooks_BookType", "[IsDeleted] = 1 OR [BookType] IN (1, 2, 3)");
+                table.HasCheckConstraint("CK_AccountingBooks_LifecycleStatus", "[IsDeleted] = 1 OR [LifecycleStatus] IN (1, 2, 3, 4, 5, 6)");
+                table.HasCheckConstraint("CK_AccountingBooks_EffectiveDates", "[IsDeleted] = 1 OR [EffectiveToUtc] IS NULL OR [EffectiveFromUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]");
+                table.HasCheckConstraint("CK_AccountingBooks_BaseShape", "[IsDeleted] = 1 OR ([BookType] = 3 AND [BaseAccountingBookId] IS NOT NULL AND [FunctionalCurrencyCode] IS NULL) OR ([BookType] IN (1, 2) AND [BaseAccountingBookId] IS NULL AND [FunctionalCurrencyCode] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingBooks_DefaultType", "[IsDeleted] = 1 OR ([BookType] = 1 AND [IsDefault] = 1) OR ([BookType] <> 1 AND [IsDefault] = 0)");
+                table.HasCheckConstraint("CK_AccountingBooks_NoSelfBase", "[IsDeleted] = 1 OR [BaseAccountingBookId] IS NULL OR [BaseAccountingBookId] <> [Id]");
+                table.HasCheckConstraint("CK_AccountingBooks_PostingLifecycle", "[IsDeleted] = 1 OR ([LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([LifecycleStatus] <> 4 AND [IsActive] = 0 AND [AllowsPosting] = 0)");
+                if (this.Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBooks_CodeCanonical", "[IsDeleted] = 1 OR ([Code] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Code]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([Code]) = DATALENGTH(UPPER(LTRIM(RTRIM([Code])))) AND LEFT([Code], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [Code] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [Code] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL', N'ALL_ACTIVE_BOOKS', N'ALL_CLASSIFIED_BOOKS', N'ALLCLASSIFIEDBOOKS'))");
+                    table.HasCheckConstraint("CK_AccountingBooks_FunctionalCurrencyCanonical", "[IsDeleted] = 1 OR [FunctionalCurrencyCode] IS NULL OR (DATALENGTH([FunctionalCurrencyCode]) = 6 AND [FunctionalCurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+                }
+            });
+            // Posting evidence uses tenant-qualified book identity so a corrupt foreign tenant
+            // reference cannot be legitimized merely because GUIDs are globally unique.
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id });
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id, e.Code });
             entity.HasIndex(e => new { e.TenantId, e.Code }).IsUnique();
             entity.Property(e => e.Code).HasMaxLength(20).IsRequired();
             entity.Property(e => e.Name).HasMaxLength(100).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Purpose).HasMaxLength(50);
+            entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3);
+            entity.Property(e => e.PendingTransitionReason).HasMaxLength(500);
+            entity.Property(e => e.TransitionDecisionReason).HasMaxLength(500);
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
+            // The filtered key makes the one-primary invariant concurrency-safe; service validation
+            // remains responsible for the richer PrimaryFull/default/full-book relationship.
+            entity.HasIndex(e => new { e.TenantId, e.IsDefault })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [IsDefault] = 1");
+            entity.HasIndex(e => new { e.TenantId, e.BaseAccountingBookId });
+            entity.HasOne(e => e.BaseAccountingBook)
+                .WithMany(e => e.DerivedBooks)
+                .HasForeignKey(e => new { e.TenantId, e.BaseAccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEvent>(entity =>
+        {
+            entity.ToTable("AccountingEvents", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEvents_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingEvents_Status", "[Status] IN ('PendingApproval','Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_AccountingEvents_MakerChecker", "[ReleasedByUserId] IS NULL OR [ReleasedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingEvents_Kind", "[EventKind] IN ('Original','Correction','Reversal')");
+                table.HasCheckConstraint("CK_AccountingEvents_Version", "[Version] > 0");
+                table.HasCheckConstraint("CK_AccountingEvents_Lineage", "([EventKind] = 'Original' AND [Version] = 1 AND [RootAccountingEventId] = [Id] AND [SupersedesAccountingEventId] IS NULL AND [CorrectsAccountingEventId] IS NULL AND [ReversesAccountingEventId] IS NULL) OR ([EventKind] = 'Correction' AND [Version] > 1 AND [SupersedesAccountingEventId] = [CorrectsAccountingEventId] AND [CorrectsAccountingEventId] IS NOT NULL AND [ReversesAccountingEventId] IS NULL) OR ([EventKind] = 'Reversal' AND [Version] > 1 AND [SupersedesAccountingEventId] = [ReversesAccountingEventId] AND [ReversesAccountingEventId] IS NOT NULL AND [CorrectsAccountingEventId] IS NULL)");
+                table.HasCheckConstraint("CK_AccountingEvents_ResultShape", "([Status] = 'PendingApproval' AND [AccountingBookSelectionEvidenceId] IS NULL AND [ReleasedByUserId] IS NULL AND [ReleasedAtUtc] IS NULL AND [ReleaseReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Pending' AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [AccountingBookSelectionEvidenceId] IS NOT NULL AND LEN([SelectionFingerprint]) = 64 AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [ReleasedByUserId] IS NOT NULL AND [ReleasedAtUtc] IS NOT NULL AND [ReleaseReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingEvents_ProducerDecision", "([ProducerDecisionStatus] = 'NotRequired' AND [ProducerParticipantIdentity] IS NULL AND [ProducerIntentSnapshotJson] IS NULL AND [ProducerIntentSnapshotHash] IS NULL AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] = 'Pending' AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerIntentSnapshotJson] IS NOT NULL AND LEN([ProducerIntentSnapshotHash]) = 64 AND [ProducerDecidedByUserId] IS NULL AND [ProducerDecidedAtUtc] IS NULL AND [ProducerDecisionReason] IS NULL) OR ([ProducerDecisionStatus] IN ('Approved','Rejected') AND [ProducerParticipantIdentity] IS NOT NULL AND [ProducerIntentSnapshotJson] IS NOT NULL AND LEN([ProducerIntentSnapshotHash]) = 64 AND [ProducerDecidedByUserId] IS NOT NULL AND [ProducerDecidedAtUtc] IS NOT NULL AND [ProducerDecisionReason] IS NOT NULL)");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingEvents_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingEvents_SelectionFingerprint", "[SelectionFingerprint] = '' OR (LEN([SelectionFingerprint]) = 64 AND [SelectionFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%')");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id, item.Version });
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.RootAccountingEventId, item.Version }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.OriginatingModuleCode, item.SourceDocumentType, item.SourceDocumentId, item.PostingAction, item.Version }).IsUnique();
+            entity.Property(item => item.EventDate).HasColumnType("date");
+            entity.HasOne(item => item.RootAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.RootAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SupersedesAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SupersedesAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.CorrectsAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.CorrectsAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ReversesAccountingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.ReversesAccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBookSelectionEvidence).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEventPosting>(entity =>
+        {
+            entity.ToTable("AccountingEventPostings", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEventPostings_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingEventPostings_Status", "[Status] IN ('Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_AccountingEventPostings_EventVersion", "[EventVersion] > 0");
+                table.HasCheckConstraint("CK_AccountingEventPostings_ResultShape", "([Status] = 'Pending' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [FinancePostingEventId] IS NOT NULL AND [JournalEntryId] IS NOT NULL AND [PostedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [FinancePostingEventId] IS NULL AND [JournalEntryId] IS NULL AND [PostedAtUtc] IS NULL AND [FailureMessage] IS NOT NULL)");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingEventPostings_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.EventVersion, item.AccountingBookId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.EventVersion, item.SelectionOrder }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.FinancePostingEventId }).IsUnique()
+                .HasFilter("[FinancePostingEventId] IS NOT NULL");
+            entity.HasIndex(item => new { item.TenantId, item.JournalEntryId }).IsUnique()
+                .HasFilter("[JournalEntryId] IS NOT NULL");
+            entity.HasOne(item => item.AccountingEvent).WithMany(item => item.Postings)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingEventId, item.EventVersion })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Version }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FinancePostingEvent).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.FinancePostingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.JournalEntry).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.JournalEntryId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEventAttempt>(entity =>
+        {
+            entity.ToTable("AccountingEventAttempts", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEventAttempts_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingEventAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_AccountingEventAttempts_Number", "[AttemptNumber] > 0");
+                table.HasCheckConstraint("CK_AccountingEventAttempts_ResultShape", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingEventAttempts_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.AttemptNumber }).IsUnique();
+            entity.HasOne(item => item.AccountingEvent).WithMany(item => item.Attempts)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingEventId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingEventProducerReceipt>(entity =>
+        {
+            entity.ToTable("AccountingEventProducerReceipts", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingEventProducerReceipts_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingEventProducerReceipts_EffectFingerprint", "LEN([EffectFingerprint]) = 64 AND [EffectFingerprint] <> REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingEventProducerReceipts_RequestFingerprint", "LEN([RequestFingerprint]) = 64 AND [RequestFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId, item.ParticipantCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.ParticipantCode, item.EffectFingerprint }).IsUnique();
+            entity.HasOne(item => item.AccountingEvent).WithOne(item => item.ProducerReceipt)
+                .HasForeignKey<AccountingEventProducerReceipt>(item => new { item.TenantId, item.AccountingEventId })
+                .HasPrincipalKey<AccountingEvent>(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroup>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroups", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroups_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Status", "[Status] IN ('PendingApproval','Approved','Rejected','Posted','Failed')");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_MemberCount", "[MemberCount] BETWEEN 2 AND 20");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Kind", "[GroupKind] IN ('Original','Correction','Reversal')");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Lineage", "([GroupKind] = 'Original' AND [Version] = 1 AND [RootProducerIntentGroupId] = [Id] AND [SupersedesProducerIntentGroupId] IS NULL AND [CorrectsProducerIntentGroupId] IS NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Correction' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [CorrectsProducerIntentGroupId] AND [CorrectsProducerIntentGroupId] IS NOT NULL AND [ReversesProducerIntentGroupId] IS NULL) OR ([GroupKind] = 'Reversal' AND [Version] > 1 AND [SupersedesProducerIntentGroupId] = [ReversesProducerIntentGroupId] AND [ReversesProducerIntentGroupId] IS NOT NULL AND [CorrectsProducerIntentGroupId] IS NULL)");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_Decision", "([Status] = 'PendingApproval' AND [DecidedByUserId] IS NULL AND [DecidedAtUtc] IS NULL AND [DecisionReason] IS NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] IN ('Approved','Rejected') AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Posted' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL) OR ([Status] = 'Failed' AND [DecidedByUserId] IS NOT NULL AND [DecidedAtUtc] IS NOT NULL AND [DecisionReason] IS NOT NULL AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL)");
+                table.HasCheckConstraint("CK_ProducerIntentGroups_MakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_IdempotencyAscii", "DATALENGTH([IdempotencyKey])=LEN([IdempotencyKey])*2 AND LEFT([IdempotencyKey],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z0-9]' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.:-]%' AND [IdempotencyKey] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_ParticipantAscii", "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_OwnerEntityAscii", "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_OwnerActionAscii", "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_SnapshotHash", "LEN([RequestSnapshotHash]) = 64 AND [RequestSnapshotHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_ProducerIntentGroups_EffectFingerprint", "LEN([ExpectedOwnerEffectFingerprint]) = 64 AND [ExpectedOwnerEffectFingerprint] <> REPLICATE('0',64) AND [ExpectedOwnerEffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.GroupFingerprint }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.RootProducerIntentGroupId, item.Version }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.SupersedesProducerIntentGroupId }).IsUnique()
+                .HasFilter("[SupersedesProducerIntentGroupId] IS NOT NULL");
+            entity.HasOne(item => item.RootProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.RootProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SupersedesProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SupersedesProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.CorrectsProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.CorrectsProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ReversesProducerIntentGroup).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.ReversesProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroupMember>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroupMembers", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroupMembers_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroupMembers_Order", "[MemberOrder] > 0");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_ProducerIntentGroupMembers_Fingerprint", "LEN([MemberFingerprint]) = 64 AND [MemberFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.ProducerIntentGroupId, item.MemberOrder }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingEventId }).IsUnique();
+            entity.HasOne(item => item.ProducerIntentGroup).WithMany(item => item.Members)
+                .HasForeignKey(item => new { item.TenantId, item.ProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingEvent).WithOne()
+                .HasForeignKey<ProducerIntentGroupMember>(item => new { item.TenantId, item.AccountingEventId })
+                .HasPrincipalKey<AccountingEvent>(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroupReceipt>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroupReceipts", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_ParticipantAscii", "DATALENGTH([ParticipantCode])=LEN([ParticipantCode])*2 AND LEFT([ParticipantCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [ParticipantCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_OwnerEntityAscii", "DATALENGTH([OwnerEntityType])=LEN([OwnerEntityType])*2 AND LEFT([OwnerEntityType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerEntityType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_OwnerActionAscii", "DATALENGTH([OwnerAction])=LEN([OwnerAction])*2 AND LEFT([OwnerAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [OwnerAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_EffectFingerprint", "LEN([EffectFingerprint]) = 64 AND [EffectFingerprint] <> REPLICATE('0',64) AND [EffectFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_ProducerIntentGroupReceipts_GroupFingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasIndex(item => new { item.TenantId, item.ProducerIntentGroupId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.ParticipantCode, item.EffectFingerprint }).IsUnique();
+            entity.HasOne(item => item.ProducerIntentGroup).WithOne(item => item.Receipt)
+                .HasForeignKey<ProducerIntentGroupReceipt>(item => new { item.TenantId, item.ProducerIntentGroupId })
+                .HasPrincipalKey<ProducerIntentGroup>(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<ProducerIntentGroupAttempt>(entity =>
+        {
+            entity.ToTable("ProducerIntentGroupAttempts", table =>
+            {
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Number", "[AttemptNumber] > 0");
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Status", "[Status] IN ('Pending','Posted','Failed')");
+                table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Result", "([Status] = 'Pending' AND [CompletedAtUtc] IS NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Posted' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NULL AND [FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([Status] = 'Failed' AND [CompletedAtUtc] IS NOT NULL AND [FailureMessage] IS NOT NULL AND (([FailedMemberOrder] IS NULL AND [FailedAccountingEventId] IS NULL) OR ([FailedMemberOrder] IS NOT NULL AND [FailedAccountingEventId] IS NOT NULL)))");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_ProducerIntentGroupAttempts_Fingerprint", "LEN([GroupFingerprint]) = 64 AND [GroupFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.ProducerIntentGroupId, item.AttemptNumber }).IsUnique();
+            entity.HasOne(item => item.ProducerIntentGroup).WithMany(item => item.Attempts)
+                .HasForeignKey(item => new { item.TenantId, item.ProducerIntentGroupId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookApplicabilityPolicy>(entity =>
+        {
+            entity.ToTable("AccountingBookApplicabilityPolicies", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_Status", "[PolicyStatus] IN (1, 2, 3, 4, 5)");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_EffectiveRange", "[EffectiveTo] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_VersionLineageShape", "([Version] = 1 AND [SupersedesPolicyId] IS NULL) OR ([Version] > 1 AND [SupersedesPolicyId] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementMakerChecker", "[RetiredByUserId] IS NULL OR [RetiredByUserId] <> [RetirementRequestedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_RetirementRequestShape", "([RetirementDecisionStatus] IS NULL AND [RetirementRequestedByUserId] IS NULL AND [RetirementRequestedAtUtc] IS NULL AND [RetirementReason] IS NULL AND [RetirementWorkflowInstanceId] IS NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] = 'Pending' AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NULL AND [RetirementDecidedAtUtc] IS NULL) OR ([RetirementDecisionStatus] IN ('Approved','Rejected') AND [RetirementRequestedByUserId] IS NOT NULL AND [RetirementRequestedAtUtc] IS NOT NULL AND [RetirementReason] IS NOT NULL AND [RetirementWorkflowInstanceId] IS NOT NULL AND [RetirementDecidedByUserId] IS NOT NULL AND [RetirementDecidedAtUtc] IS NOT NULL AND [RetirementDecisionReason] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_ApprovalShape", "([PolicyStatus] IN (1,2,4) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NULL AND [RetiredAtUtc] IS NULL) OR ([PolicyStatus] = 5 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RetiredByUserId] IS NOT NULL AND [RetiredAtUtc] IS NOT NULL)");
+                if (Database.IsSqlServer())
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityPolicies_CodeCanonical", "LEN([PolicyCode]) > 0 AND [PolicyCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PolicyCode]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([PolicyCode]) = DATALENGTH(UPPER(LTRIM(RTRIM([PolicyCode])))) AND LEFT([PolicyCode], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [PolicyCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.PolicyCode, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id, item.Version });
+            entity.HasIndex(item => new { item.TenantId, item.PolicyCode, item.Version }).IsUnique();
+            entity.Property(item => item.PolicyCode).HasMaxLength(30).IsRequired();
+            entity.Property(item => item.Name).HasMaxLength(150).IsRequired();
+            entity.Property(item => item.Description).HasMaxLength(500);
+            entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.DecisionReason).HasMaxLength(500);
+            entity.Property(item => item.RetirementReason).HasMaxLength(500);
+            entity.Property(item => item.RetirementDecisionStatus).HasMaxLength(20);
+            entity.Property(item => item.RetirementDecisionReason).HasMaxLength(500);
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.SupersedesPolicy).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.PolicyCode, item.SupersedesPolicyId })
+                .HasPrincipalKey(item => new { item.TenantId, item.PolicyCode, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookApplicabilityRule>(entity =>
+        {
+            entity.ToTable("AccountingBookApplicabilityRules", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_Priority", "[Priority] >= 0");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_RuleCodeCanonical", "LEN([RuleCode]) > 0 AND LEFT([RuleCode],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [RuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([RuleCode]))) COLLATE Latin1_General_100_BIN2 AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [RuleCode] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookApplicabilityRules_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.RuleCode }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.OriginatingModuleCode, item.SourceDocumentType, item.PostingAction, item.Priority }).IsUnique();
+            entity.Property(item => item.RuleCode).HasMaxLength(40).IsRequired();
+            entity.Property(item => item.OriginatingModuleCode).HasMaxLength(40).IsRequired();
+            entity.Property(item => item.SourceDocumentType).HasMaxLength(80).IsRequired();
+            entity.Property(item => item.PostingAction).HasMaxLength(60).IsRequired();
+            entity.HasOne(item => item.Policy).WithMany(item => item.Rules)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookApplicabilityRuleBook>(entity =>
+        {
+            entity.ToTable("AccountingBookApplicabilityRuleBooks", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingBookApplicabilityRuleBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityRuleId, item.AccountingBookId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookApplicabilityRuleId, item.SelectionOrder }).IsUnique();
+            entity.Property(item => item.AccountingBookCodeSnapshot).HasMaxLength(20).IsRequired();
+            entity.HasOne(item => item.Rule).WithMany(item => item.SelectedBooks)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityRuleId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId, item.AccountingBookCodeSnapshot })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Code }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookSelectionEvidence>(entity =>
+        {
+            entity.ToTable("AccountingBookSelectionEvidence", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_RuleLineage", "([AccountingBookApplicabilityPolicyId] IS NULL AND [AccountingBookApplicabilityRuleId] IS NULL AND [PolicyVersion] IS NULL) OR ([AccountingBookApplicabilityPolicyId] IS NOT NULL AND [AccountingBookApplicabilityRuleId] IS NOT NULL AND [PolicyVersion] IS NOT NULL)");
+                if (Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleCanonical", "LEN([OriginatingModuleCode]) > 0 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([OriginatingModuleCode]))) COLLATE Latin1_General_100_BIN2 AND [OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%'");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ModuleSupported", "[OriginatingModuleCode] COLLATE Latin1_General_100_BIN2 IN (N'FIN',N'INV',N'PROC',N'SALES',N'HR',N'QS',N'ESTATE',N'LEGAL',N'MAINT')");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_DocumentCanonical", "LEN([SourceDocumentType]) > 0 AND LEFT([SourceDocumentType],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([SourceDocumentType]))) COLLATE Latin1_General_100_BIN2 AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [SourceDocumentType] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_ActionCanonical", "LEN([PostingAction]) > 0 AND LEFT([PostingAction],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [PostingAction] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([PostingAction]))) COLLATE Latin1_General_100_BIN2 AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_.-]%' AND [PostingAction] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_InputHash", "LEN([CalculationInputHash]) = 64 AND [CalculationInputHash] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingBookSelectionEvidence_Fingerprint", "LEN([SelectionFingerprint]) = 64 AND [SelectionFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(item => item.OriginatingModuleCode).HasMaxLength(40).IsRequired();
+            entity.Property(item => item.SourceDocumentType).HasMaxLength(80).IsRequired();
+            entity.Property(item => item.PostingAction).HasMaxLength(60).IsRequired();
+            entity.Property(item => item.CalculationInputHash).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.SelectionFingerprint).HasMaxLength(64).IsRequired();
+            entity.HasOne(item => item.Policy).WithMany(item => item.SelectionEvidence)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.PolicyVersion })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Version }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Rule).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.AccountingBookApplicabilityRuleId })
+                .HasPrincipalKey(item => new { item.TenantId, item.AccountingBookApplicabilityPolicyId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookSelectionEvidenceBook>(entity =>
+        {
+            entity.ToTable("AccountingBookSelectionEvidenceBooks", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_NoDelete", "[IsDeleted] = 0");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_CodeCanonical", "LEN([AccountingBookCodeSnapshot]) > 0 AND LEFT([AccountingBookCodeSnapshot],1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([AccountingBookCodeSnapshot]))) COLLATE Latin1_General_100_BIN2 AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [AccountingBookCodeSnapshot] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL',N'ALL_ACTIVE_BOOKS',N'ALL_CLASSIFIED_BOOKS',N'ALLCLASSIFIEDBOOKS')");
+                if (Database.IsSqlServer()) table.HasCheckConstraint("CK_AccountingBookSelectionEvidenceBooks_AuthorityFingerprint", "LEN([AuthorityFingerprint]) = 64 AND [AuthorityFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId, item.AccountingBookId }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId, item.SelectionOrder }).IsUnique();
+            entity.Property(item => item.AccountingBookCodeSnapshot).HasMaxLength(20).IsRequired();
+            entity.Property(item => item.AuthorityFingerprint).HasMaxLength(64).IsRequired();
+            entity.HasOne(item => item.Evidence).WithMany(item => item.Books)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookSelectionEvidenceId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId, item.AccountingBookCodeSnapshot })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id, item.Code }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookPeriod>(entity =>
+        {
+            entity.ToTable("AccountingBookPeriods", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookPeriods_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookPeriods_Status", "[IsDeleted] = 1 OR [PeriodStatus] IN (1, 2, 3, 4)");
+                table.HasCheckConstraint("CK_AccountingBookPeriods_PendingStatus", "[PendingStatus] IS NULL OR [PendingStatus] IN (1, 2, 3, 4)");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.FiscalPeriodId }).IsUnique();
+            entity.Property(item => item.PendingReason).HasMaxLength(500);
+            entity.Property(item => item.DecisionReason).HasMaxLength(500);
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.AccountingBook).WithMany(book => book.BookPeriods)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.FiscalPeriod).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.FiscalPeriodId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookInitialization>(entity =>
+        {
+            entity.ToTable("AccountingBookInitializations", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookInitializations_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Mode", "[IsDeleted] = 1 OR [Mode] IN (1, 2, 3)");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Status", "[IsDeleted] = 1 OR [InitializationStatus] IN (1, 2, 3, 4)");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Balanced", "[IsDeleted] = 1 OR [TotalDebits] = [TotalCredits]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_DecisionMakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_Coverage", "[RequiredAccountCount] >= 0 AND [CoveredAccountCount] >= 0 AND [CoveredAccountCount] <= [RequiredAccountCount]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_SourceShape", "([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 4 AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL)");
+                if (this.Database.IsSqlServer())
+                {
+                    table.HasCheckConstraint("CK_AccountingBookInitializations_EvidenceFingerprint", "LEN([EvidenceFingerprint]) = 64 AND [EvidenceFingerprint] = RTRIM([EvidenceFingerprint]) AND [EvidenceFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                    table.HasCheckConstraint("CK_AccountingBookInitializations_ReconciliationFingerprint", "LEN([ReconciliationFingerprint]) = 64 AND [ReconciliationFingerprint] = RTRIM([ReconciliationFingerprint]) AND [ReconciliationFingerprint] COLLATE Latin1_General_100_BIN2 NOT LIKE '%[^0-9A-F]%'");
+                }
+            });
+            entity.HasAlternateKey(item => new { item.TenantId, item.Id });
+            entity.HasAlternateKey(item => new { item.TenantId, item.AccountingBookId, item.Id });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.Version }).IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.InitializationStatus })
+                .IsUnique().HasFilter("[IsDeleted] = 0 AND [InitializationStatus] = 3");
+            entity.HasIndex(item => new { item.TenantId, item.IdempotencyKey }).IsUnique();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(100).IsRequired();
+            entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.EvidenceFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.ReconciliationFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.AccountingBook).WithMany(book => book.Initializations)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SourceAccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.SourceAccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.CutoffFiscalPeriod).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.CutoffFiscalPeriodId })
+                .HasPrincipalKey(period => new { period.TenantId, period.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.SupersedesInitialization).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId, item.SupersedesInitializationId })
+                .HasPrincipalKey(item => new { item.TenantId, item.AccountingBookId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountingBookInitializationLine>(entity =>
+        {
+            entity.ToTable("AccountingBookInitializationLines", table =>
+            {
+                table.HasCheckConstraint("CK_AccountingBookInitializationLines_NoDelete", "[IsDeleted] = 0");
+                table.HasCheckConstraint("CK_AccountingBookInitializationLines_Amounts", "[OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)");
+                if (this.Database.IsSqlServer())
+                    table.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "LEN([CurrencyCode]) = 3 AND [CurrencyCode] = RTRIM([CurrencyCode]) AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
+            });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookInitializationId, item.AccountId }).IsUnique();
+            entity.Property(item => item.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.HasOne(item => item.Initialization).WithMany(initialization => initialization.Lines)
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookInitializationId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Account).WithMany().HasForeignKey(item => new { item.TenantId, item.AccountId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<AccountAccountingBook>(entity =>
@@ -2923,6 +3470,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("AccountAccountingBooks");
             entity.HasIndex(e => new { e.TenantId, e.AccountId, e.AccountingBookId }).IsUnique();
             entity.Property(e => e.FinancialStatementLineItem).HasMaxLength(100);
+            entity.Property(e => e.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasOne(e => e.Account)
                 .WithMany(a => a.AccountingBooks)
                 .HasForeignKey(e => e.AccountId)
@@ -2931,9 +3479,58 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany(book => book.AccountMappings)
                 .HasForeignKey(e => e.AccountingBookId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountClassification)
+                .WithMany(classification => classification.AccountMappings)
+                .HasForeignKey(e => e.AccountClassificationId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountClassification>(entity =>
+        {
+            entity.ToTable("AccountClassifications");
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.Code })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.ParentClassificationId, item.DisplayOrder });
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.SystemRole })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [SystemRole] IS NOT NULL AND [SystemRole] <> 1 AND [SystemRole] <> 2");
+            entity.Property(item => item.Code).HasMaxLength(50).IsRequired();
+            entity.Property(item => item.Name).HasMaxLength(200).IsRequired();
+            entity.Property(item => item.Description).HasMaxLength(1000);
+            entity.Property(item => item.RetirementReason).HasMaxLength(500);
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountingBook).WithMany(book => book.AccountClassifications)
+                .HasForeignKey(item => item.AccountingBookId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ParentClassification).WithMany(parent => parent.Children)
+                .HasForeignKey(item => item.ParentClassificationId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AccountBookCurrencyPolicy>(entity =>
+        {
+            entity.ToTable("AccountBookCurrencyPolicies");
+            entity.HasIndex(item => new { item.TenantId, item.AccountAccountingBookId, item.AccountCurrencyLinkId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.Property(item => item.OverrideReason).HasMaxLength(500);
+            entity.Property(item => item.PendingReason).HasMaxLength(500);
+            entity.Property(item => item.DecisionReason).HasMaxLength(500);
+            entity.Property(item => item.LifecycleStatus).HasMaxLength(30).IsRequired();
+            entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
+            entity.HasOne(item => item.AccountAccountingBook)
+                .WithMany(mapping => mapping.CurrencyPolicies)
+                .HasForeignKey(item => item.AccountAccountingBookId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AccountCurrencyLink)
+                .WithMany(link => link.BookPolicies)
+                .HasForeignKey(item => item.AccountCurrencyLinkId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -2946,6 +3543,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Name).HasMaxLength(150).IsRequired();
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Revision).IsConcurrencyToken();
+            entity.HasOne(e => e.StandardSourceLayout)
+                .WithMany()
+                .HasForeignKey(e => e.StandardSourceLayoutId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.AccountingBook)
                 .WithMany()
                 .HasForeignKey(e => e.AccountingBookId)
@@ -2963,6 +3564,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutId, e.Status, e.EffectiveFrom, e.EffectiveTo });
             entity.Property(e => e.PublishedByName).HasMaxLength(200);
             entity.Property(e => e.Notes).HasMaxLength(1000);
+            entity.Property(e => e.PublicationSnapshotSchemaVersion).HasMaxLength(20);
+            entity.Property(e => e.PublishedAccountingBookCode).HasMaxLength(20);
+            entity.Property(e => e.PublishedAccountingBookName).HasMaxLength(100);
+            entity.Property(e => e.HierarchyFingerprint).HasMaxLength(64);
+            entity.Property(e => e.ResolutionFingerprint).HasMaxLength(64);
             entity.Property(e => e.Revision).IsConcurrencyToken();
             entity.HasOne(e => e.FinancialStatementLayout)
                 .WithMany(layout => layout.Versions)
@@ -3001,6 +3607,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("FinancialStatementRowMappings");
             entity.HasIndex(e => new { e.TenantId, e.FinancialStatementRowId });
             entity.HasIndex(e => new { e.TenantId, e.AccountId });
+            entity.HasIndex(e => new { e.TenantId, e.AccountClassificationId });
             entity.Property(e => e.FromAccountNumber).HasMaxLength(100);
             entity.Property(e => e.ToAccountNumber).HasMaxLength(100);
             entity.HasOne(e => e.FinancialStatementRow)
@@ -3011,6 +3618,41 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountClassification)
+                .WithMany()
+                .HasForeignKey(e => e.AccountClassificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinancialStatementPublicationAccount>(entity =>
+        {
+            entity.ToTable("FinancialStatementPublicationAccounts");
+            entity.HasIndex(e => new { e.TenantId, e.FinancialStatementLayoutVersionId, e.AccountId }).IsUnique();
+            entity.HasIndex(e => new { e.TenantId, e.AccountClassificationId });
+            entity.Property(e => e.RowCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.AccountNumber).HasMaxLength(100).IsRequired();
+            entity.Property(e => e.AccountName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.AccountingBookCode).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ClassificationCode).HasMaxLength(50);
+            entity.Property(e => e.ClassificationName).HasMaxLength(200);
+            entity.Property(e => e.ClassificationPath).HasMaxLength(1000);
+            entity.Property(e => e.MappingSelector).HasMaxLength(500);
+            entity.HasOne(e => e.FinancialStatementLayoutVersion)
+                .WithMany(e => e.PublicationAccounts)
+                .HasForeignKey(e => e.FinancialStatementLayoutVersionId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(e => e.FinancialStatementRow)
+                .WithMany()
+                .HasForeignKey(e => e.FinancialStatementRowId)
+                .OnDelete(DeleteBehavior.NoAction);
+            entity.HasOne(e => e.FinancialStatementRowMapping)
+                .WithMany()
+                .HasForeignKey(e => e.FinancialStatementRowMappingId)
+                .OnDelete(DeleteBehavior.NoAction);
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
@@ -3020,9 +3662,20 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<JournalEntry>(entity =>
         {
             entity.ToTable("JournalEntries");
+            entity.HasAlternateKey(e => new { e.TenantId, e.Id, e.AccountingBookId });
+            // The reciprocal flags are useful evidence, but this database invariant is what closes
+            // the concurrent double-reversal race for every server-owned reversal path.
+            entity.HasIndex(e => new { e.TenantId, e.OriginalJournalEntryId })
+                .IsUnique()
+                .HasFilter("[OriginalJournalEntryId] IS NOT NULL AND [IsDeleted] = 0");
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany(p => p.JournalEntries)
                 .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ReversalJournalEntry)
                 .WithMany()
@@ -3046,22 +3699,30 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("FinancePostingEvents");
             entity.HasIndex(e => e.TenantId);
-            entity.HasIndex(e => new { e.TenantId, e.SourceModule, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.SourceModule, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
-            entity.HasIndex(e => new { e.TenantId, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.SourceDocumentType, e.SourceDocumentId, e.PostingAction })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
-            entity.HasIndex(e => new { e.TenantId, e.IdempotencyKey })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.IdempotencyKey })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0 AND [IdempotencyKey] IS NOT NULL");
             entity.HasIndex(e => e.JournalEntryId);
             entity.HasIndex(e => e.PrimaryExchangeRateId);
             entity.HasIndex(e => new { e.TenantId, e.HasForeignCurrencyLines });
             entity.Property(e => e.PrimaryExchangeRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.RequestFingerprintVersion).HasMaxLength(40);
+            entity.Property(e => e.RequestFingerprint).HasMaxLength(64);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()
-                .HasForeignKey(e => e.JournalEntryId)
+                .HasForeignKey(e => new { e.TenantId, e.JournalEntryId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id, e.AccountingBookId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.PrimaryExchangeRateRecord)
                 .WithMany()
@@ -3182,6 +3843,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.RouteId, e.SourceDocumentId });
+            entity.HasIndex(e => new { e.TenantId, e.ResolvedAccountId });
             entity.HasIndex(e => e.FinanceDimensionSnapshotId).IsUnique()
                 .HasFilter("[FinanceDimensionSnapshotId] IS NOT NULL AND [IsDeleted] = 0");
             entity.Property(e => e.RowVersion).IsRowVersion();
@@ -3190,6 +3852,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.FinanceDimensionSnapshot).WithMany()
                 .HasForeignKey(e => e.FinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany()
+                .HasForeignKey(e => e.ResolvedAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3207,6 +3871,36 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.NewFinanceDimensionSnapshot).WithMany()
                 .HasForeignKey(e => e.NewFinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FinanceSettlementDimensionComponent>(entity =>
+        {
+            entity.ToTable("FinanceSettlementDimensionComponents");
+            entity.HasIndex(e => new
+                {
+                    e.TenantId,
+                    e.RouteId,
+                    e.SourceDocumentId,
+                    e.SettlementSourceLineId,
+                    e.OriginatingSourceLineId,
+                    e.ComponentType
+                })
+                .HasDatabaseName("IX_FinanceSettlementDimensionComponents_EvidenceKey")
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.RouteId, e.SourceDocumentId });
+            entity.HasIndex(e => e.FinanceDimensionSnapshotId);
+            entity.Property(e => e.RowVersion).IsRowVersion();
+            entity.Property(e => e.EvidenceVersion).HasDefaultValue("1.0");
+            entity.HasCheckConstraint(
+                "CK_FinanceSettlementDimensionComponents_ComponentType",
+                "[ComponentType] IN (0,1,2,3,4,5,6)");
+            entity.HasOne(e => e.FinanceDimensionSet).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSetId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.FinanceDimensionSnapshot).WithMany()
+                .HasForeignKey(e => e.FinanceDimensionSnapshotId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant).WithMany()
+                .HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<FinanceDimensionRouteCertification>(entity =>
@@ -3253,7 +3947,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new
             {
                 e.TenantId,
-                e.BookClassification,
+                e.AccountingBookId,
                 e.TransactionDate,
                 e.AccountId
             });
@@ -3279,9 +3973,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.FinanceDimensionSnapshotId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany(j => j.Transactions)
-                .HasForeignKey(e => e.JournalEntryId)
+                .HasForeignKey(e => new { e.TenantId, e.JournalEntryId, e.AccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id, e.AccountingBookId })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany(p => p.Transactions)
@@ -3368,7 +4068,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.ToTable("FxRevaluationBatches");
             entity.HasIndex(e => e.TenantId);
-            entity.HasIndex(e => new { e.TenantId, e.Scope, e.RevaluationDate, e.FiscalPeriodId })
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.Scope, e.RevaluationDate, e.FiscalPeriodId })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.IdempotencyKey })
@@ -3376,9 +4076,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => e.JournalEntryId);
             entity.HasIndex(e => e.PostingEventId);
+            entity.Property(e => e.AccountingBookCode).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.PreviewFingerprint).HasMaxLength(64);
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany()
                 .HasForeignKey(e => e.FiscalPeriodId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountingBook)
+                .WithMany()
+                .HasForeignKey(e => e.AccountingBookId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry)
                 .WithMany()
@@ -3418,6 +4124,26 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => e.AccountId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountAccountingBook)
+                .WithMany()
+                .HasForeignKey(e => e.AccountAccountingBookId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountBookCurrencyPolicy)
+                .WithMany()
+                .HasForeignKey(e => e.AccountBookCurrencyPolicyId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.AccountClassification)
+                .WithMany()
+                .HasForeignKey(e => e.AccountClassificationId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.Property(e => e.AccountClassificationCode).HasMaxLength(50).IsRequired();
+            entity.Property(e => e.AccountClassificationName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.CoreAccountType).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ClassificationDefault).HasMaxLength(10).IsRequired();
+            entity.Property(e => e.EffectivePolicySource).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.GovernanceWarning).HasMaxLength(500);
+            entity.Property(e => e.ClosingRateType).HasMaxLength(20).IsRequired();
+            entity.Property(e => e.ClosingQuoteSide).HasMaxLength(20).IsRequired();
             entity.HasOne(e => e.ClosingExchangeRateRecord)
                 .WithMany()
                 .HasForeignKey(e => e.ClosingExchangeRateId)
@@ -3437,6 +4163,37 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.Tenant)
                 .WithMany()
                 .HasForeignKey(e => e.TenantId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<FxRevaluationRateUsage>(entity =>
+        {
+            entity.ToTable("FxRevaluationRateUsages");
+            entity.HasIndex(item => new
+                {
+                    item.TenantId,
+                    item.FxRevaluationBatchId,
+                    item.PostingEventId,
+                    item.ExchangeRateId
+                })
+                .IsUnique();
+            entity.HasIndex(item => item.PostingEventId);
+            entity.HasIndex(item => item.ExchangeRateId);
+            entity.HasOne(item => item.Batch)
+                .WithMany()
+                .HasForeignKey(item => item.FxRevaluationBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.PostingEvent)
+                .WithMany()
+                .HasForeignKey(item => item.PostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.ExchangeRate)
+                .WithMany()
+                .HasForeignKey(item => item.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Tenant)
+                .WithMany()
+                .HasForeignKey(item => item.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -3562,6 +4319,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("RecurringJournalOccurrences");
             entity.HasIndex(e => new { e.TenantId, e.TemplateId, e.ScheduledDate }).IsUnique().HasFilter("[IsDeleted] = 0");
             entity.HasIndex(e => new { e.TenantId, e.Status, e.EffectiveDate });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalStatus, e.ReversalDueDate });
             entity.HasOne(e => e.Template).WithMany(e => e.Occurrences).HasForeignKey(e => e.TemplateId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.JournalEntry).WithOne(e => e.RecurringOccurrence).HasForeignKey<RecurringJournalOccurrence>(e => e.JournalEntryId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant).WithMany().HasForeignKey(e => e.TenantId).OnDelete(DeleteBehavior.Restrict);
@@ -3718,6 +4476,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.TransactionCurrencyCode).HasMaxLength(3);
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)");
             entity.Property(e => e.SourceDocumentType).HasMaxLength(50);
+            entity.Property(e => e.CapitalizationApprovalSnapshotHash).HasMaxLength(64);
+            entity.Property(e => e.CapitalizationApprovalInvalidationReason).HasMaxLength(1000);
             entity.HasOne(e => e.CurrentCustodian)
                 .WithMany()
                 .HasForeignKey(e => e.CurrentCustodianId)
@@ -3737,6 +4497,55 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne<ExchangeRate>()
                 .WithMany()
                 .HasForeignKey(e => e.ExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<ExchangeRate>()
+                .WithMany()
+                .HasForeignKey(e => e.CapitalizationApprovalExchangeRateId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<OpeningBalanceBatchReversal>(entity =>
+        {
+            entity.ToTable("OpeningBalanceBatchReversals");
+            entity.HasIndex(e => new { e.TenantId, e.OpeningBalanceBatchId })
+                .IsUnique()
+                .HasFilter("[IsDeleted] = 0 AND [Status] <> N'Rejected'");
+            entity.HasIndex(e => new { e.TenantId, e.Status });
+            entity.HasIndex(e => new { e.TenantId, e.ReversalPostingEventId });
+            entity.Property(e => e.SourceKind).HasMaxLength(40).IsRequired();
+            entity.Property(e => e.BookClassification).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Status).HasMaxLength(30).IsRequired();
+            entity.Property(e => e.Reason).HasMaxLength(1000).IsRequired();
+            entity.Property(e => e.ImpactAssessment).HasMaxLength(2000).IsRequired();
+            entity.Property(e => e.RequestedByUserName).HasMaxLength(200).IsRequired();
+            entity.Property(e => e.ReviewedByUserName).HasMaxLength(200);
+            entity.Property(e => e.ReviewComment).HasMaxLength(2000);
+            entity.Property(e => e.FailureReason).HasMaxLength(2000);
+            entity.Property(e => e.OriginalTotalDebit).HasPrecision(18, 2);
+            entity.Property(e => e.OriginalTotalCredit).HasPrecision(18, 2);
+            entity.HasOne(e => e.OpeningBalanceBatch)
+                .WithMany(e => e.Reversals)
+                .HasForeignKey(e => e.OpeningBalanceBatchId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.OriginalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.OriginalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<FinancePostingEvent>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalPostingEventId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<JournalEntry>()
+                .WithMany()
+                .HasForeignKey(e => e.ReversalJournalEntryId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.Tenant)
+                .WithMany()
+                .HasForeignKey(e => e.TenantId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -4240,6 +5049,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.CumulativeProductionUnitsAfter).HasColumnType("decimal(18,4)");
             entity.Property(e => e.ProductionEvidenceReference).HasMaxLength(200);
             entity.Property(e => e.ProductionEvidenceNotes).HasMaxLength(1000);
+            entity.Property(e => e.ConventionFactor).HasColumnType("decimal(18,8)");
+            entity.Property(e => e.ConventionBasis).HasMaxLength(80);
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetId, e.FiscalPeriodId, e.BookClassification, e.CorrectionSequence }).IsUnique();
             entity.HasIndex(e => new { e.TenantId, e.FixedAssetDepreciationRunId });
             entity.HasIndex(e => new { e.TenantId, e.PostingEventId });
@@ -5119,6 +5930,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // Configure Tenant entity
         builder.Entity<Tenant>(entity =>
         {
+            if (this.Database.IsSqlServer())
+                entity.ToTable("Tenants", table => table.HasCheckConstraint(
+                    "CK_Tenants_BaseCurrencyCanonical_C3",
+                    "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')"));
             // Configure relationship to UserTenants
             entity.HasMany(t => t.UserTenants)
                 .WithOne(ut => ut.Tenant)
@@ -5186,6 +6001,10 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(a => a.Timestamp);
             entity.HasIndex(a => a.UserId);
             entity.HasIndex(a => a.Resource);
+            entity.Property(a => a.IdempotencyKey).HasMaxLength(450);
+            entity.HasIndex(a => new { a.TenantId, a.IdempotencyKey })
+                .IsUnique()
+                .HasFilter("[IdempotencyKey] IS NOT NULL");
         });
 
         // Configure SecurityLog entity
@@ -5534,8 +6353,30 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)"));
         builder.Entity<SupplierDebitNoteApplication>(entity =>
             entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)"));
+        builder.Entity<FinanceSettlementDimensionComponent>(entity =>
+        {
+            entity.Property(e => e.ExchangeRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.ComparisonExchangeRate).HasColumnType("decimal(18,6)");
+        });
         ConfigureSalesAllocationPrecision(builder);
         builder.ApplyConfiguration(new AccountBalanceConfiguration());
+        builder.ApplyConfiguration(new AccountCurrencyExposureConfiguration());
+        builder.Entity<FinanceBalanceRebuildRun>(entity =>
+        {
+            entity.ToTable("FinanceBalanceRebuildRuns");
+            entity.HasIndex(item => new { item.TenantId, item.AccountingBookId, item.IdempotencyKey })
+                .IsUnique().HasFilter("[IsDeleted] = 0");
+            entity.Property(item => item.AccountingBookCode).HasMaxLength(20).IsRequired();
+            entity.Property(item => item.IdempotencyKey).HasMaxLength(200).IsRequired();
+            entity.Property(item => item.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(item => item.SourceFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.CommandFingerprint).HasMaxLength(64).IsRequired();
+            entity.Property(item => item.AbsoluteDrift).HasColumnType("decimal(18,2)");
+            entity.HasOne(item => item.AccountingBook).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.AccountingBookId })
+                .HasPrincipalKey(book => new { book.TenantId, book.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         // Configure all tenant relationships to avoid cascade conflicts
         ConfigureGlobalTenantRelationships(builder);
@@ -5566,6 +6407,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<InventoryIssueVoucherLine>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
         builder.Entity<InventoryReturnVoucherLine>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
         builder.Entity<GoodsReceiptNoteItem>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
+        builder.Entity<StockAdjustmentItem>().Property(item => item.UnitCost).HasColumnType("decimal(18,4)");
 
         // Configure Workflow Engine entities
         ConfigureWorkflowEntities(builder);
@@ -5584,7 +6426,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         ConfigurePurchaseRequisitionLinkage(builder);
 
         // Configure Finance Common entities
-        ConfigureFinanceCommonEntities(builder);
+        ConfigureFinanceCommonEntities(builder, Database.IsSqlServer());
 
         // Configure Compliance/Settings entities
         ConfigureComplianceAndSettingsEntities(builder);
@@ -8412,12 +9254,17 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<EhcTicket>(entity =>
         {
+            entity.HasIndex(x => new { x.TenantId, x.RequesterUserId, x.ExternalSubmissionId })
+                .IsUnique().HasFilter("[ExternalSubmissionId] IS NOT NULL");
             entity.HasIndex(x => new { x.TenantId, x.TicketNumber }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.Status });
             entity.HasIndex(x => new { x.TenantId, x.RequesterUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedToUserId });
             entity.HasIndex(x => new { x.TenantId, x.AssignedDepartmentId });
+            entity.HasIndex(x => new { x.TenantId, x.AssignedOrganizationUnitId });
             entity.HasIndex(x => new { x.TenantId, x.RootCauseId });
+            entity.HasIndex(x => new { x.TenantId, x.CrmOpportunityId });
+            entity.HasIndex(x => new { x.TenantId, x.EstateListingApplicationCaseId });
 
             entity.HasOne(x => x.Category)
                 .WithMany()
@@ -8437,6 +9284,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(x => x.AssignedDepartment)
                 .WithMany()
                 .HasForeignKey(x => x.AssignedDepartmentId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.AssignedOrganizationUnit)
+                .WithMany()
+                .HasForeignKey(x => x.AssignedOrganizationUnitId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+
+            entity.HasOne(x => x.CrmLead)
+                .WithMany()
+                .HasForeignKey(x => x.CrmLeadId)
+                .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(x => x.CrmOpportunity)
+                .WithMany()
+                .HasForeignKey(x => x.CrmOpportunityId)
                 .OnDelete(DeleteBehavior.NoAction);
 
             entity.HasMany(x => x.Messages)
@@ -8463,6 +9326,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithOne(w => w.Ticket)
                 .HasForeignKey(w => w.TicketId)
                 .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasMany(x => x.CrmEngagementLinks)
+                .WithOne(l => l.Ticket)
+                .HasForeignKey(l => l.TicketId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<EhcTicketMessage>(entity =>
@@ -8474,6 +9342,18 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(x => new { x.TenantId, x.TicketId });
             entity.HasIndex(x => new { x.TenantId, x.MessageId });
+        });
+
+        builder.Entity<EhcCrmEngagementLink>(entity =>
+        {
+            entity.HasIndex(x => new { x.TenantId, x.TicketId });
+            entity.HasIndex(x => new { x.TenantId, x.CrmActivityId });
+            entity.HasIndex(x => new { x.TenantId, x.SourceKey }).IsUnique();
+
+            entity.HasOne(x => x.CrmActivity)
+                .WithMany()
+                .HasForeignKey(x => x.CrmActivityId)
+                .OnDelete(DeleteBehavior.NoAction);
         });
 
         builder.Entity<EhcTicketStatusHistory>(entity =>
@@ -9389,7 +10269,23 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.ToTable("EstateLandDemarcations");
             entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.DemarcationNumber })
                 .IsUnique();
+            entity.HasIndex(item => new { item.TenantId, item.EstateManagedAssetId, item.ParentDemarcationId });
+            entity.HasIndex(item => new { item.TenantId, item.IsReadyForProjectManagement, item.IsPublishedToExternalPortal });
             entity.Property(item => item.AreaSquareFeet).HasPrecision(18, 4);
+            entity.Property(item => item.AllocatedCost).HasPrecision(18, 2);
+            entity.Property(item => item.CostPerAcre).HasPrecision(18, 2);
+            entity.Property(item => item.TargetSalePrice).HasPrecision(18, 2);
+            entity.Property(item => item.ParentLandAssetReference).HasMaxLength(120);
+            entity.Property(item => item.ParentFixedAssetReference).HasMaxLength(120);
+            entity.Property(item => item.ChildFixedAssetReference).HasMaxLength(120);
+            entity.Property(item => item.FixedAssetPostingStatus).HasMaxLength(40);
+            entity.Property(item => item.ExternalListingPrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalSalePrice).HasPrecision(18, 2);
+            entity.Property(item => item.ExternalMonthlyRent).HasPrecision(18, 2);
+            entity.HasOne(item => item.ParentDemarcation)
+                .WithMany(item => item.ChildDemarcations)
+                .HasForeignKey(item => item.ParentDemarcationId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         builder.Entity<EstateGisConfiguration>(entity =>
@@ -9537,18 +10433,52 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        if (HasInventoryCostProjectionChanges() && Database.IsRelational() && Database.CurrentTransaction == null)
+        {
+            return await Database.CreateExecutionStrategy().ExecuteAsync(async () =>
+            {
+                await using var transaction = await Database.BeginTransactionAsync(cancellationToken);
+                var result = await SaveWithInventoryCostProjectionAsync(false, cancellationToken);
+                await transaction.CommitAsync(cancellationToken);
+                ChangeTracker.AcceptAllChanges();
+                return result;
+            });
+        }
+        return await SaveWithInventoryCostProjectionAsync(true, cancellationToken);
+    }
+
+    private async Task<int> SaveWithInventoryCostProjectionAsync(bool acceptAllChanges, CancellationToken cancellationToken)
+    {
+        await SynchronizeInventoryAverageCostsAsync(true, cancellationToken);
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
-        return await base.SaveChangesAsync(cancellationToken);
+        return await base.SaveChangesAsync(acceptAllChanges, cancellationToken);
     }
 
     public override int SaveChanges()
     {
+        if (HasInventoryCostProjectionChanges() && Database.IsRelational() && Database.CurrentTransaction == null)
+        {
+            return Database.CreateExecutionStrategy().Execute(() =>
+            {
+                using var transaction = Database.BeginTransaction();
+                var result = SaveWithInventoryCostProjection(false);
+                transaction.Commit();
+                ChangeTracker.AcceptAllChanges();
+                return result;
+            });
+        }
+        return SaveWithInventoryCostProjection(true);
+    }
+
+    private int SaveWithInventoryCostProjection(bool acceptAllChanges)
+    {
+        SynchronizeInventoryAverageCostsAsync(false, CancellationToken.None).GetAwaiter().GetResult();
         UpdateAuditableEntities();
         NormalizeProcurementAwardReadinessAuditEnvelopes();
         NormalizeProcurementBidderCommunicationAuditEnvelopes();
-        return base.SaveChanges();
+        return base.SaveChanges(acceptAllChanges);
     }
 
     private void NormalizeProcurementAwardReadinessAuditEnvelopes()
@@ -9611,7 +10541,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     }
                     else
                     {
-                        entry.Entity.CreatedAt = DateTime.UtcNow;
+                        // Inventory assigns a strictly increasing server timestamp to
+                        // each new adjustment line. Preserve that FIFO posting order;
+                        // caller DTOs never supply this value. Other audit defaults
+                        // and every existing row's historical timestamp are unchanged.
+                        if (entry.Entity is not StockAdjustmentItem || entry.Entity.CreatedAt == default)
+                            entry.Entity.CreatedAt = DateTime.UtcNow;
                         entry.Entity.UpdatedAt = DateTime.UtcNow;
                     }
                     
@@ -9850,8 +10785,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // ProcurementPlan entity
         builder.Entity<ProcurementPlan>(entity =>
         {
+            entity.Property(p => p.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("ProcurementPlans", table => table.HasTrigger("TR_ProcurementPlans_ApprovalPolicy"));
             entity.HasIndex(p => p.PlanNumber).IsUnique();
             entity.HasIndex(p => p.DepartmentId);
+            entity.HasIndex(p => p.OrganizationUnitId);
             entity.HasIndex(p => p.FiscalYear);
             entity.HasIndex(p => p.PlanningCycle);
             entity.HasIndex(p => p.PlanningQuarter);
@@ -9862,6 +10800,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(p => p.Department)
                 .WithMany()
                 .HasForeignKey(p => p.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(p => p.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(p => p.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(p => p.Items)
@@ -9923,14 +10866,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // ProcurementBudget entity
         builder.Entity<ProcurementBudget>(entity =>
         {
+            entity.Property(b => b.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("ProcurementBudgets", table => table.HasTrigger("TR_ProcurementBudgets_ApprovalPolicy"));
             entity.HasIndex(b => new { b.TenantId, b.BudgetCode }).IsUnique();
             entity.HasIndex(b => b.DepartmentId);
+            entity.HasIndex(b => b.OrganizationUnitId);
             entity.HasIndex(b => b.FiscalYear);
             entity.HasIndex(b => b.Status);
 
             entity.HasOne(b => b.Department)
                 .WithMany()
                 .HasForeignKey(b => b.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(b => b.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(b => b.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasMany(b => b.Allocations)
@@ -9959,6 +10910,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // ProcurementBudgetRevision entity
         builder.Entity<ProcurementBudgetRevision>(entity =>
         {
+            entity.Property(r => r.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("ProcurementBudgetRevisions", table => table.HasTrigger("TR_ProcurementBudgetRevisions_ApprovalPolicy"));
             entity.HasIndex(r => r.ProcurementBudgetId);
             entity.HasIndex(r => r.RevisionNumber);
             entity.HasIndex(r => r.Status);
@@ -10036,6 +10989,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         {
             entity.HasIndex(s => s.ProcurementPlanId);
             entity.HasIndex(s => s.DepartmentId);
+            entity.HasIndex(s => s.OrganizationUnitId);
             entity.HasIndex(s => s.PlannedStartDate);
             entity.HasIndex(s => s.Status);
 
@@ -10047,6 +11001,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(s => s.Department)
                 .WithMany()
                 .HasForeignKey(s => s.DepartmentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(s => s.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(s => s.OrganizationUnitId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
@@ -10359,10 +11318,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     {
         builder.Entity<PurchaseRequisition>(entity =>
         {
+            entity.Property(r => r.ApprovalRequired).HasDefaultValue(true);
             entity.Property(item => item.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.HasIndex(item => new { item.TenantId, item.SourcePlanItemId });
             entity.HasIndex(item => new { item.TenantId, item.BudgetId });
             entity.HasIndex(item => new { item.TenantId, item.ProjectId });
+            entity.HasIndex(item => new { item.TenantId, item.OrganizationUnitId });
             entity.HasIndex(item => new { item.TenantId, item.ProcurementCategory });
             entity.HasIndex(item => new { item.TenantId, item.SpecificationTemplateId });
             entity.HasIndex(item => new { item.TenantId, item.ApprovedExceptionRuleId });
@@ -10383,6 +11344,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .HasForeignKey(item => item.SourcePlanId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.SourcePlanItem).WithMany()
                 .HasForeignKey(item => item.SourcePlanItemId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.OrganizationUnit).WithMany()
+                .HasForeignKey(item => item.OrganizationUnitId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Budget).WithMany()
                 .HasForeignKey(item => item.BudgetId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<ErpSystem.Core.Entities.Projects.Project>().WithMany()
@@ -10412,6 +11375,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // InventoryItem entity
         builder.Entity<InventoryItem>(entity =>
         {
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryOffsetAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.CostOfGoodsSoldAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.SalesAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.MarkdownsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.SalesReturnsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InUseAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InServiceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.DamagedAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.VarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.DropShipItemsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.PurchasePriceVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.UnrealisedPurchasePriceVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.InventoryReturnsAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.AssemblyVarianceAccountId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<Account>().WithMany().HasForeignKey(item => item.StandardCostRevaluationAccountId).OnDelete(DeleteBehavior.Restrict);
             entity.ToTable("InventoryItems", table =>
             {
                 table.HasTrigger("TR_TDC0601_InventoryItems_IdentifierIntegrity");
@@ -10689,6 +11668,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseOrder entity
         builder.Entity<PurchaseOrder>(entity =>
         {
+            entity.Property(po => po.ApprovalRequired).HasDefaultValue(true);
             entity.ToTable("PurchaseOrders", table =>
             {
                 table.HasTrigger("TR_PurchaseOrders_FrameworkCallOffProtected");
@@ -10758,8 +11738,12 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseOrderItem entity
         builder.Entity<PurchaseOrderItem>(entity =>
         {
+            entity.Property(item => item.LineType).HasDefaultValue(ItemType.StockItem);
             entity.ToTable("PurchaseOrderItems", table =>
-                table.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected"));
+            {
+                table.HasTrigger("TR_PurchaseOrderItems_FrameworkCallOffProtected");
+                table.HasCheckConstraint("CK_PurchaseOrderItems_LineType", "[LineType] IN (1, 2, 3, 4)");
+            });
             entity.HasIndex(poi => poi.PurchaseOrderId);
             entity.HasIndex(poi => poi.InventoryItemId);
 
@@ -10943,6 +11927,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseOrderLandedCostPlanItem entity
         builder.Entity<PurchaseOrderLandedCostPlanItem>(entity =>
         {
+            entity.HasOne<PurchaseOrderItem>().WithMany().HasForeignKey(i => i.PurchaseOrderItemId).OnDelete(DeleteBehavior.NoAction);
             entity.HasIndex(i => i.PurchaseOrderLandedCostPlanId);
             entity.HasIndex(i => i.SupplierId);
 
@@ -10955,7 +11940,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // StockAdjustment entity
         builder.Entity<StockAdjustment>(entity =>
         {
-            entity.ToTable("StockAdjustments", table => table.HasTrigger("TR_StockAdjustments_ControlledLifecycle"));
+            entity.ToTable("StockAdjustments", table =>
+            {
+                table.HasTrigger("TR_StockAdjustments_ControlledLifecycle");
+                table.HasTrigger("TR_StockAdjustments_FifoSequenceGuard");
+            });
             entity.HasIndex(sa => sa.AdjustmentNumber).IsUnique();
             entity.HasIndex(sa => new { sa.TenantId, sa.IdempotencyKey }).IsUnique().HasFilter("[IdempotencyKey] IS NOT NULL");
             entity.HasIndex(sa => sa.AdjustmentDate);
@@ -11142,6 +12131,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(ir => ir.RequisitionNumber).IsUnique();
             entity.HasIndex(ir => ir.WarehouseId);
             entity.HasIndex(ir => ir.DepartmentId);
+            entity.HasIndex(ir => ir.OrganizationUnitId);
             entity.HasIndex(ir => ir.Status);
             entity.HasIndex(ir => ir.RequestDate);
             entity.HasIndex(ir => ir.RequiredDate);
@@ -11156,6 +12146,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(ir => ir.LocationId)
                 .OnDelete(DeleteBehavior.NoAction);
+
+            entity.HasOne(ir => ir.OrganizationUnit)
+                .WithMany()
+                .HasForeignKey(ir => ir.OrganizationUnitId)
+                .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(ir => ir.RequestedBy)
                 .WithMany()
@@ -11369,6 +12364,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // LandedCostItem entity
         builder.Entity<LandedCostItem>(entity =>
         {
+            entity.HasOne<PurchaseOrderItem>().WithMany().HasForeignKey(i => i.PurchaseOrderItemId).OnDelete(DeleteBehavior.NoAction);
             entity.HasIndex(lci => lci.LandedCostId);
 
             entity.HasOne(lci => lci.LandedCost)
@@ -11432,6 +12428,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // PurchaseReturn entity
         builder.Entity<PurchaseReturn>(entity =>
         {
+            entity.Property(value => value.ApprovalRequired).HasDefaultValue(true);
+            entity.ToTable("PurchaseReturns", table => table.HasTrigger("TR_PurchaseReturns_OptionalApproval"));
             entity.HasIndex(pr => pr.ReturnNumber).IsUnique();
             entity.HasIndex(pr => pr.SupplierId);
             entity.HasIndex(pr => pr.WarehouseId);
@@ -11640,7 +12638,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         });
     }
 
-    private static void ConfigureFinanceCommonEntities(ModelBuilder builder)
+    private static void ConfigureFinanceCommonEntities(ModelBuilder builder, bool isSqlServer)
     {
         // Configure PaymentTerm entity
         builder.Entity<PaymentTerm>(entity =>
@@ -11657,9 +12655,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         builder.Entity<FinanceSettings>(entity =>
         {
             entity.ToTable("FinanceSettings", table =>
+            {
                 table.HasCheckConstraint(
                     "CK_FinanceSettings_TDC0504ApMatchTolerances",
-                    "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100"));
+                    "[ApInvoicePriceTolerancePercent] BETWEEN 0 AND 100 AND [ApInvoiceQuantityTolerancePercent] BETWEEN 0 AND 100");
+                if (isSqlServer)
+                    table.HasCheckConstraint(
+                        "CK_FinanceSettings_BaseCurrencyCanonical_C3",
+                        "[IsDeleted] = 1 OR (DATALENGTH([BaseCurrency]) = 6 AND [BaseCurrency] COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z][A-Z][A-Z]')");
+            });
             entity.HasIndex(s => s.TenantId).IsUnique();
             entity.Property(s => s.ApInvoicePriceTolerancePercent).HasPrecision(5, 2);
             entity.Property(s => s.ApInvoiceQuantityTolerancePercent).HasPrecision(5, 2);
@@ -12514,7 +13518,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_SchemaVersion", "[SchemaVersion] > 0");
                 table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_DecisionKey", "[DecisionKey] LIKE 'DEC-[0-9][0-9][0-9]'");
                 table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_EffectivePeriod", "[EffectiveTo] IS NULL OR [EffectiveFrom] IS NULL OR [EffectiveTo] >= [EffectiveFrom]");
-                table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3)");
+                table.HasCheckConstraint("CK_ProcurementConfigurationDecisions_Status", "[Status] IN (0, 1, 2, 3) OR ([Status] = 4 AND [DecisionKey] = 'DEC-011')");
             });
             entity.HasOne(item => item.Profile)
                 .WithMany(item => item.Decisions)
@@ -13032,6 +14036,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(item => item.FileUploadRecord).WithMany().HasForeignKey(item => item.FileUploadRecordId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
+
     }
 
     private static void ConfigurePolicyRule<TEntity>(Microsoft.EntityFrameworkCore.Metadata.Builders.EntityTypeBuilder<TEntity> entity)

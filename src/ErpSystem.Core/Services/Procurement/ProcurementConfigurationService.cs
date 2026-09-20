@@ -196,6 +196,9 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
         CancellationToken cancellationToken = default)
     {
         EnsureEditor();
+        if (request.Status == ProcurementConfigurationDecisionStatus.Withdrawn)
+            throw ValidationException(decisionKey,
+                new[] { "Withdrawn cannot be assigned through decision editing. Use the governed DEC-011 withdrawal action on its published profile." });
         var profile = await FindProfileAsync(profileId, tracked: true, cancellationToken);
         var decision = await FindDecisionAsync(profileId, decisionKey, tracked: true, cancellationToken);
         ProcurementConfigurationLifecyclePolicy.EnsureEditable(profile);
@@ -329,6 +332,47 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
 
         var mappedProfile = await GetProfileAsync(profile.Id, cancellationToken);
         return mappedProfile.Decisions.Single(item => item.DecisionKey == definition.DecisionKey);
+    }
+
+    public async Task<ProcurementConfigurationProfileDto> WithdrawDecisionAsync(
+        Guid profileId,
+        string decisionKey,
+        WithdrawProcurementConfigurationDecisionRequest request,
+        string correlationId,
+        CancellationToken cancellationToken = default)
+    {
+        EnsureEditor();
+        if (!string.Equals(decisionKey?.Trim(), "DEC-011", StringComparison.OrdinalIgnoreCase))
+            throw ValidationException(decisionKey,
+                new[] { "Only the optional DEC-011 supplier-risk decision supports governed withdrawal. Other decisions and the profile must remain unchanged." });
+        if (string.IsNullOrWhiteSpace(request.Reason) || request.Reason.Trim().Length > 1000)
+            throw ValidationException("DEC-011",
+                new[] { "A withdrawal reason of 1 through 1000 characters is required for the retained audit." });
+
+        var profile = await FindProfileAsync(profileId, tracked: true, cancellationToken);
+        await EnsurePublisherAsync(profile, "WithdrawDecision", correlationId, cancellationToken);
+        var decision = await FindDecisionAsync(profileId, "DEC-011", tracked: true, cancellationToken);
+        var now = DateTime.UtcNow;
+        if (!ProcurementConfigurationLifecyclePolicy.IsRuntimeEligible(profile, now) ||
+            decision.Status != ProcurementConfigurationDecisionStatus.Approved ||
+            decision.ApprovalStatus != ProcurementConfigurationApprovalStatus.Approved ||
+            (decision.EffectiveFrom.HasValue && decision.EffectiveFrom.Value > now) ||
+            (decision.EffectiveTo.HasValue && decision.EffectiveTo.Value < now))
+            throw new ProcurementConfigurationConflictException(
+                "Only the currently approved, effective DEC-011 decision in a published profile can be withdrawn.");
+        EnsureRowVersion(decision.RowVersion, request.RowVersion, "DEC-011");
+
+        // This is the sole narrow exception to published-decision immutability:
+        // deactivate the optional rule, never rewrite its value or approval/evidence
+        // history, and never retire the profile or change its other decisions.
+        var before = DecisionSnapshot(decision);
+        decision.Status = ProcurementConfigurationDecisionStatus.Withdrawn;
+        SetModified(decision);
+        await Decisions.UpdateAsync(decision);
+        await AddRevisionAsync(profile.Id, decision.Id, "WithdrawDecision", "Succeeded",
+            correlationId, request.Reason.Trim(), before, DecisionSnapshot(decision));
+        await SaveWithConcurrencyAsync("DEC-011", cancellationToken);
+        return await GetProfileAsync(profile.Id, cancellationToken);
     }
 
     public async Task<ProcurementConfigurationValidationResultDto> ValidateProfileAsync(
@@ -521,7 +565,11 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             {
                 clonedDecision.SchemaVersion = sourceDecision.SchemaVersion;
                 clonedDecision.OwnerGroup = sourceDecision.OwnerGroup;
-                clonedDecision.Status = ProcurementConfigurationDecisionStatus.Proposed;
+                // An explicit withdrawal must not be silently reactivated by a
+                // later profile revision. The source retains its original evidence.
+                clonedDecision.Status = IsWithdrawnRiskDecision(sourceDecision)
+                    ? ProcurementConfigurationDecisionStatus.Withdrawn
+                    : ProcurementConfigurationDecisionStatus.Proposed;
                 clonedDecision.ApprovalStatus = definition.RequiresRenewedApproval
                     ? ProcurementConfigurationApprovalStatus.Pending
                     : sourceDecision.ApprovalStatus;
@@ -737,6 +785,17 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
             }
 
             var decision = matching[0];
+            if (IsWithdrawnRiskDecision(decision))
+            {
+                warnings.Add(new ProcurementConfigurationValidationIssueDto
+                {
+                    Code = "DECISION_WITHDRAWN",
+                    DecisionKey = decision.DecisionKey,
+                    Message = "DEC-011 was explicitly withdrawn. Its historical value is retained but is not an active supplier-risk policy.",
+                    Severity = "Warning"
+                });
+                continue;
+            }
             if (string.IsNullOrWhiteSpace(decision.OwnerGroup))
                 AddError(errors, "OWNER_REQUIRED", "A decision owner group is required.", definition.DecisionKey);
             if (!decision.DecisionDate.HasValue)
@@ -1186,11 +1245,18 @@ public sealed class ProcurementConfigurationService : IProcurementConfigurationS
 
     private static bool IsDecisionComplete(ProcurementConfigurationDecision decision)
     {
+        // Complete describes a resolved configuration decision, not runtime
+        // eligibility. Runtime consumers still require the Approved status.
+        if (IsWithdrawnRiskDecision(decision)) return true;
         if (!ProcurementConfigurationDecisionRegistry.TryGet(decision.DecisionKey, out var definition)) return false;
         return decision.Status == ProcurementConfigurationDecisionStatus.Approved &&
                (!definition.RequiresApproval || decision.ApprovalStatus == ProcurementConfigurationApprovalStatus.Approved) &&
                (!definition.RequiresEvidence || decision.EvidenceStatus != ProcurementConfigurationEvidenceStatus.Missing);
     }
+
+    private static bool IsWithdrawnRiskDecision(ProcurementConfigurationDecision decision) =>
+        decision.DecisionKey == "DEC-011" &&
+        decision.Status == ProcurementConfigurationDecisionStatus.Withdrawn;
 
     private static ProcurementConfigurationValidationException ValidationException(
         string? decisionKey,

@@ -180,7 +180,7 @@ export function TenderDocumentContentArtifactField({
           <p className="text-sm text-muted-foreground">
             {workflowInstanceId
               ? 'No content is available in this approval workflow yet. Upload below, then use the document review section for independent verification.'
-              : 'Content can be attached after this Draft starts its exact approval workflow.'}
+              : 'Select Start document preparation first to enable uploading. No file is needed to start; review and attachment come after upload.'}
           </p>
         )}
       {selected && (

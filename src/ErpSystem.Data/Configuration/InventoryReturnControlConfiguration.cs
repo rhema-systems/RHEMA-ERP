@@ -11,7 +11,7 @@ public sealed class InventoryReturnVoucherConfiguration : IEntityTypeConfigurati
         builder.ToTable("InventoryReturnVouchers", table =>
         {
             table.HasTrigger("TR_InventoryReturnVouchers_ControlledLifecycle");
-            table.HasCheckConstraint("CK_InventoryReturnVouchers_Status", "[Status] BETWEEN 1 AND 5");
+            table.HasCheckConstraint("CK_InventoryReturnVouchers_Status", "[Status] BETWEEN 1 AND 6");
             table.HasCheckConstraint("CK_InventoryReturnVouchers_TotalValue", "[TotalValue] > 0");
         });
         builder.HasIndex(x => new { x.TenantId, x.VoucherNumber }).IsUnique();

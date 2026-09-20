@@ -50,6 +50,9 @@ export const procurementConfigurationService = {
   retire: (id: string, request: ProcurementConfigurationLifecycleRequest) =>
     apiService.post<ProcurementConfigurationProfile>(`${root}/${id}/retire`, request),
 
+  withdrawDecision: (id: string, decisionKey: string, request: ProcurementConfigurationLifecycleRequest) =>
+    apiService.post<ProcurementConfigurationProfile>(`${root}/${id}/decisions/${decisionKey}/withdraw`, request),
+
   cloneDraft: (id: string, changeSummary?: string) =>
     apiService.post<ProcurementConfigurationProfile>(`${root}/${id}/clone-draft`, { changeSummary }),
 

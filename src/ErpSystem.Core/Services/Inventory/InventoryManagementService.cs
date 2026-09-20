@@ -72,6 +72,7 @@ public class InventoryManagementService : IInventoryManagementService
 
             return items.Select(item => new InventoryItemDto
             {
+                PostingAccounts = InventoryItemPostingAccounts.Read(item),
                 Id = item.Id,
                 ItemCode = item.ItemCode,
                 Name = item.Name,
@@ -118,6 +119,7 @@ public class InventoryManagementService : IInventoryManagementService
 
             return new InventoryItemDetailDto
             {
+                PostingAccounts = InventoryItemPostingAccounts.Read(item),
                 Id = item.Id,
                 ItemCode = item.ItemCode,
                 Name = item.Name,

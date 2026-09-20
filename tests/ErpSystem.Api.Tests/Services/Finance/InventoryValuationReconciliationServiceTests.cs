@@ -121,6 +121,33 @@ public sealed class InventoryValuationReconciliationServiceTests
         (await fixture.Db.InventoryValuationReconciliationActions.CountAsync()).Should().Be(1);
     }
 
+    [Theory]
+    [InlineData("INV-RECEIPT-CONTROL")]
+    [InlineData("RTV-Dispatch-Inventory")]
+    public async Task Reconciliation_includes_item_mappings_and_historical_inventory_accounts_in_same_tenant(string historicalTag)
+    {
+        await using var fixture = await Fixture.CreateAsync();
+        var globalAccountId = (await fixture.Db.FinanceSettings.SingleAsync()).ControlAccountInventoryId!.Value;
+        var mappedAccount = new Account { TenantId = fixture.TenantId, AccountCode = "ITEM-INV", AccountNumber = "1301", AccountName = "Item inventory", AccountType = AccountType.Asset };
+        var historicalAccount = new Account { TenantId = fixture.TenantId, AccountCode = "OLD-INV", AccountNumber = "1302", AccountName = "Old inventory", AccountType = AccountType.Asset };
+        fixture.Db.Accounts.AddRange(mappedAccount, historicalAccount);
+        var item = new InventoryItem { TenantId = fixture.TenantId, ItemCode = "ITEM-001", Name = "Item", InventoryAccountId = mappedAccount.Id };
+        fixture.Db.InventoryItems.Add(item);
+        fixture.Db.InventoryMovements.Add(new InventoryMovement { TenantId = fixture.TenantId, InventoryItemId = item.Id,
+            WarehouseId = Guid.NewGuid(), MovementNumber = "ADJ-001", MovementType = InventoryMovementType.AdjustmentIn,
+            Direction = MovementDirection.In, TotalValue = 90m, Quantity = 9m, UnitCost = 10m, IsPosted = true, PostingDate = new DateTime(2026, 12, 10) });
+        fixture.Db.InventoryBalances.Add(new InventoryBalance { TenantId = fixture.TenantId, InventoryItemId = item.Id, WarehouseId = Guid.NewGuid(), QuantityOnHand = 9m, TotalValue = 90m });
+        foreach (var (accountId, amount, tag) in new[] { (globalAccountId, 30m, "INV-ADJ-CONTROL"), (mappedAccount.Id, 20m, "INV-ADJ-CONTROL"), (historicalAccount.Id, 40m, historicalTag) })
+            fixture.Db.AccountTransactions.Add(new AccountTransaction { TenantId = fixture.TenantId, AccountId = accountId, JournalEntryId = Guid.NewGuid(), DebitAmount = amount, PostingStatus = "Posted", TransactionDate = new DateTime(2026, 12, 10), TransactionTag = tag });
+        fixture.Db.AccountTransactions.Add(new AccountTransaction { TenantId = Guid.NewGuid(), AccountId = mappedAccount.Id, JournalEntryId = Guid.NewGuid(), DebitAmount = 100m, PostingStatus = "Posted", TransactionDate = new DateTime(2026, 12, 10), TransactionTag = "INV-ADJ-CONTROL" });
+        await fixture.Db.SaveChangesAsync();
+
+        var result = await fixture.Service.GenerateAsync(new GenerateInventoryValuationReconciliationRequest { FiscalPeriodId = fixture.PeriodId, ToleranceAmount = 0m, IdempotencyKey = "item-account-snapshot", CorrelationId = "item-account-test" });
+        result.GeneralLedgerValue.Should().Be(90m);
+        result.ReconciliationVariance.Should().Be(0m);
+        result.Exceptions.Should().NotContain(value => value.Code == "INV_VALUATION_GL_MISMATCH");
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private Fixture(ApplicationDbContext db, Guid tenantId, Guid periodId,

@@ -29,6 +29,42 @@ public sealed class ControlledOpeningBalancePostingTests
 {
     [Fact]
     [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "CanonicalMasterData")]
+    public async Task SpecializedOptions_ShouldUseCanonicalArCustomersAndActiveApSuppliers()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        db.Suppliers.Add(new Supplier
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            SupplierCode = "SUP-001",
+            Name = "Opening Supplier",
+            IsActive = true,
+            Status = "Active"
+        });
+        db.BusinessPartners.Add(new BusinessPartner
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            PartnerCode = "CUS-001",
+            CustomerAccountNumber = "AR-CUS-001",
+            PartnerName = "Opening Customer",
+            PartnerType = "Customer",
+            IsActive = true
+        });
+        await db.SaveChangesAsync();
+
+        var options = await CreateService(db, tenantId).GetSpecializedOptionsAsync();
+
+        options.Suppliers.Should().ContainSingle(item =>
+            item.Code == "SUP-001" && item.Name == "Opening Supplier");
+        options.Customers.Should().ContainSingle(item =>
+            item.Code == "AR-CUS-001" && item.Name == "Opening Customer");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
     [Trait("Category", "ProjectionContract")]
     public async Task ApprovalProjection_ShouldLabelFunctionalAmountWithFunctionalCurrency_NotFiscalPeriod()
     {
@@ -905,7 +941,7 @@ public sealed class ControlledOpeningBalancePostingTests
         };
         db.BankAccounts.Add(bank);
         await db.SaveChangesAsync();
-        var service = CreateService(db, tenantId);
+        var service = CreateService(db, tenantId, withoutWorkflow: true);
         var created = await service.CreateBankAccountOpeningBatchAsync(new CreateBankAccountOpeningBalanceDto
         {
             SourceReference = "BANK-MAPPING-SNAPSHOT",
@@ -929,7 +965,7 @@ public sealed class ControlledOpeningBalancePostingTests
         await db.SaveChangesAsync();
         await FluentActions.Awaiting(() => service.SubmitForApprovalAsync(created.Id))
             .Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("Governed bank and residual opening sources require the Finance approval workflow*");
+            .WithMessage("Controlled opening balances require the Finance approval workflow*");
     }
 
     [Fact]
@@ -1100,8 +1136,10 @@ public sealed class ControlledOpeningBalancePostingTests
         });
 
         await service.SubmitForApprovalAsync(supplierBatch.Id);
+        await ApproveBatchAsync(db, supplierBatch.Id);
         await service.PostAsync(supplierBatch.Id);
         await service.SubmitForApprovalAsync(customerBatch.Id);
+        await ApproveBatchAsync(db, customerBatch.Id);
         await service.PostAsync(customerBatch.Id);
 
         var supplierAdvance = await db.Set<VendorPayment>().SingleAsync(payment => payment.OpeningBalanceBatchId == supplierBatch.Id);
@@ -1153,7 +1191,7 @@ public sealed class ControlledOpeningBalancePostingTests
         {
             Id = Guid.NewGuid(), TenantId = tenantId, AccountId = fixture.SupplierAdvance.Id,
             LinkedCurrencyCode = "USD", IsActive = true, EffectiveDate = new DateTime(2026, 1, 1),
-            RevaluationRequired = true, TransactionRateType = "Daily", RevaluationRateType = "Month-End"
+            TransactionRateType = "Daily", RevaluationRateType = "Month-End"
         });
         await db.SaveChangesAsync();
         var service = CreateService(db, tenantId);
@@ -1186,6 +1224,7 @@ public sealed class ControlledOpeningBalancePostingTests
         payment.ExchangeRateId.Should().Be(rate.Id);
 
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var posted = await service.PostAsync(batch.Id);
         posted.Status.Should().Be("Posted");
         var postedLine = await db.AccountTransactions.SingleAsync(transaction =>
@@ -1235,8 +1274,10 @@ public sealed class ControlledOpeningBalancePostingTests
         });
 
         await service.SubmitForApprovalAsync(apBatch.Id);
+        await ApproveBatchAsync(db, apBatch.Id);
         await service.PostAsync(apBatch.Id);
         await service.SubmitForApprovalAsync(arBatch.Id);
+        await ApproveBatchAsync(db, arBatch.Id);
         await service.PostAsync(arBatch.Id);
 
         var compliance = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
@@ -1318,6 +1359,7 @@ public sealed class ControlledOpeningBalancePostingTests
             line.CreditAmount == 800m);
 
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var posted = await service.PostAsync(batch.Id);
 
         posted.Status.Should().Be("Posted");
@@ -1478,6 +1520,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var posted = await service.PostAsync(batch.Id);
 
         posted.Status.Should().Be("Posted");
@@ -1487,12 +1530,56 @@ public sealed class ControlledOpeningBalancePostingTests
         (await db.FinancePostingEvents.CountAsync(e => e.TenantId == tenantId && e.SourceDocumentType == "OpeningBalanceBatch")).Should().Be(1);
         (await db.AccountTransactions.CountAsync(t => t.TenantId == tenantId && t.SourceDocumentType == "OpeningBalanceBatch")).Should().Be(2);
 
-        var cash = await db.Accounts.SingleAsync(a => a.Id == fixture.Cash.Id);
-        var equity = await db.Accounts.SingleAsync(a => a.Id == fixture.Equity.Id);
-        // Opening balances also maintain Account.Balance as a read-side snapshot through the posting engine.
-        cash.Balance.Should().Be(100m);
-        equity.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == fixture.Cash.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(a => a.AccountId == fixture.Equity.Id)).ClosingBalance.Should().Be(-100m);
         (await db.AuditLogs.CountAsync(a => a.TenantId == tenantId && a.Action == FinanceAuditEvents.OpeningBalancePosted)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Reversal")]
+    public async Task PostedOpeningBalanceReversal_ShouldRequireIndependentReviewAndPostCompensatingEvidence()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var maker = CreateService(db, tenantId, withAudit: true);
+        var batch = await maker.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
+        await maker.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
+        var posted = await maker.PostAsync(batch.Id);
+
+        var request = await maker.RequestReversalAsync(batch.Id, new RequestOpeningBalanceBatchReversalDto
+        {
+            ReversalDate = new DateTime(2026, 1, 1),
+            Reason = "Incorrect cutover values require controlled correction",
+            ImpactAssessment = "The original GL opening will be neutralized before a corrected controlled batch is prepared."
+        });
+        await FluentActions.Awaiting(() => maker.ReviewReversalAsync(batch.Id, request.Id, new ReviewOpeningBalanceBatchReversalDto
+            {
+                Approved = true,
+                ReviewComment = "Independent review confirms the correction is necessary."
+            }))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("The reversal requester cannot review the same request.");
+
+        var checker = CreateService(db, tenantId, withAudit: true);
+        var approved = await checker.ReviewReversalAsync(batch.Id, request.Id, new ReviewOpeningBalanceBatchReversalDto
+        {
+            Approved = true,
+            ReviewComment = "Independent review confirms the correction is necessary."
+        });
+        approved.Status.Should().Be(OpeningBalanceBatchReversalStatuses.Approved);
+
+        var reversed = await checker.PostReversalAsync(batch.Id, request.Id);
+        reversed.Status.Should().Be(OpeningBalanceBatchReversalStatuses.Posted);
+        reversed.OriginalJournalEntryId.Should().Be(posted.JournalEntryId!.Value);
+        reversed.ReversalJournalEntryId.Should().NotBeNull();
+        reversed.ReversalPostingEventId.Should().NotBeNull();
+        (await db.OpeningBalanceBatches.SingleAsync(item => item.Id == batch.Id)).Status.Should().Be("Reversed");
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == fixture.Cash.Id)).ClosingBalance.Should().Be(0m);
+        (await db.AccountBalances.SingleAsync(item => item.AccountId == fixture.Equity.Id)).ClosingBalance.Should().Be(0m);
     }
 
     [Fact]
@@ -1700,6 +1787,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var act = () => service.PostAsync(batch.Id);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
@@ -1763,6 +1851,7 @@ public sealed class ControlledOpeningBalancePostingTests
 
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         var first = await service.PostAsync(batch.Id);
         var second = await service.PostAsync(batch.Id);
 
@@ -1799,6 +1888,26 @@ public sealed class ControlledOpeningBalancePostingTests
         await act.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Opening balance batch must be approved before posting.");
         workflow.Verify(x => x.StartApprovalWorkflowAsync("OpeningBalanceBatch", batch.Id), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-OpeningBalances")]
+    [Trait("Category", "Workflow")]
+    public async Task StandardOpening_ShouldFailClosedWhenWorkflowIsUnavailable()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = SeedOpeningBalanceFixture(db, tenantId);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId, withoutWorkflow: true);
+        var batch = await service.CreateBatchAsync(
+            CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
+
+        await FluentActions.Awaiting(() => service.SubmitForApprovalAsync(batch.Id))
+            .Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("Controlled opening balances require the Finance approval workflow*");
+
+        (await db.OpeningBalanceBatches.SingleAsync(item => item.Id == batch.Id)).Status.Should().Be("Validated");
     }
 
     [Fact]
@@ -2770,6 +2879,7 @@ public sealed class ControlledOpeningBalancePostingTests
         var service = CreateService(db, tenantId);
         var batch = await service.CreateBatchAsync(CreateBalancedBatch(fixture.Period.Id, fixture.Cash.Id, fixture.Equity.Id));
         await service.SubmitForApprovalAsync(batch.Id);
+        await ApproveBatchAsync(db, batch.Id);
         await service.PostAsync(batch.Id);
         return fixture;
     }
@@ -2780,7 +2890,8 @@ public sealed class ControlledOpeningBalancePostingTests
         bool withAudit = false,
         IWorkflowService? workflow = null,
         IFinanceAuditService? auditOverride = null,
-        ILogger<OpeningBalanceService>? logger = null)
+        ILogger<OpeningBalanceService>? logger = null,
+        bool withoutWorkflow = false)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var audit = auditOverride ?? (withAudit
@@ -2797,8 +2908,9 @@ public sealed class ControlledOpeningBalancePostingTests
             currentUser.Object,
             postingEngine,
             audit,
-            workflow,
-            logger);
+            withoutWorkflow ? null : workflow ?? CreatePendingOpeningWorkflow(),
+            logger,
+            reversalPolicyService: new FinanceReversalPolicyService(db, currentUser.Object));
     }
 
     private static IWorkflowService CreateCompletedOpeningWorkflow()
@@ -2887,11 +2999,12 @@ public sealed class ControlledOpeningBalancePostingTests
             Id = Guid.NewGuid(), TenantId = tenantId, SupplierCode = $"SUP-{tenantId:N}"[..12],
             Name = "TDC cutover supplier", IsActive = true, Status = "Active", TaxId = "TDC-SUP-TIN"
         };
-        var customer = new Customer
+        var customer = new BusinessPartner
         {
-            Id = Guid.NewGuid(), TenantId = tenantId, CustomerCode = $"CUS-{tenantId:N}"[..12],
-            CustomerName = "TDC cutover customer", ReferenceNumber = $"CUS-{tenantId:N}"[..18],
-            Status = "Active", IsActive = true, CurrencyCode = "GHS"
+            Id = Guid.NewGuid(), TenantId = tenantId, PartnerCode = $"CUS-{tenantId:N}"[..12],
+            CustomerAccountNumber = $"AR-{tenantId:N}"[..12], PartnerName = "TDC cutover customer",
+            PartnerType = "Customer", RegistrationStatus = "Active", ApprovalStatus = "Approved",
+            IsActive = true, Currency = "GHS"
         };
         var withholdingTax = new Tax
         {
@@ -2901,7 +3014,7 @@ public sealed class ControlledOpeningBalancePostingTests
             TaxPayableAccountId = whtPayable.Id, TaxReceivableAccountId = whtReceivable.Id
         };
         db.Suppliers.Add(supplier);
-        db.Set<Customer>().Add(customer);
+        db.BusinessPartners.Add(customer);
         db.Taxes.Add(withholdingTax);
         db.FinanceSettings.Add(new FinanceSettings
         {
@@ -3173,7 +3286,7 @@ public sealed class ControlledOpeningBalancePostingTests
         Account WhtPayable,
         Account WhtReceivable,
         Supplier Supplier,
-        Customer Customer,
+        BusinessPartner Customer,
         Tax WithholdingTax);
     private sealed record FixedAssetOpeningFixture(
         FixedAsset Asset,

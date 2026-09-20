@@ -10,9 +10,15 @@ public class TenderConfiguration : IEntityTypeConfiguration<Tender>
     public void Configure(EntityTypeBuilder<Tender> builder)
     {
         builder.ToTable("Tenders", table =>
-            table.HasTrigger("TR_Tenders_SourcingReleaseGuard"));
+        {
+            table.HasTrigger("TR_Tenders_SourcingReleaseGuard");
+            table.HasTrigger("TR_Tenders_ControlledDocumentPublicationGuard");
+            table.HasTrigger("TR_Tenders_BidValidityTerms_Immutable");
+            table.HasTrigger("TR_Tenders_ApprovalPolicy");
+        });
 
         builder.HasKey(t => t.Id);
+        builder.Property(t => t.ApprovalRequired).HasDefaultValue(true);
 
         builder.Property(t => t.TenderNumber)
             .IsRequired()

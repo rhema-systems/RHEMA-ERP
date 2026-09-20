@@ -316,7 +316,7 @@ public sealed class QuantitySurveySubcontractChargeService(
                 charge.Id, charge.ApprovalWorkflowDefinitionId);
             if (!result.ExecutionResult.Success || result.Outcome != WorkflowOutcome.Pending)
                 throw Conflict(result.ExecutionResult.Message ?? "The charge workflow must stop at an independent approval step.");
-            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Subcontract).ApplySubmitOutcome(charge, result.Outcome, UserId);
+            workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Subcontract).ApplySubmitOutcome(charge, result, UserId);
             charge.Status = QuantitySurveySubcontractChargeStatuses.PendingApproval; charge.ApprovalStatus = "Pending";
             charge.WorkflowInstanceId = result.ExecutionResult.WorkflowInstanceId; charge.SubmittedById = UserId; charge.SubmittedAt = DateTime.UtcNow;
         });

@@ -100,4 +100,16 @@ describe('purchase-order approved source client', () => {
       'Your assigned Security roles do not authorize this procurement action. Ask a Security administrator to assign the permission required for the action and try again. (PO_COMPLIANCE_FORBIDDEN)'
     );
   });
+
+  it('shows field validation errors instead of only the generic ProblemDetails title', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      title: 'One or more validation errors occurred.',
+      errors: { '$.sourceId': ['Invalid identifier.'], Items: ['At least one line is required.'] },
+      code: 'VALIDATION_FAILED'
+    }), { status: 400 })));
+    await expect(purchasingService.createPurchaseOrder({
+      sourceType: 'ApprovedException', sourceId: 'source-1', supplierId: 'supplier-1',
+      requestedById: 'user-1', items: []
+    })).rejects.toThrow('One or more validation errors occurred. $.sourceId: Invalid identifier. Items: At least one line is required. (VALIDATION_FAILED)');
+  });
 });

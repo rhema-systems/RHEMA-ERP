@@ -1,3 +1,5 @@
+import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
+
 export type DepreciationMethod =
   | 'StraightLine'
   | 'DecliningBalance'
@@ -98,12 +100,25 @@ export interface FixedAsset {
   disposalDate?: string;
   functionalCurrencyCode: string;
   transactionCurrencyCode?: string;
+  exchangeRate?: number;
+  exchangeRateId?: string;
+  exchangeRateDate?: string;
   sourceDocumentType?: string;
   sourceDocumentId?: string;
   sourceDocumentLineId?: string;
   journalEntryId?: string;
   postingEventId?: string;
   capitalizedAt?: string;
+  capitalizationApprovalSnapshot?: FixedAssetCapitalizationApprovalSnapshot;
+  financeDimensions?: FinanceSourceDocumentDimension;
+  capitalizationApprovalSnapshotHash?: string;
+  capitalizationApprovalWorkflowInstanceId?: string;
+  capitalizationApprovalSubmittedByUserId?: string;
+  capitalizationApprovalSubmittedAt?: string;
+  capitalizationApprovalApprovedByUserId?: string;
+  capitalizationApprovalApprovedAt?: string;
+  capitalizationApprovalInvalidatedAt?: string;
+  capitalizationApprovalInvalidationReason?: string;
   capitalizationReversalJournalEntryId?: string;
   capitalizationReversalPostingEventId?: string;
   capitalizationReversedAt?: string;
@@ -115,6 +130,48 @@ export interface FixedAsset {
   updatedAt?: string;
   updatedBy?: string;
   bookValues: FixedAssetBookValue[];
+}
+
+export interface FixedAssetCapitalizationApprovalSnapshot {
+  version: number;
+  fixedAssetId: string;
+  assetCode: string;
+  fixedAssetCategoryId: string;
+  debitAccountId: string;
+  creditAccountId: string;
+  usesCategoryAucAccount: boolean;
+  capitalizationDate: string;
+  transactionAmount: number;
+  functionalCurrencyCode: string;
+  transactionCurrencyCode: string;
+  exchangeRate: number;
+  exchangeRateId?: string;
+  exchangeRateDate: string;
+  reference: string;
+  reason: string;
+  sourceDocumentType: string;
+  sourceDocumentId: string;
+  sourceDocumentLineId?: string;
+  assetEvidenceHash: string;
+}
+
+export interface SubmitFixedAssetCapitalizationDto {
+  capitalizationDate: string;
+  creditAccountId?: string;
+  reference?: string;
+  reason: string;
+  comments?: string;
+  amount?: number;
+  transactionCurrencyCode?: string;
+  exchangeRate?: number;
+  exchangeRateId?: string;
+  exchangeRateDate?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
+}
+
+export interface FixedAssetApprovalActionDto {
+  reason?: string;
+  comments?: string;
 }
 
 export interface FixedAssetBookValue {
@@ -233,6 +290,7 @@ export interface RunDepreciationDto {
   postingDate?: string;
   bookClassification?: string;
   productionUsageEntries?: FixedAssetProductionUsage[];
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface FixedAssetProductionUsage {
@@ -259,6 +317,16 @@ export interface AssetDepreciationSchedule {
   cumulativeProductionUnitsAfter: number;
   productionEvidenceReference?: string;
   productionEvidenceNotes?: string;
+  placedInServiceDateSnapshot?: string;
+  depreciationConventionSnapshot: DepreciationConvention;
+  conventionFactor: number;
+  conventionBasis: string;
+  conventionEligibleFromDate?: string;
+  conventionEligibleToDate?: string;
+  fiscalPeriodStartDateSnapshot?: string;
+  fiscalPeriodEndDateSnapshot?: string;
+  fiscalYearStartDateSnapshot?: string;
+  fiscalYearEndDateSnapshot?: string;
   accumulatedDepreciation: number;
   netBookValue: number;
   isPosted: boolean;
@@ -271,6 +339,36 @@ export interface AssetDepreciationSchedule {
   reversalJournalEntryId?: string;
   reversalPostingEventId?: string;
   depreciationReversalId?: string;
+}
+
+export interface FixedAssetLocationOption {
+  id: string;
+  locationLevelId: string;
+  code: string;
+  name: string;
+  displayName: string;
+  levelName?: string;
+  parentLocationId?: string;
+  isLeaf: boolean;
+}
+
+export interface FixedAssetDepreciationRun {
+  id: string;
+  fiscalPeriodId: string;
+  fixedAssetId?: string;
+  bookClassification: string;
+  postingDate: string;
+  status: 'Calculated' | 'PendingApproval' | 'Approved' | 'Rejected' | 'Posted' | 'Failed' | 'Reversed';
+  totalDepreciationAmount: number;
+  correctionSequence: number;
+  journalEntryId?: string;
+  postingEventId?: string;
+  calculatedAt?: string;
+  postedAt?: string;
+  failedAt?: string;
+  failureReason?: string;
+  assetCount: number;
+  preparedBy?: string;
 }
 
 export type FixedAssetDepreciationReversalStatus =
@@ -410,6 +508,7 @@ export interface AssetTransfer {
   journalEntryId?: string;
   postingEventId?: string;
   createdAt: string;
+  financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface RequestAssetTransferDto {
@@ -427,6 +526,7 @@ export interface RequestAssetTransferDto {
   reason?: string;
   transferCost?: number;
   idempotencyKey?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface ApproveAssetTransferDto {
@@ -510,6 +610,7 @@ export interface AssetDisposal {
   saleTaxGroupId?: string;
   saleTaxTreatment: AssetDisposalSaleTaxTreatment;
   settlementPaymentTermId?: string;
+  financeDimensions?: FinanceSourceDocumentDimension;
   settlementPaymentMethodId?: string;
   settlementBankAccountId?: string;
   settlementLiquidityAccountId?: string;
@@ -557,6 +658,7 @@ export interface RequestAssetDisposalDto {
   finalDepreciationProductionUnits?: number;
   finalDepreciationEvidenceReference?: string;
   finalDepreciationEvidenceNotes?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface ApproveAssetDisposalDto {
@@ -653,6 +755,7 @@ export interface CreateAssetValuationDto {
   valuationReportReference?: string;
   reason?: string;
   notes?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface CreateBulkAssetValuationDto {
@@ -665,6 +768,7 @@ export interface CreateBulkAssetValuationDto {
   valuationReportReference?: string;
   reason?: string;
   notes?: string;
+  financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface AssetValuation {
@@ -697,6 +801,7 @@ export interface AssetValuation {
   journalEntryId?: string;
   postedDate?: string;
   createdAt: string;
+  financeDimensions?: FinanceSourceDocumentDimension;
 }
 
 export interface RequestAssetValuationCorrectionDto {

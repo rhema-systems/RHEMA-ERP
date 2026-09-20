@@ -737,6 +737,12 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
         };
         CaptureAttendance(attendance, appointment);
         await Attendance.AddAsync(attendance);
+        // A failed quorum is a historical attempt, not a live attendance tally.
+        // Reopen the meeting before saving new attendance so the SQL lifecycle
+        // guard does not compare it with that stale attempt. Retain its snapshot
+        // and audit evidence; only ConfirmQuorumAsync can confirm the new quorum.
+        if (meeting.Status == ProcurementEvaluationMeetingStatus.QuorumFailed)
+            meeting.Status = ProcurementEvaluationMeetingStatus.Draft;
         Touch(meeting, now);
         await Meetings.UpdateAsync(meeting);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1297,7 +1303,9 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
                 "The scorer or recall requester cannot approve the shared recall workflow.");
         var sod = await _sodGuard.EnforceAsync(new ProcurementSodGuardRequest
         {
-            ControlCode = "SOD-EVALUATION-SCORER-RECALL-APPROVER",
+            // A recall is a procurement transaction: its requester and original
+            // scorer remain makers, and its decision must use the shared checker.
+            ControlCode = "SOD-INITIATOR-APPROVER",
             SourceType = EventType,
             SourceReference = recall.ScoreSheet.CommitteeControl.SourceReference,
             ProhibitedActorUserIds = new List<Guid>
@@ -1508,6 +1516,31 @@ public sealed partial class ProcurementEvaluationCommitteeControlService
 
         if (state is null)
         {
+            var sourcing = tender.SourcingCase;
+            var requiresAdvanced = sourcing is null || ProcurementTenderRouting.RequiresControlledLifecycle(
+                sourcing.SelectedMethod,
+                ProcurementTenderRouting.HasAdvancedAuthority(sourcing.AuthorityRouteId, sourcing.AuthorityRouteReference));
+            if (!requiresAdvanced && (tender.Status is "Published" or "Closed" or "Awarded") &&
+                tender.SubmissionDeadline.HasValue)
+            {
+                var hasSubmission = await _unitOfWork.Repository<TenderBid>().GetQueryable(bid =>
+                        bid.TenantId == _currentUser.TenantId && bid.TenderId == tender.Id && !bid.IsDeleted &&
+                        (bid.Status == "Submitted" || bid.Status == "Opened" || bid.Status == "UnderEvaluation" ||
+                         bid.Status == "Evaluated" || bid.Status == "Awarded") &&
+                        bid.SubmittedDate != default && bid.SubmittedDate <= tender.SubmissionDeadline.Value)
+                    .AnyAsync(cancellationToken);
+                var preparation = hasSubmission ? LifecycleGate.Ready : LifecycleGate.Blocked(
+                    "EVALUATION_COMMITTEE_BID_SUBMISSION_REQUIRED",
+                    "At least one on-time sealed bid must be registered before the evaluation committee is constituted or begins member actions.");
+                return source with
+                {
+                    CommitteePreparationGate = preparation,
+                    MeetingGate = !hasSubmission ? preparation : DateTime.UtcNow < tender.SubmissionDeadline.Value
+                        ? LifecycleGate.Blocked("EVALUATION_MEETING_BEFORE_SUBMISSION_DEADLINE",
+                            "The bidding window must close before an evaluation meeting, attendance or quorum can be recorded.")
+                        : LifecycleGate.Ready
+                };
+            }
             var notPublished = LifecycleGate.Blocked(
                 "EVALUATION_COMMITTEE_TENDER_NOT_PUBLISHED",
                 "Publish the approved tender and open its governed bidding window before constituting the evaluation committee.");

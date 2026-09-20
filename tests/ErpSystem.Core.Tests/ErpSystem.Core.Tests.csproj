@@ -31,6 +31,125 @@
     <ProjectReference Include="..\..\src\ErpSystem.Shared\ErpSystem.Shared.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!--
+      Every source below is individually named because an existing regression executes its Up/Down
+      operations, SQL constants, or final trigger builder. There is deliberately no archive glob:
+      unrelated historical sources remain uncompiled, and the Data product assembly continues to
+      exclude the complete LegacyMigrationsArchive and discover only the true current-model baseline.
+    -->
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260807233500_FixSupplierEvidencePackBindingLineageTrigger.cs"
+             Link="ArchivedMigrationTestSources\20260807233500_FixSupplierEvidencePackBindingLineageTrigger.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260807234500_RecordEverySystemExceptionOccurrence.cs"
+             Link="ArchivedMigrationTestSources\20260807234500_RecordEverySystemExceptionOccurrence.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260809173500_AllowControlledSupplierApplicantContactCorrection.cs"
+             Link="ArchivedMigrationTestSources\20260809173500_AllowControlledSupplierApplicantContactCorrection.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260809204500_AllowPreProvisioningSupplierContactCorrection.cs"
+             Link="ArchivedMigrationTestSources\20260809204500_AllowPreProvisioningSupplierContactCorrection.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260827090000_AlignSupplierOnboardingPartnerCategories.cs"
+             Link="ArchivedMigrationTestSources\20260827090000_AlignSupplierOnboardingPartnerCategories.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260829170000_AddPurchaseRequisitionLinePlanItemLineage.cs"
+             Link="ArchivedMigrationTestSources\20260829170000_AddPurchaseRequisitionLinePlanItemLineage.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260831194500_GrantTenderPaymentVerificationPermission.cs"
+             Link="ArchivedMigrationTestSources\20260831194500_GrantTenderPaymentVerificationPermission.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260812113000_AddCategoryAwareAcceptedSupply.cs" Link="ArchivedMigrationTestSources\20260812113000_AddCategoryAwareAcceptedSupply.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260821050000_AddCivilEngineeringMaintenanceAssessments.cs" Link="ArchivedMigrationTestSources\20260821050000_AddCivilEngineeringMaintenanceAssessments.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260821063000_AddCivilEngineeringMaintenanceCompletionControls.cs" Link="ArchivedMigrationTestSources\20260821063000_AddCivilEngineeringMaintenanceCompletionControls.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs.cs" Link="ArchivedMigrationTestSources\20260821053000_AddCivilEngineeringMaintenanceCostingHandoffs.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260821060000_AddCivilEngineeringMaintenanceExecutionLinks.cs" Link="ArchivedMigrationTestSources\20260821060000_AddCivilEngineeringMaintenanceExecutionLinks.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260821033000_AddCivilEngineeringMaintenanceIntakes.cs" Link="ArchivedMigrationTestSources\20260821033000_AddCivilEngineeringMaintenanceIntakes.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260820150000_AddCivilEngineeringProjectEngineerAssignments.cs" Link="ArchivedMigrationTestSources\20260820150000_AddCivilEngineeringProjectEngineerAssignments.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260904123000_AddEvaluationCommitteeDraftRetirement.cs" Link="ArchivedMigrationTestSources\20260904123000_AddEvaluationCommitteeDraftRetirement.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906010000_AddGovernedSupplierRiskDecisionWithdrawal.cs" Link="ArchivedMigrationTestSources\20260906010000_AddGovernedSupplierRiskDecisionWithdrawal.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260820100000_AddInventoryOpeningStockBook.cs" Link="ArchivedMigrationTestSources\20260820100000_AddInventoryOpeningStockBook.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260724020403_AddProcurementAwardReadinessControls.cs" Link="ArchivedMigrationTestSources\20260724020403_AddProcurementAwardReadinessControls.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260721100238_AddProcurementMasterDataChangeControls.cs" Link="ArchivedMigrationTestSources\20260721100238_AddProcurementMasterDataChangeControls.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260812153000_AddProcurementOperationalReportCatalogue.cs" Link="ArchivedMigrationTestSources\20260812153000_AddProcurementOperationalReportCatalogue.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260829160000_AddQuantitySurveyEstimateSourceSnapshots.cs" Link="ArchivedMigrationTestSources\20260829160000_AddQuantitySurveyEstimateSourceSnapshots.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260809165157_AddQuantitySurveyPriceIndexImportWorkflow.cs" Link="ArchivedMigrationTestSources\20260809165157_AddQuantitySurveyPriceIndexImportWorkflow.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260810165005_AddQuantitySurveyRetentionReleaseLifecycle.cs" Link="ArchivedMigrationTestSources\20260810165005_AddQuantitySurveyRetentionReleaseLifecycle.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260818103000_AddSupplierDebitNoteLifecycleAndApplications.cs" Link="ArchivedMigrationTestSources\20260818103000_AddSupplierDebitNoteLifecycleAndApplications.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260831203000_AddTenderFeeFinancePostingLineage.cs" Link="ArchivedMigrationTestSources\20260831203000_AddTenderFeeFinancePostingLineage.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260908153000_AlignContractPurchaseOrderCommercialIdentity.cs" Link="ArchivedMigrationTestSources\20260908153000_AlignContractPurchaseOrderCommercialIdentity.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906030000_AlignLegacyAwardReadinessWithLockedCurrentEvaluations.cs" Link="ArchivedMigrationTestSources\20260906030000_AlignLegacyAwardReadinessWithLockedCurrentEvaluations.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260907042000_AlignPettyPurchaseAwardReadinessAuthority.cs" Link="ArchivedMigrationTestSources\20260907042000_AlignPettyPurchaseAwardReadinessAuthority.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260826190000_AlignPurchaseOrderCommitmentWithRequisition.cs" Link="ArchivedMigrationTestSources\20260826190000_AlignPurchaseOrderCommitmentWithRequisition.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes.cs" Link="ArchivedMigrationTestSources\20260826210000_AlignPurchaseOrderSourceTriggerWithSupportedRoutes.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster.cs" Link="ArchivedMigrationTestSources\20260827211500_AlignRfqCommercialIdentityWithReceiptItemMaster.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906230000_AlignStoreReturnWithOriginalIssueValuation.cs" Link="ArchivedMigrationTestSources\20260906230000_AlignStoreReturnWithOriginalIssueValuation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260901033000_AllowGovernedTenderLineageRecovery.cs" Link="ArchivedMigrationTestSources\20260901033000_AllowGovernedTenderLineageRecovery.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260902110000_AllowHistoricalEvaluationCommitteeSourceLineage.cs" Link="ArchivedMigrationTestSources\20260902110000_AllowHistoricalEvaluationCommitteeSourceLineage.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912113000_AllowOptionalProcurementApproval.cs" Link="ArchivedMigrationTestSources\20260912113000_AllowOptionalProcurementApproval.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260825170000_AllowReleaseOnlyProcurementSourceEntry.cs" Link="ArchivedMigrationTestSources\20260825170000_AllowReleaseOnlyProcurementSourceEntry.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260826180000_AllowReleaseOnlyPurchaseOrderSourceLineage.cs" Link="ArchivedMigrationTestSources\20260826180000_AllowReleaseOnlyPurchaseOrderSourceLineage.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260826170000_AllowReleaseOnlyRfqAwardTransition.cs" Link="ArchivedMigrationTestSources\20260826170000_AllowReleaseOnlyRfqAwardTransition.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260904171000_AllowStaleSourcingCaseTerminalRecovery.cs" Link="ArchivedMigrationTestSources\20260904171000_AllowStaleSourcingCaseTerminalRecovery.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260904203000_AllowTenderDocumentWorkflowContentBinding.cs" Link="ArchivedMigrationTestSources\20260904203000_AllowTenderDocumentWorkflowContentBinding.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260904183000_AllowTerminalSourcingCaseRetry.cs" Link="ArchivedMigrationTestSources\20260904183000_AllowTerminalSourcingCaseRetry.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260905193000_AllowUnpublishedTenderScheduleReschedule.cs" Link="ArchivedMigrationTestSources\20260905193000_AllowUnpublishedTenderScheduleReschedule.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912170000_ArInvoiceOptionalWorkflow.cs" Link="ArchivedMigrationTestSources\20260912170000_ArInvoiceOptionalWorkflow.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment.cs" Link="ArchivedMigrationTestSources\20260829210000_EnforceAtomicPurchaseOrderBudgetCommitment.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260721183000_EnsureProcurementMasterDataCancellationTransition.cs" Link="ArchivedMigrationTestSources\20260721183000_EnsureProcurementMasterDataCancellationTransition.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260812170000_ExtendControlledSourcingMethods.cs" Link="ArchivedMigrationTestSources\20260812170000_ExtendControlledSourcingMethods.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260812140000_GovernEmergencyPurchaseExceptions.cs" Link="ArchivedMigrationTestSources\20260812140000_GovernEmergencyPurchaseExceptions.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260313114533_InitialBaseline.cs" Link="ArchivedMigrationTestSources\20260313114533_InitialBaseline.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912120000_InventoryOptionalApprovalSnapshots.cs" Link="ArchivedMigrationTestSources\20260912120000_InventoryOptionalApprovalSnapshots.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260813063001_INVREQFU002MaintenanceReservationLifecycle.cs" Link="ArchivedMigrationTestSources\20260813063001_INVREQFU002MaintenanceReservationLifecycle.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260813150000_INVREQFU003AllowPostedFullReturnReversal.cs" Link="ArchivedMigrationTestSources\20260813150000_INVREQFU003AllowPostedFullReturnReversal.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260813103157_INVREQFU003IssueFinanceAssetLifecycle.cs" Link="ArchivedMigrationTestSources\20260813103157_INVREQFU003IssueFinanceAssetLifecycle.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind.cs" Link="ArchivedMigrationTestSources\20260814143000_INVREQFU004AllowDraftInspectionWorkflowRebind.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260813171000_INVREQFU004RequireCleanTransferEvidence.cs" Link="ArchivedMigrationTestSources\20260813171000_INVREQFU004RequireCleanTransferEvidence.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912200000_JournalBatchOptionalWorkflow.cs" Link="ArchivedMigrationTestSources\20260912200000_JournalBatchOptionalWorkflow.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912155000_OptionalControlledTenderApproval.cs" Link="ArchivedMigrationTestSources\20260912155000_OptionalControlledTenderApproval.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912210000_OptionalExceptionalAndPrequalificationApproval.cs" Link="ArchivedMigrationTestSources\20260912210000_OptionalExceptionalAndPrequalificationApproval.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912153000_OptionalRfqEvaluationApproval.cs" Link="ArchivedMigrationTestSources\20260912153000_OptionalRfqEvaluationApproval.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260803183000_Phase6ReviewCycleCountAdjustmentRetirement.cs" Link="ArchivedMigrationTestSources\20260803183000_Phase6ReviewCycleCountAdjustmentRetirement.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260803213000_Phase6ReviewExactBinNegativeStockGuard.cs" Link="ArchivedMigrationTestSources\20260803213000_Phase6ReviewExactBinNegativeStockGuard.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912231000_PurchaseReturnOptionalApproval.cs" Link="ArchivedMigrationTestSources\20260912231000_PurchaseReturnOptionalApproval.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912130000_ReceiptInspectionOptionalWorkflow.cs" Link="ArchivedMigrationTestSources\20260912130000_ReceiptInspectionOptionalWorkflow.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260906050000_SeparateAwardVerificationDocumentRequirement.cs" Link="ArchivedMigrationTestSources\20260906050000_SeparateAwardVerificationDocumentRequirement.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260804004500_SerialTrackingTransactionLines.cs" Link="ArchivedMigrationTestSources\20260804004500_SerialTrackingTransactionLines.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912235000_StockAdjustmentSequentialFifoValuation.cs" Link="ArchivedMigrationTestSources\20260912235000_StockAdjustmentSequentialFifoValuation.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260729084856_TDC0401FrameworkAgreements.cs" Link="ArchivedMigrationTestSources\20260729084856_TDC0401FrameworkAgreements.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730024500_TDC0401FrameworkRevisionIndexes.cs" Link="ArchivedMigrationTestSources\20260730024500_TDC0401FrameworkRevisionIndexes.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730183000_TDC0402ExtensionSafeCallOffLineage.cs" Link="ArchivedMigrationTestSources\20260730183000_TDC0402ExtensionSafeCallOffLineage.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260729124416_TDC0402FrameworkCallOffs.cs" Link="ArchivedMigrationTestSources\20260729124416_TDC0402FrameworkCallOffs.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730215500_TDC0402SharedFrameworkPriceLines.cs" Link="ArchivedMigrationTestSources\20260730215500_TDC0402SharedFrameworkPriceLines.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730192500_TDC0402TerminalReviewPaths.cs" Link="ArchivedMigrationTestSources\20260730192500_TDC0402TerminalReviewPaths.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730204500_TDC0403CommercialCapacityHardStops.cs" Link="ArchivedMigrationTestSources\20260730204500_TDC0403CommercialCapacityHardStops.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730031000_TDC0403ExceptionalFrameworkLineage.cs" Link="ArchivedMigrationTestSources\20260730031000_TDC0403ExceptionalFrameworkLineage.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260729210000_TDC0403FrameworkLineageFailClosed.cs" Link="ArchivedMigrationTestSources\20260729210000_TDC0403FrameworkLineageFailClosed.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260729153000_TDC0403MandatoryPurchaseOrderSources.cs" Link="ArchivedMigrationTestSources\20260729153000_TDC0403MandatoryPurchaseOrderSources.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730150000_TDC0403OrdinarySourceTriggerCorrections.cs" Link="ArchivedMigrationTestSources\20260730150000_TDC0403OrdinarySourceTriggerCorrections.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730030000_TDC0403RfqAwardSupplierHardStop.cs" Link="ArchivedMigrationTestSources\20260730030000_TDC0403RfqAwardSupplierHardStop.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730032601_TDC0406PurchaseOrderAmendments.cs" Link="ArchivedMigrationTestSources\20260730032601_TDC0406PurchaseOrderAmendments.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730132714_TDC0407ContractActivationGate.cs" Link="ArchivedMigrationTestSources\20260730132714_TDC0407ContractActivationGate.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260730171500_TDC0409WorksCloseoutControl.cs" Link="ArchivedMigrationTestSources\20260730171500_TDC0409WorksCloseoutControl.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260801073000_TDC0501LegacyReceiptCompatibility.cs" Link="ArchivedMigrationTestSources\20260801073000_TDC0501LegacyReceiptCompatibility.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260731123000_TDC0501ReceiptSourceControl.cs" Link="ArchivedMigrationTestSources\20260731123000_TDC0501ReceiptSourceControl.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260731140000_TDC0502ReceiptInspectionClosure.cs" Link="ArchivedMigrationTestSources\20260731140000_TDC0502ReceiptInspectionClosure.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260801140000_TDC0502ReceiptReplayAndReplacementLineage.cs" Link="ArchivedMigrationTestSources\20260801140000_TDC0502ReceiptReplayAndReplacementLineage.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260731153000_TDC0503ReceiptSodClosure.cs" Link="ArchivedMigrationTestSources\20260731153000_TDC0503ReceiptSodClosure.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260731170000_TDC0504MandatoryThreeWayMatch.cs" Link="ArchivedMigrationTestSources\20260731170000_TDC0504MandatoryThreeWayMatch.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260731193000_TDC0505PaymentReadiness.cs" Link="ArchivedMigrationTestSources\20260731193000_TDC0505PaymentReadiness.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260801060000_TDC0505TerminalReceiptEligibility.cs" Link="ArchivedMigrationTestSources\20260801060000_TDC0505TerminalReceiptEligibility.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802033000_TDC0506EffectivePaymentAllocations.cs" Link="ArchivedMigrationTestSources\20260802033000_TDC0506EffectivePaymentAllocations.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260801101500_TDC0506HistoricalPaymentSodCompatibility.cs" Link="ArchivedMigrationTestSources\20260801101500_TDC0506HistoricalPaymentSodCompatibility.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260731213000_TDC0506InvoiceProcessorPaymentSod.cs" Link="ArchivedMigrationTestSources\20260731213000_TDC0506InvoiceProcessorPaymentSod.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260801114500_TDC0509IssuedSnapshotTransition.cs" Link="ArchivedMigrationTestSources\20260801114500_TDC0509IssuedSnapshotTransition.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260801013000_TDC0509ReceiptDocumentLifecycle.cs" Link="ArchivedMigrationTestSources\20260801013000_TDC0509ReceiptDocumentLifecycle.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260801150000_TDC0601InventoryItemIdentifiers.cs" Link="ArchivedMigrationTestSources\20260801150000_TDC0601InventoryItemIdentifiers.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802023830_TDC0605DirectedWarehouseOperations.cs" Link="ArchivedMigrationTestSources\20260802023830_TDC0605DirectedWarehouseOperations.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802033223_TDC0606ControlledInventoryIssue.cs" Link="ArchivedMigrationTestSources\20260802033223_TDC0606ControlledInventoryIssue.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments.cs" Link="ArchivedMigrationTestSources\20260802052546_TDC0607ControlledInventoryReturnsAndAdjustments.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802095353_TDC0608ControlledInventoryTransfers.cs" Link="ArchivedMigrationTestSources\20260802095353_TDC0608ControlledInventoryTransfers.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802105457_TDC0609ControlledCycleCounts.cs" Link="ArchivedMigrationTestSources\20260802105457_TDC0609ControlledCycleCounts.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802153000_TDC0610NegativeStockControl.cs" Link="ArchivedMigrationTestSources\20260802153000_TDC0610NegativeStockControl.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802160000_TDC0611ProjectInventoryReservations.cs" Link="ArchivedMigrationTestSources\20260802160000_TDC0611ProjectInventoryReservations.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260802162449_TDC0612InventoryReplenishment.cs" Link="ArchivedMigrationTestSources\20260802162449_TDC0612InventoryReplenishment.cs" />
+    <Compile Include="..\..\src\ErpSystem.Data\LegacyMigrationsArchive\20260912150000_UnitJournalEntryOptionalWorkflow.cs" Link="ArchivedMigrationTestSources\20260912150000_UnitJournalEntryOptionalWorkflow.cs" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' != 'true'">
     <Compile Include="Services\Crm\**\*.cs" />
     <Compile Include="Services\Deployment\**\*.cs" />
@@ -43,6 +162,12 @@
     <Compile Include="Services\Inventory\InventoryTrackingControlServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryDirectedOperationServiceTests.cs" />
     <Compile Include="Services\Inventory\InventoryIssueControlTests.cs" />
+    <Compile Include="Services\Inventory\InventoryIssueValuationTests.cs" />
+    <Compile Include="Services\Inventory\InventoryCurrentCostProjectionTests.cs" />
+    <Compile Include="Services\Inventory\InventoryTransferValuationTests.cs" />
+    <Compile Include="Services\Inventory\InventoryTransferNewBinBalanceTests.cs" />
+    <Compile Include="Services\Inventory\InventoryReturnValuationSqlTests.cs" />
+    <Compile Include="Services\Inventory\InventoryRequisitionDraftTests.cs" />
     <Compile Include="Services\Inventory\InventoryReturnAdjustmentControlTests.cs" />
     <Compile Include="Services\Inventory\InventoryOpeningStockGovernanceTests.cs" />
     <Compile Include="Services\Inventory\InventoryTransferControlTests.cs" />
@@ -58,6 +183,17 @@
     <Compile Include="Services\Inventory\InventoryStoresArchitectureSqlServerIntegrationTests.cs" />
     <Compile Include="Services\Inventory\E2E010ProjectMaterialLifecycleTests.cs" />
     <Compile Include="Services\Inventory\E2E012CycleCountFinanceLifecycleTests.cs" />
+    <Compile Include="Services\Inventory\PhysicalCountPostingEligibilityTests.cs" />
+    <Compile Include="Services\Inventory\InventoryOptionalApprovalTests.cs" />
+    <Compile Include="Services\Inventory\PurchaseReturnLifecycleTests.cs" />
+    <Compile Include="Services\Inventory\WarehouseDefaultLocationServiceTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentLocationValuationTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentSequentialFifoMigrationTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentFifoReversalTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentTrackedStateTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentCountFreezeOrderingTests.cs" />
+    <Compile Include="Services\Inventory\StockAdjustmentDirectDisposalSourceTests.cs" />
+    <Compile Include="Services\Finance\FinanceProducerApprovedExecutionContractTests.cs" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TdcFocusedTestBuild)' == 'true'">

@@ -9,7 +9,7 @@ public sealed class CivilEngineeringMaintenanceIntakeMigrationGuardTests
     public void Migration_enforces_tenant_bound_source_dms_workflow_and_append_only_history()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", "20260821033000_AddCivilEngineeringMaintenanceIntakes.cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", "20260821033000_AddCivilEngineeringMaintenanceIntakes.cs"));
 
         migration.Should().Contain("CK_CivilEngineeringMaintenanceIntakes_Target")
             .And.Contain("CK_CivilEngineeringMaintenanceIntakes_SourceLink")

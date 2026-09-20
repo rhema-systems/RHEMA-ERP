@@ -44,13 +44,7 @@ public sealed class PurchaseReturnsController : ControllerBase
     {
         try
         {
-            var values = await _grns.GetAllAsync();
-            var sourceIds = values
-                .Where(value => value.Status == ErpSystem.Core.Enums.GRNStatus.StockUpdated)
-                .Select(value => value.Id)
-                .ToList();
-            var sourceDetails = await Task.WhenAll(sourceIds.Select(id => _grns.GetByIdAsync(id)));
-            return Ok(sourceDetails.Where(value => value is not null).Select(value => value!));
+            return Ok(await _returns.GetSourceGrnsAsync());
         }
         catch (Exception ex)
         {
@@ -72,13 +66,17 @@ public sealed class PurchaseReturnsController : ControllerBase
         }
     }
 
+    [HttpPut("{id:guid}")]
+    public async Task<ActionResult<PurchaseReturnDto>> Update(Guid id, [FromBody] CreatePurchaseReturnDto dto)
+        => await ExecuteAsync(() => _returns.UpdateAsync(id, dto, CurrentUserId()));
+
     [HttpPost("{id:guid}/submit")]
     public Task<ActionResult> Submit(Guid id) => MutationAsync(
-        () => _returns.SubmitForApprovalAsync(id, CurrentUserId()), "Supplier return submitted for independent approval.");
+        () => _returns.SubmitForApprovalAsync(id, CurrentUserId()), "Supplier return processed. Refresh the status for the next action.");
 
     [HttpPost("{id:guid}/approve")]
     public Task<ActionResult> Approve(Guid id) => MutationAsync(
-        () => _returns.ApproveAsync(id, CurrentUserId()), "Supplier return approved. Stock is unchanged until dispatch.");
+        () => _returns.ApproveAsync(id, CurrentUserId()), "Approval step recorded. Stock is unchanged until final approval and dispatch.");
 
     [HttpPost("{id:guid}/reject")]
     public Task<ActionResult> Reject(Guid id, [FromBody] SupplierReturnReasonRequest request) => MutationAsync(
@@ -120,6 +118,10 @@ public sealed class PurchaseReturnsController : ControllerBase
     {
         if (exception is InventorySupplierReturnException controlled)
             return StatusCode(controlled.StatusCode, Problem(controlled.Code, controlled.Message, controlled.StatusCode));
+        if (exception is UnauthorizedAccessException)
+            return StatusCode(StatusCodes.Status403Forbidden, Problem("INV_SUPPLIER_RETURN_FORBIDDEN", exception.Message, StatusCodes.Status403Forbidden));
+        if (exception is InvalidOperationException)
+            return StatusCode(StatusCodes.Status409Conflict, Problem("INV_SUPPLIER_RETURN_CONTROL_BLOCKED", exception.Message, StatusCodes.Status409Conflict));
         _logger.LogError(exception, "Supplier return request failed. Correlation {CorrelationId}", HttpContext.TraceIdentifier);
         return StatusCode(StatusCodes.Status500InternalServerError, Problem(fallbackCode, fallbackDetail, StatusCodes.Status500InternalServerError));
     }

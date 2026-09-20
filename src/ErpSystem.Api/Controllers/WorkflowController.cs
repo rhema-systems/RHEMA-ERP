@@ -767,7 +767,8 @@ public class WorkflowController : ControllerBase
             var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(
                 entityTypeRecord.Code ?? entityTypeRecord.Name ?? entityType);
 
-            var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString());
+            var instances = (await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, entityId.ToString()))
+                .Where(instance => instance.TenantId == tenantId && !instance.IsDeleted).ToList();
             var activeInstance = instances
                 .Where(i =>
                     i.Status == WorkflowInstanceStatus.Created ||
@@ -784,10 +785,11 @@ public class WorkflowController : ControllerBase
                     success = true,
                     data = new WorkflowEntitySummaryDto
                     {
-                        EntityType = entityTypeRecord.Code ?? entityTypeRecord.Name,
+                        EntityType = entityType,
                         EntityId = entityId,
                         HasActiveInstance = false,
                         ApprovalRequired = approvalRequired,
+                        HasWorkflowHistory = instances.Count > 0,
                         CanCurrentUserApprove = false
                     }
                 });
@@ -841,9 +843,10 @@ public class WorkflowController : ControllerBase
 
             var summary = new WorkflowEntitySummaryDto
             {
-                EntityType = status.EntityType,
+                EntityType = entityType,
                 EntityId = entityId,
                 HasActiveInstance = true,
+                HasWorkflowHistory = true,
                 ApprovalRequired = true,
                 WorkflowInstanceId = status.WorkflowInstanceId,
                 WorkflowName = status.WorkflowName,
@@ -955,7 +958,8 @@ public class WorkflowController : ControllerBase
                 var canonicalEntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType;
                 var approvalRequired = await _workflowService.HasActiveApprovalWorkflowAsync(canonicalEntityType);
 
-                var instances = await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, requestedEntityId.ToString());
+                var instances = (await _workflowInstanceRepository.GetByEntityAsync(entityTypeRecord.Id, requestedEntityId.ToString()))
+                    .Where(instance => instance.TenantId == tenantId && !instance.IsDeleted).ToList();
                 var activeInstance = instances
                     .Where(i =>
                         i.Status == WorkflowInstanceStatus.Created ||
@@ -969,10 +973,11 @@ public class WorkflowController : ControllerBase
                 {
                     return new WorkflowEntitySummaryDto
                     {
-                        EntityType = entityTypeRecord.Code ?? entityTypeRecord.Name ?? requestedEntityType,
+                        EntityType = requestedEntityType,
                         EntityId = requestedEntityId,
                         HasActiveInstance = false,
                         ApprovalRequired = approvalRequired,
+                        HasWorkflowHistory = instances.Count > 0,
                         CanCurrentUserApprove = false
                     };
                 }
@@ -1026,9 +1031,10 @@ public class WorkflowController : ControllerBase
 
                 return new WorkflowEntitySummaryDto
                 {
-                    EntityType = status.EntityType,
+                    EntityType = requestedEntityType,
                     EntityId = requestedEntityId,
                     HasActiveInstance = true,
+                    HasWorkflowHistory = true,
                     ApprovalRequired = true,
                     WorkflowInstanceId = status.WorkflowInstanceId,
                     WorkflowName = status.WorkflowName,
@@ -2450,7 +2456,7 @@ public class WorkflowController : ControllerBase
     /// Processes an approval decision
     /// </summary>
     [HttpPost("approvals/{id:guid}/process")]
-    public async Task<ActionResult<WorkflowApproval>> ProcessApproval(Guid id, ProcessApprovalRequest request)
+    public async Task<ActionResult<WorkflowApprovalResponse>> ProcessApproval(Guid id, ProcessApprovalRequest request)
     {
         try
         {
@@ -2618,12 +2624,25 @@ public class WorkflowController : ControllerBase
 
             await TryApplyPostApprovalIntegrationAsync(approval.StepInstanceId, currentUserId.Value, request, HttpContext.RequestAborted);
 
-            // Reload for response (best-effort).
+            // Reload for response (best-effort). Never serialize the tracked entity:
+            // workflow/user navigation cycles can fail after the approval has committed.
             approval = await _workflowApprovalRepository.GetByIdAsync(id) ?? approval;
             return Ok(new
             {
                 success = true,
-                data = approval
+                data = new WorkflowApprovalResponse
+                {
+                    Id = approval.Id,
+                    StepInstanceId = approval.StepInstanceId,
+                    ApproverId = approval.ApproverId,
+                    ApproverRole = approval.ApproverRole,
+                    Status = approval.Status,
+                    RequestedDate = approval.RequestedDate,
+                    ProcessedDate = approval.ProcessedDate,
+                    DueDate = approval.DueDate,
+                    Comments = approval.Comments,
+                    TenantId = approval.TenantId
+                }
             });
         }
         catch (Exception ex)

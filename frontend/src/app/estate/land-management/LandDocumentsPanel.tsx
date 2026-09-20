@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Dialog,
   DialogContent,
@@ -56,6 +57,10 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
   const [documentType, setDocumentType] = React.useState('Other');
   const [uploading, setUploading] = React.useState(false);
   const [publishingId, setPublishingId] = React.useState<string | null>(null);
+  const [bulkPublishing, setBulkPublishing] = React.useState(false);
+  const [selectedDocumentIds, setSelectedDocumentIds] = React.useState<
+    Set<string>
+  >(new Set());
   const [preview, setPreview] = React.useState<{
     url: string;
     name: string;
@@ -72,6 +77,16 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  React.useEffect(() => {
+    setSelectedDocumentIds((current) => {
+      const available = new Set(documents.map((document) => document.id));
+      const next = new Set(
+        [...current].filter((documentId) => available.has(documentId))
+      );
+      return next.size === current.size ? current : next;
+    });
+  }, [documents]);
 
   React.useEffect(
     () => () => {
@@ -135,11 +150,7 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
   const publishToCentralDms = async (document: EstateManagedAssetDocument) => {
     try {
       setPublishingId(document.id);
-      const result =
-        await estateLandManagementService.publishDocumentToCentralDms(
-          assetId,
-          document.id
-        );
+      const result = await fileDocumentInCentralDms(document.id);
       setDocuments((current) =>
         current.map((item) =>
           item.id === document.id
@@ -153,13 +164,86 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
             : item
         )
       );
-      toast.success(`Published to Central DMS as ${result.documentReference}.`);
+      toast.success(`Filed in Central DMS as ${result.documentReference}.`);
     } catch (error: any) {
       toast.error(
-        error?.message || 'Unable to publish document to Central DMS.'
+        error?.message || 'Unable to file document in Central DMS.'
       );
     } finally {
       setPublishingId(null);
+    }
+  };
+
+  const fileDocumentInCentralDms = (documentId: string) =>
+    estateLandManagementService.publishDocumentToCentralDms(
+      assetId,
+      documentId
+    );
+
+  const toggleDocumentSelection = (documentId: string, checked: boolean) => {
+    setSelectedDocumentIds((current) => {
+      const next = new Set(current);
+      if (checked) {
+        next.add(documentId);
+      } else {
+        next.delete(documentId);
+      }
+      return next;
+    });
+  };
+
+  const selectableDocumentIds = documents.map((document) => document.id);
+  const allSelected =
+    selectableDocumentIds.length > 0 &&
+    selectableDocumentIds.every((documentId) =>
+      selectedDocumentIds.has(documentId)
+    );
+  const selectedDocuments = documents.filter((document) =>
+    selectedDocumentIds.has(document.id)
+  );
+
+  const toggleAllDocuments = (checked: boolean) => {
+    setSelectedDocumentIds(
+      checked ? new Set(selectableDocumentIds) : new Set()
+    );
+  };
+
+  const fileSelectedInCentralDms = async () => {
+    if (selectedDocuments.length === 0) {
+      toast.error('Select at least one document to file in DMS.');
+      return;
+    }
+
+    try {
+      setBulkPublishing(true);
+      const updates = new Map<string, { id: string; documentReference: string; publishedToCentralDmsAt?: string | null }>();
+      for (const document of selectedDocuments) {
+        const result = await fileDocumentInCentralDms(document.id);
+        updates.set(document.id, result);
+      }
+
+      setDocuments((current) =>
+        current.map((item) => {
+          const result = updates.get(item.id);
+          return result
+            ? {
+                ...item,
+                centralDocumentRecordId: result.id,
+                centralDocumentReference: result.documentReference,
+                publishedToCentralDmsAt:
+                  result.publishedToCentralDmsAt || new Date().toISOString(),
+              }
+            : item;
+        })
+      );
+      setSelectedDocumentIds(new Set());
+      toast.success(
+        `Filed ${updates.size} document${updates.size === 1 ? '' : 's'} in Central DMS.`
+      );
+    } catch (error: any) {
+      toast.error(error?.message || 'Unable to file selected documents in Central DMS.');
+    } finally {
+      setBulkPublishing(false);
     }
   };
 
@@ -169,7 +253,7 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
         <p className="text-sm font-semibold">Land Documents</p>
         <p className="text-xs text-muted-foreground">
           Files are stored in the Estate / Facility repository and can be
-          published to Central DMS.
+          filed in Central DMS.
         </p>
       </div>
 
@@ -199,6 +283,33 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
         </div>
       </div>
 
+      {documents.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <label className="flex items-center gap-2">
+            <Checkbox
+              checked={allSelected}
+              disabled={bulkPublishing}
+              onCheckedChange={(checked) =>
+                toggleAllDocuments(checked === true)
+              }
+            />
+            <span>Select all documents</span>
+          </label>
+          <Button
+            size="sm"
+            disabled={bulkPublishing || selectedDocuments.length === 0}
+            onClick={() => void fileSelectedInCentralDms()}
+          >
+            {bulkPublishing ? (
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            ) : (
+              <Send className="mr-2 h-4 w-4" />
+            )}
+            File selected in DMS
+          </Button>
+        </div>
+      ) : null}
+
       <div className="space-y-2">
         {documents.length === 0 ? (
           <p className="text-sm text-muted-foreground">
@@ -211,6 +322,13 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
               className="flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2 text-sm"
             >
               <div className="flex min-w-0 items-center gap-2">
+                <Checkbox
+                  checked={selectedDocumentIds.has(document.id)}
+                  disabled={bulkPublishing}
+                  onCheckedChange={(checked) =>
+                    toggleDocumentSelection(document.id, checked === true)
+                  }
+                />
                 <FileText className="h-4 w-4 shrink-0" />
                 <div className="min-w-0">
                   <p className="truncate font-medium">
@@ -252,7 +370,7 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
                   variant={
                     document.centralDocumentReference ? 'outline' : 'default'
                   }
-                  disabled={publishingId === document.id}
+                  disabled={bulkPublishing || publishingId === document.id}
                   onClick={() => void publishToCentralDms(document)}
                 >
                   {publishingId === document.id ? (
@@ -262,7 +380,7 @@ export default function LandDocumentsPanel({ assetId }: { assetId: string }) {
                   )}
                   {document.centralDocumentReference
                     ? 'Sync DMS'
-                    : 'Publish DMS'}
+                    : 'File in DMS'}
                 </Button>
               </div>
             </div>

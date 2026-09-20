@@ -75,6 +75,10 @@ namespace ErpSystem.Core.Entities.Finance.FixedAssets
 
         public DateTime? OpeningPostedDate { get; set; }
 
+        public Guid? OpeningReversalJournalEntryId { get; set; }
+        public Guid? OpeningReversalPostingEventId { get; set; }
+        public DateTime? OpeningReversedAt { get; set; }
+
         [MaxLength(50)]
         public string OpeningSource { get; set; } = "Manual";
 

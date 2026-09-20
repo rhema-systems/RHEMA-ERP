@@ -137,7 +137,10 @@ public sealed class ProcurementSupplierOnboardingTokensController : ControllerBa
                 value.Token.Id,
                 value.PlaintextToken,
                 correlationId,
-                cancellationToken);
+                // Activation has committed. A disconnected browser must not cancel
+                // the send outcome/audit save and leave a delivered token unrecorded.
+                // SMTP itself has a bounded async deadline.
+                CancellationToken.None);
         }
         catch (ProcurementSupplierApplicantAccessException)
         {

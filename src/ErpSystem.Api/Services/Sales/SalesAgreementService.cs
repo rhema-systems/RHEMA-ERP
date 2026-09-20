@@ -339,8 +339,7 @@ public class SalesAgreementService : ISalesAgreementService
 
     public async Task<SalesAgreementDetailDto> SubmitForApprovalAsync(Guid id)
     {
-        var agreement = await _context.Set<SalesAgreement>().FindAsync(id)
-            ?? throw new KeyNotFoundException($"Sales Agreement {id} not found");
+        var agreement = await GetLifecycleAgreementAsync(id);
 
         if (agreement.AgreementStatus != SalesAgreementStatus.Draft)
             throw new InvalidOperationException("Only Draft agreements can be submitted for approval");
@@ -351,7 +350,7 @@ public class SalesAgreementService : ISalesAgreementService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(WorkflowEntityType);
-        adapter.ApplySubmitOutcome(agreement, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(agreement, workflowResult, userId);
 
         await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
@@ -362,8 +361,7 @@ public class SalesAgreementService : ISalesAgreementService
 
     public async Task<SalesAgreementDetailDto> ProcessApprovalAsync(Guid id, SalesAgreementApprovalDto dto)
     {
-        var agreement = await _context.Set<SalesAgreement>().FindAsync(id)
-            ?? throw new KeyNotFoundException($"Sales Agreement {id} not found");
+        var agreement = await GetLifecycleAgreementAsync(id);
 
         if (agreement.AgreementStatus != SalesAgreementStatus.PendingApproval)
             throw new InvalidOperationException("Only PendingApproval agreements can be approved/rejected");
@@ -412,17 +410,32 @@ public class SalesAgreementService : ISalesAgreementService
 
     public async Task<SalesAgreementDetailDto> ActivateAsync(Guid id)
     {
-        var agreement = await _context.Set<SalesAgreement>().FindAsync(id)
-            ?? throw new KeyNotFoundException($"Sales Agreement {id} not found");
+        var agreement = await GetLifecycleAgreementAsync(id);
 
-        if (agreement.AgreementStatus != SalesAgreementStatus.PendingApproval &&
-            agreement.AgreementStatus != SalesAgreementStatus.Suspended)
+        // Initial activation must use the same optional-approval decision as Submit.
+        if (agreement.AgreementStatus == SalesAgreementStatus.Draft)
+            return await SubmitForApprovalAsync(id);
+
+        if (agreement.AgreementStatus != SalesAgreementStatus.Suspended)
             throw new InvalidOperationException("Agreement cannot be activated from current status");
+
+        if (await _workflowIntegrationService.HasActiveApprovalInstanceAsync(WorkflowEntityType, id))
+            throw new InvalidOperationException("Complete the existing agreement approval process before activation.");
 
         agreement.AgreementStatus = SalesAgreementStatus.Active;
         await SyncLinkedProjectUnitsAsync(agreement);
         await _context.SaveChangesAsync();
         return await GetByIdAsync(id);
+    }
+
+    private async Task<SalesAgreement> GetLifecycleAgreementAsync(Guid id)
+    {
+        var tenantId = _currentUserService.TenantId;
+        if (!tenantId.HasValue || tenantId.Value == Guid.Empty)
+            throw new UnauthorizedAccessException("A current tenant is required.");
+        return await _context.Set<SalesAgreement>().FirstOrDefaultAsync(agreement =>
+            agreement.Id == id && agreement.TenantId == tenantId.Value && !agreement.IsDeleted)
+            ?? throw new KeyNotFoundException($"Sales Agreement {id} not found");
     }
 
     public async Task<SalesAgreementDetailDto> SuspendAsync(Guid id, string? reason = null)

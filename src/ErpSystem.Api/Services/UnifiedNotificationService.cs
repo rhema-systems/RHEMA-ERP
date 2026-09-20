@@ -36,6 +36,10 @@ namespace ErpSystem.Api.Services;
 /// </summary>
 public class UnifiedNotificationService : INotificationService
 {
+    // Audit text is not a replayable email payload, including legacy rows created before
+    // direct delivery was separated from the background queue.
+    public const string RedactedEmailAuditBody =
+        "Sensitive email content omitted from notification audit storage.";
     private readonly IUnitOfWork _unitOfWork;
     private readonly IEmailService _emailService;
     private readonly ISmsSender _smsSender;
@@ -97,7 +101,7 @@ public class UnifiedNotificationService : INotificationService
                 subject,
                 persistBody
                     ? body
-                    : "Sensitive email content omitted from notification audit storage.",
+                    : RedactedEmailAuditBody,
                 isHtml,
                 attachments: null);
 
@@ -382,7 +386,9 @@ public class UnifiedNotificationService : INotificationService
                 Title = subject ?? string.Empty,
                 Message = body ?? string.Empty,
                 Priority = "Normal",
-                Status = "Pending",
+                // The direct caller owns this send. A Pending audit row lets the dispatcher
+                // race it (and, for sensitive mail, send the redaction instead of the secret).
+                Status = "Sending",
                 IsRead = false,
                 ScheduledFor = DateTime.UtcNow,
                 SentAt = null,
@@ -1528,10 +1534,19 @@ public class UnifiedNotificationService : INotificationService
 
             var now = DateTime.UtcNow;
 
-            var dueIds = await _dbContext.Notifications
+            var candidates = _dbContext.Notifications.AsQueryable();
+            if (_configuration.GetValue("Notifications:PropertyEnquiriesOnly", false))
+            {
+                candidates = candidates.Where(n => n.EntityType == "EhcTicket" && n.EntityId.HasValue
+                    && _dbContext.EhcTickets.Any(t => t.Id == n.EntityId.Value && t.TenantId == n.TenantId
+                        && !t.IsDeleted && t.PropertyListingContextJson != null));
+            }
+
+            var dueIds = await candidates
                 .AsNoTracking()
                 .Where(n =>
                     !n.IsDeleted &&
+                    n.Message != RedactedEmailAuditBody &&
                     (n.Status == "Pending" || n.Status == "Failed" || n.Status == "Processing") &&
                     n.SentAt == null &&
                     n.ScheduledFor <= now &&
@@ -1754,6 +1769,7 @@ SET [Status] = {"Processing"},
     [LastError] = NULL
 WHERE [Id] = {notificationId}
   AND [IsDeleted] = 0
+  AND [Message] <> {RedactedEmailAuditBody}
   AND [SentAt] IS NULL
   AND ([Status] = {"Pending"} OR [Status] = {"Failed"} OR [Status] = {"Processing"})
   AND [ScheduledFor] <= {now}

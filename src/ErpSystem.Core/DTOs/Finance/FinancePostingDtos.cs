@@ -1,6 +1,6 @@
 namespace ErpSystem.Core.DTOs.Finance;
 
-public sealed class FinancePostingRequestDto
+public abstract class FinancePostingCommandDto
 {
     public string SourceModule { get; set; } = string.Empty;
     /// <summary>
@@ -21,7 +21,6 @@ public sealed class FinancePostingRequestDto
     public DateTime PostingDate { get; set; } = DateTime.UtcNow;
     public Guid? FiscalPeriodId { get; set; }
     public string JournalType { get; set; } = "System Generated";
-    public string BookClassification { get; set; } = "IFRS";
     public string FunctionalCurrencyCode { get; set; } = "GHS";
     public string? IdempotencyKey { get; set; }
     public bool ReturnExistingOnDuplicate { get; set; } = true;
@@ -66,6 +65,15 @@ public sealed class FinancePostingRequestDto
 
     public IReadOnlyList<FinancePostingLineDto> Lines { get; set; } = Array.Empty<FinancePostingLineDto>();
     public IReadOnlyList<FinanceTaxCalculationSnapshotDto> TaxCalculationSnapshots { get; set; } = Array.Empty<FinanceTaxCalculationSnapshotDto>();
+}
+
+/// <summary>
+/// Canonical V2 posting contract. AccountingBookCode selects the ledger basis; detailed account
+/// classification remains Finance-owned metadata resolved from each AccountId.
+/// </summary>
+public sealed class FinancePostingRequestV2Dto : FinancePostingCommandDto
+{
+    public string AccountingBookCode { get; set; } = "IFRS";
 }
 
 public sealed class FinancePostingLineDto

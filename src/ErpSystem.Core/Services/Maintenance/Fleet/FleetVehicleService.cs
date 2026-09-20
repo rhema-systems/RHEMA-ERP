@@ -179,10 +179,10 @@ public class FleetVehicleService : IFleetVehicleService
         }
 
         var employee = await _unitOfWork.Repository<Employee>()
-            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.Department);
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.OrganizationUnit);
 
-        if (employee?.Department == null ||
-            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        if (employee?.OrganizationUnit == null ||
+            !employee.OrganizationUnit.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
         {
             return (false, null);
         }

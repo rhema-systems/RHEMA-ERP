@@ -1,6 +1,33 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { apiService } from './api.service';
-import { dashboardService, type EnterpriseDashboardData } from './dashboard';
+import { dashboardService, getUnavailableDashboardModules, type EnterpriseDashboardData } from './dashboard';
+
+describe('dashboard availability presentation', () => {
+  it('does not describe access-restricted analytics as a service outage', () => {
+    const restricted = {
+      module: 'Procurement and Inventory Management',
+      available: false,
+      accessRestricted: true,
+      error: 'No assigned warehouse or location granting inventory read access.',
+    };
+    expect(getUnavailableDashboardModules([restricted])).toEqual([]);
+    expect(restricted.available).toBe(false);
+  });
+
+  it('retains genuine and legacy service failures alongside restricted analytics', () => {
+    const outage = { module: 'Projects', available: false, accessRestricted: false, error: 'Database unavailable' };
+    const legacyOutage = { module: 'Maintenance', available: false, error: 'Request failed' };
+    expect(getUnavailableDashboardModules([
+      { module: 'Inventory', available: false, accessRestricted: true },
+      outage,
+      legacyOutage,
+    ])).toEqual([outage, legacyOutage]);
+  });
+
+  it('does not warn about successful modules', () => {
+    expect(getUnavailableDashboardModules([{ module: 'Purchase Orders', available: true }])).toEqual([]);
+  });
+});
 
 describe('dashboardService', () => {
   afterEach(() => {

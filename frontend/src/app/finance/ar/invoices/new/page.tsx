@@ -51,7 +51,7 @@ import { Calendar } from '@/components/ui/calendar';
 import { arService } from '@/services/ar-service';
 import { financeDataService } from '@/services/finance/finance-data.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
-import { financeService, resolvePostingExchangeRate } from '@/services/finance.service';
+import { financeService } from '@/services/finance.service';
 import { paymentTermService, type PaymentTermListDto } from '@/services/financeCommonService';
 import { useToast } from '@/components/ui/use-toast';
 import { formatCurrency, cn } from '@/lib/utils';
@@ -61,6 +61,10 @@ import { loadApprovedInvoiceRate } from '@/lib/finance/invoice-exchange-rate';
 import { useTenant } from '@/contexts/TenantContext';
 import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
 import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import {
+    allocateDocumentTradeDiscount,
+    calculateNetTradeDiscountLineAmount,
+} from '@/lib/finance/invoice-trade-discount';
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
@@ -89,6 +93,18 @@ const invoiceSchema = z.object({
     notes: z.string().optional(),
     taxGroupId: z.string().optional(),
     lineItems: z.array(lineItemSchema).min(1, 'At least one line item is required'),
+}).superRefine((invoice, context) => {
+    const eligibleAmount = invoice.lineItems.reduce((total, line) => {
+        const gross = line.quantity * line.unitPrice;
+        return total + Math.max(0, calculateNetTradeDiscountLineAmount(gross, line.discountPercentage || 0));
+    }, 0);
+    if ((invoice.discountAmount || 0) > eligibleAmount) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['discountAmount'],
+            message: 'Document trade discount cannot exceed the net line amount',
+        });
+    }
 });
 
 type InvoiceFormValues = z.infer<typeof invoiceSchema>;
@@ -232,76 +248,62 @@ export default function NewInvoicePage() {
         const qty = Number(item.quantity) || 0;
         const price = Number(item.unitPrice) || 0;
         const discount = Number(item.discountPercentage) || 0;
-        const lineTotal = qty * price * (1 - discount / 100);
+        const lineTotal = calculateNetTradeDiscountLineAmount(qty * price, discount);
         return acc + lineTotal;
+    }, 0);
+    const documentDiscountBasis = watchLineItems.reduce((acc, item) => {
+        const gross = (Number(item.quantity) || 0) * (Number(item.unitPrice) || 0);
+        const net = calculateNetTradeDiscountLineAmount(
+            gross,
+            Number(item.discountPercentage) || 0
+        );
+        return acc + Math.max(0, net);
     }, 0);
 
     const watchTaxGroupId = form.watch('taxGroupId');
     const watchCurrencyCode = form.watch('currencyCode') || 'GHS';
-    const documentDiscount = Math.min(Number(form.watch('discountAmount')) || 0, subtotal);
+    const documentDiscount = Number(form.watch('discountAmount')) || 0;
 
     const applyInvoiceExchangeRate = async (currencyCode: string) => {
         const requestId = ++exchangeRateRequestId.current;
         const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
-        const isOpeningBalance = form.getValues('isOpeningBalance');
-
-        if (isOpeningBalance) {
-            // Clear the prior date/currency evidence before the async lookup so Save cannot race
-            // with a stale approved-rate identity while the new historical rate is loading.
-            form.setValue('exchangeRateId', undefined);
-            if (!financeSettings) {
-                throw new Error('Finance settings are still loading. Try again before saving this opening invoice.');
-            }
-            let snapshot;
-            try {
-                snapshot = await loadApprovedInvoiceRate(
-                    {
-                        module: 'AR',
-                        transactionCurrency: currencyCode,
-                        functionalCurrency,
-                        invoiceDate: form.getValues('invoiceDate'),
-                        settings: financeSettings,
-                    },
-                    (code, query) => financeService.getCurrentExchangeRate(code, query)
-                );
-            } catch (error) {
-                if (requestId !== exchangeRateRequestId.current) return;
-                throw error;
-            }
-            if (requestId !== exchangeRateRequestId.current) return;
-            form.setValue('exchangeRate', snapshot.rate);
-            form.setValue('exchangeRateId', snapshot.exchangeRateId);
-            form.setValue('exchangeRateSource', snapshot.source);
-            return;
-        }
-
+        // Clear prior evidence before lookup so Save cannot race with stale rate identity.
         form.setValue('exchangeRateId', undefined);
-        if (currencyCode === functionalCurrency) {
-            form.setValue('exchangeRate', 1);
-            form.setValue('exchangeRateSource', 'Daily');
-            return;
+        if (!financeSettings) {
+            throw new Error('Finance settings are still loading. Try again before saving this invoice.');
         }
-
-        let rateObj;
+        let snapshot;
         try {
-            rateObj = await financeService.getCurrentExchangeRate(currencyCode);
+            snapshot = await loadApprovedInvoiceRate(
+                {
+                    module: 'AR',
+                    transactionCurrency: currencyCode,
+                    functionalCurrency,
+                    invoiceDate: form.getValues('invoiceDate'),
+                    settings: financeSettings,
+                },
+                (code, query) => financeService.getCurrentExchangeRate(code, query)
+            );
         } catch (error) {
             if (requestId !== exchangeRateRequestId.current) return;
             throw error;
         }
         if (requestId !== exchangeRateRequestId.current) return;
-        form.setValue('exchangeRate', resolvePostingExchangeRate(rateObj));
-        form.setValue('exchangeRateSource', 'Daily');
+        form.setValue('exchangeRate', snapshot.rate);
+        form.setValue('exchangeRateId', snapshot.exchangeRateId);
+        form.setValue('exchangeRateDate', form.getValues('invoiceDate'));
+        form.setValue('exchangeRateSource', snapshot.source);
     };
 
     useEffect(() => {
-        if (!watchIsOpeningBalance || !financeSettings || !watchInvoiceDate) return;
+        if (!financeSettings || !watchInvoiceDate) return;
         void applyInvoiceExchangeRate(watchCurrencyCode).catch((error) => {
-            console.error('Failed to resolve governed AR opening-invoice rate', error);
+            console.error('Failed to resolve governed AR invoice rate', error);
             form.setValue('exchangeRateId', undefined);
+            form.setValue('exchangeRate', 0);
             form.setValue('exchangeRateSource', 'Unavailable');
         });
-    }, [financeSettings, watchCurrencyCode, watchInvoiceDate, watchIsOpeningBalance]);
+    }, [financeSettings, watchCurrencyCode, watchInvoiceDate]);
 
     const getTaxBreakdown = () => {
         if (watchIsOpeningBalance) {
@@ -315,11 +317,28 @@ export default function NewInvoicePage() {
         let totalTaxAmount = 0;
         const breakdowns: { [taxCode: string]: { name: string; rate: number; amount: number } } = {};
 
-        watchLineItems.forEach((item) => {
+        const linesBeforeDocumentDiscount = watchLineItems.map((item) => {
             const qty = Number(item.quantity) || 0;
             const price = Number(item.unitPrice) || 0;
             const discount = Number(item.discountPercentage) || 0;
-            const lineSubtotal = qty * price * (1 - discount / 100);
+            return {
+                sourceLineId: item.sourceLineId,
+                netAmount: calculateNetTradeDiscountLineAmount(qty * price, discount),
+            };
+        });
+        const documentDiscountAllocations = allocateDocumentTradeDiscount(
+            linesBeforeDocumentDiscount,
+            documentDiscount
+        );
+
+        watchLineItems.forEach((item, index) => {
+            const qty = Number(item.quantity) || 0;
+            const price = Number(item.unitPrice) || 0;
+            const discount = Number(item.discountPercentage) || 0;
+            const lineSubtotal = Math.max(
+                0,
+                calculateNetTradeDiscountLineAmount(qty * price, discount) - documentDiscountAllocations[index]
+            );
 
             // Resolve line tax group override or default to header
             const activeGroupId = item.taxGroupId || watchTaxGroupId;
@@ -425,7 +444,7 @@ export default function NewInvoicePage() {
                 } catch (err) {
                     console.error("Failed to fetch exchange rate for customer currency", err);
                     form.setValue('exchangeRateId', undefined);
-                    form.setValue('exchangeRate', 1.0);
+                    form.setValue('exchangeRate', 0);
                     form.setValue('exchangeRateSource', 'Unavailable');
                 }
             } else {
@@ -448,10 +467,10 @@ export default function NewInvoicePage() {
         try {
             const isOpeningBalance = data.isOpeningBalance;
             const functionalCurrency = financeSettings?.baseCurrency || 'GHS';
-            if (isOpeningBalance && data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
+            if (data.currencyCode !== functionalCurrency && !data.exchangeRateId) {
                 toast({
                     title: 'Approved exchange rate required',
-                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this opening invoice.',
+                    description: 'Select a currency and invoice date with an active approved Daily rate before creating this invoice.',
                     variant: 'destructive',
                 });
                 return;
@@ -462,7 +481,7 @@ export default function NewInvoicePage() {
                 dueDate: data.dueDate.toISOString(),
                 taxGroupId: isOpeningBalance || data.taxGroupId === 'none' ? null : (data.taxGroupId || null),
                 exchangeRate: Number(data.exchangeRate) || 1.0,
-                exchangeRateId: isOpeningBalance ? data.exchangeRateId : undefined,
+                exchangeRateId: data.exchangeRateId,
                 paymentTermId: data.paymentTermId === 'none' ? null : (data.paymentTermId || null),
                 discountAmount: Number(data.discountAmount) || 0,
                 isOpeningBalance,
@@ -708,7 +727,7 @@ export default function NewInvoicePage() {
                                             } catch (err) {
                                                 console.error("Failed to fetch exchange rate for currency", err);
                                                 form.setValue('exchangeRateId', undefined);
-                                                form.setValue('exchangeRate', 1.0);
+                                                form.setValue('exchangeRate', 0);
                                                 form.setValue('exchangeRateSource', 'Unavailable');
                                             }
                                         }}
@@ -734,17 +753,13 @@ export default function NewInvoicePage() {
                                     type="number" 
                                     step="0.0001" 
                                     min="0.0001" 
-                                    readOnly={watchIsOpeningBalance}
-                                    aria-readonly={watchIsOpeningBalance}
-                                    {...form.register('exchangeRate', {
-                                        onChange: () => {
-                                            if (!watchIsOpeningBalance) form.setValue('exchangeRateSource', 'Custom');
-                                        }
-                                    })} 
+                                    readOnly
+                                    aria-readonly="true"
+                                    {...form.register('exchangeRate')}
                                 />
                                 <span className="text-[11px] text-muted-foreground block mt-1">
                                     1 {watchCurrencyCode} = {form.watch('exchangeRate')} {financeSettings?.baseCurrency || 'GHS'}
-                                    {watchIsOpeningBalance ? ' · approved rate locked to this opening invoice' : ''}
+                                    {' · approved rate locked to this invoice'}
                                 </span>
                             </div>
                         )}
@@ -793,16 +808,20 @@ export default function NewInvoicePage() {
                         </div>
 
                         <div className="space-y-2">
-                            <Label htmlFor="discountAmount">Document Discount Allowed</Label>
+                            <Label htmlFor="discountAmount">Document Trade Discount</Label>
                             <Input
                                 id="discountAmount"
                                 type="number"
                                 min="0"
+                                max={documentDiscountBasis}
                                 step="0.01"
                                 {...form.register('discountAmount')}
                             />
+                            {form.formState.errors.discountAmount && (
+                                <p className="text-sm text-red-500">{form.formState.errors.discountAmount.message}</p>
+                            )}
                             <span className="text-[11px] text-muted-foreground block mt-1">
-                                Posts to the configured Discount Allowed control account when the invoice is posted.
+                                Fixed currency amount allocated across invoice lines. It reduces revenue and the taxable base.
                             </span>
                         </div>
 
@@ -818,7 +837,7 @@ export default function NewInvoicePage() {
                                             render={({ field }) => (
                                                 <Popover>
                                                     <PopoverTrigger asChild>
-                                                        <Button variant="outline" disabled={watchIsOpeningBalance} className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
+                                                        <Button variant="outline" disabled className={cn("w-full justify-start text-left font-normal text-xs", !field.value && "text-muted-foreground")}>
                                                             <CalendarIcon className="mr-2 h-3 w-3" />
                                                             {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
                                                         </Button>
@@ -836,22 +855,7 @@ export default function NewInvoicePage() {
                                             control={form.control}
                                             name="exchangeRateSource"
                                             render={({ field }) => (
-                                                watchIsOpeningBalance ? (
-                                                    <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
-                                                ) : (
-                                                    <Select value={field.value || 'Daily'} onValueChange={field.onChange}>
-                                                        <SelectTrigger className="h-10 text-xs">
-                                                            <SelectValue placeholder="Select FX Source" />
-                                                        </SelectTrigger>
-                                                        <SelectContent>
-                                                            <SelectItem value="Daily">Daily</SelectItem>
-                                                            <SelectItem value="Spot">Spot</SelectItem>
-                                                            <SelectItem value="Official">Official</SelectItem>
-                                                            <SelectItem value="Market">Market</SelectItem>
-                                                            <SelectItem value="Custom">Custom</SelectItem>
-                                                        </SelectContent>
-                                                    </Select>
-                                                )
+                                                <Input value={field.value || 'Approved Daily rate'} readOnly aria-readonly="true" className="h-10 text-xs" />
                                             )}
                                         />
                                     </div>
@@ -1043,8 +1047,11 @@ export default function NewInvoicePage() {
                                             <Input type="number" step="0.01" {...form.register(`lineItems.${index}.unitPrice` as const)} className="text-right" />
                                         </div>
                                         <div className="col-span-1 space-y-2">
-                                            <Label className={index !== 0 ? 'sr-only' : ''}>Disc %</Label>
-                                            <Input type="number" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
+                                            <Label className={index !== 0 ? 'sr-only' : ''}>Trade Disc %</Label>
+                                            <Input type="number" min="0" max="100" step="0.5" {...form.register(`lineItems.${index}.discountPercentage` as const)} className="text-center" />
+                                            {form.formState.errors.lineItems?.[index]?.discountPercentage && (
+                                                <p className="text-xs text-red-500">Use 0–100</p>
+                                            )}
                                         </div>
                                         <div className="col-span-2 space-y-2">
                                             <Label className={cn("text-amber-600 font-semibold", index !== 0 ? 'sr-only' : '')}>Tax Group</Label>
@@ -1115,7 +1122,7 @@ export default function NewInvoicePage() {
                                 </div>
                                 {documentDiscount > 0 && (
                                     <div className="flex justify-between w-72 text-sm text-muted-foreground">
-                                        <span>Discount Allowed:</span>
+                                        <span>Document Trade Discount:</span>
                                         <span className="font-medium text-red-600">-{formatAmountWithCurrency(documentDiscount)}</span>
                                     </div>
                                 )}

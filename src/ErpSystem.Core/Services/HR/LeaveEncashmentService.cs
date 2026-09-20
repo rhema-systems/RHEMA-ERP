@@ -171,8 +171,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
             Status = LeaveEncashmentStatus.Submitted
         };
 
-        // Create and submit in ONE transaction: a workflow submit that throws (e.g. no active
-        // definition for the tenant) must roll the insert back too, or the caller gets an error
+        // Create and submit in ONE transaction: a workflow submit that throws
+        // must roll the insert back too, or the caller gets an error
         // while an orphaned Submitted row survives — and every retry then refuses with
         // "already been encashed". Found live in area 25 slice 4.
         await _unitOfWork.ExecuteInTransactionAsync(async ct =>

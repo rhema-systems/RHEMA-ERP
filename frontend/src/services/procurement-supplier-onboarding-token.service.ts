@@ -14,6 +14,26 @@ import type {
 
 const root = '/procurement/supplier-onboarding-tokens';
 
+// These operations commit activation before waiting for bounded SMTP delivery.
+// Give the server time to return its delivery result; never automatically repeat
+// a mutation when its outcome is uncertain.
+async function postWithTokenDelivery<T>(path: string, body: unknown): Promise<T> {
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 90_000);
+  try {
+    return await apiService.post<T>(path, body, controller.signal);
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(
+        'Token delivery request timed out. Refresh the token and payment status before retrying; the payment may already be posted.'
+      );
+    }
+    throw error;
+  } finally {
+    clearTimeout(deadline);
+  }
+}
+
 export const procurementSupplierOnboardingTokenService = {
   summary: () =>
     apiService.get<SupplierOnboardingTokenSummary>(`${root}/summary`),
@@ -32,11 +52,11 @@ export const procurementSupplierOnboardingTokenService = {
       `${root}/registrations/${registrationId}`
     ),
   issue: (registrationId: string) =>
-    apiService.post<SupplierOnboardingTokenIssueResult>(root, {
+    postWithTokenDelivery<SupplierOnboardingTokenIssueResult>(root, {
       registrationId,
     }),
   reissue: (id: string, reason: string, rowVersion: string) =>
-    apiService.post<SupplierOnboardingTokenIssueResult>(
+    postWithTokenDelivery<SupplierOnboardingTokenIssueResult>(
       `${root}/${id}/reissue`,
       {
         reason,
@@ -59,7 +79,7 @@ export const procurementSupplierOnboardingTokenService = {
     notes: string | undefined,
     rowVersion: string
   ) =>
-    apiService.post<SupplierOnboardingToken>(
+    postWithTokenDelivery<SupplierOnboardingToken>(
       `${root}/${tokenId}/payments/${paymentId}/reconcile`,
       { reconciliationReference, ...(notes ? { notes } : {}), rowVersion }
     ),
@@ -73,7 +93,7 @@ export const procurementSupplierOnboardingTokenService = {
     exemptionId: string,
     request: SupplierOnboardingExemptionDecision
   ) =>
-    apiService.post<SupplierOnboardingToken>(
+    postWithTokenDelivery<SupplierOnboardingToken>(
       `${root}/${tokenId}/exemptions/${exemptionId}/decision`,
       request
     ),

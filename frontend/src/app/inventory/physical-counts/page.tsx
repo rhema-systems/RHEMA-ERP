@@ -12,25 +12,31 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Checkbox } from '@/components/ui/checkbox';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Plus, Search, Eye, ClipboardCheck, AlertTriangle, CheckCircle,
   Clock, XCircle, BarChart3, Calculator, FileDown, FileUp, Printer,
-  Play, Save, Send, ThumbsUp, ThumbsDown, Trash2, RefreshCw, ShieldCheck
+  Play, Save, Send, ThumbsUp, ThumbsDown, Trash2, RefreshCw, ShieldCheck, Pencil
 } from 'lucide-react';
 import {
   inventoryManagementService,
   PhysicalCountDto, PhysicalCountDetailDto, CreatePhysicalCountDto,
-  PhysicalCountItemDto, WarehouseDto, InventoryItemDto, RecordCountItemDto,
-  PhysicalCountFilterDto, VarianceReportDto, ImportCountItemDto
+  PhysicalCountItemDto, WarehouseDto, WarehouseLocationDto, InventoryItemDto, RecordCountItemDto,
+  PhysicalCountFilterDto, VarianceReportDto, AddCountItemDto
 } from '@/services/inventoryManagementService';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { toast } from 'sonner';
+import { PhysicalCountReviewActions } from '@/components/inventory/PhysicalCountReviewActions';
+import { PhysicalCountItemsGrid } from '@/components/inventory/PhysicalCountItemsGrid';
 import { PhysicalCountControlPanel } from '@/components/inventory/PhysicalCountControlPanel';
-import { currencyService } from '@/services/financeCommonService';
+import { PhysicalCountDraftItemDialog } from '@/components/inventory/PhysicalCountDraftItemDialog';
+import { PhysicalCountSheetUploadDialog } from '@/components/inventory/PhysicalCountSheetUploadDialog';
+import { createCountSheet } from '@/lib/physical-count-sheet';
+import { procurementCurrencyService } from '@/services/financeCommonService';
 import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
 
 type ProblemDetails = {
@@ -42,10 +48,10 @@ type ProblemDetails = {
 };
 
 const problemMessage = (error: unknown, fallback: string) => {
-  const problem = axios.isAxiosError<ProblemDetails>(error) ? error.response?.data : undefined;
-  const message = problem?.detail || problem?.message || problem?.title ||
+  const problem = axios.isAxiosError<ProblemDetails | string>(error) ? error.response?.data : undefined;
+  const message = (typeof problem === 'string' ? problem : problem?.detail || problem?.message || problem?.title) ||
     (error instanceof Error ? error.message : fallback);
-  const code = problem?.code || problem?.extensions?.code;
+  const code = typeof problem === 'object' ? problem?.code || problem?.extensions?.code : undefined;
   return code ? `${message} (${code})` : message;
 };
 
@@ -61,7 +67,9 @@ const loadPhysicalCountDetail = async (countId: string) => {
 const CountStatuses = [
   { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-200' },
   { value: 'InProgress', label: 'In Progress', color: 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200' },
-  { value: 'RecountRequired', label: 'Recount Required', color: 'bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200' },
+  { value: 'RecountRequired', label: 'Awaiting review', color: 'bg-orange-100 text-orange-800' },
+  { value: 'UnderReview', label: 'Under review', color: 'bg-blue-100 text-blue-800' },
+  { value: 'UnderInvestigation', label: 'Under investigation', color: 'bg-orange-100 text-orange-800' },
   { value: 'PendingStoresApproval', label: 'Stores Approval', color: 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200' },
   { value: 'PendingFinanceApproval', label: 'Finance Approval', color: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900 dark:text-cyan-200' },
   { value: 'PendingAuditAttestation', label: 'Audit Attestation', color: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200' },
@@ -95,10 +103,15 @@ export default function PhysicalCountsPage() {
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [evidenceTitle, setEvidenceTitle] = useState('');
   const [evidenceUploading, setEvidenceUploading] = useState(false);
+  const [draftNotes, setDraftNotes] = useState('');
+  const [removeTarget, setRemoveTarget] = useState<PhysicalCountItemDto | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<PhysicalCountDto | null>(null);
+  const [cancellationReason, setCancellationReason] = useState('');
 
   // Dialog states
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
   const [detailDialogOpen, setDetailDialogOpen] = useState(false);
+  const [countItemsFullPage, setCountItemsFullPage] = useState(false);
   const [varianceDialogOpen, setVarianceDialogOpen] = useState(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [reasonDialogOpen, setReasonDialogOpen] = useState(false);
@@ -139,26 +152,45 @@ export default function PhysicalCountsPage() {
     abcClass: 'C',
     notes: ''
   });
+  const [countScope, setCountScope] = useState<'warehouse' | 'location'>('warehouse');
+  const [countLocations, setCountLocations] = useState<WarehouseLocationDto[]>([]);
+  const [locationsLoading, setLocationsLoading] = useState(false);
+  const [locationsError, setLocationsError] = useState<string | null>(null);
+  const [locationsReload, setLocationsReload] = useState(0);
 
-  // Add item form
-  const [addItemData, setAddItemData] = useState({
-    inventoryItemId: '',
-    locationId: '',
-    systemQuantity: 0
-  });
+  useEffect(() => {
+    let cancelled = false;
+    setCountLocations([]);
+    setLocationsError(null);
+    if (!createDialogOpen || countScope !== 'location' || !formData.warehouseId) {
+      setLocationsLoading(false);
+      return;
+    }
+    setLocationsLoading(true);
+    inventoryManagementService.getWarehouseLocations(formData.warehouseId)
+      .then(locations => {
+        if (!cancelled) setCountLocations(locations.filter(location => location.isActive && location.warehouseId === formData.warehouseId));
+      })
+      .catch(error => {
+        if (!cancelled) setLocationsError(problemMessage(error, 'Could not load warehouse locations.'));
+      })
+      .finally(() => { if (!cancelled) setLocationsLoading(false); });
+    return () => { cancelled = true; };
+  }, [createDialogOpen, countScope, formData.warehouseId, locationsReload]);
 
-  // Import data
-  const [importItems, setImportItems] = useState<ImportCountItemDto[]>([]);
+  const canCreateCount = !!formData.warehouseId && !actionLoading && (countScope === 'warehouse' ||
+    (!locationsLoading && !locationsError && countLocations.some(location => location.id === formData.locationId)));
 
   // Count items for recording
   const [editingItems, setEditingItems] = useState<Map<string, number>>(new Map());
-  const [recountNotes, setRecountNotes] = useState<Map<string, string>>(new Map());
+
 
   useEffect(() => {
     let cancelled = false;
 
-    currencyService.getBaseCurrency()
-      .then((currency) => {
+    procurementCurrencyService.getActive()
+      .then((currencies) => {
+        const currency = currencies.find(value => value.isBaseCurrency);
         if (!cancelled) setCurrencyCode(normalizeInventoryCurrency(currency?.code));
       })
       .catch(() => {
@@ -211,15 +243,18 @@ export default function PhysicalCountsPage() {
 
   // Handler functions
   const handleCreate = async () => {
+    if (!canCreateCount) return;
     try {
       setActionLoading(true);
-      const newCount = await inventoryManagementService.createPhysicalCount(formData);
+      const { locationId, ...warehouseData } = formData;
+      const newCount = await inventoryManagementService.createPhysicalCount(countScope === 'location' ? { ...warehouseData, locationId } : warehouseData);
       setCounts(prev => [...prev, newCount]);
       setCreateDialogOpen(false);
       setFormData({ warehouseId: '', countType: 'CycleCount', freezeInventory: true, blindCount: true, abcClass: 'C', notes: '' });
+      setCountScope('warehouse');
     } catch (err) {
       console.error('Error creating count:', err);
-      toast.error('Failed to create physical count');
+      toast.error(problemMessage(err, 'Failed to create physical count'));
     } finally {
       setActionLoading(false);
     }
@@ -229,6 +264,12 @@ export default function PhysicalCountsPage() {
     try {
       const details = await loadPhysicalCountDetail(count.id);
       setSelectedCount(details);
+      setCountItemsFullPage(false);
+      setDraftNotes(details.notes || '');
+      setEditingItems(new Map());
+
+      setAddItemDialogOpen(false);
+      setRemoveTarget(null);
       setDetailDialogOpen(true);
     } catch (err) {
       console.error('Error fetching count details:', err);
@@ -243,21 +284,7 @@ export default function PhysicalCountsPage() {
       fetchData();
     } catch (err) {
       console.error('Error starting count:', err);
-      toast.error('Failed to start count');
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleComplete = async (id: string) => {
-    try {
-      setActionLoading(true);
-      await inventoryManagementService.completePhysicalCount(id);
-      fetchData();
-      setDetailDialogOpen(false);
-    } catch (err) {
-      console.error('Error completing count:', err);
-      toast.error('Failed to complete count');
+      toast.error(problemMessage(err, 'Failed to start count'));
     } finally {
       setActionLoading(false);
     }
@@ -307,17 +334,17 @@ export default function PhysicalCountsPage() {
     }
   };
 
-  const handleCancel = async (id: string, reason: string) => {
+  const handleCancel = async () => {
+    if (!cancelTarget || cancelTarget.status !== 'Draft' || !cancellationReason.trim() || actionLoading) return false;
     try {
       setActionLoading(true);
-      await inventoryManagementService.cancelPhysicalCount(id, reason);
-      fetchData();
-      setDetailDialogOpen(false);
-      setReasonDialogOpen(false);
-      setReasonText('');
+      await inventoryManagementService.cancelPhysicalCount(cancelTarget.id, cancellationReason.trim());
+      await fetchData();
+      toast.success('Draft count cancelled.');
+      return true;
     } catch (err) {
-      console.error('Error cancelling count:', err);
-      toast.error('Failed to cancel count');
+      toast.error(problemMessage(err, 'Failed to cancel count'));
+      return false;
     } finally {
       setActionLoading(false);
     }
@@ -325,20 +352,25 @@ export default function PhysicalCountsPage() {
 
   const handleRecordItems = async () => {
     if (!selectedCount || editingItems.size === 0) return;
+    if ([...editingItems.values()].some(qty => !Number.isFinite(qty) || qty < 0)) {
+      toast.error('Counted quantities must be zero or positive numbers.');
+      return;
+    }
     try {
       setActionLoading(true);
       const items: RecordCountItemDto[] = [];
       editingItems.forEach((qty, itemId) => {
         const line = selectedCount.items.find(item => item.id === itemId);
-        if (line) items.push({ physicalCountItemId: itemId, countedQuantity: qty, rowVersion: line.rowVersion, idempotencyKey: crypto.randomUUID() });
+        if (line) items.push({ physicalCountItemId: itemId, countedQuantity: qty, rowVersion: line.rowVersion, lotNumber: line.lotNumber, serialNumber: line.serialNumber, notes: line.notes, idempotencyKey: crypto.randomUUID() });
       });
       for (const item of items) await inventoryManagementService.recordCountItem(selectedCount.id, item);
       const updatedDetails = await loadPhysicalCountDetail(selectedCount.id);
       setSelectedCount(updatedDetails);
       setEditingItems(new Map());
+      toast.success('Count quantities saved.');
     } catch (err) {
       console.error('Error recording items:', err);
-      toast.error('Failed to record items');
+      toast.error(problemMessage(err, 'Failed to record items'));
     } finally {
       setActionLoading(false);
     }
@@ -349,6 +381,37 @@ export default function PhysicalCountsPage() {
     const current = await loadPhysicalCountDetail(selectedCount.id);
     setSelectedCount(current);
     await fetchData();
+  };
+
+  const updateDraft = async (save: () => Promise<unknown>, message: string) => {
+    if (!selectedCount || selectedCount.status !== 'Draft' || actionLoading) return false;
+    setActionLoading(true);
+    try {
+      await save();
+    } catch (error) {
+      toast.error(problemMessage(error, 'The draft could not be updated.'));
+      setActionLoading(false);
+      return false;
+    }
+    try {
+      await refreshSelected();
+      toast.success(message);
+    } catch {
+      // Do not leave a successful mutation open for a duplicate retry.
+      setDetailDialogOpen(false);
+      toast.warning('The change was saved. Refresh the register before continuing.');
+    } finally {
+      setActionLoading(false);
+    }
+    return true;
+  };
+
+  const addDraftItem = (item: AddCountItemDto) => updateDraft(
+    () => inventoryManagementService.addCountItem(selectedCount!.id, item), 'Item added to draft.');
+
+  const removeDraftItem = () => {
+    if (!removeTarget) return Promise.resolve(false);
+    return updateDraft(() => inventoryManagementService.removeCountItem(selectedCount!.id, removeTarget.id), 'Item removed from draft.');
   };
 
   const uploadCountEvidence = async () => {
@@ -373,50 +436,6 @@ export default function PhysicalCountsPage() {
     }
   };
 
-  const handleRecount = async (item: PhysicalCountItemDto) => {
-    if (!selectedCount) return;
-    const notes = recountNotes.get(item.id)?.trim();
-    if (!notes) { toast.error('Independent investigation notes are required.'); return; }
-    setActionLoading(true);
-    try {
-      await inventoryManagementService.recordPhysicalCountRecount(selectedCount.id, {
-        physicalCountItemId: item.id,
-        itemRowVersion: item.rowVersion,
-        recountedQuantity: editingItems.get(item.id) ?? item.countedQuantity,
-        investigationNotes: notes,
-        rowVersion: selectedCount.rowVersion,
-        idempotencyKey: crypto.randomUUID(),
-        correlationId: `count-recount:${selectedCount.id}:${crypto.randomUUID()}`,
-        comment: notes,
-      });
-      setEditingItems(previous => { const next = new Map(previous); next.delete(item.id); return next; });
-      setRecountNotes(previous => { const next = new Map(previous); next.delete(item.id); return next; });
-      await refreshSelected();
-    } catch { toast.error('The recount was rejected by independence, concurrency, or location controls.'); }
-    finally { setActionLoading(false); }
-  };
-
-  const handleControlDecision = async (stage: 'stores' | 'finance' | 'audit', approved: boolean, reason?: string) => {
-    if (!selectedCount) return;
-    setActionLoading(true);
-    const request = {
-      approved,
-      reason,
-      comment: approved ? `${stage} control stage approved.` : reason,
-      rowVersion: selectedCount.rowVersion,
-      idempotencyKey: crypto.randomUUID(),
-      correlationId: `count-${stage}:${selectedCount.id}:${crypto.randomUUID()}`,
-    };
-    try {
-      if (stage === 'stores') await inventoryManagementService.decidePhysicalCountStores(selectedCount.id, request);
-      if (stage === 'finance') await inventoryManagementService.decidePhysicalCountFinance(selectedCount.id, request);
-      if (stage === 'audit') await inventoryManagementService.attestPhysicalCountAudit(selectedCount.id, request);
-      setReasonDialogOpen(false); setReasonText('');
-      await refreshSelected();
-    } catch { toast.error(`The ${stage} control decision was rejected.`); }
-    finally { setActionLoading(false); }
-  };
-
   const handleControlledPost = async () => {
     if (!selectedCount) return;
     setActionLoading(true);
@@ -435,20 +454,7 @@ export default function PhysicalCountsPage() {
   const handleExport = async (id: string) => {
     try {
       const exportData = await inventoryManagementService.exportCountSheet(id);
-      // Create workbook for Excel export
-      const ws = XLSX.utils.json_to_sheet(exportData.items.map(item => ({
-        'Item Code': item.itemCode,
-        'Item Name': item.itemName,
-        'UOM': item.unitOfMeasure,
-        'Location': item.locationName || '',
-        'System Qty': item.systemQuantity,
-        'Counted Qty': item.countedQuantity,
-        'Variance': item.varianceQuantity,
-        'Lot Number': item.lotNumber || '',
-        'Notes': item.notes || ''
-      })));
-      const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, 'Count Sheet');
+      const wb = createCountSheet(exportData.items);
       XLSX.writeFile(wb, `${exportData.countNumber}_CountSheet.xlsx`);
     } catch (err) {
       console.error('Error exporting count sheet:', err);
@@ -580,7 +586,14 @@ export default function PhysicalCountsPage() {
               {counts.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">No physical counts found.</div>
               ) : (
-                counts.map((count) => (
+                [...counts].sort((a, b) => {
+                  const timestamp = (count: PhysicalCountDto) => {
+                    const created = Date.parse(count.createdAt || '');
+                    const dated = Date.parse(count.countDate || '');
+                    return Number.isFinite(created) ? created : Number.isFinite(dated) ? dated : 0;
+                  };
+                  return timestamp(b) - timestamp(a) || b.countNumber.localeCompare(a.countNumber, undefined, { numeric: true });
+                }).map((count) => (
                   <div key={count.id} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
                     <div className="flex items-center justify-between">
                       <div className="flex items-center space-x-4">
@@ -594,27 +607,25 @@ export default function PhysicalCountsPage() {
                             <Badge variant="secondary">{CountTypes.find(t => t.value === count.countType)?.label || count.countType}</Badge>
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            Warehouse: {count.warehouseName || '-'} • Date: {count.countDate ? format(new Date(count.countDate), 'MMM dd, yyyy') : '-'}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            Items: {count.totalItems || 0} • With Variance: {count.itemsWithVariance || 0}
+                            Warehouse: {count.warehouseName || '-'} • Scope: {count.locationId ? `Location: ${count.locationName || 'Selected location'}` : 'Warehouse-wide'} • Date: {count.countDate ? format(new Date(count.countDate), 'MMM dd, yyyy') : '-'}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => handleViewDetails(count)}>
-                          <Eye className="h-4 w-4 mr-1" />View
+                        <Button size="sm" variant="outline" aria-label={count.status === 'Draft' ? 'Edit draft' : 'View'} title={count.status === 'Draft' ? 'Edit draft' : 'View count'} onClick={() => handleViewDetails(count)}>
+                          {count.status === 'Draft' ? <><Pencil className="h-4 w-4 mr-1" />Edit draft</> : <Eye className="h-4 w-4" />}
                         </Button>
                         {count.status === 'Draft' && (
-                          <Button size="sm" variant="outline" onClick={() => handleStart(count.id)}>
+                          <Button size="sm" variant="outline" className="text-red-600 hover:text-red-700" aria-label={`Cancel draft count ${count.countNumber}`} title="Cancel draft count" disabled={actionLoading} onClick={() => { setCancellationReason(''); setCancelTarget(count); }}>
+                            <XCircle className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {count.status === 'Draft' && (
+                          <Button size="sm" variant="outline" onClick={() => handleStart(count.id)} disabled={actionLoading || count.totalItems === 0} title={count.totalItems === 0 ? 'Add at least one item before starting.' : undefined}>
                             <Play className="h-4 w-4 mr-1" />Start
                           </Button>
                         )}
-                        {count.status === 'InProgress' && (
-                          <Button size="sm" variant="outline" onClick={() => handleComplete(count.id)}>
-                            <Send className="h-4 w-4 mr-1" />Complete
-                          </Button>
-                        )}
+
                         {count.status === 'PendingApproval' && (
                           <>
                             <Button size="sm" variant="outline" className="text-green-600" onClick={() => handleApprove(count.id)}>
@@ -633,7 +644,7 @@ export default function PhysicalCountsPage() {
                             <CheckCircle className="h-4 w-4 mr-1" />Post
                           </Button>
                         )}
-                        <Button size="sm" variant="outline" onClick={() => handleExport(count.id)}>
+                        <Button size="sm" variant="outline" aria-label={`Download count sheet ${count.countNumber}`} onClick={() => handleExport(count.id)}>
                           <FileDown className="h-4 w-4" />
                         </Button>
                         <Button size="sm" variant="outline" onClick={() => handleViewVarianceReport(count.id)}>
@@ -651,19 +662,38 @@ export default function PhysicalCountsPage() {
 
       {/* Create Dialog */}
       <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
+        <DialogContent className="sm:max-w-[560px] flex h-[640px] max-h-[90dvh] flex-col overflow-hidden">
+          <DialogHeader className="shrink-0">
             <DialogTitle>Create Physical Count</DialogTitle>
             <DialogDescription>Start a new inventory count</DialogDescription>
           </DialogHeader>
-          <div className="grid gap-4 py-4">
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto py-2">
             <div className="space-y-2">
-              <Label>Warehouse *</Label>
-              <Select value={formData.warehouseId} onValueChange={(v) => setFormData({...formData, warehouseId: v})}>
-                <SelectTrigger><SelectValue placeholder="Select warehouse" /></SelectTrigger>
+              <Label htmlFor="count-warehouse">Warehouse *</Label>
+              <Select value={formData.warehouseId} disabled={actionLoading} onValueChange={(v) => { setCountLocations([]); setFormData(previous => ({...previous, warehouseId: v, locationId: undefined})); }}>
+                <SelectTrigger id="count-warehouse"><SelectValue placeholder="Select warehouse" /></SelectTrigger>
                 <SelectContent>{warehouses.map(w => <SelectItem key={w.id} value={w.id}>{w.name}</SelectItem>)}</SelectContent>
               </Select>
             </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label htmlFor="count-scope">Count scope</Label>
+                <Select value={countScope} disabled={actionLoading} onValueChange={value => { setCountScope(value === 'location' ? 'location' : 'warehouse'); setCountLocations([]); setFormData(previous => ({ ...previous, locationId: undefined })); }}>
+                  <SelectTrigger id="count-scope"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="warehouse">Warehouse-wide</SelectItem><SelectItem value="location">Selected location</SelectItem></SelectContent>
+                </Select>
+              </div>
+              {countScope === 'location' && <div className="space-y-2">
+                <Label htmlFor="count-location">Location *</Label>
+                <Select value={formData.locationId || ''} onValueChange={value => setFormData(previous => ({ ...previous, locationId: value }))} disabled={actionLoading || !formData.warehouseId || locationsLoading || !!locationsError || countLocations.length === 0}>
+                  <SelectTrigger id="count-location"><SelectValue placeholder={locationsLoading ? 'Loading locations...' : 'Select location'} /></SelectTrigger>
+                  <SelectContent>{countLocations.map(location => <SelectItem key={location.id} value={location.id}>{location.locationCode}{location.name ? ` - ${location.name}` : ''}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>}
+            </div>
+            <p className="text-xs text-muted-foreground">{countScope === 'warehouse' ? 'Count items across this warehouse, separated by stock location.' : 'Only stock in the selected location is included.'} The same scope is used for the draft, count sheet and variances.</p>
+            {countScope === 'location' && locationsError && <div role="alert" className="flex items-center justify-between gap-2 text-sm text-red-600"><span>{locationsError}</span><Button size="sm" variant="outline" onClick={() => setLocationsReload(value => value + 1)}>Retry</Button></div>}
+            {countScope === 'location' && formData.warehouseId && !locationsLoading && !locationsError && countLocations.length === 0 && <p role="status" className="text-sm text-amber-700">No active locations are available for this warehouse.</p>}
             <div className="space-y-2">
               <Label>Count Type</Label>
               <Select value={formData.countType} onValueChange={(v) => setFormData({...formData, countType: v})}>
@@ -691,9 +721,9 @@ export default function PhysicalCountsPage() {
               <Textarea value={formData.notes} onChange={(e) => setFormData({...formData, notes: e.target.value})} rows={3} />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="shrink-0">
             <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={!formData.warehouseId || actionLoading}>
+            <Button onClick={handleCreate} disabled={!canCreateCount}>
               {actionLoading ? 'Creating...' : 'Create Count'}
             </Button>
           </DialogFooter>
@@ -701,24 +731,32 @@ export default function PhysicalCountsPage() {
       </Dialog>
 
       {/* Detail Dialog */}
+      <ConfirmationDialog open={!!cancelTarget} onOpenChange={open => { if (!open && !actionLoading) { setCancelTarget(null); setCancellationReason(''); } }}
+        title="Cancel draft count?" description={`Cancel ${cancelTarget?.countNumber ?? 'this draft'}? The record and reason will be retained; stock quantities will not change.`}
+        confirmText="Cancel count" cancelText="Keep draft" variant="destructive" isLoading={actionLoading}
+        confirmDisabled={!cancellationReason.trim()} onConfirm={handleCancel}>
+        <Label htmlFor="count-cancellation-reason">Cancellation reason</Label>
+        <Textarea id="count-cancellation-reason" value={cancellationReason} onChange={event => setCancellationReason(event.target.value)} placeholder="Why is this draft being cancelled?" disabled={actionLoading} rows={3} />
+      </ConfirmationDialog>
       <Dialog open={detailDialogOpen} onOpenChange={setDetailDialogOpen}>
-        <DialogContent className="sm:max-w-[1000px] max-h-[90vh]">
-          <DialogHeader>
+        <DialogContent className={countItemsFullPage
+          ? "!left-0 !top-0 flex !h-dvh !max-h-none !w-screen !max-w-none !translate-x-0 !translate-y-0 flex-col overflow-hidden !rounded-none p-4"
+          : "sm:max-w-[1000px] flex h-[680px] max-h-[90dvh] flex-col overflow-hidden"}>
+          <DialogHeader className="shrink-0">
             <DialogTitle className="flex items-center gap-2">
-              Count Details - {selectedCount?.countNumber}
+              {countItemsFullPage ? 'Count Items' : selectedCount?.status === 'Draft' ? 'Edit Draft Count' : 'Count Details'} - {selectedCount?.countNumber}
               {selectedCount && getStatusBadge(selectedCount.status)}
             </DialogTitle>
-            <DialogDescription>View and manage count items</DialogDescription>
+            <DialogDescription>{selectedCount?.status === 'Draft' ? 'Add or remove items before starting. Each item change is saved immediately.' : 'View and manage count items'}</DialogDescription>
           </DialogHeader>
           {selectedCount && (
-            <Tabs defaultValue="details" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
+            <Tabs defaultValue="details" className="flex min-h-0 flex-1 flex-col">
+              <TabsList className={countItemsFullPage ? "hidden" : "grid w-full shrink-0 grid-cols-3"}>
                 <TabsTrigger value="details">Details</TabsTrigger>
                 <TabsTrigger value="items">Items ({selectedCount.items?.length || 0})</TabsTrigger>
-                <TabsTrigger value="variance">Variance</TabsTrigger>
                 <TabsTrigger value="history">Control history</TabsTrigger>
               </TabsList>
-              <TabsContent value="details" className="space-y-4">
+              <TabsContent value="details" className="min-h-0 flex-1 overflow-y-auto space-y-4">
                 <div className="grid grid-cols-4 gap-4">
                   <div><Label className="text-muted-foreground">Type</Label><div className="font-medium">{CountTypes.find(t => t.value === selectedCount.countType)?.label}</div></div>
                   <div><Label className="text-muted-foreground">Warehouse</Label><div className="font-medium">{selectedCount.warehouseName}</div></div>
@@ -730,131 +768,50 @@ export default function PhysicalCountsPage() {
                   <div><Label className="text-muted-foreground">Counted</Label><div className="font-medium">{selectedCount.countedItems}</div></div>
                   <div><Label className="text-muted-foreground">With Variance</Label><div className="font-medium text-orange-600">{selectedCount.itemsWithVariance}</div></div>
                 </div>
-                {selectedCount.notes && <div><Label className="text-muted-foreground">Notes</Label><div>{selectedCount.notes}</div></div>}
+                <p className="text-sm"><span className="text-muted-foreground">Count scope: </span>{selectedCount.locationId ? `Selected location — ${selectedCount.locationName || 'Location name unavailable'}` : 'Warehouse-wide (all locations)'}</p>
+                {selectedCount.items.some(item => !item.locationId) && !['Posted', 'Cancelled'].includes(selectedCount.status) && <p role="status" className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Items without a saved bin will use this warehouse’s default location when the count starts or is submitted. Stock already spread across other bins requires a new scoped count.</p>}
+                {selectedCount.status === 'Draft' ? <div className="space-y-2"><Label htmlFor="draft-count-notes">Notes (optional)</Label><Textarea id="draft-count-notes" value={draftNotes} onChange={event => setDraftNotes(event.target.value)} disabled={actionLoading} /><Button variant="outline" disabled={actionLoading || draftNotes === (selectedCount.notes || '')} onClick={() => void updateDraft(() => inventoryManagementService.updatePhysicalCount(selectedCount.id, { notes: draftNotes }), 'Draft notes saved.')}><Save className="mr-2 h-4 w-4" />Save draft notes</Button></div> : selectedCount.notes && <div><Label className="text-muted-foreground">Notes</Label><div>{selectedCount.notes}</div></div>}
                 <div className="space-y-3 rounded-md border p-4">
-                  <div><Label>Stock-taking evidence</Label><p className="text-sm text-muted-foreground">Signed count sheets and reconciliation evidence are scanned and linked to this count in Central DMS. No document IDs are entered manually.</p></div>
-                  {(selectedCount.evidence ?? []).length > 0 ? <div className="space-y-2">{selectedCount.evidence.map(item => <div key={item.centralDocumentVersionId} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted p-3 text-sm"><div><div className="font-medium">{item.documentReference} · {item.title || item.fileName}</div><div className="text-xs text-muted-foreground">{item.versionNumber} · {item.scanStatus} · {new Date(item.uploadedAtUtc).toLocaleString()}</div></div><Badge variant="outline">Published</Badge></div>)}</div> : <p className="text-sm text-amber-700">Attach at least one evidence file before completing the count.</p>}
-                  {['InProgress', 'RecountRequired'].includes(selectedCount.status) && <div className="grid gap-3 md:grid-cols-[1fr_1fr_auto]"><Input value={evidenceTitle} onChange={event => setEvidenceTitle(event.target.value)} placeholder="Evidence title (optional)" /><Input key={evidenceFile?.name ?? 'empty-evidence'} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png" onChange={event => setEvidenceFile(event.target.files?.[0] ?? null)} /><Button type="button" onClick={() => void uploadCountEvidence()} disabled={!evidenceFile || evidenceUploading}>{evidenceUploading ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <FileUp className="mr-2 h-4 w-4" />}{evidenceUploading ? 'Uploading' : 'Upload evidence'}</Button></div>}
+                  <div><Label>Count sheet (optional)</Label><p className="text-sm text-muted-foreground">Edit quantities in Items and select Save Counts, or import an Excel sheet. Saved quantities are used for review.</p></div>
+                  {selectedCount.evidence?.some(item => item.isCurrentCountSheet) ? selectedCount.evidence.filter(item => item.isCurrentCountSheet).map(item => <div key={item.centralDocumentVersionId} className="flex items-center justify-between gap-3 rounded-md bg-green-50 p-3 text-sm text-green-900"><div><div className="font-medium">{item.fileName || item.title}</div><div>{new Date(item.uploadedAtUtc).toLocaleString()} · {selectedCount.countedItems}/{selectedCount.totalItems} counted</div></div><Badge variant="outline">Current</Badge></div>) : <p className="text-sm text-muted-foreground">{selectedCount.status === 'Draft' ? 'No file needed to prepare this draft. Upload after starting the count.' : selectedCount.evidence?.some(item => item.isImportedCountSheet) ? 'Quantities were edited in Items. Earlier Excel files remain in history; no re-upload is needed.' : 'Excel import is optional. Enter quantities directly in Items.'}</p>}
+                  {(['InProgress', 'UnderReview'].includes(selectedCount.status) && !!selectedCount.canReview) && <Button disabled={actionLoading || editingItems.size > 0} onClick={() => setImportDialogOpen(true)}><FileUp className="mr-2 h-4 w-4" />{selectedCount.evidence?.some(item => item.isImportedCountSheet) ? 'Replace' : 'Upload'}</Button>}
+                  <details className="rounded-md border p-3"><summary className="cursor-pointer text-sm font-medium">Supporting files and upload history ({(selectedCount.evidence ?? []).filter(item => !item.isCurrentCountSheet).length})</summary>
+                    <p className="my-3 text-sm text-muted-foreground">These files are kept for review. They do not supply or change count quantities.</p>
+                    <div className="space-y-2">{(selectedCount.evidence ?? []).filter(item => !item.isCurrentCountSheet).map(item => <div key={item.centralDocumentVersionId} className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-muted p-3 text-sm"><div><div className="font-medium">{item.fileName || item.title}</div><div className="text-xs text-muted-foreground">{new Date(item.uploadedAtUtc).toLocaleString()} · {item.scanStatus}</div></div><Badge variant="outline">{item.isImportedCountSheet ? 'Previous count sheet' : 'Attachment only'}</Badge></div>)}</div>
+                    {['InProgress', 'RecountRequired', 'UnderReview', 'UnderInvestigation'].includes(selectedCount.status) && <div className="mt-3 grid gap-3 md:grid-cols-[1fr_1fr_auto]"><Input value={evidenceTitle} onChange={event => setEvidenceTitle(event.target.value)} placeholder="Supporting file title (optional)" /><Input aria-label="Supporting evidence file" key={evidenceFile?.name ?? 'empty-evidence'} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.jpg,.jpeg,.png" onChange={event => setEvidenceFile(event.target.files?.[0] ?? null)} /><Button type="button" onClick={() => void uploadCountEvidence()} disabled={!evidenceFile || evidenceUploading}>{evidenceUploading ? 'Uploading' : 'Attach supporting file'}</Button></div>}
+                  </details>
                 </div>
               </TabsContent>
-              <TabsContent value="items">
-                <ScrollArea className="h-[400px]">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Item</TableHead>
-                        <TableHead>Location</TableHead>
-                        <TableHead className="text-right">System Qty</TableHead>
-                        <TableHead className="text-right">Counted Qty</TableHead>
-                        <TableHead className="text-right">Variance</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedCount.items?.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>
-                            <div className="font-medium">{item.itemCode}</div>
-                            <div className="text-sm text-muted-foreground">{item.itemName}</div>
-                          </TableCell>
-                          <TableCell>{item.locationName || '-'}</TableCell>
-                          <TableCell className="text-right">{selectedCount.systemQuantityVisible ? item.systemQuantity : <span className="text-xs text-muted-foreground">Protected</span>}</TableCell>
-                          <TableCell className="text-right">
-                            {selectedCount.status === 'InProgress' ? (
-                              <Input
-                                type="number"
-                                className="w-20 text-right"
-                                value={editingItems.get(item.id) ?? item.countedQuantity}
-                                onChange={(e) => updateItemQuantity(item.id, parseFloat(e.target.value) || 0)}
-                              />
-                            ) : (
-                              selectedCount.systemQuantityVisible ? item.countedQuantity : <span className="text-xs text-muted-foreground">Protected</span>
-                            )}
-                          </TableCell>
-                          <TableCell className="text-right">
-                            {selectedCount.systemQuantityVisible ? <Badge className={item.varianceQuantity > 0 ? 'bg-green-100 text-green-800' : item.varianceQuantity < 0 ? 'bg-red-100 text-red-800' : ''}>{item.varianceQuantity > 0 ? '+' : ''}{item.varianceQuantity}</Badge> : <span className="text-xs text-muted-foreground">Protected</span>}
-                          </TableCell>
-                          <TableCell>
-                            {selectedCount.status === 'RecountRequired' && item.requiresRecount ? <div className="w-56 space-y-2"><Input type="number" value={editingItems.get(item.id) ?? item.countedQuantity} onChange={(event) => updateItemQuantity(item.id, Number(event.target.value))} /><Textarea className="min-h-16" placeholder="Independent investigation" value={recountNotes.get(item.id) ?? ''} onChange={(event) => setRecountNotes(previous => new Map(previous).set(item.id, event.target.value))} /><Button size="sm" onClick={() => handleRecount(item)} disabled={actionLoading}>Save recount</Button></div> : item.isCounted ? <CheckCircle className="h-4 w-4 text-green-600" /> : <Clock className="h-4 w-4 text-gray-400" />}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </ScrollArea>
-                {selectedCount.status === 'InProgress' && editingItems.size > 0 && (
-                  <div className="mt-4 flex justify-end">
-                    <Button onClick={handleRecordItems} disabled={actionLoading}>
-                      <Save className="h-4 w-4 mr-2" />{actionLoading ? 'Saving...' : 'Save Counts'}
-                    </Button>
-                  </div>
-                )}
+              <TabsContent value="items" className="min-h-0 flex-1 flex-col overflow-hidden data-[state=active]:flex">
+                <PhysicalCountItemsGrid key={selectedCount.id} count={selectedCount} edits={editingItems} busy={actionLoading}
+                  currencyCode={currencyCode}
+                  fullPage={countItemsFullPage} onToggleFullPage={() => setCountItemsFullPage(value => !value)}
+                  onQuantity={(id, value) => {
+                    if (value === undefined) setEditingItems(previous => { const next = new Map(previous); next.delete(id); return next; });
+                    else updateItemQuantity(id, value);
+                  }}
+                  onRemove={setRemoveTarget} onAdd={() => setAddItemDialogOpen(true)}
+                  onImport={() => setImportDialogOpen(true)} onExport={() => void handleExport(selectedCount.id)} />
               </TabsContent>
-              <TabsContent value="variance">
-                <div className="space-y-4">
-                  {!selectedCount.systemQuantityVisible && <div className="rounded-md border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">System quantities, first-count values, and variance results remain hidden until the blind count and required recount are complete.</div>}
-                  <div className="grid grid-cols-3 gap-4 p-4 bg-muted rounded-lg">
-                    <div><Label className="text-muted-foreground">Items with Variance</Label><div className="text-2xl font-bold text-orange-600">{selectedCount.itemsWithVariance}</div></div>
-                    <div><Label className="text-muted-foreground">Total Variance Value</Label><div className="text-2xl font-bold">{formatInventoryMoney(selectedCount.totalVarianceValue || 0, currencyCode)}</div></div>
-                    <div><Label className="text-muted-foreground">Counted Progress</Label><div className="text-2xl font-bold">{selectedCount.totalItems > 0 ? Math.round((selectedCount.countedItems / selectedCount.totalItems) * 100) : 0}%</div></div>
-                  </div>
-                  <ScrollArea className="h-[300px]">
-                    {selectedCount.systemQuantityVisible && selectedCount.items?.filter(i => i.varianceQuantity !== 0).map((item) => (
-                      <div key={item.id} className="flex items-center justify-between p-3 border-b">
-                        <div>
-                          <div className="font-medium">{item.itemCode} - {item.itemName}</div>
-                          <div className="text-sm text-muted-foreground">{item.locationName || 'No location'}</div>
-                        </div>
-                        <div className="text-right">
-                          <Badge className={item.varianceQuantity > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}>
-                            {item.varianceQuantity > 0 ? '+' : ''}{item.varianceQuantity} ({item.variancePercent?.toFixed(1)}%)
-                          </Badge>
-                          <div className="text-sm text-muted-foreground">{formatInventoryMoney(Math.abs(item.varianceValue || 0), currencyCode)}</div>
-                        </div>
-                      </div>
-                    ))}
-                  </ScrollArea>
-                </div>
-              </TabsContent>
-              <TabsContent value="history">
-                <ScrollArea className="h-[380px]"><div className="space-y-2">{selectedCount.actions.map(action => <div key={action.id} className="rounded-md border p-3"><div className="flex items-center justify-between"><div className="font-medium">#{action.sequence} {action.actionType}</div><Badge variant="outline">{action.actorRole}</Badge></div><div className="mt-1 text-sm text-muted-foreground">{new Date(action.occurredAtUtc).toLocaleString()} · {action.comment || 'No comment'}</div><div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{action.integrityHash}</div></div>)}</div></ScrollArea>
+              <TabsContent value="history" className="min-h-0 flex-1 overflow-y-auto">
+                <div className="space-y-2">{[...selectedCount.actions].sort((a, b) => b.sequence - a.sequence).map(action => <div key={action.id} className="rounded-md border p-3"><div className="flex items-center justify-between"><div className="font-medium">#{action.sequence} {action.actionType}</div><Badge variant="outline">{action.actorRole}</Badge></div><div className="mt-1 text-sm text-muted-foreground">{new Date(action.occurredAtUtc).toLocaleString()} · {action.comment || 'No comment'}</div><div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{action.integrityHash}</div></div>)}</div>
               </TabsContent>
             </Tabs>
           )}
-          <DialogFooter className="flex justify-between">
-            <div className="flex gap-2">
-              {selectedCount?.status === 'InProgress' && (
-                <Button variant="outline" onClick={() => handleComplete(selectedCount.id)} disabled={actionLoading || (selectedCount.evidence ?? []).length === 0} title={(selectedCount.evidence ?? []).length === 0 ? 'Attach stock-taking evidence first.' : undefined}>
-                  <Send className="h-4 w-4 mr-2" />Complete Count
-                </Button>
-              )}
-              {selectedCount?.status === 'PendingApproval' && (
-                <>
-                  <Button variant="outline" className="text-green-600" onClick={() => handleApprove(selectedCount.id)} disabled={actionLoading}>
-                    <ThumbsUp className="h-4 w-4 mr-2" />Approve
-                  </Button>
-                  <Button variant="outline" className="text-red-600" onClick={() => {
-                    setReasonAction({ title: 'Reject Count', message: 'Enter reason for rejection:', action: (reason) => handleReject(selectedCount.id, reason) });
-                    setReasonDialogOpen(true);
-                  }} disabled={actionLoading}>
-                    <ThumbsDown className="h-4 w-4 mr-2" />Reject
-                  </Button>
-                </>
-              )}
-              {selectedCount?.status === 'Approved' && (
-                <Button onClick={() => handlePostAdjustments(selectedCount.id)} disabled={actionLoading}>
-                  <CheckCircle className="h-4 w-4 mr-2" />Post Adjustments
-                </Button>
-              )}
-              {selectedCount?.status === 'PendingStoresApproval' && <><Button onClick={() => handleControlDecision('stores', true)} disabled={actionLoading}><ThumbsUp className="mr-2 h-4 w-4" />Stores approve</Button><Button variant="destructive" onClick={() => { setReasonAction({ title: 'Stores rejection', message: 'Record the controlled reason for recount:', action: reason => handleControlDecision('stores', false, reason) }); setReasonDialogOpen(true); }} disabled={actionLoading}><ThumbsDown className="mr-2 h-4 w-4" />Reject</Button></>}
-              {selectedCount?.status === 'PendingFinanceApproval' && <><Button onClick={() => handleControlDecision('finance', true)} disabled={actionLoading}><ThumbsUp className="mr-2 h-4 w-4" />Finance approve</Button><Button variant="destructive" onClick={() => { setReasonAction({ title: 'Finance rejection', message: 'Record the financial-control exception:', action: reason => handleControlDecision('finance', false, reason) }); setReasonDialogOpen(true); }} disabled={actionLoading}><ThumbsDown className="mr-2 h-4 w-4" />Reject</Button></>}
-              {selectedCount?.status === 'PendingAuditAttestation' && <><Button onClick={() => handleControlDecision('audit', true)} disabled={actionLoading}><ShieldCheck className="mr-2 h-4 w-4" />Audit attest</Button><Button variant="destructive" onClick={() => { setReasonAction({ title: 'Audit exception', message: 'Record the independent audit exception:', action: reason => handleControlDecision('audit', false, reason) }); setReasonDialogOpen(true); }} disabled={actionLoading}><AlertTriangle className="mr-2 h-4 w-4" />Exception</Button></>}
-              {selectedCount?.status === 'ReadyToPost' && <Button onClick={handleControlledPost} disabled={actionLoading}><CheckCircle className="mr-2 h-4 w-4" />Finance post</Button>}
+          <DialogFooter className="flex shrink-0 flex-row items-start gap-2 sm:justify-between sm:space-x-0" data-testid="count-action-footer">
+            <div className="max-h-[32vh] min-w-0 flex-1 space-y-2 overflow-y-auto">
+              {selectedCount && <PhysicalCountReviewActions count={selectedCount} unsaved={editingItems.size > 0}
+                saving={actionLoading} onSaveCounts={() => void handleRecordItems()}
+                onUploadSheet={() => setImportDialogOpen(true)} onChanged={refreshSelected} />}
+              {selectedCount?.status === 'ReadyToPost' && selectedCount.canPost === true && <Button onClick={handleControlledPost} disabled={actionLoading}><CheckCircle className="mr-2 h-4 w-4" />Post</Button>}
             </div>
             <Button variant="outline" onClick={() => setDetailDialogOpen(false)}>Close</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {selectedCount?.status === 'Draft' && <PhysicalCountDraftItemDialog open={addItemDialogOpen} count={selectedCount} busy={actionLoading} onOpenChange={setAddItemDialogOpen} onSave={addDraftItem} />}
+      <ConfirmationDialog open={!!removeTarget} onOpenChange={open => { if (!open) setRemoveTarget(null); }} title="Remove count item?" description={`Remove ${removeTarget?.itemCode} - ${removeTarget?.itemName} from this draft? Stock balances are not changed.`} confirmText="Remove item" variant="destructive" isLoading={actionLoading} onConfirm={removeDraftItem} />
 
       {/* Reason Dialog */}
       <Dialog open={reasonDialogOpen} onOpenChange={setReasonDialogOpen}>
@@ -879,6 +836,14 @@ export default function PhysicalCountsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {importDialogOpen && selectedCount && <PhysicalCountSheetUploadDialog
+        key={selectedCount.id}
+        count={selectedCount}
+        errorMessage={problemMessage}
+        onSaved={refreshSelected}
+        onClose={() => { setImportDialogOpen(false); void refreshSelected().catch(() => toast.warning('Refresh the register to reload the count.')); }}
+      />}
 
       {/* Variance Report Dialog */}
       <Dialog open={varianceDialogOpen} onOpenChange={setVarianceDialogOpen}>

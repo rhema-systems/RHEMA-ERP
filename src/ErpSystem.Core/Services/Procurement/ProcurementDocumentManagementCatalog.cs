@@ -50,7 +50,7 @@ public static class ProcurementDocumentManagementCatalog
             "Draft, executed, amendment, security and contract-administration evidence.",
             "Contract", "PROC-CON-EVD", "ContractEvidence", "Procurement contract restricted",
             "procurement.records.read", ["procurement.contract.manage"],
-            ["Contract", "Amendment", "Addendum", "Specification", "Certificate", "Invoice", "Receipt", "Correspondence", "Other"]),
+            ["Contract", "SignedCopy", "Amendment", "Addendum", "Specification", "Certificate", "Invoice", "Receipt", "Correspondence", "Other"]),
         Family(ProcurementDocumentFamily.GoodsReceiptNote, "GRN documents",
             "Goods receipt and inspection evidence linked to the governed GRN.",
             "GoodsReceiptNote", "TDC-PROC-GRN-EVD", "GoodsReceiptEvidence", "Procurement receipt restricted",

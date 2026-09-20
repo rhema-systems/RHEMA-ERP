@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   getProcurementProblemMessage,
   getTenderHeaderActions,
+  getTenderStageVisibility,
 } from './procurement-tender-header-actions';
 
 const input = {
@@ -11,9 +12,64 @@ const input = {
   sourcingCaseId: 'case-1',
   sourcingMethod: 'NationalCompetitiveTendering' as const,
   canReadProcurementRecords: true,
+  status: 'Closed',
+  bidCount: 2,
 };
 
 describe('tender header control actions', () => {
+  it.each(['Closed', 'UnderEvaluation', 'Evaluated', 'Awarded'])(
+    'retains bid and award navigation after closing: %s',
+    (status) => {
+      expect(getTenderStageVisibility(status)).toEqual({
+        publishedStage: true,
+        awardStage: true,
+      });
+      expect(getTenderHeaderActions({ ...input, status })).toMatchObject({
+        showCommitteeControls: true,
+        showAwardReadiness: true,
+        showGhanepsExchange: true,
+      });
+      expect(getTenderHeaderActions({ ...input, status, canReadProcurementRecords: false })).toMatchObject({
+        showCommitteeControls: false,
+        showAwardReadiness: false,
+        showGhanepsExchange: false,
+      });
+    }
+  );
+
+  it.each([
+    'Draft',
+    'Submitted',
+    'Approved',
+    'Rejected',
+    'Cancelled',
+    undefined,
+  ])('hides later-stage navigation for %s tenders', (status) => {
+    expect(getTenderStageVisibility(status)).toEqual({
+      publishedStage: false,
+      awardStage: false,
+    });
+    expect(getTenderHeaderActions({ ...input, status })).toMatchObject({
+      showCommitteeControls: false,
+      showAwardReadiness: false,
+      showGhanepsExchange: false,
+    });
+  });
+
+  it('waits for submitted bids before committee work and closing before award readiness', () => {
+    expect(
+      getTenderHeaderActions({ ...input, status: 'Published', bidCount: 0 })
+    ).toMatchObject({
+      showCommitteeControls: false,
+      showAwardReadiness: false,
+      showGhanepsExchange: true,
+    });
+    expect(
+      getTenderHeaderActions({ ...input, status: 'Published', bidCount: 1 })
+        .showCommitteeControls
+    ).toBe(true);
+  });
+
   it('exposes all controls for a readable case-backed formal tender', () => {
     expect(getTenderHeaderActions(input)).toEqual({
       showCommitteeControls: true,

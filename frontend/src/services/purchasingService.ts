@@ -2,6 +2,7 @@
  * Purchasing Service
  * Handles Purchase Requisitions, Purchase Orders, and Purchase Receipts (GRN)
  */
+import type { BusinessPartnerPostingDefaults } from './businessPartnerService';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -50,6 +51,15 @@ async function getFriendlyErrorMessage(
         parsed?.detail ||
         parsed?.title ||
         (typeof parsed === 'string' ? parsed : message);
+      const validationErrors = parsed?.errors;
+      if (validationErrors && typeof validationErrors === 'object' && !Array.isArray(validationErrors)) {
+        const fields = Object.entries(validationErrors).flatMap(([field, errors]) =>
+          (Array.isArray(errors) ? errors : [errors])
+            .filter((error): error is string => typeof error === 'string' && error.trim().length > 0)
+            .map(error => `${field}: ${error}`)
+        );
+        if (fields.length > 0) message = `${message} ${fields.join(' ')}`;
+      }
     } catch {
       // not JSON, keep text
     }
@@ -639,6 +649,7 @@ export interface ProcurementPurchaseOrderSodCheckDto {
 }
 
 export interface ProcurementPurchaseOrderSodReadinessDto {
+  approvalRequired?: boolean;
   purchaseOrderId: string;
   orderNumber: string;
   status: string;
@@ -739,7 +750,19 @@ export interface PurchaseOrderBudgetCommitmentDto {
   history: PurchaseOrderBudgetCommitmentHistoryDto[];
 }
 
+export interface PurchaseOrderSupplierDefaultsDto {
+  businessPartnerId: string;
+  paymentTermId?: string | null;
+  paymentTerms?: string | null;
+  paymentTermsDays?: number | null;
+  tin?: string | null;
+  creditLimit?: number | null;
+  currency?: string | null;
+  postingDefaults: BusinessPartnerPostingDefaults;
+}
+
 export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
+  supplierDefaults?: PurchaseOrderSupplierDefaultsDto | null;
   receivedDate?: string;
   approvedByName?: string;
   approvedAt?: string;
@@ -779,6 +802,7 @@ export interface PurchaseOrderDetailDto extends PurchaseOrderSummaryDto {
 }
 
 export interface PurchaseOrderItemDto {
+  lineType?: import('@/lib/purchase-order-line-types').PurchaseOrderLineType;
   id: string;
   purchaseOrderId: string;
   inventoryItemId: string;
@@ -810,6 +834,7 @@ export type LandedCostAllocationMethod =
   'ByValue' | 'ByQuantity' | 'ByWeight' | 'ByVolume' | 'Equal' | 'Manual';
 
 export interface PurchaseOrderLandedCostPlanItemDto {
+  purchaseOrderItemId?: string;
   id: string;
   costType: number; // matches backend LandedCostType enum values
   description: string;
@@ -835,6 +860,8 @@ export interface PurchaseOrderLandedCostPlanDto {
 }
 
 export interface UpsertPurchaseOrderLandedCostPlanItemDto {
+  purchaseOrderItemId?: string;
+  purchaseOrderLineIndex?: number;
   costType: number;
   description: string;
   amount: number;
@@ -891,6 +918,7 @@ const normalizePurchaseOrderLandedCostPlanDto = (
 };
 
 export interface CreatePurchaseOrderDto {
+  plannedLandedCostPlan?: UpsertPurchaseOrderLandedCostPlanDto;
   sourceType: ProcurementPurchaseOrderSourceType;
   sourceId: string;
   supplierId: string; // Maps to BusinessPartnerId
@@ -917,7 +945,9 @@ export interface CreatePurchaseOrderDto {
 }
 
 export interface CreatePurchaseOrderItemDto {
-  inventoryItemId: string;
+  id?: string;
+  lineType?: import('@/lib/purchase-order-line-types').PurchaseOrderLineType;
+  inventoryItemId?: string;
   supplierItemCode?: string; // Maps to BusinessPartnerItemCode
   itemDescription?: string;
   orderedQuantity: number;
@@ -956,6 +986,16 @@ export interface PurchaseOrderReceiptDto {
 }
 
 export type ProcurementReceiptSourceEvidenceKind = 1 | 2;
+
+const normalizeReceiptSourceEvidence = (
+  evidence: ProcurementReceiptSourceEvidenceDto
+): ProcurementReceiptSourceEvidenceDto => {
+  const value: unknown = evidence.evidenceKind;
+  const evidenceKind = value === 1 || value === '1' || value === 'Waybill' ? 1
+    : value === 2 || value === '2' || value === 'VatInvoiceCopy' ? 2 : undefined;
+  if (evidenceKind === undefined) throw new Error('Unrecognized receipt evidence type. Refresh or contact support.');
+  return { ...evidence, evidenceKind };
+};
 
 export interface ProcurementReceiptSourceEvidenceDto {
   id: string;
@@ -1028,6 +1068,7 @@ export interface ProcurementReceiptInspectionEvidenceRequest {
 }
 
 export interface ProcurementReceiptInspectionLineDto {
+  lineType?: import('@/lib/purchase-order-line-types').PurchaseOrderLineType;
   id: string;
   purchaseOrderReceiptItemId: string;
   purchaseOrderItemId: string;
@@ -1069,6 +1110,8 @@ export interface ProcurementReceiptInspectionActionDto {
 }
 
 export interface ProcurementReceiptInspectionDto {
+  approvalRequired?: boolean;
+  workflowDefinitionId?: string;
   id: string;
   purchaseOrderReceiptId: string;
   sequence: number;
@@ -1191,7 +1234,7 @@ export interface ProcurementReceiptDocumentOverviewDto {
 }
 
 export interface SaveProcurementReceiptInspectionRequest {
-  comment: string;
+  comment?: string;
   idempotencyKey: string;
   rowVersion?: string;
   lines: Array<{
@@ -2139,7 +2182,7 @@ export const purchasingService = {
   async submitReceiptInspection(
     caseId: string,
     request: {
-      comment: string;
+      comment?: string;
       rowVersion: string;
       evidence: ProcurementReceiptInspectionEvidenceRequest[];
     }
@@ -2246,7 +2289,8 @@ export const purchasingService = {
       { headers: getAuthHeaders() }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
-    return response.json();
+    const overview: ProcurementReceiptSourceEvidenceOverviewDto = await response.json();
+    return { ...overview, evidence: overview.evidence.map(normalizeReceiptSourceEvidence) };
   },
 
   async uploadReceiptSourceEvidence(
@@ -2270,7 +2314,7 @@ export const purchasingService = {
       { method: 'POST', headers: getMultipartAuthHeaders(), body: form }
     );
     if (!response.ok) throw new Error(await getFriendlyErrorMessage(response));
-    return response.json();
+    return normalizeReceiptSourceEvidence(await response.json());
   },
 
   async downloadReceiptSourceEvidence(

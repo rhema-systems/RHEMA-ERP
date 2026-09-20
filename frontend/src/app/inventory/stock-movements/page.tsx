@@ -19,6 +19,7 @@ import {
 import { MovementDetailDialog } from '@/components/inventory/MovementDetailDialog';
 import { format } from 'date-fns';
 import { INVENTORY_MOVEMENT_REPORT_PATH } from '@/lib/inventory-report-navigation';
+import { formatInventoryMoney } from '@/lib/inventory-currency';
 
 // Movement type definitions with isInbound to determine direction
 const MovementTypes: { value: string; label: string; color: string; icon: typeof ArrowDown; isInbound: boolean | null }[] = [
@@ -153,6 +154,10 @@ export default function StockMovementsPage() {
     .filter(m => OUTBOUND_TYPES.includes(m.movementType) || getMovementType(m.movementType).isInbound === false)
     .reduce((sum, m) => sum + Math.abs(m.quantity), 0);
   const totalValue = movements.reduce((sum, m) => sum + Math.abs(m.totalCost || 0), 0);
+  // Values arrive with their valuation currency; do not guess a currency or sum mixed currencies.
+  const money = (value: number, code?: string | null) => code ? formatInventoryMoney(value, code) : '—';
+  const currencyCode = movements[0]?.currencyCode;
+  const sameCurrency = currencyCode && movements.every(m => m.currencyCode === currencyCode);
 
   return (
     <div className="space-y-6">
@@ -205,7 +210,7 @@ export default function StockMovementsPage() {
         </CardContent></Card>
         <Card><CardContent className="pt-6">
           <div className="flex items-center justify-between">
-            <div><p className="text-2xl font-bold">${totalValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p><p className="text-sm text-muted-foreground">Total Value</p></div>
+            <div><p className="text-2xl font-bold">{sameCurrency ? money(totalValue, currencyCode) : '—'}</p><p className="text-sm text-muted-foreground">Total Value</p></div>
             <Package className="h-8 w-8 text-purple-500" />
           </div>
         </CardContent></Card>
@@ -267,6 +272,8 @@ export default function StockMovementsPage() {
         <CardHeader>
           <CardTitle>Movement History</CardTitle>
           <CardDescription>{loading ? 'Loading...' : `${movements.length} movement(s) found`}</CardDescription>
+          {!loading && movements.some(m => !m.currencyCode) && <p className="text-sm text-amber-700">Valuation currency unavailable. Refresh to load monetary values.</p>}
+          {!loading && movements.length > 0 && movements.every(m => m.currencyCode) && !sameCurrency && <p className="text-sm text-muted-foreground">Values use different currencies; no combined total is shown.</p>}
         </CardHeader>
         <CardContent>
           {loading && <div className="text-center py-8 text-muted-foreground">Loading...</div>}
@@ -325,7 +332,7 @@ export default function StockMovementsPage() {
                             {Math.abs(movement.quantity).toLocaleString()}
                           </div>
                           <div className="text-sm text-muted-foreground">
-                            ${(movement.totalCost || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            {money(movement.totalCost || 0, movement.currencyCode)}
                           </div>
                           <div className="text-xs text-muted-foreground">
                             {movement.movementDate ? format(new Date(movement.movementDate), 'MMM dd, yyyy HH:mm') : '-'}
@@ -356,6 +363,7 @@ export default function StockMovementsPage() {
         open={detailDialogOpen}
         onOpenChange={setDetailDialogOpen}
         movement={selectedMovement}
+        currencyCode={selectedMovement?.currencyCode ?? null}
       />
     </div>
   );

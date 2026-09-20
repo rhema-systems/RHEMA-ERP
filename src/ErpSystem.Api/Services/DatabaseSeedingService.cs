@@ -1,6 +1,7 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using ErpSystem.Api.Configuration;
+using ErpSystem.Api.Extensions;
 using ErpSystem.Core.DTOs.Workflow;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Ehc;
@@ -8,6 +9,7 @@ using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Entities.Projects;
@@ -21,6 +23,7 @@ using ErpSystem.Shared;
 using Microsoft.Data.SqlClient;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ErpSystem.Web.Services
 {
@@ -85,6 +88,15 @@ namespace ErpSystem.Web.Services
                     "Financial Controller Final Approval",
                     new[] { "Financial Controller" },
                     "Independent final payment authorization before posting, clearing, or settlement finalization.")
+            };
+
+        private static readonly IReadOnlyList<WorkflowApprovalStageSeed> AccountingBookApprovalStages =
+            new List<WorkflowApprovalStageSeed>
+            {
+                new(
+                    "Financial Controller Review",
+                    new[] { "Financial Controller" },
+                    "Independent approval of accounting-book opening, period, or lifecycle evidence.")
             };
 
         private static readonly JsonSerializerOptions WorkflowSeedJsonOptions = CreateWorkflowSeedJsonOptions();
@@ -232,7 +244,7 @@ namespace ErpSystem.Web.Services
                 if (_procurementAccessControlSeeder is not null)
                 {
                     _logger.LogInformation("Ensuring TDC access roles, permissions, committees, and Draft workflow templates are seeded...");
-                    await _procurementAccessControlSeeder.SeedAsync();
+                    await _procurementAccessControlSeeder.SeedAsync(preserveExistingWorkflows: true);
                 }
 
                 if (_civilEngineeringConfigurationProfileSeeder is not null)
@@ -353,6 +365,9 @@ namespace ErpSystem.Web.Services
                     var defaultTenant = await _context.Tenants.FirstOrDefaultAsync(t => t.Code == "DEFAULT");
                     if (defaultTenant != null)
                     {
+                        _logger.LogInformation("Ensuring public estate portal demo sale listings are seeded...");
+                        await EnsurePublicEstatePortalDemoSaleListingsSeededAsync(defaultTenant.Id);
+
                         var ehcDemoSeeder = new EhcHelpdeskDemoSeeder(_context, _logger);
                         await ehcDemoSeeder.SeedAsync(defaultTenant.Id);
                     }
@@ -403,6 +418,13 @@ namespace ErpSystem.Web.Services
             await EnsureFinancePermissionAssignmentsAsync();
             _logger.LogInformation("Ensuring EHC workflow is seeded...");
             await EnsureEhcWorkflowSeededAsync();
+            if (_context.Database.IsSqlServer())
+            {
+                await _context.Database.ExecuteSqlRawAsync(EhcPropertyEnquiryConfiguration.Sql);
+                // The disposable baseline creates schema from the current model rather than replaying
+                // historical data migrations. Reapply this idempotent tenant notification authority.
+                await _context.Database.ExecuteSqlRawAsync(EhcPropertyEnquiryNotificationHandoffConfiguration.Sql);
+            }
             _logger.LogInformation("Ensuring finance workflows are seeded...");
             await EnsureFinanceWorkflowsSeededAsync();
             _logger.LogInformation("Ensuring business partner workflows are seeded...");
@@ -423,20 +445,8 @@ namespace ErpSystem.Web.Services
             _logger.LogInformation("Ensuring workflow notification topics are seeded...");
             await EnsureWorkflowNotificationTopicsSeededAsync();
 
-            // Program.cs invokes this lightweight path during every permitted VPS
-            // startup. Keep the UAT PO route here so Draft templates are repaired and
-            // published before operators can submit purchase orders.
-            if (_procurementAccessControlSeeder is not null &&
-                StartupInitializationPolicy.IsDevelopmentDataSeedingPermitted(
-                    _environment.EnvironmentName,
-                    _allowDevelopmentDataSeedingOutsideDevelopment))
-            {
-                _logger.LogInformation(
-                    "Ensuring TDC Draft workflow templates and the UAT Purchase Order approval workflow are ready...");
-                await _procurementAccessControlSeeder.SeedAsync();
-                await _procurementAccessControlSeeder
-                    .EnsurePublishedPurchaseOrderApprovalWorkflowForUatAsync();
-            }
+            // Routine startup must not repair Draft user edits or publish a deliberately
+            // disabled UAT workflow. Explicit UAT provisioning owns template publication.
         }
 
         /// <summary>
@@ -659,6 +669,9 @@ namespace ErpSystem.Web.Services
 
                 foreach (var tenant in tenants)
                 {
+                    if (await HasExistingWorkflowConfigurationAsync(tenant.Id, entityCode,
+                        "Procurement Receipt Inspection", definitionName))
+                        continue; // Retain live-instance assignments as well as the definition.
                     await EnsureSequentialWorkflowDefinitionSeededAsync(
                         tenant.Id,
                         entityCode,
@@ -791,6 +804,8 @@ namespace ErpSystem.Web.Services
 
         private async Task EnsureEstateSopWorkflowDefinitionSeededAsync(Guid tenantId, EstateSopWorkflowSeedSpec spec)
         {
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, spec.EntityCode, spec.EntityName, spec.DefinitionName))
+                return;
             var entityType = await EnsureWorkflowEntityTypeAsync(
                 tenantId,
                 spec.EntityCode,
@@ -1332,9 +1347,11 @@ namespace ErpSystem.Web.Services
                     foreach (var spec in GetFinanceWorkflowSeedSpecs())
                     {
                         var approvalStages = spec.EntityCode is
-                            "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
-                            ? FinancePaymentApprovalStages
-                            : FinanceApprovalStages;
+                            "AccountingBookInitialization" or "AccountingBookPeriodLifecycle" or "AccountingBookLifecycle"
+                            ? AccountingBookApprovalStages
+                            : spec.EntityCode is "VendorPayment" or "PaymentBatch" or "VendorInvoiceMatchException"
+                                ? FinancePaymentApprovalStages
+                                : FinanceApprovalStages;
 
                         await EnsureSequentialWorkflowDefinitionSeededAsync(
                             tenant.Id,
@@ -1437,6 +1454,8 @@ namespace ErpSystem.Web.Services
         private async Task EnsureVendorPaymentControlWorkflowSeededAsync(Guid tenantId)
         {
             const string definitionName = "Vendor Payment Approval";
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, "VendorPayment", "Vendor Payment", definitionName))
+                return;
             await EnsureWorkflowDefinitionSeededAsync(
                 tenantId,
                 entityCode: "VendorPayment",
@@ -1715,6 +1734,12 @@ namespace ErpSystem.Web.Services
                     "Sequential finance journal approval: Accounts Officer review -> Finance Manager approval -> Financial Controller final approval."),
                 new("JournalBatch", "Journal Batch", typeof(JournalBatch).FullName, "Journal Batch Approval",
                     "Batch-level journal approval with per-entry decisions, control totals, partial posting, and batch reversal controls."),
+                new("AccountingBookInitialization", "Accounting Book Initialization", typeof(AccountingBookInitialization).FullName,
+                    "Accounting Book Initialization Approval", "Independent approval of balanced, complete opening evidence before book activation."),
+                new("AccountingBookPeriodLifecycle", "Accounting Book Period Lifecycle", typeof(AccountingBookPeriod).FullName,
+                    "Accounting Book Period Lifecycle Approval", "Independent approval of exact-book period opening and close transitions."),
+                new("AccountingBookLifecycle", "Accounting Book Lifecycle", typeof(AccountingBook).FullName,
+                    "Accounting Book Lifecycle Approval", "Independent approval of governed accounting-book state transitions."),
 
                 // Accounts Payable
                 new("FinancePurchaseOrder", "Finance Purchase Order", typeof(FinancePurchaseOrder).FullName, "Finance Purchase Order Approval",
@@ -5415,6 +5440,8 @@ namespace ErpSystem.Web.Services
             string description,
             IReadOnlyCollection<string> approvalRoleNames)
         {
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, entityCode, entityName, definitionName))
+                return;
             var entityTypeCandidates = await _context.WorkflowEntityTypes
                 .Where(et => !et.IsDeleted && et.TenantId == tenantId)
                 .ToListAsync();
@@ -5612,6 +5639,8 @@ namespace ErpSystem.Web.Services
             string description,
             IReadOnlyList<WorkflowApprovalStageSeed> approvalStages)
         {
+            if (await HasExistingWorkflowConfigurationAsync(tenantId, entityCode, entityName, definitionName))
+                return;
             var entityType = await EnsureWorkflowEntityTypeAsync(
                 tenantId,
                 entityCode,
@@ -5796,6 +5825,26 @@ namespace ErpSystem.Web.Services
             DeactivateLegacyWorkflowDefinitions(definitions, definitionId, definitionName, approvalStages, now);
 
             await _context.SaveChangesAsync();
+        }
+
+        /// <summary>
+        /// Startup creates missing baselines only. Existing definitions (including Draft,
+        /// inactive, retired and soft-deleted records) and disabled entity types are explicit
+        /// tenant configuration, not a request to publish a replacement on the next restart.
+        /// </summary>
+        private async Task<bool> HasExistingWorkflowConfigurationAsync(
+            Guid tenantId, string entityCode, string entityName, string definitionName)
+        {
+            var candidates = await _context.WorkflowEntityTypes.IgnoreQueryFilters().AsNoTracking()
+                .Where(item => item.TenantId == tenantId).ToListAsync();
+            var entityTypes = candidates.Where(item =>
+                WorkflowEntityTypeKeyMatches(item.Code, entityCode) || WorkflowEntityTypeKeyMatches(item.Name, entityCode) ||
+                WorkflowEntityTypeKeyMatches(item.Code, entityName) || WorkflowEntityTypeKeyMatches(item.Name, entityName)).ToList();
+            if (entityTypes.Any(item => item.IsDeleted || !item.IsActive)) return true;
+            var entityIds = entityTypes.Select(item => item.Id).ToList();
+            return await _context.WorkflowDefinitions.IgnoreQueryFilters().AsNoTracking().AnyAsync(item =>
+                item.TenantId == tenantId && (entityIds.Contains(item.EntityTypeId) ||
+                    item.Name == definitionName || item.Name.StartsWith(definitionName + " ")));
         }
 
         private async Task<WorkflowEntityType> EnsureWorkflowEntityTypeAsync(
@@ -6167,6 +6216,8 @@ namespace ErpSystem.Web.Services
                 var tenants = await _context.Tenants.Where(t => !t.IsDeleted && t.Status == TenantStatus.Active).ToListAsync();
                 foreach (var tenant in tenants)
                 {
+                    if (await HasExistingWorkflowConfigurationAsync(tenant.Id, "EHC_TICKET", "EHC Ticket", "EHC Ticket"))
+                        continue;
                     var entityType = await _context.WorkflowEntityTypes
                         .FirstOrDefaultAsync(et => !et.IsDeleted && et.TenantId == tenant.Id && et.Code == "EHC_TICKET");
 
@@ -7728,6 +7779,391 @@ namespace ErpSystem.Web.Services
                 }
             }
         }
+
+        private async Task EnsurePublicEstatePortalDemoSaleListingsSeededAsync(Guid tenantId)
+        {
+            var now = DateTime.UtcNow;
+            var seeds = new[]
+            {
+                new PublicEstatePortalSaleListingSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-001",
+                    AssetCode: "TDC-PORTAL-LAND-001",
+                    AssetName: "Community 25 Serviced Parcel 01",
+                    ListingNotes: "Serviced residential land available for purchase. Boundary verified and ready for buyer enquiry.",
+                    Location: "Community 25 Extension, Tema",
+                    Town: "Tema Community 25",
+                    District: "Tema West",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 5445m,
+                    SalePrice: 850000m,
+                    OwnerName: "Nii Tema Family Stool",
+                    ContactNumber: "0302001101",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-001",
+                    MapSheetNumber: "MS-TDC-C25-001",
+                    DemarcationNumber: 1),
+                new PublicEstatePortalSaleListingSeed(
+                    ProjectReference: "TDC-PORTAL-ACQ-002",
+                    AssetCode: "TDC-PORTAL-LAND-002",
+                    AssetName: "East Legon Hills Residential Parcel 02",
+                    ListingNotes: "Residential land parcel published to the public portal for sales enquiry.",
+                    Location: "East Legon Hills, Accra",
+                    Town: "East Legon Hills",
+                    District: "Adentan",
+                    Region: "Greater Accra",
+                    AreaSquareFeet: 7200m,
+                    SalePrice: 1250000m,
+                    OwnerName: "Mensah-Aryee Family",
+                    ContactNumber: "0302001102",
+                    SurveyPlanNumber: "SP-TDC-PORTAL-002",
+                    MapSheetNumber: "MS-TDC-ELH-002",
+                    DemarcationNumber: 1)
+            };
+
+            foreach (var seed in seeds)
+            {
+                var acquisition = await _context.LandAcquisitions
+                    .Include(item => item.CadastralSurveys)
+                    .Include(item => item.OwnershipHistories)
+                    .Include(item => item.NegotiationOffers)
+                    .Include(item => item.LandAssets)
+                    .FirstOrDefaultAsync(item =>
+                        item.TenantId == tenantId
+                        && item.ProjectReference == seed.ProjectReference
+                        && !item.IsDeleted);
+
+                if (acquisition is null)
+                {
+                    acquisition = new LandAcquisition
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        ProjectReference = seed.ProjectReference,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    _context.LandAcquisitions.Add(acquisition);
+                }
+
+                acquisition.IntendedUse = "Residential sale listing";
+                acquisition.EstimatedSize = seed.AreaSquareFeet;
+                acquisition.Location = seed.Location;
+                acquisition.CurrentStage = AcquisitionProcedure.LandAssetCreation;
+                acquisition.Status = LandAcquisitionStatus.AssetCreated;
+                acquisition.OwnershipType = LandOwnershipType.Family;
+                acquisition.Coordinates = BuildSeedBoundary(seed);
+                acquisition.StageOrder = (int)AcquisitionProcedure.LandAssetCreation;
+                acquisition.PlanningUploaded = true;
+                acquisition.InternalApproved = true;
+                acquisition.SuitableForDueDiligence = true;
+                acquisition.ApprovedAt ??= now.AddDays(-7);
+                acquisition.UpdatedAt = now;
+                acquisition.UpdatedBy = "System";
+
+                EnsureSeedCadastralSurvey(acquisition, seed, tenantId, now);
+                EnsureSeedOwnershipHistory(acquisition, seed, tenantId, now);
+                EnsureSeedNegotiationOffer(acquisition, seed, tenantId, now);
+                EnsureSeedLandAsset(acquisition, seed, tenantId, now);
+
+                var asset = await _context.EstateManagedAssets
+                    .Include(item => item.Demarcations)
+                    .FirstOrDefaultAsync(item =>
+                        item.TenantId == tenantId
+                        && item.AssetCode == seed.AssetCode
+                        && !item.IsDeleted);
+
+                if (asset is null)
+                {
+                    asset = new EstateManagedAsset
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        AssetCode = seed.AssetCode,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    _context.EstateManagedAssets.Add(asset);
+                }
+
+                asset.LandAcquisitionId = acquisition.Id;
+                asset.Name = seed.AssetName;
+                asset.Description = seed.ListingNotes;
+                asset.Location = seed.Location;
+                asset.Purpose = "Residential development";
+                asset.ZoningClassification = "Residential";
+                asset.PlanningComplianceStatus = "Compliant";
+                asset.BoundaryVerified = true;
+                asset.BoundaryCoordinates = BuildSeedBoundary(seed);
+                asset.SurveyPlanNumber = seed.SurveyPlanNumber;
+                asset.MapSheetNumber = seed.MapSheetNumber;
+                asset.CadastreDescription = $"{seed.AssetName} cadastral survey";
+                asset.Region = seed.Region;
+                asset.District = seed.District;
+                asset.Town = seed.Town;
+                asset.AreaValue = seed.AreaSquareFeet;
+                asset.AreaUnit = "square feet";
+                asset.SurveyorName = "TDC Survey Unit";
+                asset.SurveyDate = now.Date.AddDays(-21);
+                asset.BeaconCount = 4;
+                asset.AssetType = EstateManagedAssetType.Land;
+                asset.Status = EstateManagedAssetStatus.LandBank;
+                asset.SourceType = EstateManagedAssetSourceType.LandAcquisition;
+                asset.ProjectId = null;
+                asset.ProjectCode = null;
+                asset.ProjectTitle = null;
+                asset.CustomerBusinessPartnerId = null;
+                asset.LesseeName = null;
+                asset.AreaSquareMeters = seed.AreaSquareFeet * 0.09290304m;
+                asset.ValuationAmount = seed.SalePrice;
+                asset.OwnerConsiderationCost = seed.SalePrice * 0.70m;
+                asset.ExternalSurveyorCost = 25000m;
+                asset.StampDutyCost = seed.SalePrice * 0.01m;
+                asset.OtherAcquisitionCost = 15000m;
+                asset.TotalCapitalizedCost =
+                    asset.OwnerConsiderationCost + asset.ExternalSurveyorCost + asset.StampDutyCost + asset.OtherAcquisitionCost;
+                asset.Currency = "GHS";
+                asset.IsAvailableForLease = false;
+                asset.IsAvailableForSale = true;
+                asset.IsPublishedFromProject = false;
+                asset.IsPublishedToExternalPortal = false;
+                asset.ExternalListingType = "Sale";
+                asset.ExternalListingStatus = "Draft";
+                asset.ExternalListingPrice = seed.SalePrice;
+                asset.ExternalSalePrice = seed.SalePrice;
+                asset.ExternalMonthlyRent = null;
+                asset.ExternalLeaseTermMonths = null;
+                asset.ExternalListingCurrency = "GHS";
+                asset.ExternalListingNotes = seed.ListingNotes;
+                asset.ExternalPublishedAt = now.AddDays(-2);
+                asset.Notes = "Seeded public portal land sale listing for sales enquiry testing.";
+                asset.IsReadyForProjectManagement = false;
+                asset.UpdatedAt = now;
+                asset.UpdatedBy = "System";
+
+                var demarcation = asset.Demarcations.FirstOrDefault(item =>
+                    item.DemarcationNumber == seed.DemarcationNumber
+                    && !item.IsDeleted);
+                if (demarcation is null)
+                {
+                    demarcation = new EstateLandDemarcation
+                    {
+                        Id = Guid.NewGuid(),
+                        TenantId = tenantId,
+                        EstateManagedAssetId = asset.Id,
+                        EstateManagedAsset = asset,
+                        DemarcationNumber = seed.DemarcationNumber,
+                        CreatedAt = now,
+                        CreatedBy = "System"
+                    };
+                    asset.Demarcations.Add(demarcation);
+                }
+
+                demarcation.Description = seed.ListingNotes;
+                demarcation.BeaconCount = 4;
+                demarcation.BoundaryCoordinates = BuildSeedBoundary(seed);
+                demarcation.AreaSquareFeet = seed.AreaSquareFeet;
+                demarcation.BoundaryVerified = true;
+                demarcation.CostAllocationMethod = "Manual";
+                demarcation.AllocatedCost = asset.TotalCapitalizedCost;
+                demarcation.CostPerAcre = asset.TotalCapitalizedCost / (seed.AreaSquareFeet / 43560m);
+                demarcation.TargetSalePrice = seed.SalePrice;
+                demarcation.ParentLandAssetReference = seed.AssetCode;
+                demarcation.FixedAssetPostingStatus = "NotRequired";
+                demarcation.IsReadyForProjectManagement = false;
+                demarcation.IsPublishedToExternalPortal = true;
+                demarcation.ExternalListingType = "Sale";
+                demarcation.ExternalListingStatus = "Published";
+                demarcation.ExternalListingPrice = seed.SalePrice;
+                demarcation.ExternalSalePrice = seed.SalePrice;
+                demarcation.ExternalMonthlyRent = null;
+                demarcation.ExternalLeaseTermMonths = null;
+                demarcation.ExternalListingCurrency = "GHS";
+                demarcation.ExternalListingNotes = seed.ListingNotes;
+                demarcation.ExternalPublishedAt = now.AddDays(-2);
+                demarcation.UpdatedAt = now;
+                demarcation.UpdatedBy = "System";
+            }
+
+            await _context.SaveChangesAsync();
+        }
+
+        private static void EnsureSeedCadastralSurvey(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.CadastralSurveys.Any(item => item.PlanNumber == seed.SurveyPlanNumber && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.CadastralSurveys.Add(new CadastralSurvey
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                SurveyorName = "TDC Survey Unit",
+                SurveyDate = now.Date.AddDays(-21),
+                SurveyorSignedDate = now.Date.AddDays(-19),
+                PlanNumber = seed.SurveyPlanNumber,
+                MapSheetNumber = seed.MapSheetNumber,
+                BeaconCount = "4",
+                Description = $"{seed.AssetName} cadastral survey",
+                AreaSize = seed.AreaSquareFeet,
+                AreaUnit = "square feet",
+                BoundaryCoordinates = BuildSeedBoundary(seed),
+                RegionalSurveyorName = "Regional Survey Office",
+                RegionalSurveyorSignedDate = now.Date.AddDays(-18),
+                MainPortion = true,
+                CadastralMatch = true,
+                OverlapCleared = true,
+                BoundaryConfirmed = true,
+                VerificationReference = $"VR-{seed.ProjectReference}",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static void EnsureSeedOwnershipHistory(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.OwnershipHistories.Any(item => item.OwnerName == seed.OwnerName && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.OwnershipHistories.Add(new OwnershipHistory
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                OwnerName = seed.OwnerName,
+                ContactNumber = seed.ContactNumber,
+                Address = seed.Location,
+                OwnershipType = LandOwnershipType.Family,
+                AcquisitionMethod = LandAcquisitionMethod.Purchase,
+                TenureType = "Freehold",
+                OwnershipStartDate = now.Date.AddYears(-10),
+                OwnershipPercentage = 100m,
+                IsCurrentOwner = true,
+                InterestHeld = "Beneficial ownership",
+                RiskLevel = "Low",
+                TitleSearchCompleted = true,
+                OwnerIdentityVerified = true,
+                AuthorityToSellVerified = true,
+                SearchReference = $"SR-{seed.ProjectReference}",
+                IdentificationType = "Family / stool authority",
+                IdentificationNumber = seed.ProjectReference,
+                Notes = "Seeded owner profile for portal listing demo.",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static void EnsureSeedNegotiationOffer(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.NegotiationOffers.Any(item => item.IsAccepted && item.NegotiatedValue == seed.SalePrice && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.NegotiationOffers.Add(new NegotiationOffer
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                OpeningOffer = seed.SalePrice * 0.85m,
+                CounterOffer = seed.SalePrice,
+                NegotiatedValue = seed.SalePrice,
+                SellerQuote = seed.SalePrice,
+                PaymentTerms = "Full payment on sales agreement execution",
+                PaymentType = "Bank transfer",
+                AgreementDay = now.Day.ToString("00"),
+                AgreementMonth = now.Month.ToString("00"),
+                AgreementYear = now.Year.ToString(),
+                AgreementGenerated = true,
+                Notes = "Accepted demo acquisition value used as public portal sale price.",
+                IsAccepted = true,
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static void EnsureSeedLandAsset(
+            LandAcquisition acquisition,
+            PublicEstatePortalSaleListingSeed seed,
+            Guid tenantId,
+            DateTime now)
+        {
+            if (acquisition.LandAssets.Any(item => item.AssetCode == seed.AssetCode && !item.IsDeleted))
+            {
+                return;
+            }
+
+            acquisition.LandAssets.Add(new LandAsset
+            {
+                Id = Guid.NewGuid(),
+                TenantId = tenantId,
+                LandAcquisitionId = acquisition.Id,
+                AssetCode = seed.AssetCode,
+                AssetNumber = seed.AssetCode,
+                ParcelIdentifier = $"{seed.AssetCode}-P{seed.DemarcationNumber:000}",
+                RegistrationNumber = $"REG-{seed.ProjectReference}",
+                OwnerName = seed.OwnerName,
+                Location = seed.Location,
+                AssetCategory = "Land bank",
+                Size = seed.AreaSquareFeet,
+                SizeUnit = "square feet",
+                Status = "LandBank",
+                Purpose = "Residential development",
+                ZoningClassification = "Residential",
+                OwnershipVerification = "Verified",
+                CapitalizationValue = seed.SalePrice,
+                GlAccount = "Land Bank",
+                Custodian = "Estate Management",
+                Notes = "Seeded land asset backing a public portal listing.",
+                CreatedAt = now,
+                CreatedBy = "System"
+            });
+        }
+
+        private static string BuildSeedBoundary(PublicEstatePortalSaleListingSeed seed)
+        {
+            var longitude = seed.AssetCode.EndsWith("002", StringComparison.Ordinal) ? -0.1837m : -0.0086m;
+            var latitude = seed.AssetCode.EndsWith("002", StringComparison.Ordinal) ? 5.7138m : 5.6813m;
+            return JsonSerializer.Serialize(new[]
+            {
+                new { lat = latitude, lng = longitude },
+                new { lat = latitude + 0.0010m, lng = longitude },
+                new { lat = latitude + 0.0010m, lng = longitude + 0.0010m },
+                new { lat = latitude, lng = longitude + 0.0010m },
+                new { lat = latitude, lng = longitude }
+            });
+        }
+
+        private sealed record PublicEstatePortalSaleListingSeed(
+            string ProjectReference,
+            string AssetCode,
+            string AssetName,
+            string ListingNotes,
+            string Location,
+            string Town,
+            string District,
+            string Region,
+            decimal AreaSquareFeet,
+            decimal SalePrice,
+            string OwnerName,
+            string ContactNumber,
+            string SurveyPlanNumber,
+            string MapSheetNumber,
+            int DemarcationNumber);
 
         private async Task EnsureEstateSopExampleCasesSeededAsync()
         {
@@ -9983,8 +10419,26 @@ namespace ErpSystem.Web.Services
     // Extension methods for easy registration
     public static class DatabaseSeedingServiceExtensions
     {
+        public static IServiceCollection AddDatabaseSeedingFinanceBoundary(this IServiceCollection services)
+        {
+            // The supplier-onboarding fixture owns Procurement intent, while Finance retains
+            // canonical account/classification/segment/book provisioning. Reduced seed-command
+            // hosts therefore need this same production boundary without loading the entire web
+            // service graph. Request-backed web registrations win because these are TryAdd fallbacks.
+            services.TryAddScoped<DatabaseSeedingCurrentUserContext>();
+            services.TryAddScoped<ErpSystem.Core.Interfaces.ICurrentUserService>(provider =>
+                provider.GetRequiredService<DatabaseSeedingCurrentUserContext>());
+            services.TryAddScoped<ErpSystem.Core.Interfaces.ICurrentUserProvider>(provider =>
+                provider.GetRequiredService<DatabaseSeedingCurrentUserContext>());
+            services.AddFinanceAccountProvisioning();
+
+            return services;
+        }
+
         public static IServiceCollection AddDatabaseSeeding(this IServiceCollection services)
         {
+            services.AddDatabaseSeedingFinanceBoundary();
+
             services.AddScoped<IDatabaseSeedingService, DatabaseSeedingService>();
             services.AddScoped<PaymentTermBaselineSeeder>();
             services.AddScoped<FinanceCloseTemplateBaselineSeeder>();

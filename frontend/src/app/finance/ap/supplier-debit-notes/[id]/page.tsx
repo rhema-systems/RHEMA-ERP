@@ -8,7 +8,7 @@ import {
   ArrowLeft,
   Ban,
   Check,
-  Edit,
+  Pencil,
   FileCheck2,
   Loader2,
   RotateCcw,
@@ -19,6 +19,10 @@ import {
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -37,11 +41,11 @@ import { accountsPayableService } from '@/services/accountsPayableService';
 import type { SupplierDebitNoteStatus } from '@/types/ap';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
 
-function statusBadge(status: SupplierDebitNoteStatus) {
+function statusBadge(status: SupplierDebitNoteStatus, approvalRequired = true) {
   if (status === 'Posted')
     return <Badge className="bg-emerald-600">Posted</Badge>;
   if (status === 'Approved')
-    return <Badge className="bg-blue-600">Approved</Badge>;
+    return <Badge className="bg-blue-600">{approvalRequired ? 'Approved' : 'Ready to post'}</Badge>;
   if (status === 'PendingApproval')
     return <Badge className="bg-amber-600">Pending approval</Badge>;
   if (status === 'Rejected' || status === 'Cancelled')
@@ -56,6 +60,12 @@ export default function SupplierDebitNoteDetailPage() {
   const { toast } = useToast();
   const { hasPermission } = useAuth();
   const [workingAction, setWorkingAction] = useState('');
+  const [confirmation, setConfirmation] = useState<'Approve' | 'Reject' | 'Post' | 'Cancel' | 'Reverse' | 'Edit details' | null>(null);
+  const [creditReference, setCreditReference] = useState('');
+  const [creditDate, setCreditDate] = useState('');
+  const [headerVersion, setHeaderVersion] = useState('');
+  const [actionComment, setActionComment] = useState('');
+  const [actionError, setActionError] = useState('');
   const {
     data: note,
     isLoading,
@@ -68,6 +78,7 @@ export default function SupplierDebitNoteDetailPage() {
 
   const run = async (label: string, action: () => Promise<unknown>) => {
     setWorkingAction(label);
+    setActionError('');
     try {
       await action();
       toast({
@@ -75,15 +86,17 @@ export default function SupplierDebitNoteDetailPage() {
         description: 'The supplier debit-note register has been refreshed.',
       });
       await refetch();
-    } catch (actionError) {
+      return true;
+    } catch (failure) {
+      const data = (failure as { response?: { data?: { detail?: string; message?: string; code?: string } } })?.response?.data;
+      const message = (data?.detail || data?.message || (failure instanceof Error ? failure.message : 'The action could not be completed.')) + (data?.code ? ` (${data.code})` : '');
+      setActionError(message);
       toast({
         title: `${label} failed`,
-        description:
-          actionError instanceof Error
-            ? actionError.message
-            : 'The action could not be completed.',
+        description: message,
         variant: 'destructive',
       });
+      return false;
     } finally {
       setWorkingAction('');
     }
@@ -119,6 +132,32 @@ export default function SupplierDebitNoteDetailPage() {
   const canPost = hasPermission('Finance.AP.SupplierDebitNotes.Post');
   const canReverse = hasPermission('Finance.AP.SupplierDebitNotes.Reverse');
   const busy = Boolean(workingAction);
+  const approvalRequired = note.approvalRequired !== false;
+  const inventoryCredit = !!note.inventoryPurchaseReturnId;
+  const reasonRequired = confirmation === 'Reject' || confirmation === 'Cancel' || confirmation === 'Reverse';
+  const ask = (action: NonNullable<typeof confirmation>) => {
+    setActionComment(action === 'Edit details' ? note.reason || '' : ''); setActionError(''); setConfirmation(action);
+    if (action === 'Edit details') {
+      setCreditReference(note.supplierCreditNoteReference || ''); setCreditDate(note.debitNoteDate.slice(0, 10)); setHeaderVersion(note.rowVersion);
+    }
+  };
+  const confirmAction = async () => {
+    const comment = actionComment.trim();
+    if (busy || (reasonRequired && !comment)) return false;
+    switch (confirmation) {
+      case 'Approve': return run('Approval', () => accountsPayableService.decideSupplierDebitNote(id, true, comment || undefined));
+      case 'Reject': return run('Rejection', () => accountsPayableService.decideSupplierDebitNote(id, false, comment));
+      case 'Post': return run('Posting', () => accountsPayableService.postSupplierDebitNote(id));
+      case 'Cancel': return run('Cancellation', () => accountsPayableService.cancelSupplierDebitNote(id, comment));
+      case 'Reverse': return run('Reversal', () => accountsPayableService.reverseSupplierDebitNote(id, comment));
+      case 'Edit details':
+        if (!creditReference.trim() || !creditDate || !headerVersion) return false;
+        return run('Save', () => accountsPayableService.updateInventoryReturnCreditHeader(id, {
+          supplierCreditNoteReference: creditReference.trim(), creditDate, reason: comment || undefined, rowVersion: headerVersion,
+        }));
+      default: return false;
+    }
+  };
 
   return (
     <div className="mx-auto max-w-[1200px] space-y-6 p-8">
@@ -134,21 +173,24 @@ export default function SupplierDebitNoteDetailPage() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold">{note.debitNoteNumber}</h1>
-              {statusBadge(note.statusName)}
+              {statusBadge(note.statusName, approvalRequired)}
             </div>
             <p className="text-muted-foreground">{note.vendorName}</p>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canManage && ['Draft', 'Rejected'].includes(note.statusName) && (
+          {canManage && inventoryCredit && ['Draft', 'Rejected'].includes(note.statusName) && <Button variant="outline" size="icon" aria-label="Edit credit details" title="Edit credit details" disabled={busy} onClick={() => ask('Edit details')}><Pencil className="h-4 w-4" /></Button>}
+          {canManage && !inventoryCredit && ['Draft', 'Rejected'].includes(note.statusName) && (
             <Button
               variant="outline"
+              size="icon"
+              aria-label="Edit"
+              title="Edit"
               onClick={() =>
                 router.push(`/finance/ap/supplier-debit-notes/${id}/edit`)
               }
             >
-              <Edit className="mr-2 h-4 w-4" />
-              Edit
+              <Pencil className="h-4 w-4" />
             </Button>
           )}
           {canSubmit && note.statusName === 'Draft' && (
@@ -161,41 +203,23 @@ export default function SupplierDebitNoteDetailPage() {
               }
             >
               <Send className="mr-2 h-4 w-4" />
-              Submit
+              {approvalRequired ? 'Submit for approval' : 'Continue'}
             </Button>
           )}
-          {canApprove && note.statusName === 'PendingApproval' && (
+          {approvalRequired && canApprove && note.statusName === 'PendingApproval' && (
             <Button
               disabled={busy}
-              onClick={() =>
-                run('Approval', () =>
-                  accountsPayableService.decideSupplierDebitNote(
-                    id,
-                    true,
-                    window.prompt('Approval comments (optional)') ?? undefined
-                  )
-                )
-              }
+              onClick={() => ask('Approve')}
             >
               <Check className="mr-2 h-4 w-4" />
               Approve
             </Button>
           )}
-          {canApprove && note.statusName === 'PendingApproval' && (
+          {approvalRequired && canApprove && note.statusName === 'PendingApproval' && (
             <Button
               variant="destructive"
               disabled={busy}
-              onClick={() => {
-                const reason = window.prompt('Rejection reason');
-                if (reason?.trim())
-                  void run('Rejection', () =>
-                    accountsPayableService.decideSupplierDebitNote(
-                      id,
-                      false,
-                      reason
-                    )
-                  );
-              }}
+              onClick={() => ask('Reject')}
             >
               <X className="mr-2 h-4 w-4" />
               Reject
@@ -204,48 +228,29 @@ export default function SupplierDebitNoteDetailPage() {
           {canPost && note.statusName === 'Approved' && (
             <Button
               disabled={busy}
-              onClick={() =>
-                run('Posting', () =>
-                  accountsPayableService.postSupplierDebitNote(id)
-                )
-              }
+              onClick={() => ask('Post')}
             >
               <FileCheck2 className="mr-2 h-4 w-4" />
               Post
             </Button>
           )}
-          {canManage && ['Draft', 'Rejected'].includes(note.statusName) && (
+          {canManage && !inventoryCredit && ['Draft', 'Rejected'].includes(note.statusName) && (
             <Button
               variant="outline"
               disabled={busy}
-              onClick={() => {
-                const reason = window.prompt('Cancellation reason');
-                if (reason?.trim())
-                  void run('Cancellation', () =>
-                    accountsPayableService.cancelSupplierDebitNote(id, reason)
-                  );
-              }}
+              onClick={() => ask('Cancel')}
             >
               <Ban className="mr-2 h-4 w-4" />
               Cancel
             </Button>
           )}
-          {canReverse &&
+          {canReverse && !inventoryCredit &&
             note.statusName === 'Posted' &&
             note.appliedAmount === 0 && (
               <Button
                 variant="destructive"
                 disabled={busy}
-                onClick={() => {
-                  const reason = window.prompt('Reversal reason');
-                  if (reason?.trim())
-                    void run('Reversal', () =>
-                      accountsPayableService.reverseSupplierDebitNote(
-                        id,
-                        reason
-                      )
-                    );
-                }}
+                onClick={() => ask('Reverse')}
               >
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Reverse
@@ -260,13 +265,12 @@ export default function SupplierDebitNoteDetailPage() {
         </div>
       </div>
 
+      {actionError && !confirmation && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
       <Alert>
-        <AlertTitle>Controlled lifecycle</AlertTitle>
+        <AlertTitle>{inventoryCredit ? 'Credit against original invoice' : 'Supplier credit'}</AlertTitle>
         <AlertDescription>
-          Maker saves and submits; an independent reviewer approves; a
-          purpose-authorised poster creates the AP/GL entry. Applications are
-          made against a specific supplier invoice through a vendor payment and
-          are shown below.
+          {inventoryCredit ? 'Post records the supplier credit and applies it to the original invoice. It does not move stock again.' : 'Post records the AP/GL credit. Apply it to an invoice through a vendor payment.'}
+          {approvalRequired ? ' Approval is required before posting.' : ''}
         </AlertDescription>
       </Alert>
 
@@ -318,7 +322,7 @@ export default function SupplierDebitNoteDetailPage() {
             </div>
             <div>
               <p className="text-xs font-semibold uppercase text-muted-foreground">
-                Approved rate snapshot
+                Exchange rate
               </p>
               <p className="mt-1 font-medium">
                 {note.currencyCode} @ {note.exchangeRate.toFixed(6)}
@@ -435,8 +439,7 @@ export default function SupplierDebitNoteDetailPage() {
         </CardHeader>
         <CardContent>
           <p className="mb-4 text-sm text-muted-foreground">
-            Create applications from the relevant vendor payment. Reversal rows
-            preserve history and neutralise their linked original application.
+            {inventoryCredit ? 'This credit is applied directly to the original invoice when posted; no payment is created.' : 'Applications are recorded through vendor payments.'}
           </p>
           <div className="rounded-md border">
             <Table>
@@ -450,7 +453,14 @@ export default function SupplierDebitNoteDetailPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {note.applications.length === 0 && (
+                {inventoryCredit && note.directInvoiceAppliedAt && <TableRow>
+                  <TableCell>Credit only</TableCell>
+                  <TableCell><Button variant="link" className="h-auto p-0" onClick={() => router.push(`/finance/ap/invoices/${note.originalVendorInvoiceId}`)}>{note.originalVendorInvoiceNumber}</Button></TableCell>
+                  <TableCell>{format(new Date(note.directInvoiceAppliedAt), 'dd MMM yyyy')}</TableCell>
+                  <TableCell className="text-right">{formatCurrency(note.directInvoiceAppliedAmount || 0, note.currencyCode)}</TableCell>
+                  <TableCell><Badge className="bg-emerald-600">Applied</Badge></TableCell>
+                </TableRow>}
+                {note.applications.length === 0 && !note.directInvoiceAppliedAt && (
                   <TableRow>
                     <TableCell
                       colSpan={5}
@@ -532,12 +542,12 @@ export default function SupplierDebitNoteDetailPage() {
             <CardTitle>Control references</CardTitle>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm md:grid-cols-2">
-            <div>
+            {approvalRequired && note.workflowInstanceId && <div>
               <span className="text-muted-foreground">Workflow:</span>{' '}
               <span className="font-mono">
                 {note.workflowInstanceId ?? '-'}
               </span>
-            </div>
+            </div>}
             <div>
               <span className="text-muted-foreground">Posting event:</span>{' '}
               <span className="font-mono">{note.postingEventId ?? '-'}</span>
@@ -577,6 +587,15 @@ export default function SupplierDebitNoteDetailPage() {
           </CardContent>
         </Card>
       )}
+      <ConfirmationDialog open={!!confirmation} onOpenChange={open => { if (!open && !busy) setConfirmation(null); }}
+        title={`${confirmation || 'Confirm'} supplier credit`} confirmText={confirmation === 'Edit details' ? 'Save' : confirmation || 'Confirm'}
+        description={confirmation === 'Post' ? inventoryCredit ? `Post ${formatCurrency(note.totalAmount, note.currencyCode)} and apply the credit to invoice ${note.originalVendorInvoiceNumber}? Stock will not be changed again.` : `Post this ${formatCurrency(note.totalAmount, note.currencyCode)} supplier credit to AP and GL?` : `${confirmation || 'Confirm'} ${note.debitNoteNumber}.`}
+        variant={reasonRequired ? 'destructive' : 'default'} isLoading={busy} confirmDisabled={(reasonRequired && !actionComment.trim()) || (confirmation === 'Edit details' && (!creditReference.trim() || !creditDate || !headerVersion))}
+        onConfirm={confirmAction}>
+        {confirmation === 'Edit details' && <div className="mb-4 grid gap-3"><div className="space-y-1"><Label htmlFor="credit-header-reference">Supplier credit reference</Label><Input id="credit-header-reference" value={creditReference} maxLength={100} disabled={busy} onChange={event => setCreditReference(event.target.value)} /></div><div className="space-y-1"><Label htmlFor="credit-header-date">Credit date</Label><Input id="credit-header-date" type="date" value={creditDate} disabled={busy} onChange={event => setCreditDate(event.target.value)} /></div></div>}
+        {confirmation !== 'Post' && <div className="space-y-2"><Label htmlFor="credit-action-comment">{reasonRequired ? 'Reason' : 'Comments (optional)'}</Label><Textarea id="credit-action-comment" value={actionComment} disabled={busy} onChange={event => setActionComment(event.target.value)} /></div>}
+        {actionError && <p role="alert" className="mt-2 text-sm text-destructive">{actionError}</p>}
+      </ConfirmationDialog>
     </div>
   );
 }

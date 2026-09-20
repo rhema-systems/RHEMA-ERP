@@ -14,11 +14,15 @@ export function TenderHeaderControlActions({
   tenderType,
   sourcingCaseId,
   sourcingMethod,
+  status,
+  bidCount,
 }: {
   tenderId: string;
   tenderType?: string;
   sourcingCaseId?: string;
   sourcingMethod?: ProcurementMethodType | number;
+  status?: string;
+  bidCount?: number;
 }) {
   const { hasPermission } = useAuth();
   const actions = getTenderHeaderActions({
@@ -26,6 +30,8 @@ export function TenderHeaderControlActions({
     tenderType,
     sourcingCaseId,
     sourcingMethod,
+    status,
+    bidCount,
     canReadProcurementRecords: hasPermission('procurement.records.read'),
   });
 

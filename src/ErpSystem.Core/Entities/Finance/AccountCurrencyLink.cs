@@ -45,20 +45,8 @@ namespace ErpSystem.Core.Entities.Finance
         public string LinkedCurrencyCode { get; set; } = string.Empty;
 
         /// <summary>
-        /// Determines if currency revaluation is required for this currency link.
-        /// 
-        /// Per IAS 21 (Effects of Changes in Foreign Exchange Rates):
-        /// - Monetary assets/liabilities (cash, receivables, payables) require revaluation
-        /// - Non-monetary items (inventory, PPE at cost) do not require revaluation
-        /// 
-        /// TRUE: Account balance revalued at period-end using current exchange rates.
-        /// FALSE: Account maintains historical cost, no revaluation adjustments.
-        /// </summary>
-        public bool RevaluationRequired { get; set; } = true;
-
-        /// <summary>
-        /// Frequency of automatic currency revaluation.
-        /// Only relevant if RevaluationRequired = true.
+        /// Frequency of automatic currency revaluation when the effective
+        /// account/book/currency policy includes this exposure.
         /// </summary>
         public RevaluationFrequency RevaluationFrequency { get; set; } = RevaluationFrequency.Monthly;
 
@@ -109,7 +97,7 @@ namespace ErpSystem.Core.Entities.Finance
         /// 
         /// ACTIVE (TRUE):
         /// - Currency available for new transactions
-        /// - Included in revaluation process if RevaluationRequired = true
+        /// - Eligible for revaluation only when its exact account/book/currency policy includes it
         /// - Appears in currency selection dropdowns
         /// 
         /// INACTIVE (FALSE):
@@ -309,6 +297,8 @@ namespace ErpSystem.Core.Entities.Finance
         [ForeignKey(nameof(AccountId))]
         public virtual Account Account { get; set; } = null!;
 
+        public virtual ICollection<AccountBookCurrencyPolicy> BookPolicies { get; set; } = new List<AccountBookCurrencyPolicy>();
+
         #endregion
     }
 
@@ -343,7 +333,7 @@ namespace ErpSystem.Core.Entities.Finance
 
         /// <summary>
         /// No automatic revaluation scheduled.
-        /// Used when RevaluationRequired = false.
+        /// Used when no automatic revaluation schedule applies.
         /// </summary>
         None = 0
     }

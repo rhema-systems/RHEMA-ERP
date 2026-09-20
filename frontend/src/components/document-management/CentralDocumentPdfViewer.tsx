@@ -16,13 +16,15 @@ import {
 } from '@syncfusion/ej2-pdfviewer';
 
 interface CentralDocumentPdfViewerProps {
-  fileUrl: string;
+  fileUrl?: string | null;
+  fileData?: Uint8Array | null;
   fileName?: string | null;
   enableAnnotations?: boolean;
 }
 
 export default function CentralDocumentPdfViewer({
   fileUrl,
+  fileData,
   fileName,
   enableAnnotations = false,
 }: CentralDocumentPdfViewerProps) {
@@ -35,7 +37,7 @@ export default function CentralDocumentPdfViewer({
 
   React.useEffect(() => {
     const host = viewerHostRef.current;
-    if (!host || !fileUrl) return;
+    if (!host || (!fileUrl && !fileData)) return;
     let disposed = false;
     setLoadError(null);
 
@@ -53,13 +55,15 @@ export default function CentralDocumentPdfViewer({
     );
 
     const loadDocument = async (viewer: PdfViewer) => {
-      const response = await fetch(fileUrl);
-      if (!response.ok) {
-        throw new Error(`Unable to load PDF preview (${response.status}).`);
+      let documentBytes = fileData;
+      if (!documentBytes && fileUrl) {
+        const response = await fetch(fileUrl);
+        if (!response.ok) {
+          throw new Error(`Unable to load PDF preview (${response.status}).`);
+        }
+        documentBytes = new Uint8Array(await response.arrayBuffer());
       }
-
-      const documentBytes = new Uint8Array(await response.arrayBuffer());
-      if (!disposed) {
+      if (!disposed && documentBytes) {
         viewer.load(documentBytes, '');
       }
     };
@@ -97,9 +101,9 @@ export default function CentralDocumentPdfViewer({
       disposed = true;
       viewer.destroy();
     };
-  }, [enableAnnotations, fileUrl]);
+  }, [enableAnnotations, fileUrl, fileData]);
 
-  if (!fileUrl) {
+  if (!fileUrl && !fileData) {
     return null;
   }
 

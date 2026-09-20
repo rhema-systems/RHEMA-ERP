@@ -13,7 +13,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { ArrowLeft, Save, Plus, Trash2, Loader2, Edit } from 'lucide-react';
 import { toast } from 'sonner';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { procurementBudgetService, commonService, type ProcurementBudgetDetailDto, type CreateProcurementBudgetDto, type CreateProcurementBudgetAllocationDto, type DepartmentDto } from '@/services/procurementPlanningService';
+import { procurementBudgetService, type ProcurementBudgetDetailDto, type CreateProcurementBudgetDto, type CreateProcurementBudgetAllocationDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { FiscalYearSelect } from '../../../components/FiscalYearSelect';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 
@@ -23,11 +25,11 @@ export default function EditProcurementBudgetPage() {
   const id = Array.isArray(params?.id) ? params.id[0] : params?.id ?? '';
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
-  const [loadingDepartments, setLoadingDepartments] = useState(true);
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
+  const [loadingOrganizationUnits, setLoadingOrganizationUnits] = useState(true);
   const [budget, setBudget] = useState<ProcurementBudgetDetailDto | null>(null);
   const [formData, setFormData] = useState<CreateProcurementBudgetDto>({
-    title: '', description: '', departmentId: '', fiscalYear: new Date().getFullYear(),
+    title: '', description: '', organizationUnitId: '', fiscalYear: new Date().getFullYear(),
     allocatedAmount: 0, currency: 'USD', controlLevel: 'Warning', warningThresholdPercent: 80, notes: '', allocations: [],
   });
 
@@ -40,12 +42,12 @@ export default function EditProcurementBudgetPage() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        setLoadingDepartments(true);
-        const [depts, budgetData] = await Promise.all([commonService.getDepartments(), procurementBudgetService.getBudgetById(id)]);
-        setDepartments(depts);
+        setLoadingOrganizationUnits(true);
+        const [units, budgetData] = await Promise.all([organizationUnitService.getSummary(), procurementBudgetService.getBudgetById(id)]);
+        setOrganizationUnits(units.filter((unit) => unit.isActive));
         setBudget(budgetData);
         setFormData({
-          title: budgetData.title, description: budgetData.description || '', departmentId: budgetData.departmentId,
+          title: budgetData.title, description: budgetData.description || '', organizationUnitId: budgetData.organizationUnitId || '',
           fiscalYear: budgetData.fiscalYear, allocatedAmount: budgetData.allocatedAmount, currency: budgetData.currency,
           controlLevel: budgetData.controlLevel, warningThresholdPercent: budgetData.warningThresholdPercent,
           effectiveDate: budgetData.effectiveDate?.split('T')[0], expiryDate: budgetData.expiryDate?.split('T')[0],
@@ -57,7 +59,7 @@ export default function EditProcurementBudgetPage() {
         toast.error('Failed to load budget details');
       } finally {
         setLoading(false);
-        setLoadingDepartments(false);
+        setLoadingOrganizationUnits(false);
       }
     };
     if (id) fetchData();
@@ -110,7 +112,7 @@ export default function EditProcurementBudgetPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.title.trim()) { toast.error('Title is required'); return; }
-    if (!formData.departmentId) { toast.error('Department is required'); return; }
+    if (!formData.organizationUnitId) { toast.error('Organization unit is required'); return; }
     if (formData.allocatedAmount <= 0) { toast.error('Allocated amount must be greater than 0'); return; }
 
     try {
@@ -164,11 +166,11 @@ export default function EditProcurementBudgetPage() {
                     <Input id="title" value={formData.title} onChange={(e) => handleInputChange('title', e.target.value)} required />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="departmentId">Department *</Label>
-                    <Select value={formData.departmentId} onValueChange={(value) => handleInputChange('departmentId', value)} disabled={loadingDepartments}>
-                      <SelectTrigger><SelectValue placeholder="Select department" /></SelectTrigger>
+                    <Label htmlFor="organizationUnitId">Organization unit *</Label>
+                    <Select value={formData.organizationUnitId} onValueChange={(value) => handleInputChange('organizationUnitId', value)} disabled={loadingOrganizationUnits}>
+                      <SelectTrigger><SelectValue placeholder="Select organization unit" /></SelectTrigger>
                       <SelectContent>
-                        {departments.map((dept) => (<SelectItem key={dept.id} value={dept.id}>{dept.code ? `${dept.code} - ${dept.name}` : dept.name}</SelectItem>))}
+                        {organizationUnits.map((unit) => (<SelectItem key={unit.id} value={unit.id}>{unit.code ? `${unit.code} - ${unit.name}` : unit.name}</SelectItem>))}
                       </SelectContent>
                     </Select>
                   </div>

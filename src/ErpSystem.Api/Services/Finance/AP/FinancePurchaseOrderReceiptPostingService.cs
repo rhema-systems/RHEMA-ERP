@@ -41,6 +41,9 @@ public sealed class FinancePurchaseOrderReceiptPostingService
         var receipt = await LoadReceiptForPostingAsync(tenantId, receiptId, cancellationToken)
             ?? throw new InvalidOperationException("Finance purchase receipt was not found for this tenant.");
 
+        if (!receipt.ApprovalRequired)
+            throw new InvalidOperationException("This finance receipt does not require an approval action.");
+
         if (receipt.Status == FinancePurchaseOrderReceiptStatus.Rejected)
         {
             throw new InvalidOperationException("A rejected finance GRV cannot be approved and posted.");
@@ -89,6 +92,9 @@ public sealed class FinancePurchaseOrderReceiptPostingService
             return;
         }
 
+        if (!receipt.ApprovalRequired)
+            throw new InvalidOperationException("This finance receipt does not require an approval action.");
+
         if (receipt.Status == FinancePurchaseOrderReceiptStatus.Approved)
         {
             throw new InvalidOperationException("An approved finance GRV cannot be rejected through workflow.");
@@ -128,12 +134,38 @@ public sealed class FinancePurchaseOrderReceiptPostingService
         await _dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    public async Task CompleteWithoutApprovalAndPostAsync(
+        Guid tenantId, Guid receiptId, Guid submittedById, CancellationToken cancellationToken)
+    {
+        if (tenantId != _currentUserService.GetRequiredFinanceTenantId() || submittedById == Guid.Empty ||
+            !Guid.TryParse(_currentUserService.UserId, out var actorId) || actorId != submittedById)
+            throw new UnauthorizedAccessException("An authenticated submitting user in this tenant is required.");
+        if (_dbContext.Database.IsRelational() && _dbContext.Database.CurrentTransaction is null)
+            throw new InvalidOperationException("Direct finance receipt completion requires its submission transaction.");
+        var receipt = await LoadReceiptForPostingAsync(tenantId, receiptId, cancellationToken)
+            ?? throw new InvalidOperationException("Finance purchase receipt was not found for this tenant.");
+        if (receipt.ApprovalRequired || receipt.Status != FinancePurchaseOrderReceiptStatus.Draft ||
+            receipt.WorkflowInstanceId.HasValue || receipt.ApprovedById.HasValue || receipt.ApprovedAt.HasValue ||
+            receipt.SubmittedById != submittedById || !receipt.SubmittedAt.HasValue)
+            throw new InvalidOperationException("Only a validated direct submission can complete without approval.");
+
+        // Approved is the retained business-ready state used by AP invoice conversion.
+        // ApprovalRequired=false distinguishes completion from a human approval.
+        receipt.Status = FinancePurchaseOrderReceiptStatus.Approved;
+        receipt.UpdatedAt = DateTime.UtcNow;
+        receipt.UpdatedBy = _currentUserService.UserName;
+        if (!await HasPostedReceiptAsync(tenantId, receiptId, cancellationToken))
+            await PostReceiptThroughFinancePostingEngineAsync(receipt, tenantId, cancellationToken);
+        await _dbContext.SaveChangesAsync(cancellationToken);
+    }
+
     private async Task<FinancePurchaseOrderReceipt?> LoadReceiptForPostingAsync(
         Guid tenantId,
         Guid receiptId,
         CancellationToken cancellationToken)
     {
         return await _dbContext.FinancePurchaseOrderReceipts
+            .AsTracking()
             .Include(r => r.FinancePurchaseOrder)
                 .ThenInclude(po => po.Vendor)
             .Include(r => r.FinancePurchaseOrder)
@@ -234,7 +266,7 @@ public sealed class FinancePurchaseOrderReceiptPostingService
             throw new InvalidOperationException($"Finance GRV {receipt.ReceiptNumber} has no positive-value lines to post.");
         }
 
-        await _financePostingEngine.PostAsync(new FinancePostingRequestDto
+        await _financePostingEngine.PostAsync(new FinancePostingRequestV2Dto
         {
             SourceModule = "AP",
             SourceDocumentType = "FinancePurchaseOrderReceipt",
@@ -245,7 +277,7 @@ public sealed class FinancePurchaseOrderReceiptPostingService
             Description = $"Finance GRV {receipt.ReceiptNumber} - {purchaseOrder.Vendor?.PartnerName ?? purchaseOrder.OrderNumber}",
             PostingDate = receipt.ReceiptDate,
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = functionalCurrency,
             IdempotencyKey = $"FinancePurchaseOrderReceipt:{tenantId:N}:{receipt.Id:N}:Post",
             Lines = lines

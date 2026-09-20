@@ -26,6 +26,7 @@ public class Tender : TenantEntity
     [Required]
     [MaxLength(50)]
     public string Status { get; set; } = "Draft"; // Draft, Published, Closed, Awarded, Cancelled
+    public bool ApprovalRequired { get; set; } = true;
 
     public DateTime? PublishDate { get; set; }
     public DateTime? SubmissionDeadline { get; set; }
@@ -114,6 +115,10 @@ public class Tender : TenantEntity
 
     public string? Notes { get; set; }
     public string? TermsAndConditions { get; set; }
+
+    /// <summary>Calendar days from submission closing, agreed with the tender terms. No default is assumed.</summary>
+    [Range(1, int.MaxValue)]
+    public int? BidValidityPeriodDays { get; set; }
 
     // Navigation Properties
     public new virtual ApplicationUser? CreatedBy { get; set; }

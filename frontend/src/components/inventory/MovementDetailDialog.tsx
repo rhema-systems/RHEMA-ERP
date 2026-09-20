@@ -1,5 +1,6 @@
 'use client';
 
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import React, { useState, useEffect } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -13,13 +14,14 @@ import {
   StockMovementDto, 
   InventoryTransferDetailDto 
 } from '@/services/inventoryManagementService';
-import { useToast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
+import { formatInventoryMoney } from '@/lib/inventory-currency';
 
 interface MovementDetailDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   movement: StockMovementDto | null;
+  currencyCode: string | null;
 }
 
 // Movement type definitions for display
@@ -35,9 +37,9 @@ const getMovementTypeInfo = (type: string) => {
   return { color: 'bg-blue-100 text-blue-800', icon: ArrowUpDown, isInbound: null };
 };
 
-export function MovementDetailDialog({ open, onOpenChange, movement }: MovementDetailDialogProps) {
-  const { toast } = useToast();
+export function MovementDetailDialog({ open, onOpenChange, movement, currencyCode }: MovementDetailDialogProps) {
   const [activeTab, setActiveTab] = useState('header');
+  const [documentPreview, setDocumentPreview] = useState<CentralDocumentViewerFile | null>(null);
   const [transferDetail, setTransferDetail] = useState<InventoryTransferDetailDto | null>(null);
   const [loadingTransfer, setLoadingTransfer] = useState(false);
 
@@ -45,6 +47,7 @@ export function MovementDetailDialog({ open, onOpenChange, movement }: MovementD
   const isTransferMovement = movement?.referenceType === 'Transfer' && movement?.referenceNumber;
 
   useEffect(() => {
+    setDocumentPreview(null);
     if (open && isTransferMovement && movement?.referenceNumber) {
       loadTransferDetails(movement.referenceNumber);
     } else {
@@ -66,36 +69,36 @@ export function MovementDetailDialog({ open, onOpenChange, movement }: MovementD
     }
   };
 
-  const handlePrintShipmentNote = async () => {
+  const handlePrintShipmentNote = () => {
     if (!transferDetail?.id) return;
-    try {
-      const blob = await inventoryManagementService.getShipmentNotePdf(transferDetail.id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating shipment note:', err);
-      toast({ title: 'Error', description: 'Failed to generate shipment note', variant: 'destructive' });
-    }
+    setDocumentPreview({
+      title: `Shipment Note ${transferDetail.transferNumber}`,
+      fileName: `ShipmentNote-${transferDetail.id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(transferDetail.id)}/shipment-note`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
-  const handlePrintGRN = async () => {
+  const handlePrintGRN = () => {
     if (!transferDetail?.id) return;
-    try {
-      const blob = await inventoryManagementService.getGoodsReceivedNotePdf(transferDetail.id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating GRN:', err);
-      toast({ title: 'Error', description: 'Failed to generate GRN', variant: 'destructive' });
-    }
+    setDocumentPreview({
+      title: `Goods Received Note ${transferDetail.transferNumber}`,
+      fileName: `GRN-${transferDetail.id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(transferDetail.id)}/grn`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
   if (!movement) return null;
 
   const typeInfo = getMovementTypeInfo(movement.movementType);
   const IconComponent = typeInfo.icon;
+  const money = (value: number) => currencyCode ? formatInventoryMoney(value, currencyCode) : '—';
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -212,11 +215,11 @@ export function MovementDetailDialog({ open, onOpenChange, movement }: MovementD
                 </div>
                 <div>
                   <p className="text-muted-foreground">Unit Cost</p>
-                  <p className="font-medium">${movement.unitCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                  <p className="font-medium">{money(movement.unitCost)}</p>
                 </div>
                 <div className="col-span-2">
                   <p className="text-muted-foreground">Total Cost</p>
-                  <p className="font-medium text-lg">${movement.totalCost.toLocaleString(undefined, { minimumFractionDigits: 2 })}</p>
+                  <p className="font-medium text-lg">{money(movement.totalCost)}</p>
                 </div>
               </CardContent>
             </Card>
@@ -311,6 +314,9 @@ export function MovementDetailDialog({ open, onOpenChange, movement }: MovementD
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <CentralDocumentViewerDialog file={documentPreview} open={open && Boolean(documentPreview)}
+      onOpenChange={(previewOpen) => { if (!previewOpen) setDocumentPreview(null); }} enableAnnotations={false} />
+    </>
   );
 }
 

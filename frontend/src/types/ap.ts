@@ -1,4 +1,4 @@
-import type { FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
+import type { FinanceSettlementDimensionComponent, FinanceSourceDocumentDimension, FinanceSourceDocumentDimensionInput } from './finance';
 
 export type VendorInvoiceStatus = 'Draft' | 'PendingApproval' | 'Approved' | 'PartiallyPaid' | 'Paid' | 'Overdue' | 'Voided' | 'Rejected' | 'OnHold';
 export type InvoiceMatchingType = 'None' | 'TwoWay' | 'ThreeWay';
@@ -25,6 +25,32 @@ export interface ApInvoiceSupplier {
     name: string;
     paymentTermId?: string | null;
     currency?: string | null;
+}
+
+/**
+ * Supplier option for invoice entry. `id` may be a canonical Supplier id or an approved
+ * Business Partner id; the Finance invoice command resolves it to the persisted Supplier id.
+ */
+export interface ApInvoiceSupplierEntryOption extends ApInvoiceSupplier {
+    supplierId?: string | null;
+    businessPartnerId?: string | null;
+}
+
+export interface ApGoodsInvoiceEntry {
+    purchaseOrderId: string;
+    lines: { purchaseOrderItemId: string; acceptedQuantity: number; invoicedQuantity: number; availableQuantity: number }[];
+}
+
+export interface VendorInvoiceDistribution {
+    invoiceId: string;
+    status: 'Proposed' | 'Posted';
+    currency: string;
+    basis: string;
+    journalEntryId?: string | null;
+    journalEntryNumber?: string | null;
+    totalDebit: number;
+    totalCredit: number;
+    lines: Array<{ lineId: string; sourceDocumentLineId?: string | null; accountId: string; accountCode: string; accountName: string; type: string; source: string; description: string; debit: number; credit: number }>;
 }
 
 export interface VendorInvoice {
@@ -55,6 +81,9 @@ export interface VendorInvoice {
     earlyPaymentDiscountAmount: number;
     withholdingTaxRate: number;
     withholdingTaxAmount: number;
+    applySupplierWithholdingDefaults?: boolean | null;
+    withholdingTaxRateOverride?: number | null;
+    withholdingDecisionPending?: boolean;
     withholdingTaxId?: string;
     withholdingTaxAccountId?: string;
     withholdingCertificateNumber?: string;
@@ -75,6 +104,7 @@ export interface VendorInvoice {
     acceptedSupplyValidatedAtUtc?: string;
     status: VendorInvoiceStatus;
     approvalStatus: string;
+    approvalRequired?: boolean;
     expenseAccountId?: string;
     expenseAccountName?: string;
     apAccountId?: string;
@@ -285,6 +315,9 @@ export interface VendorInvoiceMatchExceptionReport {
 }
 
 export interface VendorInvoiceCreateRequest {
+    applyBusinessPartnerDefaults?: boolean;
+    applySupplierWithholdingDefaults?: boolean | null;
+    withholdingTaxRateOverride?: number | null;
     supplierInvoiceNumber?: string;
     supplierId: string;
     purchaseOrderId?: string;
@@ -344,6 +377,8 @@ export interface VendorInvoiceUpdateRequest extends VendorInvoiceCreateRequest {
 }
 
 export interface VendorInvoiceLineItem {
+    landedCostItemId?: string | null;
+    taxTreatment?: number | string;
     id: string;
     vendorInvoiceId: string;
     lineItemType: string;
@@ -419,6 +454,7 @@ export interface ApBudgetCell {
 }
 
 export interface VendorPayment {
+    approvalRequired?: boolean;
     id: string;
     paymentNumber: string;
     supplierId: string;
@@ -480,6 +516,8 @@ export interface VendorPayment {
     createdAt: string;
     allocations: VendorPaymentAllocation[];
     supplierDebitNoteApplications?: SupplierDebitNoteApplication[];
+    financeDimensions?: FinanceSourceDocumentDimension;
+    settlementDimensions?: FinanceSettlementDimensionComponent[];
 }
 
 export interface SupplierDebitNoteLine {
@@ -523,6 +561,12 @@ export interface SupplierDebitNoteApplication {
 }
 
 export interface SupplierDebitNote {
+    approvalRequired?: boolean;
+    inventoryPurchaseReturnId?: string;
+    returnDispatchPostingEventId?: string;
+    returnDispatchJournalEntryId?: string;
+    directInvoiceAppliedAmount?: number;
+    directInvoiceAppliedAt?: string;
     id: string;
     debitNoteNumber: string;
     supplierCreditNoteReference?: string;
@@ -650,6 +694,7 @@ export interface VendorPaymentCreateRequest {
     withholdingCertificateDate?: string;
     notes?: string;
     allocations?: VendorPaymentAllocationCreateRequest[];
+    financeDimensions?: FinanceSourceDocumentDimensionInput;
 }
 
 export interface VendorPaymentAllocation {
@@ -705,6 +750,8 @@ export interface SubmitVendorPaymentRequest {
  * client never guesses which effective-dated policy or evidence subset applies.
  */
 export interface VendorPaymentControl {
+    canUploadEvidence?: boolean;
+    approvalRequired?: boolean;
     paymentId: string;
     policyCode?: string;
     policySetId?: string;
@@ -738,6 +785,8 @@ export interface VendorPaymentEvidenceRequirementStatus {
 }
 
 export interface VendorPaymentEvidenceDocument {
+    evidenceSource?: 'Workflow' | 'Payment';
+    downloadUrl?: string;
     id: string;
     attachmentId: string;
     requirementKey?: string;
@@ -809,6 +858,7 @@ export interface VendorPaymentAuditTrace {
 }
 
 export interface PaymentBatch {
+    approvalRequired?: boolean;
     id: string;
     batchNumber: string;
     description?: string;
@@ -1109,6 +1159,11 @@ export interface ProcurementFinanceReconciliationIssue {
 }
 
 export interface OutstandingVendorInvoice {
+    applySupplierWithholdingDefaults?: boolean | null;
+    withholdingTaxId?: string | null;
+    withholdingTaxRate?: number;
+    withholdingTaxRateOverride?: number | null;
+    withholdingTaxAccountId?: string | null;
     invoiceId: string;
     invoiceNumber: string;
     supplierInvoiceNumber?: string;

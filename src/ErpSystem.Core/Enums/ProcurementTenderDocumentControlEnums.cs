@@ -24,7 +24,8 @@ public enum ProcurementTenderDocumentChangeType
 {
     Addendum = 0,
     SubmissionDeadlineExtension = 1,
-    BidValidityExtension = 2
+    BidValidityExtension = 2,
+    UnpublishedScheduleReschedule = 3
 }
 
 public enum ProcurementTenderDocumentChangeStatus

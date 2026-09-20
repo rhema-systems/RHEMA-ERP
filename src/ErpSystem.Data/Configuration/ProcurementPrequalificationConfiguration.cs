@@ -8,8 +8,12 @@ public sealed class ProcurementPrequalificationExerciseConfiguration : IEntityTy
 {
     public void Configure(EntityTypeBuilder<ProcurementPrequalificationExercise> builder)
     {
-        builder.ToTable("ProcurementPrequalificationExercises",
-            table => table.HasTrigger("TR_ProcurementPrequalificationExercises_Lifecycle"));
+        builder.Property(item => item.ApprovalRequired).HasDefaultValue(true);
+        builder.ToTable("ProcurementPrequalificationExercises", table =>
+        {
+            table.HasTrigger("TR_ProcurementPrequalificationExercises_Lifecycle");
+            table.HasTrigger("TR_ProcurementPrequalificationExercises_ApprovalPolicy");
+        });
         builder.HasIndex(item => new { item.TenantId, item.Reference }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.Status, item.ClosesAtUtc });
         builder.HasIndex(item => new { item.TenantId, item.PolicySetId });

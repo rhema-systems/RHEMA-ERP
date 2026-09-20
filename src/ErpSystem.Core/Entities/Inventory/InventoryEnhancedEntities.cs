@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
+using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Inventory;
@@ -395,6 +396,8 @@ public class InventoryTransfer : TenantEntity
 
     // Status
     public TransferStatus Status { get; set; } = TransferStatus.Draft;
+    // Captured only on submission; historical transfers retain required approval.
+    public bool ApprovalRequired { get; set; } = true;
 
     // Personnel
     public Guid? RequestedById { get; set; }
@@ -622,6 +625,7 @@ public class PhysicalCount : TenantEntity
     public string Status { get; set; } = "Draft";
 
     // Options
+    public bool ApprovalRequired { get; set; } = true;
     public bool FreezeInventory { get; set; } = false;
     public bool IncludeZeroStock { get; set; } = false;
     public bool BlindCount { get; set; } = false; // Hide system qty from counters
@@ -917,6 +921,7 @@ public class LandedCost : TenantEntity
 /// </summary>
 public class LandedCostItem : TenantEntity
 {
+    public Guid? PurchaseOrderItemId { get; set; }
     [Required]
     public Guid LandedCostId { get; set; }
 
@@ -1024,6 +1029,9 @@ public class LandedCostAllocation : TenantEntity
 /// </summary>
 public class PurchaseReturn : TenantEntity
 {
+    // Captured by the server at submission; historical returns retain their approval obligation.
+    public bool ApprovalRequired { get; set; } = true;
+
     [Required]
     [MaxLength(50)]
     public string ReturnNumber { get; set; } = string.Empty;
@@ -1201,9 +1209,11 @@ public class InventoryRequisition : TenantEntity
     [MaxLength(200)]
     public string? Description { get; set; }
 
-    // Requesting Department/Cost Center
-    [Required]
-    public Guid DepartmentId { get; set; }
+    // Legacy department retained for existing requisitions.
+    public Guid? DepartmentId { get; set; }
+
+    // Current requesting owner from HR's Organisation Structure → Level → Unit hierarchy.
+    public Guid? OrganizationUnitId { get; set; }
 
     [MaxLength(100)]
     public string? DepartmentName { get; set; }
@@ -1269,6 +1279,7 @@ public class InventoryRequisition : TenantEntity
     // Navigation Properties
     public virtual Warehouse Warehouse { get; set; } = null!;
     public virtual WarehouseLocation? Location { get; set; }
+    public virtual OrganizationUnit? OrganizationUnit { get; set; }
     public virtual ApplicationUser? RequestedBy { get; set; }
     public virtual ApplicationUser? ApprovedBy { get; set; }
     public virtual ApplicationUser? IssuedBy { get; set; }

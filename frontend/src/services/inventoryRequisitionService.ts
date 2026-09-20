@@ -78,7 +78,12 @@ export interface InventoryRequisitionItemDto {
   itemName: string;
   requestedQuantity: number;
   approvedQuantity: number;
+  /** Net balance retained for return operations and older API clients. */
   issuedQuantity: number;
+  grossIssuedQuantity?: number;
+  returnedQuantity?: number;
+  netIssuedQuantity?: number;
+  remainingToIssueQuantity?: number;
   unitOfMeasure: string;
   unitCost: number;
   totalCost: number;
@@ -283,6 +288,24 @@ export interface InventoryIssueAccountingRuleRequest {
   rowVersion?: string;
 }
 
+type IssueAccountingRuleResponse = Omit<InventoryIssueAccountingRuleDto, 'itemType' | 'treatment'> & {
+  itemType: number | string;
+  treatment: number | string;
+};
+
+function normalizeIssueAccountingRule(rule: IssueAccountingRuleResponse): InventoryIssueAccountingRuleDto {
+  const enumNumber = (value: number | string, names: Record<string, number>): number => {
+    const result = typeof value === 'number' ? value : names[value] ?? Number(value);
+    if (!Object.values(names).includes(result)) throw new Error(`Unsupported issue-accounting value: ${value}`);
+    return result;
+  };
+  return {
+    ...rule,
+    itemType: enumNumber(rule.itemType, { StockItem: 1, Service: 2, NonStockItem: 3, FixedAsset: 4 }),
+    treatment: enumNumber(rule.treatment, { Expense: 1, FixedAsset: 2 }),
+  };
+}
+
 export interface InventoryIssueAccountingOptionDto {
   id: string;
   code: string;
@@ -341,6 +364,7 @@ export interface InventoryControlEvidenceDto extends InventoryControlEvidenceReq
 export interface InventoryReturnVoucherLineDto { id: string; requisitionItemId: string; inventoryItemId: string; itemCode: string; itemName: string; locationId?: string; quantity: number; unitCost: number; totalValue: number; lotNumber?: string; batchNumber?: string; serialNumber?: string; expiryDate?: string; }
 export interface InventoryReturnVoucherActionDto { sequence: number; actionType: string; actorUserId: string; actorName: string; occurredAtUtc: string; comment?: string; }
 export interface InventoryReturnVoucherDto {
+  approvalRequired?: boolean;
   id: string; voucherNumber: string; inventoryRequisitionId: string; requisitionNumber: string;
   warehouseId: string; warehouseName: string; status: string; reasonCode: string; reason: string; notes?: string;
   requestedById: string; requestedByName: string; approvedById?: string; approvedAtUtc?: string;
@@ -471,17 +495,17 @@ export const inventoryRequisitionService = {
 
   getIssueAccountingRules: async (): Promise<InventoryIssueAccountingRuleDto[]> => {
     const response = await axios.get(`${API_URL}/inventory/issue-accounting/rules`, { headers: getAuthHeaders() });
-    return response.data;
+    return (response.data as IssueAccountingRuleResponse[]).map(normalizeIssueAccountingRule);
   },
 
   createIssueAccountingRule: async (dto: InventoryIssueAccountingRuleRequest): Promise<InventoryIssueAccountingRuleDto> => {
     const response = await axios.post(`${API_URL}/inventory/issue-accounting/rules`, dto, { headers: getAuthHeaders() });
-    return response.data;
+    return normalizeIssueAccountingRule(response.data);
   },
 
   updateIssueAccountingRule: async (id: string, dto: InventoryIssueAccountingRuleRequest): Promise<InventoryIssueAccountingRuleDto> => {
     const response = await axios.put(`${API_URL}/inventory/issue-accounting/rules/${id}`, dto, { headers: getAuthHeaders() });
-    return response.data;
+    return normalizeIssueAccountingRule(response.data);
   },
 
   deleteIssueAccountingRule: async (id: string, rowVersion: string): Promise<void> => {

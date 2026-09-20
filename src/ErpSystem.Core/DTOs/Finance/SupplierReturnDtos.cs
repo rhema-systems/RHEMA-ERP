@@ -73,6 +73,12 @@ public class CreateSupplierReturnLineItemDto
 
 public class SupplierDebitNoteDto
 {
+    public bool ApprovalRequired { get; set; } = true;
+    public Guid? InventoryPurchaseReturnId { get; set; }
+    public Guid? ReturnDispatchPostingEventId { get; set; }
+    public Guid? ReturnDispatchJournalEntryId { get; set; }
+    public decimal DirectInvoiceAppliedAmount { get; set; }
+    public DateTime? DirectInvoiceAppliedAt { get; set; }
     public Guid Id { get; set; }
     public string DebitNoteNumber { get; set; } = string.Empty;
     public string? SupplierCreditNoteReference { get; set; }
@@ -245,6 +251,7 @@ public sealed class ReverseSupplierDebitNoteDto
 
 public sealed class SupplierDebitNoteQueryDto
 {
+    public Guid? InventoryPurchaseReturnId { get; set; }
     public Guid? VendorId { get; set; }
     public Guid? SupplierId { get; set; }
     public Guid? OriginalVendorInvoiceId { get; set; }

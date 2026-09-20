@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import axios from 'axios';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -23,6 +24,13 @@ import {
 } from '@/services/inventoryManagementService';
 import { toast } from 'sonner';
 
+const locationErrorMessage = (error: unknown, fallback: string) => {
+  const data = axios.isAxiosError(error) ? error.response?.data : undefined;
+  const message = typeof data === 'string' ? data : data?.detail || data?.message || data?.title || (error instanceof Error ? error.message : fallback);
+  const code = typeof data === 'object' ? data?.code || data?.extensions?.code : undefined;
+  return code ? `${message} (${code})` : message;
+};
+
 export default function WarehousesPage() {
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [locations, setLocations] = useState<WarehouseLocationDto[]>([]);
@@ -41,6 +49,7 @@ export default function WarehousesPage() {
   const [editingLocation, setEditingLocation] = useState<WarehouseLocationDto | null>(null);
   const [locationEditForm, setLocationEditForm] = useState<UpdateWarehouseLocationDto | null>(null);
   const [reclassifyingLocationId, setReclassifyingLocationId] = useState<string | null>(null);
+  const [savingLocation, setSavingLocation] = useState(false);
   
   const [formData, setFormData] = useState<CreateWarehouseDto>({
     name: '', code: '', description: '', address: '', city: '', state: '', 
@@ -51,7 +60,7 @@ export default function WarehousesPage() {
   const [locationForm, setLocationForm] = useState<CreateWarehouseLocationDto>({
     warehouseId: '', locationCode: '', name: '', description: '',
     locationType: 'Bin', isPickingLocation: true, isReceivingLocation: true,
-    isConsignmentBin: false, consignmentWarehouseId: null
+    isConsignmentBin: false, consignmentWarehouseId: null, isDefault: false
   });
 
   const warehouseTypes = ['Standard', 'Distribution', 'Manufacturing', 'Quarantine', 'Transit'];
@@ -143,18 +152,31 @@ export default function WarehousesPage() {
 
   const openLocations = (warehouse: WarehouseDto) => {
     setSelectedWarehouse(warehouse);
-    setLocationForm({ ...locationForm, warehouseId: warehouse.id });
+    setLocationForm({ warehouseId: warehouse.id, locationCode: '', name: '', description: '', locationType: 'Bin', isPickingLocation: true, isReceivingLocation: true, isConsignmentBin: false, consignmentWarehouseId: null, isDefault: false });
     setIsLocationDialogOpen(true);
   };
 
+  const retainSavedLocation = (saved: WarehouseLocationDto) => {
+    setLocations(previous => {
+      const updated = previous.map(location => location.id === saved.id ? saved :
+        saved.isDefault && location.warehouseId === saved.warehouseId ? { ...location, isDefault: false } : location);
+      return previous.some(location => location.id === saved.id) ? updated : [...updated, saved];
+    });
+  };
+
   const handleCreateLocation = async () => {
+    if (savingLocation || !locationForm.locationCode.trim()) return;
     try {
+      setSavingLocation(true);
       const newLocation = await inventoryManagementService.createWarehouseLocation(locationForm);
-      setLocations(prev => [...prev, newLocation]);
-      setLocationForm({ ...locationForm, locationCode: '', name: '', description: '' });
+      retainSavedLocation(newLocation);
+      setLocationForm({ ...locationForm, locationCode: '', name: '', description: '', isDefault: false });
+      toast.success('Location added');
     } catch (err) {
       console.error('Error creating location:', err);
-      toast.error('Failed to create location');
+      toast.error(locationErrorMessage(err, 'Failed to create location'));
+    } finally {
+      setSavingLocation(false);
     }
   };
 
@@ -174,23 +196,27 @@ export default function WarehousesPage() {
       maxWeight: loc.maxWeight,
       maxVolume: loc.maxVolume,
       maxItems: loc.maxItems,
-      isActive: loc.isActive
+      isActive: loc.isActive,
+      isDefault: !!loc.isDefault
     });
     setIsEditLocationDialogOpen(true);
   };
 
   const handleUpdateLocation = async () => {
-    if (!editingLocation || !locationEditForm) return;
+    if (!editingLocation || !locationEditForm || savingLocation || (locationEditForm.isDefault && !locationEditForm.isActive)) return;
     try {
+      setSavingLocation(true);
       const updated = await inventoryManagementService.updateWarehouseLocation(editingLocation.id, locationEditForm);
-      setLocations(prev => prev.map(l => (l.id === updated.id ? updated : l)));
+      retainSavedLocation(updated);
       setIsEditLocationDialogOpen(false);
       setEditingLocation(null);
       setLocationEditForm(null);
       toast.success('Location updated');
     } catch (err: any) {
       console.error('Error updating location:', err);
-      toast.error(err?.response?.data || err?.message || 'Failed to update location');
+      toast.error(locationErrorMessage(err, 'Failed to update location'));
+    } finally {
+      setSavingLocation(false);
     }
   };
 
@@ -420,6 +446,7 @@ export default function WarehousesPage() {
                           <p className="text-sm text-muted-foreground">
                             {[warehouse.city, warehouse.state, warehouse.country].filter(Boolean).join(', ') || 'No address'}
                             {' • '}{getLocationCount(warehouse.id)} locations
+                            {' • '}Default bin: {locations.find(location => location.warehouseId === warehouse.id && location.isDefault && location.isActive)?.locationCode || 'Not set'}
                           </p>
                         </div>
                       </div>
@@ -492,24 +519,25 @@ export default function WarehousesPage() {
         <DialogContent className="sm:max-w-[800px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Locations - {selectedWarehouse?.name}</DialogTitle>
-            <DialogDescription>Manage zones, aisles, shelves, and bins</DialogDescription>
+            <DialogDescription>Manage storage locations. Set one active default bin for item assignments and count rows without a location.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="grid grid-cols-4 gap-2 items-end">
-              <div className="space-y-2"><Label>Code</Label>
-                <Input value={locationForm.locationCode} onChange={(e) => setLocationForm({...locationForm, locationCode: e.target.value.toUpperCase()})} placeholder="A-01-001" />
+              <div className="space-y-2"><Label htmlFor="new-location-code">Code</Label>
+                <Input id="new-location-code" value={locationForm.locationCode} onChange={(e) => setLocationForm({...locationForm, locationCode: e.target.value.toUpperCase()})} placeholder="A-01-001" disabled={savingLocation} />
               </div>
               <div className="space-y-2"><Label>Name</Label>
                 <Input value={locationForm.name} onChange={(e) => setLocationForm({...locationForm, name: e.target.value})} />
               </div>
               <div className="space-y-2"><Label>Type</Label>
-                <Select value={locationForm.locationType} onValueChange={(v) => setLocationForm({...locationForm, locationType: v})}>
+                <Select value={locationForm.locationType} disabled={savingLocation} onValueChange={(v) => setLocationForm({...locationForm, locationType: v, isDefault: v === 'Bin' && locationForm.isDefault})}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>{locationTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <Button onClick={handleCreateLocation} disabled={!locationForm.locationCode}><Plus className="h-4 w-4 mr-1" />Add</Button>
+              <Button onClick={handleCreateLocation} disabled={!locationForm.locationCode.trim() || savingLocation}><Plus className="h-4 w-4 mr-1" />{savingLocation ? 'Saving...' : 'Add'}</Button>
             </div>
+            <div className="flex items-center gap-2"><Switch id="new-location-default" checked={!!locationForm.isDefault} onCheckedChange={value => setLocationForm({ ...locationForm, isDefault: value })} disabled={savingLocation || locationForm.locationType !== 'Bin'} /><Label htmlFor="new-location-default">Use as default bin</Label></div>
             <div className="border rounded-lg divide-y max-h-60 overflow-y-auto">
               {locations.filter(l => l.warehouseId === selectedWarehouse?.id).length === 0 ? (
                 <div className="p-4 text-center text-muted-foreground">No locations defined</div>
@@ -520,6 +548,8 @@ export default function WarehousesPage() {
                       <Badge variant="outline">{loc.locationType}</Badge>
                       <span className="font-medium">{loc.locationCode}</span>
                       <span className="text-muted-foreground">{loc.name}</span>
+                      {loc.isDefault && <Badge className="bg-blue-100 text-blue-800">Default bin</Badge>}
+                      {!loc.isActive && <Badge variant="secondary">Inactive</Badge>}
                       {loc.isConsignmentBin && (
                         <Badge className="bg-amber-100 text-amber-900">Consignment Bin</Badge>
                       )}
@@ -535,7 +565,7 @@ export default function WarehousesPage() {
                           Reclassify stock
                         </Button>
                       )}
-                      <Button size="sm" variant="ghost" onClick={() => openEditLocation(loc)}><Edit className="h-4 w-4" /></Button>
+                      <Button size="sm" variant="ghost" aria-label={`Edit location ${loc.locationCode}`} onClick={() => openEditLocation(loc)}><Edit className="h-4 w-4" /></Button>
                       <Button
                         size="sm"
                         variant="ghost"
@@ -544,6 +574,7 @@ export default function WarehousesPage() {
                           inventoryManagementService
                             .deleteWarehouseLocation(loc.id)
                             .then(() => setLocations(prev => prev.filter(l => l.id !== loc.id)))
+                            .catch(error => toast.error(locationErrorMessage(error, 'Failed to delete location')))
                         }
                       >
                         <Trash2 className="h-4 w-4" />
@@ -562,6 +593,7 @@ export default function WarehousesPage() {
       <Dialog
         open={isEditLocationDialogOpen}
         onOpenChange={(o) => {
+          if (savingLocation) return;
           setIsEditLocationDialogOpen(o);
           if (!o) {
             setEditingLocation(null);
@@ -584,7 +616,7 @@ export default function WarehousesPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Type</Label>
-                  <Select value={locationEditForm.locationType} onValueChange={(v) => setLocationEditForm({ ...locationEditForm, locationType: v })}>
+                  <Select value={locationEditForm.locationType} disabled={savingLocation} onValueChange={(v) => setLocationEditForm({ ...locationEditForm, locationType: v, isDefault: v === 'Bin' && locationEditForm.isDefault })}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>{locationTypes.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
                   </Select>
@@ -597,10 +629,12 @@ export default function WarehousesPage() {
                   <Input value={locationEditForm.name ?? ''} onChange={(e) => setLocationEditForm({ ...locationEditForm, name: e.target.value })} />
                 </div>
                 <div className="flex items-center space-x-2 pt-7">
-                  <Switch checked={locationEditForm.isActive} onCheckedChange={(v) => setLocationEditForm({ ...locationEditForm, isActive: v })} />
-                  <Label>Active</Label>
+                  <Switch id="edit-location-active" checked={locationEditForm.isActive} disabled={savingLocation} onCheckedChange={(v) => setLocationEditForm({ ...locationEditForm, isActive: v })} />
+                  <Label htmlFor="edit-location-active">Active</Label>
                 </div>
               </div>
+
+              <div className="space-y-2"><div className="flex items-center gap-2"><Switch id="edit-location-default" checked={!!locationEditForm.isDefault} disabled={savingLocation || !locationEditForm.isActive || !!locationEditForm.isConsignmentBin || locationEditForm.locationType !== 'Bin'} onCheckedChange={value => setLocationEditForm({ ...locationEditForm, isDefault: value })} /><Label htmlFor="edit-location-default">Default bin</Label></div><p className="text-xs text-muted-foreground">Replaces the current default for this warehouse. Existing stock assignments stay unchanged.</p>{locationEditForm.isDefault && !locationEditForm.isActive && <p role="alert" className="text-sm text-red-600">The default bin must remain active. Select a replacement default before deactivating it.</p>}</div>
 
               <div className="space-y-2">
                 <Label>Description</Label>
@@ -622,6 +656,7 @@ export default function WarehousesPage() {
                 <div className="flex items-start space-x-2">
                   <Switch
                     checked={!!locationEditForm.isConsignmentBin}
+                    disabled={savingLocation || !!locationEditForm.isDefault}
                     onCheckedChange={(v) => setLocationEditForm({
                       ...locationEditForm,
                       isConsignmentBin: v,
@@ -676,11 +711,11 @@ export default function WarehousesPage() {
           )}
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditLocationDialogOpen(false)}>Cancel</Button>
+            <Button variant="outline" disabled={savingLocation} onClick={() => setIsEditLocationDialogOpen(false)}>Cancel</Button>
             <Button
               onClick={handleUpdateLocation}
               disabled={
-                !locationEditForm ||
+                !locationEditForm || savingLocation || (locationEditForm.isDefault && !locationEditForm.isActive) ||
                 (locationEditForm.isConsignmentBin && (!locationEditForm.consignmentWarehouseId || locationEditForm.consignmentWarehouseId === 'none'))
               }
             >

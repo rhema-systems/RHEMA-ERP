@@ -474,20 +474,145 @@ public sealed class FixedAssetCapitalizationFoundationTests
         await blocked.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*submitted and approved*");
 
-        var submitted = await services.FixedAssets.SubmitCapitalizationForApprovalAsync(fixture.Asset.Id, "Approve direct capitalization");
+        var submitted = await services.FixedAssets.SubmitCapitalizationForApprovalAsync(
+            fixture.Asset.Id,
+            new SubmitFixedAssetCapitalizationDto
+            {
+                CapitalizationDate = new DateTime(2026, 7, 5),
+                CreditAccountId = fixture.AucAccount.Id,
+                Amount = 100m,
+                Reference = "FA-APPROVED-001",
+                Reason = "Approved direct capitalization",
+                Comments = "Approve the exact capitalization journal proposal."
+            });
         submitted.Status.Should().Be(FixedAssetStatus.PendingApproval);
+        submitted.CapitalizationApprovalSnapshot.Should().NotBeNull();
+        submitted.CapitalizationApprovalSnapshot!.TransactionAmount.Should().Be(100m);
+        submitted.CapitalizationApprovalSnapshot.CreditAccountId.Should().Be(fixture.AucAccount.Id);
+        submitted.CapitalizationApprovalSnapshotHash.Should().HaveLength(64);
         workflow.Verify(x => x.StartApprovalWorkflowAsync("FixedAsset", fixture.Asset.Id), Times.Once);
 
-        fixture.Asset.Status = FixedAssetStatus.Acquired;
+        var approval = await db.FixedAssets.SingleAsync(item => item.Id == fixture.Asset.Id);
+        approval.Status = FixedAssetStatus.Acquired;
+        approval.CapitalizationApprovalApprovedByUserId = Guid.NewGuid();
+        approval.CapitalizationApprovalApprovedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
         var capitalized = await services.FixedAssets.CapitalizeAsync(fixture.Asset.Id, new CapitalizeFixedAssetDto
         {
-            CapitalizationDate = new DateTime(2026, 7, 5),
-            Reason = "Approved direct capitalization"
+            CapitalizationDate = new DateTime(2026, 7, 20),
+            CreditAccountId = fixture.AssetCostAccount.Id,
+            Amount = 999m,
+            Reference = "CALLER-REPLACEMENT",
+            Reason = "Caller values must not replace approved evidence"
         });
 
         capitalized.Status.Should().Be(FixedAssetStatus.Capitalized);
         capitalized.PostingEventId.Should().NotBeNull();
+        capitalized.CapitalizationDate.Should().Be(new DateTime(2026, 7, 5));
+        capitalized.AcquisitionCost.Should().Be(100m);
+        var journal = await db.JournalEntries
+            .Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == capitalized.JournalEntryId);
+        journal.Transactions.Single(item => item.DebitAmount > 0m).DebitAmount.Should().Be(100m);
+        journal.Transactions.Single(item => item.CreditAmount > 0m).AccountId.Should().Be(fixture.AucAccount.Id);
+        var postingEvent = await db.FinancePostingEvents.SingleAsync(item => item.Id == capitalized.PostingEventId);
+        postingEvent.SourceDocumentReference.Should().Be("FA-APPROVED-001");
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceWorkflowApprovalHardening")]
+    [Trait("Category", "Workflow")]
+    public async Task DirectCapitalization_ShouldFailClosedWhenApprovalSnapshotIsTampered()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(x => x.StartApprovalWorkflowAsync("FixedAsset", fixture.Asset.Id))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
+        var services = CreateServices(db, tenantId, workflowService: workflow.Object);
+
+        await services.FixedAssets.SubmitCapitalizationForApprovalAsync(
+            fixture.Asset.Id,
+            new SubmitFixedAssetCapitalizationDto
+            {
+                CapitalizationDate = new DateTime(2026, 7, 5),
+                CreditAccountId = fixture.AucAccount.Id,
+                Amount = 100m,
+                Reason = "Approve capitalization evidence"
+            });
+
+        var approval = await db.FixedAssets.SingleAsync(item => item.Id == fixture.Asset.Id);
+        approval.Status = FixedAssetStatus.Acquired;
+        approval.CapitalizationApprovalApprovedByUserId = Guid.NewGuid();
+        approval.CapitalizationApprovalApprovedAt = DateTime.UtcNow;
+        approval.CapitalizationApprovalSnapshotJson += " ";
+        await db.SaveChangesAsync();
+
+        var act = () => services.FixedAssets.CapitalizeAsync(fixture.Asset.Id, new CapitalizeFixedAssetDto
+        {
+            Reason = "Attempt to post tampered evidence"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*approval evidence failed its integrity check*");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceWorkflowApprovalHardening")]
+    [Trait("Category", "Workflow")]
+    public async Task DirectCapitalization_ShouldRetireApprovalWhenPostingConfigurationDrifts()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedFixedAssetFoundationAsync(db, tenantId);
+        var workflow = new Mock<IWorkflowService>();
+        workflow.Setup(x => x.StartApprovalWorkflowAsync("FixedAsset", fixture.Asset.Id))
+            .ReturnsAsync(new WorkflowExecutionResult
+            {
+                Success = true,
+                Status = WorkflowInstanceStatus.InProgress,
+                WorkflowInstanceId = Guid.NewGuid()
+            });
+        var services = CreateServices(db, tenantId, workflowService: workflow.Object);
+
+        await services.FixedAssets.SubmitCapitalizationForApprovalAsync(
+            fixture.Asset.Id,
+            new SubmitFixedAssetCapitalizationDto
+            {
+                CapitalizationDate = new DateTime(2026, 7, 5),
+                CreditAccountId = fixture.AucAccount.Id,
+                Amount = 100m,
+                Reason = "Approve current category accounts"
+            });
+
+        var approval = await db.FixedAssets.SingleAsync(item => item.Id == fixture.Asset.Id);
+        approval.Status = FixedAssetStatus.Acquired;
+        approval.CapitalizationApprovalApprovedByUserId = Guid.NewGuid();
+        approval.CapitalizationApprovalApprovedAt = DateTime.UtcNow;
+        var replacementAssetAccount = SeedAccount(db, tenantId, "1601", AccountType.Asset);
+        fixture.Category.AssetAccountId = replacementAssetAccount.Id;
+        await db.SaveChangesAsync();
+
+        var act = () => services.FixedAssets.CapitalizeAsync(fixture.Asset.Id, new CapitalizeFixedAssetDto
+        {
+            Reason = "Attempt after account configuration drift"
+        });
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*posting-account configuration changed after capitalization approval*");
+        var retired = await db.FixedAssets.AsNoTracking().SingleAsync(item => item.Id == fixture.Asset.Id);
+        retired.Status.Should().Be(FixedAssetStatus.Draft);
+        retired.CapitalizationApprovalInvalidatedAt.Should().NotBeNull();
+        retired.CapitalizationApprovalInvalidationReason.Should().Contain("posting-account configuration changed");
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
     }
 
     [Fact]
@@ -700,7 +825,8 @@ public sealed class FixedAssetCapitalizationFoundationTests
         // AP void uses the current accounting date for the linked reversal. Seed that period as
         // well as the invoice's July period so the test proves shared-journal behavior rather than
         // being stopped earlier by the independent period-control safeguard.
-        SeedOpenPeriod(db, tenantId, startDate: new DateTime(2026, 8, 1));
+        var currentAccountingMonth = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1);
+        SeedOpenPeriod(db, tenantId, startDate: currentAccountingMonth);
         await db.SaveChangesAsync();
         var services = CreateServices(db, tenantId, fixedAssetServiceRequired: true);
         await services.VendorInvoices.PostAsync(fixture.Invoice.Id);
@@ -743,6 +869,7 @@ public sealed class FixedAssetCapitalizationFoundationTests
         Guid? userId = null,
         string userName = "fa.poster")
     {
+        EnsureCanonicalPostingBookFixture(db, tenantId);
         var currentUser = CreateCurrentUser(tenantId, userId, userName);
         var auditService = new FinanceAuditService(
             db,
@@ -779,6 +906,60 @@ public sealed class FixedAssetCapitalizationFoundationTests
             fixedAssetServiceRequired ? fixedAssetService : null);
 
         return new ServiceFixture(vendorInvoiceService, fixedAssetService, subledgerPostingMock);
+    }
+
+    private static void EnsureCanonicalPostingBookFixture(ApplicationDbContext db, Guid tenantId)
+    {
+        var book = db.AccountingBooks.Local.FirstOrDefault(item => item.TenantId == tenantId && item.Code == "IFRS")
+            ?? db.AccountingBooks.FirstOrDefault(item => item.TenantId == tenantId && item.Code == "IFRS");
+        if (book == null)
+        {
+            book = new AccountingBook
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+                IsDefault = true, IsActive = true, AllowsPosting = true
+            };
+            db.AccountingBooks.Add(book);
+        }
+
+        var accounts = db.Accounts.Local.Where(item => item.TenantId == tenantId)
+            .Concat(db.Accounts.Where(item => item.TenantId == tenantId).AsEnumerable())
+            .DistinctBy(item => item.Id)
+            .ToArray();
+        foreach (var group in accounts.GroupBy(item => item.AccountType))
+        {
+            var classification = db.AccountClassifications.Local.FirstOrDefault(item =>
+                    item.TenantId == tenantId && item.AccountingBookId == book.Id && item.CoreAccountType == group.Key)
+                ?? db.AccountClassifications.FirstOrDefault(item =>
+                    item.TenantId == tenantId && item.AccountingBookId == book.Id && item.CoreAccountType == group.Key);
+            if (classification == null)
+            {
+                classification = new AccountClassification
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountingBookId = book.Id,
+                    Code = $"FA_{group.Key.ToString().ToUpperInvariant()}", Name = $"FA {group.Key}",
+                    CoreAccountType = group.Key, IsPostingClassification = true,
+                    Status = AccountClassificationStatus.Active
+                };
+                db.AccountClassifications.Add(classification);
+            }
+
+            foreach (var account in group)
+            {
+                if (!db.AccountAccountingBooks.Local.Any(item => item.AccountId == account.Id && item.AccountingBookId == book.Id)
+                    && !db.AccountAccountingBooks.Any(item => item.AccountId == account.Id && item.AccountingBookId == book.Id))
+                {
+                    db.AccountAccountingBooks.Add(new AccountAccountingBook
+                    {
+                        Id = Guid.NewGuid(), TenantId = tenantId, AccountId = account.Id,
+                        AccountingBookId = book.Id, AccountClassificationId = classification.Id, IsEnabled = true
+                    });
+                }
+            }
+        }
+        foreach (var period in db.FiscalPeriods.Local.Where(item => item.TenantId == tenantId))
+            FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period, book.Code);
+        db.SaveChanges();
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(

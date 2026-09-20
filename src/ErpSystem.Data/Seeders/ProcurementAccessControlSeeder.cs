@@ -23,7 +23,7 @@ public sealed class ProcurementAccessControlSeeder
         _logger = logger;
     }
 
-    public async Task SeedAsync(CancellationToken cancellationToken = default)
+    public async Task SeedAsync(CancellationToken cancellationToken = default, bool preserveExistingWorkflows = false)
     {
         await ReconcileIdentityAccessBaselineAsync(cancellationToken);
         var tenantIds = await _context.Tenants.AsNoTracking()
@@ -31,13 +31,14 @@ public sealed class ProcurementAccessControlSeeder
             .Select(item => item.Id)
             .ToListAsync(cancellationToken);
         foreach (var tenantId in tenantIds)
-            await SeedTenantAsync(tenantId, null, cancellationToken);
+            await SeedTenantAsync(tenantId, null, cancellationToken, preserveExistingWorkflows);
     }
 
     public async Task SeedTenantAsync(
         Guid tenantId,
         Guid? actorUserId = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        bool preserveExistingWorkflows = false)
     {
         if (tenantId == Guid.Empty) throw new ArgumentException("Tenant ID is required.", nameof(tenantId));
         await ReconcileIdentityAccessBaselineAsync(cancellationToken);
@@ -79,6 +80,21 @@ public sealed class ProcurementAccessControlSeeder
 
         foreach (var template in ProcurementAccessControlRegistry.Workflows)
         {
+            if (preserveExistingWorkflows)
+            {
+                // Normal startup respects tenant workflow state. Explicit provisioning retains
+                // its existing opt-in repair behavior through the default false argument.
+                var existingTypes = await _context.WorkflowEntityTypes.IgnoreQueryFilters().AsNoTracking()
+                    .Where(item => item.TenantId == tenantId &&
+                        (item.Code == template.EntityTypeCode || item.Name == template.EntityTypeName))
+                    .ToListAsync(cancellationToken);
+                var existingTypeIds = existingTypes.Select(item => item.Id).ToList();
+                if (existingTypes.Any(item => item.IsDeleted || !item.IsActive) ||
+                    await _context.WorkflowDefinitions.IgnoreQueryFilters().AsNoTracking().AnyAsync(item =>
+                        item.TenantId == tenantId && (existingTypeIds.Contains(item.EntityTypeId) || item.Name == template.Name),
+                        cancellationToken))
+                    continue;
+            }
             // Workflow entity types are shared across Finance, Inventory and Procurement.
             // Prefer the TDC code where it exists, but reuse the already-governed entity
             // type when another module owns the canonical code for the same business name

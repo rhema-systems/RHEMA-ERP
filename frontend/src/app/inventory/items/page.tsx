@@ -29,6 +29,19 @@ import { useInventoryItemLabels } from '@/hooks/useFieldLabels';
 import { format } from 'date-fns';
 import { toast } from 'sonner';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { InventoryCostValue } from '@/components/inventory/InventoryCostValue';
+import { useInventoryCostCurrency } from '@/hooks/useInventoryCostCurrency';
+import { InventoryItemAccountsTab } from '@/components/inventory/InventoryItemAccountsTab';
+import axios from 'axios';
+
+function itemSaveError(error: unknown, fallback: string): string {
+  if (!axios.isAxiosError(error)) return fallback;
+  const problem = error.response?.data;
+  if (typeof problem === 'string') return problem;
+  const detail = problem?.detail || problem?.message;
+  const code = problem?.code || problem?.extensions?.code;
+  return detail ? code ? `${detail} (${code})` : detail : fallback;
+}
 
 const ItemTypes = [
   { value: 1, label: 'Stock Item' },
@@ -75,6 +88,7 @@ const getFullImageUrl = (url: string | null | undefined): string | null => {
 };
 
 export default function InventoryItemsPage() {
+  const costCurrency = useInventoryCostCurrency();
   // Get configurable field labels
   const { getLabel } = useInventoryItemLabels();
   
@@ -111,6 +125,7 @@ export default function InventoryItemsPage() {
   const [loadingPriceLines, setLoadingPriceLines] = useState(false);
   
   const [formData, setFormData] = useState<CreateInventoryItemDto>({
+    postingAccounts: {},
     // Basic Info
     itemCode: '', name: '', description: '', categoryId: '', unitOfMeasure: 'EA',
     unitOfMeasureScheduleId: undefined,
@@ -210,7 +225,7 @@ export default function InventoryItemsPage() {
       resetForm();
     } catch (err) {
       console.error('Error creating item:', err);
-      toast.error('Failed to create inventory item');
+      toast.error(itemSaveError(err, 'Failed to create inventory item'));
     }
   };
 
@@ -269,6 +284,7 @@ export default function InventoryItemsPage() {
     }
     
     setFormData({
+      postingAccounts: item.postingAccounts,
       // Basic Info
       itemCode: item.itemCode, name: item.name, description: item.description || '',
       shortDescription: item.shortDescription, genericDescription: item.genericDescription,
@@ -350,7 +366,7 @@ export default function InventoryItemsPage() {
       resetForm();
     } catch (err) {
       console.error('Error updating item:', err);
-      toast.error('Failed to update inventory item');
+      toast.error(itemSaveError(err, 'Failed to update inventory item'));
     }
   };
 
@@ -418,6 +434,7 @@ export default function InventoryItemsPage() {
 
   const resetForm = () => {
     setFormData({
+      postingAccounts: {},
       // Basic Info
       itemCode: '', name: '', description: '', categoryId: '', unitOfMeasure: 'EA',
       unitOfMeasureScheduleId: undefined,
@@ -474,12 +491,13 @@ export default function InventoryItemsPage() {
               <DialogDescription>Create a new inventory item.</DialogDescription>
             </DialogHeader>
             <Tabs defaultValue="basic" className="flex-1 flex flex-col min-h-0">
-              <TabsList className="grid w-full grid-cols-5 shrink-0">
+              <TabsList className="grid w-full grid-cols-6 shrink-0">
                 <TabsTrigger value="basic">Basic Info</TabsTrigger>
                 <TabsTrigger value="costs">Costs & Pricing</TabsTrigger>
                 <TabsTrigger value="stock">Stock Settings</TabsTrigger>
                 <TabsTrigger value="options">Options</TabsTrigger>
                 <TabsTrigger value="tracking">Tracking</TabsTrigger>
+                <TabsTrigger value="accounts">Accounts</TabsTrigger>
               </TabsList>
               {/* BASIC INFO TAB - REDESIGNED */}
               <TabsContent value="basic" className="flex-1 overflow-y-auto pt-4">
@@ -1066,6 +1084,9 @@ export default function InventoryItemsPage() {
                   </div>
                 )}
               </TabsContent>
+              <TabsContent value="accounts" className="flex-1 min-h-0 overflow-y-auto pt-4">
+                <InventoryItemAccountsTab value={formData.postingAccounts} onChange={postingAccounts => setFormData(current => ({ ...current, postingAccounts }))} />
+              </TabsContent>
             </Tabs>
             <DialogFooter className="shrink-0 pt-4">
               <Button variant="outline" onClick={() => setIsCreateDialogOpen(false)}>Cancel</Button>
@@ -1173,7 +1194,7 @@ export default function InventoryItemsPage() {
                             {item.isLotTracked && <Badge className="bg-indigo-100 text-indigo-800">Lot</Badge>}
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            Stock: {item.availableStock} / {item.currentStock} • Cost: ${item.standardCost.toFixed(2)} • {item.categoryName || 'No Category'}
+                            Stock: {item.availableStock} / {item.currentStock} • Standard cost: <InventoryCostValue value={item.standardCost} kind="standard" currencyCode={costCurrency} /> • Item-wide average cost: <InventoryCostValue value={item.averageCost} kind="item" currencyCode={costCurrency} /> • {item.categoryName || 'No Category'}
                           </p>
                         </div>
                       </div>
@@ -1208,13 +1229,14 @@ export default function InventoryItemsPage() {
             <DialogDescription>Editing: {selectedItem?.itemCode} - {selectedItem?.name}</DialogDescription>
           </DialogHeader>
           <Tabs defaultValue="basic" className="flex-1 flex flex-col min-h-0">
-            <TabsList className="grid w-full grid-cols-6 shrink-0">
+            <TabsList className="grid w-full grid-cols-7 shrink-0">
               <TabsTrigger value="basic">Basic Info</TabsTrigger>
               <TabsTrigger value="costs">Costs & Pricing</TabsTrigger>
               <TabsTrigger value="stock">Stock Settings</TabsTrigger>
               <TabsTrigger value="options">Options</TabsTrigger>
               <TabsTrigger value="tracking">Tracking</TabsTrigger>
               <TabsTrigger value="pricelists">Price Lists</TabsTrigger>
+              <TabsTrigger value="accounts">Accounts</TabsTrigger>
             </TabsList>
             <TabsContent value="basic" className="flex-1 overflow-y-auto pt-4">
               <div className="max-w-5xl mx-auto space-y-6 pb-4">
@@ -1591,6 +1613,11 @@ export default function InventoryItemsPage() {
               </div>
             </TabsContent>
             <TabsContent value="costs" className="flex-1 overflow-y-auto space-y-4 pt-4">
+              <div className="rounded-md border p-3">
+                <Label>Item-wide average cost (read-only)</Label>
+                <div className="mt-1 font-semibold"><InventoryCostValue value={selectedItem?.averageCost} kind="item" currencyCode={costCurrency} /></div>
+                <p className="mt-1 text-xs text-muted-foreground">Stored across warehouses. Count posting uses its saved valuation cost, not this reference value.</p>
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2"><Label>Standard Cost</Label><Input type="number" step="0.01" value={formData.standardCost} onChange={(e) => setFormData({...formData, standardCost: parseFloat(e.target.value) || 0})} /></div>
                 <div className="space-y-2"><Label>Current Cost</Label><Input type="number" step="0.01" value={formData.currentCost} onChange={(e) => setFormData({...formData, currentCost: parseFloat(e.target.value) || 0})} /></div>
@@ -1810,6 +1837,9 @@ export default function InventoryItemsPage() {
                   </Table>
                 </div>
               )}
+            </TabsContent>
+            <TabsContent value="accounts" className="flex-1 min-h-0 overflow-y-auto pt-4">
+              <InventoryItemAccountsTab value={formData.postingAccounts} onChange={postingAccounts => setFormData(current => ({ ...current, postingAccounts }))} />
             </TabsContent>
           </Tabs>
           <DialogFooter className="shrink-0 pt-4">

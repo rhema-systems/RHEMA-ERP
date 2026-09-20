@@ -16,6 +16,7 @@ export interface InventoryWarehouseLocationOption {
   name?: string;
   locationType?: string;
   isActive: boolean;
+  isDefault?: boolean;
   isPickingLocation: boolean;
   isReceivingLocation: boolean;
 }

@@ -282,6 +282,7 @@ public sealed class InventoryIssueControlTests : IDisposable
             Mock.Of<IProcurementControlEventService>(),
             Mock.Of<IInventoryReturnControlService>(),
             Mock.Of<IInventoryIssueFinanceAssetService>(),
+            Mock.Of<IInventoryValuationService>(),
             NullLogger<InventoryRequisitionService>.Instance);
 
         var result = await service.GetIssueVouchersAsync(requisition.Id);

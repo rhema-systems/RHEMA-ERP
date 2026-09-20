@@ -451,8 +451,8 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
         }
 
         return await _dbSet
-            .Include(e => e.Department)
-            .Where(e => e.Department != null && e.Department.Name == department && !e.IsDeleted)
+            .Include(e => e.OrganizationUnit)
+            .Where(e => e.OrganizationUnit != null && e.OrganizationUnit.Name == department && !e.IsDeleted)
             .OrderBy(e => e.LastName)
             .ThenBy(e => e.FirstName)
             .ToListAsync();
@@ -499,7 +499,7 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
     {
         return await _dbSet
             .Where(e => e.IsActive && !e.IsDeleted)
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .OrderBy(e => e.LastName)
             .ThenBy(e => e.FirstName)
@@ -525,7 +525,7 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
     {
         return await _dbSet
             .Where(e => e.IsActive && !e.IsDeleted)
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Manager)
             .Include(e => e.DirectReports)
@@ -583,8 +583,8 @@ public class EmployeeRepository : GenericRepository<Employee>, IEmployeeReposito
     public async Task<int> GetEmployeeCountByDepartmentAsync(string department)
     {
         return await _dbSet
-            .Include(e => e.Department)
-            .Where(e => e.Department != null && e.Department.Name == department && !e.IsDeleted)
+            .Include(e => e.OrganizationUnit)
+            .Where(e => e.OrganizationUnit != null && e.OrganizationUnit.Name == department && !e.IsDeleted)
             .CountAsync();
     }
 }

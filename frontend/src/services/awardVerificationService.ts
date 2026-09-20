@@ -8,6 +8,7 @@ export interface AwardVerificationChecklistItem {
   description?: string;
   displayOrder: number;
   isRequired: boolean;
+  requiresDocument?: boolean;
   category?: string;
   isActive: boolean;
 }
@@ -31,6 +32,7 @@ export interface CreateChecklistItemDto {
   description?: string;
   displayOrder: number;
   isRequired: boolean;
+  requiresDocument?: boolean;
   category?: string;
   isActive: boolean;
 }
@@ -98,6 +100,7 @@ export interface TenderAwardVerificationItemResult {
   itemDescription?: string;
   itemCategory?: string;
   isRequired?: boolean;
+  requiresDocument?: boolean;
   isVerified: boolean;
   status: string;
   comments?: string;
@@ -242,6 +245,14 @@ export const awardVerificationService = {
       const error = await response.text();
       throw new Error(error || 'Failed to delete checklist template');
     }
+  },
+
+  async updateTemplateItem(id: string, data: CreateChecklistItemDto): Promise<AwardVerificationChecklistItem> {
+    const response = await fetch(`${API_BASE_URL}/procurement/AwardVerifications/templates/items/${id}`, {
+      method: 'PUT', headers: getAuthHeaders(), body: JSON.stringify(data),
+    });
+    if (!response.ok) throw new Error((await response.text()) || 'Failed to update checklist item');
+    return response.json();
   },
 
   // Verification Methods

@@ -97,15 +97,12 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         });
         await context.SaveChangesAsync();
 
-        var migration = new AddFinanceDimensionSourceInfrastructure();
-        var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
-        migration.GetType().GetMethod("Up", BindingFlags.Instance | BindingFlags.NonPublic)!
-            .Invoke(migration, [builder]);
-        var permissionSql = builder.Operations.OfType<SqlOperation>().Single(operation =>
-            operation.Sql.Contains("Finance.Dimensions.Certification.Manage", StringComparison.Ordinal));
+        var permissionSql = ArchivedMigrationSource.SqlContaining(
+            "20260830193635_AddFinanceDimensionSourceInfrastructure.cs",
+            "INSERT INTO [Permissions]");
 
-        await context.Database.ExecuteSqlRawAsync(permissionSql.Sql);
-        await context.Database.ExecuteSqlRawAsync(permissionSql.Sql);
+        await context.Database.ExecuteSqlRawAsync(permissionSql);
+        await context.Database.ExecuteSqlRawAsync(permissionSql);
 
         var permission = await context.Permissions.AsNoTracking().SingleAsync(item =>
             item.Name == FinancePermissions.ManageDimensionCertification && !item.IsDeleted);
@@ -141,14 +138,14 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 ON column_definition.object_id = index_column.object_id
                 AND column_definition.column_id = index_column.column_id
             WHERE table_definition.name = N'AccountTransactions'
-                AND index_definition.name = N'IX_AccountTransactions_TenantId_BookClassification_TransactionDate_AccountId'
+                AND index_definition.name = N'IX_AccountTransactions_TenantId_AccountingBookId_TransactionDate_AccountId'
                 AND index_column.key_ordinal > 0;
             """;
 
         // Key order matters: changing it can leave the index present while making the tenant/book
         // prefix unusable for the trial-balance and journal-inquiry query shapes it was designed for.
         Convert.ToString(await command.ExecuteScalarAsync())
-            .Should().Be("TenantId,BookClassification,TransactionDate,AccountId");
+            .Should().Be("TenantId,AccountingBookId,TransactionDate,AccountId");
     }
 
     [SqlServerFact]
@@ -185,7 +182,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
     [SqlServerFact]
     [Trait("Batch", "FinancePostingEngine")]
     [Trait("Category", "SqlServerIntegration")]
-    public async Task PostingWithAlreadyTrackedAccounts_ShouldSynchronizeBalancesWithoutMutatingTrackerEnumeration()
+    public async Task PostingWithAlreadyTrackedAccounts_ShouldPersistBookBalancesWithoutTrackerMutation()
     {
         await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
         var seeded = await database.SeedPostingAccountsAsync();
@@ -213,7 +210,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             context,
             currentUser.Object,
             Mock.Of<ILogger<FinancePostingEngine>>());
-        var request = new FinancePostingRequestDto
+        var request = new FinancePostingRequestV2Dto
         {
             SourceModule = "PROC",
             OriginModuleCode = "PROC",
@@ -225,7 +222,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             Description = "SQL Server tracked-account posting regression",
             PostingDate = new DateTime(2026, 7, 15),
             JournalType = "System Generated",
-            BookClassification = "IFRS",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
             Lines =
             [
@@ -247,21 +244,213 @@ public sealed class JournalBatchSqlServerReleaseGateTests
         var result = await engine.PostAsync(request);
 
         result.PostingStatus.Should().Be("Posted");
-        trackedAccounts.Single(account => account.Id == seeded.DebitAccountId).Balance.Should().Be(-100m);
-        trackedAccounts.Single(account => account.Id == seeded.CreditAccountId).Balance.Should().Be(-100m);
+        trackedAccounts.Should().OnlyContain(account => context.Entry(account).State == EntityState.Unchanged);
 
-        // Verify the durable SQL values as well as the in-memory snapshot. This guards against fixing
-        // the enumerator by detaching entities while accidentally losing or double-applying balances.
+        // The tracked account entities remain stable while the book-scoped projections are durable.
         await using var verification = database.CreateContext();
-        (await verification.Accounts.AsNoTracking()
-                .SingleAsync(account => account.Id == seeded.DebitAccountId))
-            .Balance.Should().Be(-100m);
-        (await verification.Accounts.AsNoTracking()
-                .SingleAsync(account => account.Id == seeded.CreditAccountId))
-            .Balance.Should().Be(-100m);
+        (await verification.AccountBalances.AsNoTracking()
+                .SingleAsync(balance => balance.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.AsNoTracking()
+                .SingleAsync(balance => balance.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
         (await verification.FinancePostingEvents.AsNoTracking()
                 .CountAsync(postingEvent => postingEvent.SourceDocumentId == request.SourceDocumentId))
             .Should().Be(1);
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task ConcurrentSameBookSubmissions_ShouldConvergeOnOnePostingEventAndJournal()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync();
+        await using var firstContext = database.CreateRetryingContext();
+        await using var secondContext = database.CreateRetryingContext();
+        var sourceId = Guid.NewGuid();
+
+        FinancePostingRequestV2Dto Request() => new()
+        {
+            SourceModule = "TEST", SourceDocumentType = "C1ConcurrentPosting",
+            SourceDocumentId = sourceId, SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = "Post", Description = "Concurrent C1 posting",
+            PostingDate = new DateTime(2026, 7, 15), JournalType = "System Generated",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"C1|CONCURRENT|{sourceId:N}|IFRS|POST", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = seeded.DebitAccountId, DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = seeded.CreditAccountId, CreditAmount = 100m }
+            ]
+        };
+
+        var results = await Task.WhenAll(
+            CreateSqlPostingEngine(firstContext, seeded.TenantId).PostAsync(Request()),
+            CreateSqlPostingEngine(secondContext, seeded.TenantId).PostAsync(Request()));
+
+        results.Select(result => result.PostingEventId).Distinct().Should().ContainSingle();
+        results.Select(result => result.JournalEntryId).Distinct().Should().ContainSingle();
+        results.Count(result => result.WasDuplicate).Should().Be(1);
+        await using var verification = database.CreateContext();
+        (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await verification.JournalEntries.CountAsync()).Should().Be(1);
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "MultiBookIdentityC1")]
+    public async Task ConcurrentCaseVariantDifferentBookSubmissions_ShouldMoveExactBookBalancesOnce()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync(includeParallelBook: true);
+        await using var firstContext = database.CreateRetryingContext();
+        await using var secondContext = database.CreateRetryingContext();
+        var sourceId = Guid.NewGuid();
+
+        FinancePostingRequestV2Dto Request(string book, string sourceType, string action, string key) => new()
+        {
+            SourceModule = "TEST", SourceDocumentType = sourceType,
+            SourceDocumentId = sourceId, SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = action, Description = "Concurrent cross-book C1 posting",
+            PostingDate = new DateTime(2026, 7, 15), JournalType = "System Generated",
+            AccountingBookCode = book, FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = key, ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = seeded.DebitAccountId, DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = seeded.CreditAccountId, CreditAmount = 100m }
+            ]
+        };
+
+        static async Task<(FinancePostingResultDto? Result, Exception? Error)> CaptureAsync(
+            Task<FinancePostingResultDto> action)
+        {
+            try { return (await action, null); }
+            catch (Exception exception) { return (null, exception); }
+        }
+
+        var outcomes = await Task.WhenAll(
+            CaptureAsync(CreateSqlPostingEngine(firstContext, seeded.TenantId).PostAsync(
+                Request("IFRS", "C1CaseSource", "Post", $"C1|CASE|{sourceId:N}"))),
+            CaptureAsync(CreateSqlPostingEngine(secondContext, seeded.TenantId).PostAsync(
+                Request("local_statutory", "c1casesource", "post", $"c1|case|{sourceId:N}"))));
+
+        outcomes.Count(item => item.Result is not null).Should().Be(1,
+            "posting outcomes were {0}", string.Join(" | ", outcomes.Select(item =>
+                item.Error?.ToString() ?? "success")));
+        outcomes.Single(item => item.Result is not null).Result!.WasDuplicate.Should().BeFalse();
+        outcomes.Count(item => item.Error?.Message.Contains("PARALLEL_BOOK_POSTING_DISABLED", StringComparison.Ordinal) == true)
+            .Should().Be(1);
+        await using var verification = database.CreateContext();
+        (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await verification.JournalEntries.CountAsync()).Should().Be(1);
+        // Either book can win the race; only that exact book receives a projection.
+        var primaryBookWon = outcomes[0].Result is not null;
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.AccountBalances.Select(item => item.BookClassification).Distinct().ToListAsync())
+            .Should().ContainSingle().Which.Should().Be(primaryBookWon ? "IFRS" : "LOCAL_STATUTORY");
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "MultiBookBalanceC2")]
+    public async Task ConcurrentPostingAndApprovedRebuild_ShouldSerializeWithoutLostOrDuplicateProjection()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync();
+        await using var postingContext = database.CreateContext();
+        await using var rebuildContext = database.CreateContext();
+        var sourceId = Guid.NewGuid();
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "TEST", SourceDocumentType = "C2ConcurrentRebuild",
+            SourceDocumentId = sourceId, SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = "Post", Description = "Concurrent C2 posting/rebuild",
+            PostingDate = new DateTime(2026, 7, 15), JournalType = "System Generated",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"C2|CONCURRENT-REBUILD|{sourceId:N}|IFRS|POST", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = seeded.DebitAccountId, DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = seeded.CreditAccountId, CreditAmount = 100m }
+            ]
+        };
+        var rebuild = new BookBalanceReconciliationRequestDto(
+            "IFRS", true, "Concurrent C2 reconciliation", $"C2|REBUILD|{sourceId:N}", Guid.NewGuid());
+
+        await Task.WhenAll(
+            CreateSqlPostingEngine(postingContext, seeded.TenantId).PostAsync(request),
+            new BookBalanceReadModelService(rebuildContext).ReconcileAsync(seeded.TenantId, rebuild, Guid.NewGuid()));
+
+        await using var verification = database.CreateContext();
+        (await verification.JournalEntries.CountAsync()).Should().Be(1);
+        (await verification.FinancePostingEvents.CountAsync()).Should().Be(1);
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.DebitAccountId))
+            .ClosingBalance.Should().Be(100m);
+        (await verification.AccountBalances.SingleAsync(item => item.AccountId == seeded.CreditAccountId))
+            .ClosingBalance.Should().Be(-100m);
+        (await verification.FinanceBalanceRebuildRuns.CountAsync()).Should().Be(1);
+    }
+
+    [SqlServerFact]
+    [Trait("Batch", "FinancePostingEngine")]
+    [Trait("Category", "MultiBookBalanceC2")]
+    public async Task ConcurrentPostingAndDryReconciliation_ShouldReadOneConsistentSerializedSnapshot()
+    {
+        await using var database = await SqlServerJournalBatchDatabase.CreateAsync();
+        var seeded = await database.SeedPostingAccountsAsync();
+        await using var postingContext = database.CreateContext();
+        await using var previewContext = database.CreateContext();
+        var sourceId = Guid.NewGuid();
+        var request = new FinancePostingRequestV2Dto
+        {
+            SourceModule = "TEST", SourceDocumentType = "C2ConcurrentPreview",
+            SourceDocumentId = sourceId, SourceDocumentTenantId = seeded.TenantId,
+            PostingAction = "Post", Description = "Concurrent C2 posting/preview",
+            PostingDate = new DateTime(2026, 7, 15), JournalType = "System Generated",
+            AccountingBookCode = "IFRS", FunctionalCurrencyCode = "GHS",
+            IdempotencyKey = $"C2|CONCURRENT-PREVIEW|{sourceId:N}|IFRS|POST", ReturnExistingOnDuplicate = true,
+            Lines =
+            [
+                new FinancePostingLineDto { AccountId = seeded.DebitAccountId, DebitAmount = 100m },
+                new FinancePostingLineDto { AccountId = seeded.CreditAccountId, CreditAmount = 100m }
+            ]
+        };
+
+        var posting = CreateSqlPostingEngine(postingContext, seeded.TenantId).PostAsync(request);
+        var preview = new BookBalanceReadModelService(previewContext).ReconcileAsync(seeded.TenantId,
+            new BookBalanceReconciliationRequestDto("IFRS", false, null, null, null), Guid.NewGuid());
+        await Task.WhenAll(posting, preview);
+
+        preview.Result.BalanceDriftCount.Should().Be(0,
+            "the preview must run wholly before or wholly after the posting under the shared projection lock");
+        preview.Result.ExposureDriftCount.Should().Be(0);
+        await using var verification = database.CreateContext();
+        (await verification.AccountBalances.CountAsync()).Should().Be(2);
+        (await verification.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    private static FinancePostingEngine CreateSqlPostingEngine(ApplicationDbContext context, Guid tenantId)
+    {
+        var currentUser = new Mock<ICurrentUserService>();
+        currentUser.SetupGet(service => service.TenantId).Returns(tenantId);
+        currentUser.SetupGet(service => service.UserId).Returns(Guid.NewGuid().ToString());
+        currentUser.SetupGet(service => service.UserName).Returns("sql.c1.poster");
+        currentUser.SetupGet(service => service.Claims).Returns(new Dictionary<string, string>());
+        currentUser.SetupGet(service => service.IpAddress).Returns("127.0.0.1");
+        currentUser.SetupGet(service => service.UserAgent).Returns("sql-c1-release-gate");
+        return new FinancePostingEngine(context, currentUser.Object, Mock.Of<ILogger<FinancePostingEngine>>());
     }
 
     [SqlServerFact]
@@ -525,6 +714,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             var batchId = Guid.NewGuid();
             var journalId = Guid.NewGuid();
             var itemId = Guid.NewGuid();
+            var bookId = Guid.NewGuid();
             await using var context = CreateContext();
             context.Tenants.Add(new Tenant
             {
@@ -561,6 +751,13 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 PeriodStatus = "Open",
                 IsOpen = true
             });
+            context.AccountingBooks.Add(new AccountingBook
+            {
+                Id = bookId, TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+                IsDefault = true, IsActive = true, AllowsPosting = true,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS"
+            });
             var journal = new JournalEntry
             {
                 Id = journalId,
@@ -573,6 +770,7 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 TotalCreditAmount = 100m,
                 IsBalanced = true,
                 BookClassification = "IFRS",
+                AccountingBookId = bookId,
                 FiscalPeriodId = periodId,
                 PostingStatus = "Approved",
                 ApprovalStatus = "Approved"
@@ -609,13 +807,15 @@ public sealed class JournalBatchSqlServerReleaseGateTests
             return new SeededBatch(tenantId, periodId, batchId, itemId);
         }
 
-        public async Task<SeededPostingAccounts> SeedPostingAccountsAsync()
+        public async Task<SeededPostingAccounts> SeedPostingAccountsAsync(bool includeParallelBook = false)
         {
             var tenantId = Guid.NewGuid();
             var fiscalYearId = Guid.NewGuid();
             var periodId = Guid.NewGuid();
             var debitAccountId = Guid.NewGuid();
             var creditAccountId = Guid.NewGuid();
+            var bookId = Guid.NewGuid();
+            var parallelBookId = Guid.NewGuid();
 
             await using var context = CreateContext();
             context.Tenants.Add(new Tenant
@@ -663,6 +863,38 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                 PeriodStatus = "Open",
                 IsOpen = true
             });
+            context.AccountingBooks.Add(new AccountingBook
+            {
+                Id = bookId, TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+                IsDefault = true, IsActive = true, AllowsPosting = true,
+                LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                FunctionalCurrencyCode = "GHS"
+            });
+            context.AccountingBookPeriods.Add(new AccountingBookPeriod
+            {
+                TenantId = tenantId,
+                AccountingBookId = bookId,
+                FiscalPeriodId = periodId,
+                PeriodStatus = AccountingBookPeriodStatus.Open
+            });
+            if (includeParallelBook)
+            {
+                context.AccountingBooks.Add(new AccountingBook
+                {
+                    Id = parallelBookId, TenantId = tenantId, Code = "LOCAL_STATUTORY", Name = "Local Statutory",
+                    BookType = AccountingBookType.ParallelFull,
+                    IsDefault = false, IsActive = true, AllowsPosting = true,
+                    LifecycleStatus = AccountingBookLifecycleStatus.Active,
+                    FunctionalCurrencyCode = "GHS"
+                });
+                context.AccountingBookPeriods.Add(new AccountingBookPeriod
+                {
+                    TenantId = tenantId,
+                    AccountingBookId = parallelBookId,
+                    FiscalPeriodId = periodId,
+                    PeriodStatus = AccountingBookPeriodStatus.Open
+                });
+            }
             context.Accounts.AddRange(
                 new Account
                 {
@@ -688,6 +920,31 @@ public sealed class JournalBatchSqlServerReleaseGateTests
                     CurrencyCode = "GHS",
                     AllowDirectPosting = true
                 });
+            context.AccountAccountingBooks.AddRange(
+                new AccountAccountingBook
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountId = debitAccountId,
+                    AccountingBookId = bookId, IsEnabled = true
+                },
+                new AccountAccountingBook
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccountId,
+                    AccountingBookId = bookId, IsEnabled = true
+                });
+            if (includeParallelBook)
+            {
+                context.AccountAccountingBooks.AddRange(
+                    new AccountAccountingBook
+                    {
+                        Id = Guid.NewGuid(), TenantId = tenantId, AccountId = debitAccountId,
+                        AccountingBookId = parallelBookId, IsEnabled = true
+                    },
+                    new AccountAccountingBook
+                    {
+                        Id = Guid.NewGuid(), TenantId = tenantId, AccountId = creditAccountId,
+                        AccountingBookId = parallelBookId, IsEnabled = true
+                    });
+            }
             await context.SaveChangesAsync();
 
             return new SeededPostingAccounts(tenantId, debitAccountId, creditAccountId);

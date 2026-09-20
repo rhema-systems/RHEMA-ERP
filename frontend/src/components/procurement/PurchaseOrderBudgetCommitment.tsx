@@ -1,15 +1,9 @@
 import React from 'react';
-import { Landmark } from 'lucide-react';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 import { format } from 'date-fns';
 
 import { Badge } from '@/components/ui/badge';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
+import { CardContent } from '@/components/ui/card';
 import { formatProcurementMoney } from '@/lib/procurement-currency';
 import type { PurchaseOrderBudgetCommitmentDto } from '@/services/purchasingService';
 
@@ -26,29 +20,16 @@ export function PurchaseOrderBudgetCommitment({
   );
 
   return (
-    <Card className="border-emerald-300 bg-emerald-50/60">
-      <CardHeader>
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <CardTitle className="flex items-center gap-2">
-              <Landmark className="h-5 w-5 text-emerald-700" />
-              Finance commitment
-            </CardTitle>
-            <CardDescription className="mt-1">
+    <ProcurementControlAccordion
+        title="Finance commitment"
+        summary={`${commitment.reference} · ${formatProcurementMoney(commitment.amount, commitment.currency)}`}
+        status={<Badge variant="outline">{isContractAllocation ? 'PO allocated to contract' : commitment.status === 'Committed' ? 'PO formally committed' : commitment.status}</Badge>}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
               {isContractAllocation
                 ? 'Final PO approval allocated this order within the existing contract commitment.'
                 : 'Final PO approval reserved and committed the approved budget atomically.'}
-            </CardDescription>
-          </div>
-          <Badge className="bg-emerald-700 text-white">
-            {isContractAllocation
-              ? 'PO allocated to contract'
-              : commitment.status === 'Committed'
-                ? 'PO formally committed'
-                : commitment.status}
-          </Badge>
-        </div>
-      </CardHeader>
+            </p>
       <CardContent className="space-y-5">
         <div className="grid gap-3 rounded-lg border border-emerald-200 bg-white/70 p-4 text-sm md:grid-cols-2 xl:grid-cols-6">
           <div>
@@ -107,10 +88,10 @@ export function PurchaseOrderBudgetCommitment({
                 >
                   <Badge variant="outline">#{event.sequence}</Badge>
                   <div>
-                    <p className="flex flex-wrap items-center gap-2 font-medium">
+                    <div className="flex flex-wrap items-center gap-2 font-medium">
                       {event.action}
                       <Badge variant="secondary">{event.status}</Badge>
-                    </p>
+                    </div>
                     <p className="text-xs text-muted-foreground">
                       {event.event} · {commitment.reference} · {event.actorName} ·{' '}
                       {format(
@@ -131,6 +112,6 @@ export function PurchaseOrderBudgetCommitment({
           )}
         </div>
       </CardContent>
-    </Card>
+    </ProcurementControlAccordion>
   );
 }

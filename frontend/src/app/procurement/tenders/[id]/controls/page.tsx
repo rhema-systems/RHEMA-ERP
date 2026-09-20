@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import {
   ArrowLeft,
@@ -21,11 +21,12 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import {
   buildFinancialScores,
   buildTechnicalScores,
   getTenderControlReadiness,
-  tenderControlStatusLabel,
+  getTenderControlStatusLabel,
 } from '@/lib/procurement-tender-control';
 import { procurementTenderControlService as service } from '@/services/procurement-tender-control.service';
 import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
@@ -55,6 +56,7 @@ const isQualitySelection = (method: Method) =>
 
 export default function ProcurementTenderControlsPage() {
   const { id: tenderId } = useParams<{ id: string }>();
+  const workflow = useWorkflowSummary({ entityType: 'TenderAward', entityId: tenderId });
   const { user, hasPermission } = useAuth();
   const [control, setControl] = useState<ProcurementTenderControl | null>(null);
   const [loadError, setLoadError] = useState<string>();
@@ -257,7 +259,7 @@ export default function ProcurementTenderControlsPage() {
               control.status === Status.Rejected ? 'destructive' : 'secondary'
             }
           >
-            {tenderControlStatusLabel[control.status]}
+            {getTenderControlStatusLabel(control)}
           </Badge>
           <Button asChild variant="outline" size="sm">
             <Link href={`/procurement/tenders/${tenderId}/committee-controls`}>
@@ -693,7 +695,7 @@ export default function ProcurementTenderControlsPage() {
           <Card>
             <CardContent className="pt-6 text-sm text-muted-foreground">
               Scoring is not open at the current lifecycle stage (
-              {tenderControlStatusLabel[control.status]}). Complete the pending
+              {getTenderControlStatusLabel(control)}). Complete the pending
               opening, committee, or prior evaluation phase first.
             </CardContent>
           </Card>
@@ -702,26 +704,33 @@ export default function ProcurementTenderControlsPage() {
 
       {readiness.canSubmitApproval &&
         hasPermission('procurement.tender.approve') && (
-          <ActionCard title="Submit exact authority/PPA workflow">
+          <ActionCard title={workflow.visibility.direct ? 'Complete recommendation' : 'Submit authority workflow'}>
             <p className="text-sm text-muted-foreground">
-              Route {control.authorityRouteReference}; shared workflow and SOD
-              are server enforced.
+              {workflow.visibility.direct
+                ? 'Complete the evaluation recommendation. Source, committee and statutory checks still apply.'
+                : `Route ${control.authorityRouteReference}; shared workflow and SOD are server enforced.`}
             </p>
+            {workflow.error && <p role="alert" className="text-sm text-destructive">{workflow.error}</p>}
+            {workflow.visibility.direct && control.ppaApprovalRequired && (
+              <Field label="PPA/central reference (required)" value={ppaReference} onChange={setPpaReference} />
+            )}
             <Button
+              disabled={busy !== null || !workflow.visibility.known ||
+                (workflow.visibility.direct && control.ppaApprovalRequired && !ppaReference.trim())}
               onClick={() =>
                 void run(
                   'submit',
-                  () => service.submitApproval(tenderId, control.rowVersion),
-                  'Recommendation submitted'
+                  () => service.submitApproval(tenderId, control.rowVersion, ppaReference || undefined),
+                  workflow.visibility.direct ? 'Recommendation completed' : 'Recommendation submitted'
                 )
               }
             >
-              Submit for approval
+              {workflow.visibility.direct ? 'Complete recommendation' : 'Submit for approval'}
             </Button>
           </ActionCard>
         )}
 
-      {readiness.canDecide && hasPermission('procurement.tender.approve') && (
+      {readiness.canDecide && workflow.visibility.showApprovalControls && hasPermission('procurement.tender.approve') && (
         <ActionCard title="Authority and PPA decision">
           <Field
             label="Authority approval reference"
@@ -947,10 +956,12 @@ function Field({
   onChange: (value: string) => void;
   type?: string;
 }) {
+  const id = useId();
   return (
     <div className="space-y-1">
-      <Label>{label}</Label>
+      <Label htmlFor={id}>{label}</Label>
       <Input
+        id={id}
         type={type}
         value={value}
         onChange={(event) => onChange(event.target.value)}

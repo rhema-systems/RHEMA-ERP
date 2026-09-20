@@ -1,5 +1,6 @@
 'use client';
 
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -13,7 +14,7 @@ import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalA
 import { formatPendingApprovers, useWorkflowEntitySummaries } from '@/hooks/useWorkflowEntitySummaries';
 import {
   Plus, Search, Eye, ArrowRight, Truck, Package, CheckCircle,
-  Clock, XCircle, Send, Download, Pencil, FileText, Undo2, ShieldCheck
+  Clock, XCircle, Send, Download, Pencil, FileText, Undo2
 } from 'lucide-react';
 import {
   inventoryManagementService,
@@ -25,8 +26,9 @@ import { ReceiveTransferDialog } from '@/components/inventory/ReceiveTransferDia
 import { useToast } from '@/hooks/use-toast';
 import { useAuth } from '@/hooks/use-auth';
 import { format } from 'date-fns';
-import { currencyService } from '@/services/financeCommonService';
+import { procurementCurrencyService } from '@/services/financeCommonService';
 import { formatInventoryMoney, normalizeInventoryCurrency } from '@/lib/inventory-currency';
+import { getInventoryTransferStatusLabel, getInventoryTransferProblemMessage } from '@/lib/inventory-transfer-controls';
 
 const TransferStatuses = [
   { value: 'Draft', label: 'Draft', color: 'bg-gray-100 text-gray-800' },
@@ -48,6 +50,7 @@ export default function InventoryTransfersPage() {
   const [warehouses, setWarehouses] = useState<WarehouseDto[]>([]);
   const [filteredTransfers, setFilteredTransfers] = useState<InventoryTransferDto[]>([]);
   const [loading, setLoading] = useState(true);
+  const [documentPreview, setDocumentPreview] = useState<CentralDocumentViewerFile | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
@@ -103,8 +106,9 @@ export default function InventoryTransfersPage() {
   useEffect(() => {
     let cancelled = false;
 
-    currencyService.getBaseCurrency()
-      .then((currency) => {
+    procurementCurrencyService.getActive()
+      .then((currencies) => {
+        const currency = currencies.find(value => value.isBaseCurrency);
         if (!cancelled) setCurrencyCode(normalizeInventoryCurrency(currency?.code));
       })
       .catch(() => {
@@ -150,13 +154,6 @@ export default function InventoryTransfersPage() {
     setDialogOpen(true);
   };
 
-  const openControlsDialog = (transfer: InventoryTransferDto) => {
-    setSelectedTransfer(transfer);
-    setDialogMode('view');
-    setDialogInitialTab('controls');
-    setDialogOpen(true);
-  };
-
   const handleShip = (id: string) => {
     setShipTransferId(id);
     setShipDialogOpen(true);
@@ -186,7 +183,7 @@ export default function InventoryTransfersPage() {
       fetchData();
     } catch (err) {
       console.error('Error:', err);
-      toast({ title: 'Error', description: 'Failed to reverse shipment', variant: 'destructive' });
+      toast({ title: 'Error', description: getInventoryTransferProblemMessage(err, 'Failed to reverse shipment'), variant: 'destructive' });
     } finally {
       setActionLoading(false);
       setShowReverseShipmentDialog(false);
@@ -203,7 +200,7 @@ export default function InventoryTransfersPage() {
       fetchData();
     } catch (err) {
       console.error('Error:', err);
-      toast({ title: 'Error', description: 'Failed to cancel transfer', variant: 'destructive' });
+      toast({ title: 'Error', description: getInventoryTransferProblemMessage(err, 'Failed to cancel transfer'), variant: 'destructive' });
     } finally {
       setActionLoading(false);
       setShowCancelDialog(false);
@@ -211,9 +208,9 @@ export default function InventoryTransfersPage() {
     }
   };
 
-  const getStatusBadge = (status: string) => {
+  const getStatusBadge = (status: string, approvalRequired?: boolean) => {
     const s = TransferStatuses.find(st => st.value === status);
-    return <Badge className={s?.color || 'bg-gray-100'}>{s?.label || status}</Badge>;
+    return <Badge className={s?.color || 'bg-gray-100'}>{getInventoryTransferStatusLabel(status, approvalRequired)}</Badge>;
   };
 
   const getAllocationMethodLabel = (method?: string) => {
@@ -221,26 +218,28 @@ export default function InventoryTransfersPage() {
     return 'Spread to Item Cost';
   };
 
-  const handlePrintShipmentNote = async (id: string) => {
-    try {
-      const blob = await inventoryManagementService.getShipmentNotePdf(id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating shipment note:', err);
-      toast({ title: 'Error', description: 'Failed to generate shipment note', variant: 'destructive' });
-    }
+  const handlePrintShipmentNote = (id: string) => {
+    const transfer = transfers.find(item => item.id === id);
+    if (!transfer) return;
+    setDocumentPreview({
+      title: `Shipment Note ${transfer.transferNumber}`,
+      fileName: `ShipmentNote-${id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(id)}/shipment-note`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
-  const handlePrintGRN = async (id: string) => {
-    try {
-      const blob = await inventoryManagementService.getGoodsReceivedNotePdf(id);
-      const url = window.URL.createObjectURL(blob);
-      window.open(url, '_blank');
-    } catch (err) {
-      console.error('Error generating GRN:', err);
-      toast({ title: 'Error', description: 'Failed to generate GRN', variant: 'destructive' });
-    }
+  const handlePrintGRN = (id: string) => {
+    const transfer = transfers.find(item => item.id === id);
+    if (!transfer) return;
+    setDocumentPreview({
+      title: `Goods Received Note ${transfer.transferNumber}`,
+      fileName: `GRN-${id}.pdf`,
+      contentType: 'application/pdf',
+      repositoryPath: `/api/inventory/transfers/${encodeURIComponent(id)}/grn`,
+      sourceLabel: 'Inventory transfer',
+    });
   };
 
   const inTransitCount = transfers.filter(t => t.status === 'InTransit').length;
@@ -253,9 +252,8 @@ export default function InventoryTransfersPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Inventory Transfers</h1>
-          <p className="text-muted-foreground">Manage inter-warehouse and inter-bin stock transfers</p>
         </div>
-        <Button onClick={openCreateDialog}><Plus className="mr-2 h-4 w-4" />New Transfer</Button>
+        {canManageTransfers && <Button onClick={openCreateDialog}><Plus className="mr-2 h-4 w-4" />New Transfer</Button>}
       </div>
 
       {/* Breadcrumbs */}
@@ -268,13 +266,6 @@ export default function InventoryTransfersPage() {
           <BreadcrumbItem><BreadcrumbPage>Transfers</BreadcrumbPage></BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-
-      <Card className="border-blue-200 bg-blue-50/40">
-        <CardContent className="flex flex-col gap-3 pt-6 md:flex-row md:items-center md:justify-between">
-          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 text-blue-700" /><div><div className="font-semibold">Controlled transfer lifecycle</div><p className="text-sm text-muted-foreground">Independent dispatch, receipt, discrepancy resolution and closure are retained in an immutable action register.</p></div></div>
-          <div className="flex flex-wrap gap-2"><Badge variant="outline">Partial dispatch</Badge><Badge variant="outline">Damage / shortage</Badge><Badge variant="outline">Protected Central DMS evidence</Badge><Badge variant="outline">Independent closure</Badge></div>
-        </CardContent>
-      </Card>
 
       {/* Stats */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -353,7 +344,7 @@ export default function InventoryTransfersPage() {
                         <div>
                           <div className="flex items-center space-x-2">
                             <h3 className="font-semibold">{transfer.transferNumber}</h3>
-                            {getStatusBadge(transfer.status)}
+                            {getStatusBadge(transfer.status, transfer.approvalRequired)}
                             {transfer.status === 'Submitted' && stepName && (
                               <Badge variant="outline" className="text-muted-foreground">
                                 Step: {stepName}
@@ -371,40 +362,17 @@ export default function InventoryTransfersPage() {
                             <span>{transfer.destinationWarehouseName}</span>
                           </div>
                           <p className="text-sm text-muted-foreground">
-                            Requested: {transfer.requestedDate ? format(new Date(transfer.requestedDate), 'MMM dd, yyyy') : '-'} • Items: {transfer.totalItems || 0}
+                            {transfer.requestedDate ? format(new Date(transfer.requestedDate), 'MMM dd, yyyy') : '-'} · {transfer.totalItems || 0} item(s)
                           </p>
-                          <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                            <Badge variant="outline">
-                              Addl. Cost: {formatInventoryMoney(
-                                (transfer.totalAdditionalCost ??
-                                  ((transfer.shippingCost || 0) + (transfer.miscellaneousCost || 0))) || 0,
-                                currencyCode
-                              )}
-                            </Badge>
-                            <Badge variant="outline">
-                              Method: {getAllocationMethodLabel(transfer.costAllocationMethod)}
-                            </Badge>
-                            <Badge variant="outline">
-                              Basis: {transfer.costApportionmentBasis || 'Value'}
-                            </Badge>
-                            <Badge className={transfer.costsAllocated ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-700'}>
-                              {transfer.costsAllocated ? 'Allocated' : 'Not Allocated'}
-                            </Badge>
-                          </div>
                         </div>
                       </div>
                       <div className="flex items-center space-x-2">
-                        <Button size="sm" variant="outline" onClick={() => openViewDialog(transfer)}><Eye className="h-4 w-4 mr-1" />View</Button>
-                        {transfer.status === 'Received' && canManageTransfers && (
-                          <Button size="sm" variant="outline" onClick={() => openControlsDialog(transfer)}>
-                            <ShieldCheck className="h-4 w-4 mr-1" />Resolve / Close
-                          </Button>
-                        )}
-                        {transfer.status === 'Draft' && (
-                          <Button size="sm" variant="outline" onClick={() => openEditDialog(transfer)}><Pencil className="h-4 w-4 mr-1" />Edit</Button>
+                        <Button size="icon" variant="outline" aria-label="View" title="View" onClick={() => openViewDialog(transfer)}><Eye className="h-4 w-4" /></Button>
+                        {canManageTransfers && transfer.status === 'Draft' && (
+                          <Button size="icon" variant="outline" aria-label="Edit" title="Edit" onClick={() => openEditDialog(transfer)}><Pencil className="h-4 w-4 text-blue-500" /></Button>
                         )}
 
-                        <WorkflowApprovalActions
+                        {transfer.approvalRequired !== false && <WorkflowApprovalActions
                           entityType="InventoryTransfer"
                           entityId={transfer.id}
                           entityLabel="Inventory Transfer"
@@ -412,18 +380,13 @@ export default function InventoryTransfersPage() {
                           status={transfer.status}
                           currentStepName={stepName}
                           workflowSummary={summary}
-                          canSubmit={transfer.status === 'Draft'}
-                          canApproveReject={transfer.status === 'Submitted'}
+                          canSubmit={canManageTransfers && transfer.status === 'Draft' && transfer.totalItems > 0}
+                          canApproveReject={canManageTransfers && transfer.status === 'Submitted'}
                           onSubmit={async () => {
                             try {
                               await inventoryManagementService.submitTransferForApproval(transfer.id);
                             } catch (err: any) {
-                              const msg =
-                                err?.response?.data?.error ||
-                                err?.response?.data ||
-                                err?.message ||
-                                'Failed to submit transfer for approval';
-                              throw new Error(typeof msg === 'string' ? msg : 'Failed to submit transfer for approval');
+                              throw new Error(getInventoryTransferProblemMessage(err, 'Failed to submit transfer'));
                             }
                           }}
                           onApprove={async (comments) => {
@@ -452,10 +415,10 @@ export default function InventoryTransfersPage() {
                           }}
                           onAfterAction={fetchData}
                           onOpenWorkflows={() => router.push('/administration/workflow')}
-                        />
+                        />}
 
-                        {['Approved', 'InTransit'].includes(transfer.status) && <Button size="sm" variant="outline" onClick={() => handleShip(transfer.id)}><Send className="h-4 w-4 mr-1" />{transfer.status === 'InTransit' ? 'Dispatch More' : 'Ship'}</Button>}
-                        {transfer.status === 'InTransit' && (
+                        {canManageTransfers && ['Approved', 'InTransit'].includes(transfer.status) && <Button size="sm" variant="outline" onClick={() => handleShip(transfer.id)}><Send className="h-4 w-4 mr-1" />{transfer.status === 'InTransit' ? 'Dispatch More' : 'Ship'}</Button>}
+                        {canManageTransfers && transfer.status === 'InTransit' && (
                           <>
                             <Button size="sm" variant="outline" onClick={() => handleReceive(transfer.id)}><Download className="h-4 w-4 mr-1" />Receive</Button>
                             <Button size="sm" variant="outline" className="text-orange-600" onClick={() => handleReverseShipmentClick(transfer.id)} title="Reverse Shipment"><Undo2 className="h-4 w-4 mr-1" />Reverse</Button>
@@ -482,7 +445,7 @@ export default function InventoryTransfersPage() {
                             <FileText className="h-4 w-4 text-green-600" />
                           </Button>
                         )}
-                        {['Draft', 'Submitted'].includes(transfer.status) && (
+                        {canManageTransfers && ['Draft', 'Submitted', 'Approved'].includes(transfer.status) && (
                           <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleCancelClick(transfer.id)}><XCircle className="h-4 w-4" /></Button>
                         )}
                       </div>
@@ -504,6 +467,7 @@ export default function InventoryTransfersPage() {
         mode={dialogMode}
         initialTab={dialogInitialTab}
         warehouses={warehouses}
+        currencyCode={currencyCode}
         onSuccess={fetchData}
       />
 
@@ -538,6 +502,7 @@ export default function InventoryTransfersPage() {
         open={shipDialogOpen}
         onOpenChange={setShipDialogOpen}
         transferId={shipTransferId}
+        currencyCode={currencyCode}
         onSuccess={fetchData}
       />
 
@@ -548,6 +513,8 @@ export default function InventoryTransfersPage() {
         transferId={receiveTransferId}
         onSuccess={fetchData}
       />
+    <CentralDocumentViewerDialog file={documentPreview} open={Boolean(documentPreview)}
+      onOpenChange={(previewOpen) => { if (!previewOpen) setDocumentPreview(null); }} enableAnnotations={false} />
     </div>
   );
 }

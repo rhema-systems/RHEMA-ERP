@@ -141,6 +141,7 @@ export default function EditTenderPage() {
         evaluationCriteriaJson: data.evaluationCriteriaJson || '',
         notes: data.notes || '',
         termsAndConditions: data.termsAndConditions || '',
+        bidValidityPeriodDays: data.bidValidityPeriodDays ?? null,
         // QCBS Evaluation fields
         useQCBSEvaluation: data.useQCBSEvaluation || false,
         technicalWeight: data.technicalWeight ?? 80,

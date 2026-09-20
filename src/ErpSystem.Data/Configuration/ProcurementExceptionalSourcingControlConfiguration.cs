@@ -8,8 +8,12 @@ public sealed class ProcurementExceptionalSourcingControlConfiguration : IEntity
 {
     public void Configure(EntityTypeBuilder<ProcurementExceptionalSourcingControl> builder)
     {
-        builder.ToTable("ProcurementExceptionalSourcingControls",
-            table => table.HasTrigger("TR_ProcurementExceptionalSourcingControls_Lifecycle"));
+        builder.Property(item => item.ApprovalRequired).HasDefaultValue(true);
+        builder.ToTable("ProcurementExceptionalSourcingControls", table =>
+        {
+            table.HasTrigger("TR_ProcurementExceptionalSourcingControls_Lifecycle");
+            table.HasTrigger("TR_ProcurementExceptionalSourcingControls_ApprovalPolicy");
+        });
         builder.HasIndex(item => new { item.TenantId, item.TenderId }).IsUnique();
         builder.HasIndex(item => new { item.TenantId, item.SourcingCaseId });
         builder.HasIndex(item => new { item.TenantId, item.ExceptionRuleId });

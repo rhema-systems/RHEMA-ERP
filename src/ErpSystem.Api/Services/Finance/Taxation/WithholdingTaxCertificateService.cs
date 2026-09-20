@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Net;
 using System.Text;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities.Finance;
@@ -206,6 +207,17 @@ public sealed class WithholdingTaxCertificateService : IWithholdingTaxCertificat
         var paymentDate = dto.PaymentDate == default ? DateTime.UtcNow.Date : dto.PaymentDate.Date;
         var effectiveRate = await ResolveEffectiveRateAsync(tax, paymentDate, cancellationToken)
             ?? throw new InvalidOperationException($"WHT tax {tax.Code} is not effective on {paymentDate:yyyy-MM-dd}.");
+        var invoiceIds = (dto.VendorInvoiceIds ?? new List<Guid>()).Distinct().ToList();
+        if (invoiceIds.Count > 0)
+        {
+            var invoices = await _context.Set<VendorInvoice>().AsNoTracking().Where(invoice =>
+                invoice.TenantId == TenantId && !invoice.IsDeleted && invoice.SupplierId == dto.SupplierId &&
+                invoiceIds.Contains(invoice.Id)).ToListAsync(cancellationToken);
+            if (invoices.Count != invoiceIds.Count)
+                throw new InvalidOperationException("A selected WHT invoice does not belong to this supplier and tenant.");
+            var decision = ApInvoiceWithholdingPolicy.Resolve(invoices, dto.TaxId);
+            if (decision != null) effectiveRate = decision.Rate;
+        }
         var fiscalYearStart = new DateTime(paymentDate.Year, 1, 1);
         var fiscalYearEnd = fiscalYearStart.AddYears(1);
 

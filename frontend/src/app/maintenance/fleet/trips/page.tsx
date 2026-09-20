@@ -1122,7 +1122,7 @@ function FleetTripsPageContent() {
             <TabsList className="w-fit">
               <TabsTrigger value="details">Details</TabsTrigger>
               <TabsTrigger value="expenses">Expenses</TabsTrigger>
-              <WorkflowTabTrigger value="approvals" />
+              <WorkflowTabTrigger value="approvals" entityType="FleetTrip" entityId={selected?.id} />
             </TabsList>
 
             <TabsContent value="details" className="mt-4 min-h-0 flex-1 overflow-hidden">

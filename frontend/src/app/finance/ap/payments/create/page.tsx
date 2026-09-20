@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -35,10 +35,10 @@ import {
 } from '@/components/ui/popover';
 import { Calendar } from '@/components/ui/calendar';
 import { accountsPayableService } from '@/services/accountsPayableService';
-import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
 import { cashManagementDataService } from '@/services/finance/cash-management-data.service';
 import { financeService } from '@/services/finance.service';
 import { taxDataService } from '@/services/finance/tax-data.service';
+import { allocateInvoiceCash, invoiceWithholdingChoice, paymentWithholdingChoice } from '@/lib/finance/ap-payment-withholding';
 import { PaymentMethodType } from '@/types/cash-management';
 import { TaxApplicability, TaxCategory, type Tax, type WhtCalculationResult } from '@/types/tax';
 import { useToast } from '@/components/ui/use-toast';
@@ -50,6 +50,15 @@ import {
     VendorPaymentReadinessBadge,
     VendorPaymentReadinessControl,
 } from '@/components/finance/VendorPaymentReadinessControl';
+import { loadApprovedSettlementRate } from '@/lib/finance/settlement-exchange-rate';
+import { SourceDocumentDimensionPanel } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { toFinancePostingDimensionValues } from '@/lib/finance/source-document-dimensions';
+import {
+    canSubmitApPayment,
+    getApPaymentAllocationState,
+    hasApPaymentSettlementComponents,
+    type ApPaymentAllocationRow,
+} from '@/lib/finance/ap-payment-allocation';
 
 const paymentSchema = z.object({
     supplierId: z.string().min(1, 'Supplier is required'),
@@ -61,6 +70,7 @@ const paymentSchema = z.object({
     transactionReference: z.string().optional(),
     currencyCode: z.string().default('GHS'),
     exchangeRate: z.coerce.number().min(0.0001, 'Exchange rate must be greater than 0').default(1),
+    exchangeRateId: z.string().optional(),
     withholdingTaxId: z.string().optional(),
     withholdingTaxAccountId: z.string().optional(),
     withholdingTaxRate: z.coerce.number().min(0).max(100).optional().default(0),
@@ -124,10 +134,20 @@ export default function NewVendorPaymentPage() {
     const [withholdingAllocations, setWithholdingAllocations] = useState<Record<string, number>>({});
     const [withholdingCalculation, setWithholdingCalculation] = useState<WhtCalculationResult | null>(null);
     const [isCalculatingWithholding, setIsCalculatingWithholding] = useState(false);
+    const [defaultDimensionValues, setDefaultDimensionValues] = useState<Record<string, string>>({});
+    const [applyDefaultToAll, setApplyDefaultToAll] = useState(false);
+
+    const clearAllocationState = () => {
+        setAllocations({});
+        setPaymentCurrencyAllocations({});
+        setDiscountAllocations({});
+        setWithholdingAllocations({});
+        setWithholdingCalculation(null);
+    };
 
     const { data: suppliersData } = useQuery({
-        queryKey: ['business-partners', 'ap-suppliers'],
-        queryFn: () => businessPartnerService.getPartners({ pageSize: 100 }),
+        queryKey: ['finance', 'ap', 'entry-suppliers'],
+        queryFn: () => accountsPayableService.getInvoiceSupplierEntryOptions(),
     });
 
     const { data: bankAccounts } = useQuery({
@@ -150,7 +170,10 @@ export default function NewVendorPaymentPage() {
 
     const { data: withholdingTaxes } = useQuery({
         queryKey: ['taxes', 'withholding', 'active'],
-        queryFn: () => taxDataService.getTaxes({ isActive: true, category: TaxCategory.Withholding }),
+        queryFn: () => taxDataService.getActiveTaxes({
+            applicability: TaxApplicability.Purchases,
+            category: TaxCategory.Withholding,
+        }),
     });
 
     const form = useForm<PaymentFormValues>({
@@ -166,6 +189,7 @@ export default function NewVendorPaymentPage() {
             transactionReference: preselectedReferenceNumber,
             currencyCode: 'GHS',
             exchangeRate: 1,
+            exchangeRateId: undefined,
             withholdingTaxId: undefined,
             withholdingTaxAccountId: undefined,
             withholdingTaxRate: 0,
@@ -230,6 +254,7 @@ export default function NewVendorPaymentPage() {
         form.setValue('totalAmount', remainingAdvance);
         form.setValue('currencyCode', existingAdvancePayment.currencyCode || functionalCurrencyCode);
         form.setValue('exchangeRate', Number(existingAdvancePayment.exchangeRate) || 1);
+        form.setValue('exchangeRateId', existingAdvancePayment.exchangeRateId);
         form.setValue('transactionReference', existingAdvancePayment.paymentNumber);
     }, [existingAdvancePayment, existingAdvancePaymentId, form, functionalCurrencyCode]);
 
@@ -240,16 +265,15 @@ export default function NewVendorPaymentPage() {
     const currentCurrencyCode = form.watch('currencyCode') || 'GHS';
     const selectedWithholdingTax = withholdingTaxes?.find((tax: Tax) => tax.id === selectedWithholdingTaxId);
     const withholdingTaxOptions = (withholdingTaxes ?? []).filter((tax: Tax) =>
-        tax.applicability === TaxApplicability.Purchases ||
-        tax.applicability === TaxApplicability.Both
+        tax.category === TaxCategory.Withholding && (
+            tax.applicability === TaxApplicability.Purchases ||
+            tax.applicability === TaxApplicability.Both
+        )
     );
-    const supplierOptions = (suppliersData?.items ?? []).filter((partner: BusinessPartnerDto) =>
-        ['supplier', 'contractor', 'both'].includes((partner.partnerType ?? '').toLowerCase()) &&
-        !partner.isBlacklisted
-    );
+    const supplierOptions = suppliersData ?? [];
     const lockedSupplierName =
         linkedInvoice?.supplierName ||
-        supplierOptions.find((supplier) => supplier.id === selectedSupplierId)?.partnerName ||
+        supplierOptions.find((supplier) => supplier.id === selectedSupplierId)?.name ||
         'Linked supplier';
 
     useEffect(() => {
@@ -282,27 +306,38 @@ export default function NewVendorPaymentPage() {
         if (!account) return;
 
         form.setValue('currencyCode', account.currency);
-        if (account.currency === 'GHS') {
-            form.setValue('exchangeRate', 1);
-            return;
-        }
-
-        void financeService.getCurrentExchangeRate(account.currency)
-            .then((rate) => form.setValue('exchangeRate', Number(rate.currentExchangeRate ?? rate.rate ?? 1)))
-            .catch(() => form.setValue('exchangeRate', 1));
     }, [selectedBankAccountId, bankAccounts, form, existingAdvancePaymentId, isLinkedInvoicePayment]);
 
-    useEffect(() => {
-        if (!selectedWithholdingTax) {
-            form.setValue('withholdingTaxRate', 0);
-            form.setValue('withholdingTaxAccountId', undefined);
-            setWithholdingCalculation(null);
-            return;
-        }
+    const watchedPaymentDate = form.watch('paymentDate');
+    const [exchangeRateSource, setExchangeRateSource] = useState('Functional currency');
 
-        form.setValue('withholdingTaxRate', Number(selectedWithholdingTax.rate) || 0);
-        form.setValue('withholdingTaxAccountId', selectedWithholdingTax.taxPayableAccountId ?? undefined);
-    }, [selectedWithholdingTax, form]);
+    useEffect(() => {
+        if (existingAdvancePaymentId || !financeSettings || !watchedPaymentDate) return;
+        form.setValue('exchangeRateId', undefined);
+        setExchangeRateSource('Loading approved rate…');
+        let cancelled = false;
+        void loadApprovedSettlementRate(
+            {
+                module: 'AP',
+                transactionCurrency: currentCurrencyCode,
+                functionalCurrency: functionalCurrencyCode,
+                settlementDate: watchedPaymentDate,
+                settings: financeSettings,
+            },
+            (code, query) => financeService.getCurrentExchangeRate(code, query),
+        ).then(snapshot => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', snapshot.rate);
+            form.setValue('exchangeRateId', snapshot.exchangeRateId);
+            setExchangeRateSource(`${snapshot.source} · ${snapshot.quoteSide}`);
+        }).catch(error => {
+            if (cancelled) return;
+            form.setValue('exchangeRate', 0);
+            form.setValue('exchangeRateId', undefined);
+            setExchangeRateSource(error instanceof Error ? error.message : 'Approved rate unavailable');
+        });
+        return () => { cancelled = true; };
+    }, [currentCurrencyCode, existingAdvancePaymentId, financeSettings, form, functionalCurrencyCode, watchedPaymentDate]);
 
     // Fetch outstanding invoices for selected supplier
     const { data: outstandingInvoices, isLoading: isLoadingInvoices } = useQuery({
@@ -315,16 +350,58 @@ export default function NewVendorPaymentPage() {
             ? outstandingInvoices?.filter((invoice) => invoice.invoiceId === preselectedInvoiceId)
             : outstandingInvoices;
 
+    const selectedInvoiceWht = useMemo(() => {
+        const selected = (outstandingInvoices ?? []).filter(invoice =>
+            Number(allocations[invoice.invoiceId]) > 0 || Number(discountAllocations[invoice.invoiceId]) > 0 ||
+            Number(withholdingAllocations[invoice.invoiceId]) > 0);
+        try { return { choice: paymentWithholdingChoice(selected), error: undefined }; }
+        catch (error) { return { choice: null, error: error instanceof Error ? error.message : 'Review invoice WHT choices.' }; }
+    }, [outstandingInvoices, allocations, discountAllocations, withholdingAllocations]);
+
+    useEffect(() => {
+        if (selectedInvoiceWht.error) return;
+        const choice = selectedInvoiceWht.choice;
+        if (choice) {
+            form.setValue('withholdingTaxId', choice.taxId);
+            form.setValue('withholdingTaxRate', choice.rate);
+            form.setValue('withholdingTaxAccountId', choice.accountId);
+        } else {
+            form.setValue('withholdingTaxRate', Number(selectedWithholdingTax?.rate) || 0);
+            form.setValue('withholdingTaxAccountId', selectedWithholdingTax?.taxPayableAccountId ?? undefined);
+        }
+        if (!choice?.taxId && !selectedWithholdingTax) setWithholdingCalculation(null);
+    }, [selectedInvoiceWht.choice?.taxId, selectedInvoiceWht.choice?.rate, selectedInvoiceWht.choice?.accountId,
+        selectedInvoiceWht.error, selectedWithholdingTax, form]);
+
     // Pre-fill amount if invoice selected
     useEffect(() => {
+        let cancelled = false;
         if (preselectedInvoiceId && outstandingInvoices) {
             const invoice = outstandingInvoices.find(inv => inv.invoiceId === preselectedInvoiceId);
             if (invoice?.paymentReadiness?.isPaymentReady) {
-                const discountAmount = Number(invoice.discountAmount) || 0;
-                const netPaymentAmount = Math.max(invoice.balanceAmount - discountAmount, 0);
-                form.setValue('totalAmount', netPaymentAmount);
-                setAllocations({ [invoice.invoiceId]: netPaymentAmount });
-                setDiscountAllocations({ [invoice.invoiceId]: discountAmount });
+                void (async () => {
+                    try {
+                        const choice = invoiceWithholdingChoice(invoice);
+                        const calculation = !existingAdvancePaymentId && choice?.taxId
+                            ? await taxDataService.calculateApWithholding({
+                                taxId: choice.taxId, supplierId: form.getValues('supplierId'),
+                                paymentDate: form.getValues('paymentDate').toISOString(),
+                                taxableBase: invoice.balanceAmount,
+                                vendorInvoiceIds: [invoice.invoiceId],
+                            }) : null;
+                        if (cancelled) return;
+                        const discountAmount = Number(invoice.discountAmount) || 0;
+                        const withholdingAmount = calculation?.withholdingAmount ?? 0;
+                        const netPaymentAmount = roundMoney(Math.max(invoice.balanceAmount - discountAmount - withholdingAmount, 0));
+                        form.setValue('totalAmount', netPaymentAmount);
+                        setAllocations({ [invoice.invoiceId]: netPaymentAmount });
+                        setDiscountAllocations({ [invoice.invoiceId]: discountAmount });
+                        setWithholdingAllocations(withholdingAmount > 0 ? { [invoice.invoiceId]: withholdingAmount } : {});
+                        setWithholdingCalculation(calculation);
+                    } catch (error) {
+                        if (!cancelled) toast({ title: 'Review invoice withholding', description: error instanceof Error ? error.message : 'Unable to calculate invoice withholding.', variant: 'destructive' });
+                    }
+                })();
             } else if (isLinkedInvoicePayment && linkedInvoice?.id === preselectedInvoiceId) {
                 const netPaymentAmount = roundMoney(
                     Number(linkedInvoice.balanceAmount ?? linkedInvoice.totalAmount) || 0,
@@ -333,7 +410,8 @@ export default function NewVendorPaymentPage() {
                 setDiscountAllocations({});
             }
         }
-    }, [preselectedInvoiceId, outstandingInvoices, form, isLinkedInvoicePayment, linkedInvoice]);
+        return () => { cancelled = true; };
+    }, [preselectedInvoiceId, outstandingInvoices, form, isLinkedInvoicePayment, linkedInvoice, existingAdvancePaymentId, toast]);
 
 
     const onSubmit = async (data: PaymentFormValues) => {
@@ -370,15 +448,22 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
-            const paymentAllocations = Object.entries(allocations)
-                .filter(([invoiceId, amount]) =>
-                    (amount > 0 ||
-                    Number(discountAllocations[invoiceId]) > 0 ||
-                    Number(withholdingAllocations[invoiceId]) > 0) &&
-                    outstandingInvoices?.find((invoice) => invoice.invoiceId === invoiceId)
-                        ?.paymentReadiness?.isPaymentReady === true
-                )
-                .map(([invoiceId, amount]) => {
+            // Build from the union of all component keys. A discount/WHT-only row is still an
+            // invoice allocation and must never be silently converted into a supplier advance.
+            const selectedInvoiceIds = Array.from(new Set([
+                ...Object.keys(allocations),
+                ...Object.keys(paymentCurrencyAllocations),
+                ...Object.keys(discountAllocations),
+                ...Object.keys(withholdingAllocations),
+            ])).filter(invoiceId => hasApPaymentSettlementComponents([{
+                invoiceCash: Number(allocations[invoiceId]) || 0,
+                paymentCurrencyCash: Number(paymentCurrencyAllocations[invoiceId]) || 0,
+                discount: Number(discountAllocations[invoiceId]) || 0,
+                withholdingTax: Number(withholdingAllocations[invoiceId]) || 0,
+            }]));
+            const paymentAllocations = selectedInvoiceIds
+                .map((invoiceId) => {
+                    const amount = Number(allocations[invoiceId]) || 0;
                     const invoice = outstandingInvoices?.find(item => item.invoiceId === invoiceId);
                     const isCrossCurrency = invoice?.currencyCode !== data.currencyCode;
                     return {
@@ -394,11 +479,9 @@ export default function NewVendorPaymentPage() {
                     };
                 });
 
-            const blockedSelection = Object.entries(allocations).find(([invoiceId, amount]) =>
-                (amount > 0 || Number(discountAllocations[invoiceId]) > 0 || Number(withholdingAllocations[invoiceId]) > 0) &&
+            const blockedSelection = selectedInvoiceIds.find(invoiceId =>
                 outstandingInvoices?.find((invoice) => invoice.invoiceId === invoiceId)
-                    ?.paymentReadiness?.isPaymentReady !== true
-            );
+                    ?.paymentReadiness?.isPaymentReady !== true);
             if (blockedSelection) {
                 toast({
                     title: 'Payment readiness blocked',
@@ -422,8 +505,14 @@ export default function NewVendorPaymentPage() {
                 }
             }
 
-            const incompleteCrossCurrencyAllocation = paymentAllocations.find(allocation =>
-                allocation.allocatedAmount > 0 && (allocation.paymentCurrencyAmount ?? 0) <= 0);
+            const incompleteCrossCurrencyAllocation = paymentAllocations.find(allocation => {
+                const invoice = outstandingInvoices?.find(item => item.invoiceId === allocation.vendorInvoiceId);
+                if (!invoice || invoice.currencyCode === data.currencyCode) return false;
+                const hasEitherCashAmount = allocation.allocatedAmount > 0 ||
+                    (allocation.paymentCurrencyAmount ?? 0) > 0;
+                return hasEitherCashAmount && (allocation.allocatedAmount <= 0 ||
+                    (allocation.paymentCurrencyAmount ?? 0) <= 0);
+            });
             if (incompleteCrossCurrencyAllocation) {
                 toast({
                     title: 'Payment-currency amount required',
@@ -433,12 +522,29 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
-            const totalAllocated = paymentAllocations.reduce((sum, allocation) => sum + (allocation.paymentCurrencyAmount ?? allocation.allocatedAmount), 0);
+            const submissionAllocationState = getApPaymentAllocationState(
+                data.totalAmount,
+                paymentAllocations.map(allocation => ({
+                    invoiceCash: allocation.allocatedAmount,
+                    paymentCurrencyCash: allocation.paymentCurrencyAmount ?? allocation.allocatedAmount,
+                    discount: allocation.discountAmount,
+                    withholdingTax: allocation.withholdingTaxAmount,
+                })),
+            );
             const totalWithholdingTax = paymentAllocations.reduce((sum, allocation) => sum + (allocation.withholdingTaxAmount || 0), 0);
-            if (totalAllocated > data.totalAmount) {
+            if (!existingAdvancePaymentId && submissionAllocationState.disposition === 'over-allocated') {
                 toast({
                     title: 'Allocation exceeds payment',
-                    description: 'Amounts allocated from the selected bank currency cannot exceed the payment amount.',
+                    description: `Reduce allocations by ${formatCurrency(Math.abs(submissionAllocationState.remainingPaymentCurrencyCash), data.currencyCode)} before recording this payment.`,
+                    variant: 'destructive',
+                });
+                return;
+            }
+
+            if (!existingAdvancePaymentId && submissionAllocationState.disposition === 'partially-allocated') {
+                toast({
+                    title: 'Payment cash is only partially allocated',
+                    description: `Allocate the remaining ${formatCurrency(submissionAllocationState.remainingPaymentCurrencyCash, data.currencyCode)} before recording this payment, or clear all allocations to record the full amount as a supplier advance.`,
                     variant: 'destructive',
                 });
                 return;
@@ -454,6 +560,13 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
+            const invoiceWht = paymentWithholdingChoice((outstandingInvoices ?? []).filter(invoice =>
+                paymentAllocations.some(allocation => allocation.vendorInvoiceId === invoice.invoiceId)));
+            if (invoiceWht) {
+                data.withholdingTaxId = invoiceWht.taxId;
+                data.withholdingTaxRate = invoiceWht.rate;
+                data.withholdingTaxAccountId = invoiceWht.accountId;
+            }
             if (totalWithholdingTax > 0 && !data.withholdingTaxId) {
                 toast({
                     title: 'WHT tax required',
@@ -485,6 +598,7 @@ export default function NewVendorPaymentPage() {
                     supplierId: data.supplierId,
                     paymentDate: data.paymentDate.toISOString(),
                     taxableBase: withholdingTaxableBase,
+                    vendorInvoiceIds: paymentAllocations.map(allocation => allocation.vendorInvoiceId),
                 });
                 if (Math.abs(roundMoney(verifiedWithholding.withholdingAmount - totalWithholdingTax)) > 0.01) {
                     setWithholdingCalculation(verifiedWithholding);
@@ -526,6 +640,15 @@ export default function NewVendorPaymentPage() {
                 return;
             }
 
+            if (data.currencyCode.toUpperCase() !== functionalCurrencyCode && !data.exchangeRateId) {
+                toast({
+                    title: 'Approved exchange rate required',
+                    description: exchangeRateSource,
+                    variant: 'destructive',
+                });
+                return;
+            }
+
             const payment = await accountsPayableService.createPayment({
                 ...data,
                 paymentDate: data.paymentDate.toISOString(),
@@ -535,6 +658,11 @@ export default function NewVendorPaymentPage() {
                 withholdingTaxAmount: requiresServerFunctionalWithholding ? 0 : totalWithholdingTax,
                 withholdingTaxBaseAmount: requiresServerFunctionalWithholding ? 0 : verifiedWithholding?.taxableBase ?? 0,
                 allocations: paymentAllocations.length > 0 ? paymentAllocations : undefined,
+                financeDimensions: {
+                    defaultDimensions: toFinancePostingDimensionValues(defaultDimensionValues),
+                    lines: [],
+                    applyDefaultToEligibleLines: applyDefaultToAll,
+                },
             });
 
             toast({ title: 'Success', description: 'Vendor payment recorded successfully' });
@@ -566,20 +694,79 @@ export default function NewVendorPaymentPage() {
     };
 
     const currentAmount = form.watch('totalAmount');
-    // The payment header is denominated in the bank currency, so remaining cash must use
-    // paymentCurrencyAllocations for FX rows and the invoice amount only for same-currency rows.
-    const totalAllocated = displayedOutstandingInvoices?.reduce((sum, invoice) => {
-        const invoiceAmount = Number(allocations[invoice.invoiceId]) || 0;
-        return sum + (invoice.currencyCode === currentCurrencyCode
-            ? invoiceAmount
-            : Number(paymentCurrencyAllocations[invoice.invoiceId]) || 0);
-    }, 0) ?? 0;
+    const selectedAllocationInvoiceIds = Array.from(new Set([
+        ...Object.keys(allocations),
+        ...Object.keys(paymentCurrencyAllocations),
+        ...Object.keys(discountAllocations),
+        ...Object.keys(withholdingAllocations),
+    ])).filter(invoiceId => hasApPaymentSettlementComponents([{
+        invoiceCash: Number(allocations[invoiceId]) || 0,
+        paymentCurrencyCash: Number(paymentCurrencyAllocations[invoiceId]) || 0,
+        discount: Number(discountAllocations[invoiceId]) || 0,
+        withholdingTax: Number(withholdingAllocations[invoiceId]) || 0,
+    }]));
+    const allocationRows: ApPaymentAllocationRow[] = selectedAllocationInvoiceIds.map(invoiceId => {
+        const invoice = displayedOutstandingInvoices?.find(item => item.invoiceId === invoiceId);
+        const invoiceCash = Number(allocations[invoiceId]) || 0;
+        return {
+            invoiceCash,
+            paymentCurrencyCash: invoice?.currencyCode === currentCurrencyCode
+                ? invoiceCash
+                : Number(paymentCurrencyAllocations[invoiceId]) || 0,
+            discount: Number(discountAllocations[invoiceId]) || 0,
+            withholdingTax: Number(withholdingAllocations[invoiceId]) || 0,
+        };
+    });
+    // The backend rounds the aggregate payment-currency cash and payment total to two decimals,
+    // then requires exact equality. Invoice-native cash, discounts and WHT are not bank cash.
+    const allocationState = getApPaymentAllocationState(currentAmount, allocationRows);
+    const totalAllocated = allocationState.allocatedPaymentCurrencyCash;
     const totalDiscounts = Object.values(discountAllocations).reduce((acc, curr) => acc + curr, 0);
     const totalWithholdingTax = Object.values(withholdingAllocations).reduce((acc, curr) => acc + curr, 0);
-    const remainingAmount = currentAmount - totalAllocated;
+    const remainingAmount = allocationState.remainingPaymentCurrencyCash;
+    const hasPaymentReadinessFailure = selectedAllocationInvoiceIds.some(invoiceId =>
+        displayedOutstandingInvoices?.find(invoice => invoice.invoiceId === invoiceId)
+            ?.paymentReadiness?.isPaymentReady !== true);
+    const hasIncompleteCurrencyPair = selectedAllocationInvoiceIds.some(invoiceId => {
+        const invoice = displayedOutstandingInvoices?.find(item => item.invoiceId === invoiceId);
+        if (!invoice || invoice.currencyCode === currentCurrencyCode) return false;
+        const invoiceCash = Number(allocations[invoiceId]) || 0;
+        const paymentCash = Number(paymentCurrencyAllocations[invoiceId]) || 0;
+        return (invoiceCash > 0 || paymentCash > 0) && (invoiceCash <= 0 || paymentCash <= 0);
+    });
+    const currentExchangeRate = Number(form.watch('exchangeRate')) || 0;
+    const currentExchangeRateId = form.watch('exchangeRateId');
+    const hasFxEvidenceFailure = !existingAdvancePaymentId &&
+        currentCurrencyCode.toUpperCase() !== functionalCurrencyCode &&
+        (currentExchangeRate <= 0 || !currentExchangeRateId);
+    const canRecordPayment = canSubmitApPayment({
+        allocationState,
+        isAdvanceApplication: !!existingAdvancePaymentId,
+        hasPaymentReadinessFailure,
+        hasFxEvidenceFailure,
+        hasIncompleteCurrencyPair,
+        isBusy: isSubmitting ||
+            (!!existingAdvancePaymentId && !existingAdvancePayment) ||
+            (isLinkedInvoicePayment && isLoadingLinkedInvoice),
+    });
+    const allocationStatusMessage = existingAdvancePaymentId
+        ? allocationState.hasSettlementComponents
+            ? `${formatCurrency(totalAllocated, currentCurrencyCode)} is selected for application from this supplier advance.`
+            : 'Select at least one payment-ready invoice to apply this supplier advance.'
+        : allocationState.disposition === 'supplier-advance'
+            ? `No invoice allocations are entered. The full ${formatCurrency(currentAmount, currentCurrencyCode)} will be recorded as a supplier advance.`
+            : allocationState.disposition === 'fully-allocated'
+                ? 'Payment cash is fully allocated.'
+                : allocationState.disposition === 'partially-allocated'
+                    ? `Allocate the remaining ${formatCurrency(remainingAmount, currentCurrencyCode)} before recording this payment, or clear all allocations to record the full amount as a supplier advance.`
+                    : `Allocations exceed this payment by ${formatCurrency(Math.abs(remainingAmount), currentCurrencyCode)}. Reduce the allocated payment cash before recording.`;
 
     const handleAutoAllocate = async () => {
         if (!displayedOutstandingInvoices) return;
+        const eligibleInvoices = displayedOutstandingInvoices
+            .filter(invoice => invoice.paymentReadiness?.isPaymentReady === true && invoice.currencyCode === currentCurrencyCode)
+            .sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
+        let invoicesToAllocate = eligibleInvoices;
         const buildAllocation = (withholdingRate: number) => {
             let remaining = currentAmount;
             const cash: Record<string, number> = {};
@@ -587,37 +774,49 @@ export default function NewVendorPaymentPage() {
             const withholding: Record<string, number> = {};
             // Never auto-allocate cash to a Procurement-blocked invoice. The user can see the
             // readiness reason in the table, and the API independently enforces the same rule.
-            const sortedInvoices = displayedOutstandingInvoices
-                // Cross-currency rows need an explicit user-confirmed pair of amounts. Auto
-                // allocation remains deterministic by operating only on same-currency invoices.
-                .filter((invoice) => invoice.paymentReadiness?.isPaymentReady === true && invoice.currencyCode === currentCurrencyCode)
-                .sort((a, b) => new Date(a.dueDate || a.invoiceDate).getTime() - new Date(b.dueDate || b.invoiceDate).getTime());
-            for (const inv of sortedInvoices) {
+            for (const inv of invoicesToAllocate) {
                 if (remaining <= 0) break;
-                const discountAmount = Number(inv.discountAmount) || 0;
-                const withholdingAmount = withholdingRate > 0 ? roundMoney(inv.balanceAmount * (withholdingRate / 100)) : 0;
-                const netBalance = Math.max(inv.balanceAmount - discountAmount - withholdingAmount, 0);
-                const allocateAmount = Math.min(remaining, netBalance);
-                cash[inv.invoiceId] = allocateAmount;
-                if (discountAmount > 0 && allocateAmount >= netBalance) discounts[inv.invoiceId] = discountAmount;
-                if (withholdingAmount > 0 && allocateAmount >= netBalance) withholding[inv.invoiceId] = withholdingAmount;
-                remaining -= allocateAmount;
+                const allocation = allocateInvoiceCash(inv.balanceAmount, remaining, Number(inv.discountAmount) || 0, withholdingRate);
+                cash[inv.invoiceId] = allocation.cash;
+                if (allocation.discount > 0) discounts[inv.invoiceId] = allocation.discount;
+                if (allocation.withholding > 0) withholding[inv.invoiceId] = allocation.withholding;
+                remaining = roundMoney(remaining - allocation.cash);
             }
             return { cash, discounts, withholding };
         };
 
         setIsCalculatingWithholding(true);
         try {
-            const configuredRate = selectedWithholdingTax ? Number(selectedWithholdingTax.rate || 0) : 0;
+            const selectedInvoices = eligibleInvoices.filter(invoice => Number(allocations[invoice.invoiceId]) > 0 ||
+                Number(discountAllocations[invoice.invoiceId]) > 0 || Number(withholdingAllocations[invoice.invoiceId]) > 0);
+            if (selectedInvoices.length) {
+                paymentWithholdingChoice(selectedInvoices); // Do not silently change an explicit mixed selection.
+                invoicesToAllocate = selectedInvoices;
+            } else if (eligibleInvoices.length) {
+                const first = invoiceWithholdingChoice(eligibleInvoices[0]);
+                invoicesToAllocate = eligibleInvoices.filter(invoice => {
+                    const choice = invoiceWithholdingChoice(invoice);
+                    return choice?.taxId === first?.taxId && (choice?.rate ?? 0) === (first?.rate ?? 0);
+                });
+            }
+            const invoiceChoice = paymentWithholdingChoice(invoicesToAllocate);
+            const taxId = invoiceChoice ? invoiceChoice.taxId : selectedWithholdingTax?.id;
+            const configuredRate = invoiceChoice ? invoiceChoice.rate : Number(selectedWithholdingTax?.rate || 0);
+            if (invoiceChoice) {
+                form.setValue('withholdingTaxId', invoiceChoice.taxId);
+                form.setValue('withholdingTaxRate', invoiceChoice.rate);
+                form.setValue('withholdingTaxAccountId', invoiceChoice.accountId);
+            }
             let next = buildAllocation(configuredRate);
-            if (selectedWithholdingTax && selectedSupplierId) {
+            if (taxId && selectedSupplierId) {
                 const taxableBase = Object.keys(next.cash).reduce((sum, invoiceId) =>
                     sum + (next.cash[invoiceId] || 0) + (next.discounts[invoiceId] || 0) + (next.withholding[invoiceId] || 0), 0);
                 const calculation = await taxDataService.calculateApWithholding({
-                    taxId: selectedWithholdingTax.id,
+                    taxId,
                     supplierId: selectedSupplierId,
                     paymentDate: form.getValues('paymentDate').toISOString(),
                     taxableBase,
+                    vendorInvoiceIds: Object.keys(next.cash),
                 });
                 // A below-threshold result must not leave the browser's provisional percentage
                 // deductions in place. Rebuild cash allocation with zero WHT in that case. The
@@ -631,10 +830,11 @@ export default function NewVendorPaymentPage() {
                         sum + (next.cash[invoiceId] || 0) + (next.discounts[invoiceId] || 0) + (next.withholding[invoiceId] || 0), 0);
                     if (Math.abs(rebuiltTaxableBase - taxableBase) > 0.01) {
                         finalCalculation = await taxDataService.calculateApWithholding({
-                            taxId: selectedWithholdingTax.id,
+                            taxId,
                             supplierId: selectedSupplierId,
                             paymentDate: form.getValues('paymentDate').toISOString(),
                             taxableBase: rebuiltTaxableBase,
+                            vendorInvoiceIds: Object.keys(next.cash),
                         });
                         next = buildAllocation(finalCalculation.thresholdApplied ? finalCalculation.taxRate : 0);
                     }
@@ -647,6 +847,9 @@ export default function NewVendorPaymentPage() {
             setPaymentCurrencyAllocations({});
             setDiscountAllocations(next.discounts);
             setWithholdingAllocations(next.withholding);
+            if (!selectedInvoices.length && invoicesToAllocate.length < eligibleInvoices.length) {
+                toast({ title: 'Matching invoices allocated', description: 'Invoices with a different WHT choice or rate need a separate payment.' });
+            }
         } catch (error: any) {
             toast({
                 title: 'WHT calculation failed',
@@ -690,7 +893,10 @@ export default function NewVendorPaymentPage() {
                                     <Input value={lockedSupplierName} disabled />
                                 ) : (
                                     <Select
-                                        onValueChange={(val) => form.setValue('supplierId', val)}
+                                        onValueChange={(val) => {
+                                            if (val !== selectedSupplierId) clearAllocationState();
+                                            form.setValue('supplierId', val);
+                                        }}
                                         value={form.watch('supplierId') || undefined}
                                         disabled={isSubmitting || !!existingAdvancePaymentId}
                                     >
@@ -700,8 +906,8 @@ export default function NewVendorPaymentPage() {
                                         <SelectContent>
                                             {supplierOptions.map((supplier) => (
                                                 <SelectItem key={supplier.id} value={supplier.id}>
-                                                    {supplier.partnerName}
-                                                    {supplier.partnerCode ? ` (${supplier.partnerCode})` : ''}
+                                                    {supplier.name}
+                                                    {supplier.code ? ` (${supplier.code})` : ''}
                                                 </SelectItem>
                                             ))}
                                         </SelectContent>
@@ -715,7 +921,10 @@ export default function NewVendorPaymentPage() {
                             <div className="space-y-2">
                                 <Label htmlFor="bankAccount">Pay From Bank Account</Label>
                                 <Select
-                                    onValueChange={(val) => form.setValue('bankAccountId', val)}
+                                    onValueChange={(val) => {
+                                        if (val !== selectedBankAccountId) clearAllocationState();
+                                        form.setValue('bankAccountId', val);
+                                    }}
                                     value={form.watch('bankAccountId') || undefined}
                                     disabled={isSubmitting || !!existingAdvancePaymentId}
                                 >
@@ -792,6 +1001,10 @@ export default function NewVendorPaymentPage() {
                                 <Label htmlFor="withholdingTax">Withholding Tax</Label>
                                 <Select
                                     onValueChange={(val) => {
+                                        if (val !== (selectedWithholdingTaxId || 'none')) {
+                                            setWithholdingAllocations({});
+                                            setWithholdingCalculation(null);
+                                        }
                                         if (val === 'none') {
                                             form.setValue('withholdingTaxId', undefined);
                                             form.setValue('withholdingTaxAccountId', undefined);
@@ -803,7 +1016,7 @@ export default function NewVendorPaymentPage() {
                                         form.setValue('withholdingTaxId', val);
                                     }}
                                     value={form.watch('withholdingTaxId') || 'none'}
-                                    disabled={isSubmitting || !!existingAdvancePaymentId}
+                                    disabled={isSubmitting || !!existingAdvancePaymentId || !!selectedInvoiceWht.choice}
                                 >
                                     <SelectTrigger>
                                         <SelectValue placeholder="No WHT" />
@@ -817,11 +1030,15 @@ export default function NewVendorPaymentPage() {
                                         ))}
                                     </SelectContent>
                                 </Select>
+                                {selectedInvoiceWht.error && <p className="text-xs text-destructive">{selectedInvoiceWht.error}</p>}
+                                {selectedInvoiceWht.choice && <p className="text-xs text-muted-foreground">
+                                    {selectedInvoiceWht.choice.taxId ? `Invoice WHT: ${selectedInvoiceWht.choice.rate}%.` : 'WHT is disabled on the invoice.'}
+                                </p>}
                                 {selectedWithholdingTax && (
                                     <div className="space-y-1 text-xs text-muted-foreground">
                                         <div>
                                             {selectedWithholdingTax.taxPayableAccountId
-                                                ? `Posting to configured WHT payable account at ${Number(selectedWithholdingTax.rate || 0)}%.`
+                                                ? `Posting to configured WHT payable account at ${selectedInvoiceWht.choice?.rate ?? Number(selectedWithholdingTax.rate || 0)}%.`
                                                 : 'This tax has no payable account configured; posting will be blocked until it is set.'}
                                         </div>
                                         {withholdingCalculation && (
@@ -840,11 +1057,14 @@ export default function NewVendorPaymentPage() {
                                     type="number"
                                     step="0.000001"
                                     {...form.register('exchangeRate')}
-                                    disabled={isSubmitting || !!existingAdvancePaymentId || currentCurrencyCode === functionalCurrencyCode}
+                                    readOnly
+                                    aria-readonly="true"
+                                    disabled={isSubmitting || !!existingAdvancePaymentId}
                                 />
                                 <p className="text-xs text-muted-foreground">
                                     1 {currentCurrencyCode} = {form.watch('exchangeRate') || 1} {functionalCurrencyCode}
                                 </p>
+                                <p className="text-xs text-muted-foreground">{exchangeRateSource}</p>
                                 {form.formState.errors.exchangeRate && (
                                     <p className="text-sm text-red-500">{form.formState.errors.exchangeRate.message}</p>
                                 )}
@@ -892,17 +1112,35 @@ export default function NewVendorPaymentPage() {
                         </form>
                     </CardContent>
                     <CardFooter>
-                        <Button
-                            type="submit"
-                            form="payment-form"
-                            className="w-full"
-                            // Do not allow an application request until the immutable lot header
-                            // has loaded; otherwise a fast click could submit default form values.
-                            disabled={isSubmitting || (!!existingAdvancePaymentId && !existingAdvancePayment) || (isLinkedInvoicePayment && isLoadingLinkedInvoice)}
-                        >
-                            {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                            {isLoadingAdvancePayment ? 'Loading Advance...' : existingAdvancePaymentId ? 'Apply Advance' : 'Record Payment'}
-                        </Button>
+                        <div className="w-full space-y-2">
+                            <p className={cn(
+                                'text-xs',
+                                !existingAdvancePaymentId &&
+                                    (allocationState.disposition === 'partially-allocated' ||
+                                        allocationState.disposition === 'over-allocated')
+                                    ? 'text-red-600'
+                                    : 'text-muted-foreground',
+                            )}>
+                                {allocationStatusMessage}
+                            </p>
+                            <Button
+                                type="submit"
+                                form="payment-form"
+                                className="w-full"
+                                // Do not allow an application request until the immutable lot header
+                                // has loaded; otherwise a fast click could submit default form values.
+                                disabled={!canRecordPayment}
+                            >
+                                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                {isLoadingAdvancePayment
+                                    ? 'Loading Advance...'
+                                    : existingAdvancePaymentId
+                                        ? 'Apply Advance'
+                                        : allocationState.disposition === 'supplier-advance'
+                                            ? 'Record Supplier Advance'
+                                            : 'Record Payment'}
+                            </Button>
+                        </div>
                     </CardFooter>
                 </Card>
 
@@ -955,6 +1193,19 @@ export default function NewVendorPaymentPage() {
                                         {formatCurrency(remainingAmount, currentCurrencyCode)}
                                     </span>
                                 </div>
+                                <div
+                                    className={cn(
+                                        'rounded-md border px-3 py-2 text-sm',
+                                        !existingAdvancePaymentId &&
+                                            (allocationState.disposition === 'partially-allocated' ||
+                                                allocationState.disposition === 'over-allocated')
+                                            ? 'border-red-200 bg-red-50 text-red-700'
+                                            : 'border-blue-200 bg-blue-50 text-blue-700',
+                                    )}
+                                    role="status"
+                                >
+                                    {allocationStatusMessage}
+                                </div>
 
                                 <div className="border rounded-md">
                                     <table className="w-full text-sm">
@@ -1006,6 +1257,7 @@ export default function NewVendorPaymentPage() {
                                                                 type="number"
                                                                 className="text-right h-8"
                                                                 min={0}
+                                                                step="0.01"
                                                                 max={maxCashAllocation}
                                                                 value={allocations[inv.invoiceId] || ''}
                                                                 onChange={(e) => {
@@ -1024,6 +1276,7 @@ export default function NewVendorPaymentPage() {
                                                                     type="number"
                                                                     className="text-right h-8"
                                                                     min={0}
+                                                                    step="0.01"
                                                                     value={paymentCurrencyAllocations[inv.invoiceId] || ''}
                                                                     onChange={(e) => {
                                                                         const val = Number(e.target.value);
@@ -1051,6 +1304,7 @@ export default function NewVendorPaymentPage() {
                                                                 type="number"
                                                                 className="text-right h-8"
                                                                 min={0}
+                                                                step="0.01"
                                                                 max={availableDiscount}
                                                                 value={discountAllocations[inv.invoiceId] || ''}
                                                                 onChange={(e) => {
@@ -1068,6 +1322,7 @@ export default function NewVendorPaymentPage() {
                                                                 type="number"
                                                                 className="text-right h-8"
                                                                 min={0}
+                                                                step="0.01"
                                                                 max={maxWithholdingAllocation}
                                                                 value={withholdingAllocations[inv.invoiceId] || ''}
                                                                 onChange={(e) => {
@@ -1077,7 +1332,7 @@ export default function NewVendorPaymentPage() {
                                                                         [inv.invoiceId]: val
                                                                     }));
                                                                 }}
-                                                                disabled={isSubmitting || !isPaymentReady || !selectedWithholdingTax}
+                                                                disabled={isSubmitting || !isPaymentReady || !selectedWithholdingTax || inv.applySupplierWithholdingDefaults === false}
                                                             />
                                                         </td>
                                                     </tr>
@@ -1090,6 +1345,37 @@ export default function NewVendorPaymentPage() {
                         )}
                     </CardContent>
                 </Card>
+                {!existingAdvancePaymentId && (
+                    <Card className="md:col-span-3">
+                        <CardHeader><CardTitle>Finance coding dimensions</CardTitle></CardHeader>
+                        <CardContent>
+                            <SourceDocumentDimensionPanel
+                                context={{
+                                    sourceModule: 'AP',
+                                    sourceDocumentType: 'VendorPayment',
+                                    postingAction: 'Post',
+                                    sourceRoute: 'finance.ap.vendor-payments.manual',
+                                    contractVersion: '1.0',
+                                }}
+                                effectiveDate={format(form.watch('paymentDate') || new Date(), 'yyyy-MM-dd')}
+                                lines={Object.values(allocations).some(amount => Number(amount) > 0)
+                                    || Object.values(discountAllocations).some(amount => Number(amount) > 0)
+                                    || Object.values(withholdingAllocations).some(amount => Number(amount) > 0)
+                                    ? []
+                                    : [{ id: 'supplier-advance', accountLabel: 'Supplier advance (server-resolved account)' }]}
+                                defaultValues={defaultDimensionValues}
+                                lineValues={{}}
+                                onDefaultValuesChange={(values) => {
+                                    setDefaultDimensionValues(values);
+                                    setApplyDefaultToAll(false);
+                                }}
+                                onLineValuesChange={() => undefined}
+                                onApplyDefaultToAll={() => setApplyDefaultToAll(true)}
+                                disabled={isSubmitting}
+                            />
+                        </CardContent>
+                    </Card>
+                )}
             </div>
         </div>
     );

@@ -34,6 +34,8 @@ public class PurchaseOrderLandedCostPlan : TenantEntity
 /// </summary>
 public class PurchaseOrderLandedCostPlanItem : TenantEntity
 {
+    // Null means a shared PO-wide estimate; otherwise only this exact PO line.
+    public Guid? PurchaseOrderItemId { get; set; }
     [Required]
     public Guid PurchaseOrderLandedCostPlanId { get; set; }
 

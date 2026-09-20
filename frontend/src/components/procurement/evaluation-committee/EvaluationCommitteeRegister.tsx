@@ -22,6 +22,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Separator } from '@/components/ui/separator';
 import { hasAnyEvaluationCommitteeAction } from '@/lib/procurement-evaluation-committee';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
+import { EvaluationScoreRecallWorkflowReview } from './EvaluationScoreRecallWorkflowReview';
 import type {
   ProcurementEvaluationAppointment,
   ProcurementEvaluationCommitteeControl,
@@ -107,6 +108,7 @@ export interface EvaluationCommitteeRegisterProps {
     recall: ProcurementEvaluationScoreRecall,
     approve: boolean
   ) => void;
+  onWorkflowUpdated?: () => Promise<unknown>;
 }
 
 export function EvaluationCommitteeRegister({
@@ -128,6 +130,7 @@ export function EvaluationCommitteeRegister({
   onConfirmQuorum,
   onRequestRecall,
   onDecideRecall,
+  onWorkflowUpdated,
 }: EvaluationCommitteeRegisterProps) {
   const currentMember = control?.members.find(
     (member) => member.userId === currentUserId
@@ -295,6 +298,7 @@ export function EvaluationCommitteeRegister({
             canApprove={canApprove}
             onRequestRecall={onRequestRecall}
             onDecideRecall={onDecideRecall}
+            onWorkflowUpdated={onWorkflowUpdated}
           />
 
           <TimelineSection control={control} />
@@ -865,6 +869,7 @@ function ScoreSection({
   canApprove,
   onRequestRecall,
   onDecideRecall,
+  onWorkflowUpdated,
 }: {
   control: ProcurementEvaluationCommitteeControl;
   scorerEligibility: Partial<
@@ -881,6 +886,7 @@ function ScoreSection({
     recall: ProcurementEvaluationScoreRecall,
     approve: boolean
   ) => void;
+  onWorkflowUpdated?: () => Promise<unknown>;
 }) {
   return (
     <Card data-testid="committee-score-lock-history">
@@ -1047,6 +1053,7 @@ function ScoreSection({
                           ? ` · New attempt ${recall.authorizedNewAttempt}`
                           : ''}
                       </p>
+                      <EvaluationScoreRecallWorkflowReview recall={recall} currentUserId={currentUserId} onUpdated={onWorkflowUpdated} />
                     </div>
                     {recall.status === 'PendingApproval' &&
                       canApprove &&

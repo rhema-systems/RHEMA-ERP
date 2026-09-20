@@ -14,7 +14,8 @@ public enum AllocationRunBatchStatus
     Approved = 2,
     Rejected = 3,
     Posted = 4,
-    Cancelled = 5
+    Cancelled = 5,
+    ReadyToPost = 6
 }
 
 /// <summary>
@@ -48,6 +49,8 @@ public class AllocationRunBatch : TenantEntity
 
     [Required]
     public AllocationRunBatchStatus Status { get; set; } = AllocationRunBatchStatus.Draft;
+
+    public bool ApprovalRequired { get; set; } = true;
 
     [Required]
     public Guid SourceAccountId { get; set; }

@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.DTOs.Inventory;
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Services.Inventory;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -19,19 +20,22 @@ public class WarehousesController : ControllerBase
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<WarehousesController> _logger;
     private readonly IProcurementMasterDataChangeService? _masterDataChanges;
+    private readonly IWarehouseDefaultLocationService _defaultLocations;
 
     public WarehousesController(
         IWarehouseRepository warehouseRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
         ILogger<WarehousesController> logger,
-        IProcurementMasterDataChangeService? masterDataChanges = null)
+        IProcurementMasterDataChangeService? masterDataChanges = null,
+        IWarehouseDefaultLocationService? defaultLocations = null)
     {
         _warehouseRepository = warehouseRepository;
         _unitOfWork = unitOfWork;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
         _masterDataChanges = masterDataChanges;
+        _defaultLocations = defaultLocations ?? new WarehouseDefaultLocationService(unitOfWork, currentUserProvider);
     }
 
     /// <summary>
@@ -136,8 +140,12 @@ public class WarehousesController : ControllerBase
                 CreatedById = _currentUserProvider.UserId
             };
 
-            await _warehouseRepository.AddAsync(warehouse);
-            await _unitOfWork.SaveChangesAsync();
+            await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+            {
+                await _warehouseRepository.AddAsync(warehouse);
+                await _unitOfWork.SaveChangesAsync(ct);
+                await _defaultLocations.GetOrCreateAsync(warehouse.Id, _currentUserProvider.UserId, ct);
+            }, HttpContext.RequestAborted);
 
             _logger.LogInformation("Created warehouse {Code} for tenant {TenantId}", warehouse.Code, tenantId);
             return CreatedAtAction(nameof(GetById), new { id = warehouse.Id }, MapToDto(warehouse));

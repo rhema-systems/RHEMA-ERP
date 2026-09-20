@@ -21,7 +21,7 @@ namespace ErpSystem.Core.Services.Inventory;
 /// Inventory Transfer management service
 /// Handles inter-warehouse transfers with in-transit tracking
 /// </summary>
-public class InventoryTransferService : IInventoryTransferService
+public partial class InventoryTransferService : IInventoryTransferService
 {
     private const string SpreadToItemCost = "SpreadToItemCost";
     private const string GLExpense = "GLExpense";
@@ -48,6 +48,7 @@ public class InventoryTransferService : IInventoryTransferService
     private readonly IProcurementControlEventService _controlEvents;
     private readonly ILogger<InventoryTransferService> _logger;
     private readonly Dictionary<Guid, bool> _consignmentWarehouseFlagCache = new();
+    private readonly Dictionary<(Guid LocationId, Guid ItemId), InventoryLocation> _transferLocationBalanceCache = new();
 
     public InventoryTransferService(
         IInventoryTransferRepository transferRepository,
@@ -67,7 +68,8 @@ public class InventoryTransferService : IInventoryTransferService
         IInventoryNegativeStockControlService negativeStockControls,
         IProcurementAccessControlService accessControl,
         IProcurementControlEventService controlEvents,
-        ILogger<InventoryTransferService> logger)
+        ILogger<InventoryTransferService> logger,
+        IInventoryValuationService? valuation = null)
     {
         _transferRepository = transferRepository;
         _transferItemRepository = transferItemRepository;
@@ -87,6 +89,7 @@ public class InventoryTransferService : IInventoryTransferService
         _accessControl = accessControl;
         _controlEvents = controlEvents;
         _logger = logger;
+        _valuation = valuation;
     }
 
     public async Task<IEnumerable<InventoryTransferDto>> GetAllAsync(DateTime? fromDate = null, DateTime? toDate = null)
@@ -297,8 +300,22 @@ public class InventoryTransferService : IInventoryTransferService
         if (transfer.Status != TransferStatus.Draft)
             throw new InvalidOperationException("Transfer must be in Draft status");
 
-        // Start unified workflow first. If no active workflow is configured, this will throw and we will keep
-        // the transfer in Draft (so the UI can correct the configuration).
+        if (transfer.RequestedById != userId)
+            throw new UnauthorizedAccessException("Only the transfer requester can submit this draft.");
+        var lines = transfer.Items.Where(item => !item.IsDeleted).ToList();
+        if (lines.Count == 0 || lines.Any(item => item.RequestedQuantity <= 0))
+            throw new InvalidOperationException("Add at least one item with a positive quantity before submitting the transfer.");
+        foreach (var line in lines)
+        {
+            if (!line.SourceLocationId.HasValue || !line.DestinationLocationId.HasValue)
+                throw new InvalidOperationException("Select a source and destination location for every transfer item.");
+            await EnsureLocationBelongsToWarehouseAsync(line.SourceLocationId.Value, transfer.SourceWarehouseId, "Source location");
+            await EnsureLocationBelongsToWarehouseAsync(line.DestinationLocationId.Value, transfer.DestinationWarehouseId, "Destination location");
+            if (transfer.SourceWarehouseId == transfer.DestinationWarehouseId)
+                EnsureInterBinLocations(line.SourceLocationId, line.DestinationLocationId);
+        }
+
+        // The central owner distinguishes confirmed absence from lookup failures and retained workflows.
         var workflowResult = await _workflowIntegrationService.SubmitAsync("InventoryTransfer", transferId);
         if (!workflowResult.ExecutionResult.Success)
         {
@@ -306,21 +323,30 @@ public class InventoryTransferService : IInventoryTransferService
         }
 
         var statusAdapter = _workflowStatusAdapterRegistry.GetAdapter("InventoryTransfer");
-        statusAdapter.ApplySubmitOutcome(transfer, workflowResult.Outcome, userId);
-        if (transfer.Status != TransferStatus.Submitted)
+        statusAdapter.ApplySubmitOutcome(transfer, workflowResult, userId);
+        if (workflowResult.ApprovalRequired && transfer.Status != TransferStatus.Submitted)
             throw new InvalidOperationException("Inventory transfers require an independently assigned approval step; immediate approval or rejection on submission is not permitted.");
+        transfer.ApprovalRequired = workflowResult.ApprovalRequired;
         transfer.UpdatedAt = DateTime.UtcNow;
-        var payloadHash = Hash(JsonSerializer.Serialize(new { transferId, userId, transfer.TotalQuantity, transfer.TotalValue }));
+        var payloadHash = Hash(JsonSerializer.Serialize(new { transferId, userId, transfer.TotalQuantity, transfer.TotalValue, transfer.ApprovalRequired }));
         var correlationId = $"transfer-submit:{transfer.Id:N}:{Guid.NewGuid():N}";
         var action = await AddActionAsync(transfer, InventoryTransferActionType.Submitted, userId,
-            $"workflow-submit:{transfer.Id:N}:{Guid.NewGuid():N}", payloadHash, correlationId, null, []);
+            $"workflow-submit:{transfer.Id:N}:{Guid.NewGuid():N}", payloadHash, correlationId,
+            transfer.ApprovalRequired ? null : "Ready to ship; approval not required.", [], new { transfer.ApprovalRequired });
+        // The lifecycle trigger requires the append-only action to exist before changing the parent.
+        var submittedStatus = transfer.Status;
+        transfer.Status = TransferStatus.Draft;
+        transfer.ApprovalRequired = true;
+        await _unitOfWork.SaveChangesAsync();
+        transfer.Status = submittedStatus;
+        transfer.ApprovalRequired = workflowResult.ApprovalRequired;
         await _transferRepository.UpdateAsync(transfer);
         await AddAuditAsync("Submit", transfer, new { action.Id, action.Sequence, payloadHash });
         await RecordControlEventAsync(transfer, "Submit", correlationId, action.Id, payloadHash);
         await _unitOfWork.SaveChangesAsync();
         if (ownsTransaction) await _unitOfWork.CommitAsync();
 
-        _logger.LogInformation("Transfer {TransferNumber} submitted for approval", transfer.TransferNumber);
+        _logger.LogInformation("Transfer {TransferNumber} submitted; approval required: {ApprovalRequired}", transfer.TransferNumber, transfer.ApprovalRequired);
         return true;
         }
         catch
@@ -344,7 +370,7 @@ public class InventoryTransferService : IInventoryTransferService
 
         await EnsureTransferAccessAsync(transfer, TransferAccessDirection.Both, "approve");
 
-        if (transfer.Status != TransferStatus.Submitted)
+        if (!transfer.ApprovalRequired || transfer.Status != TransferStatus.Submitted)
             throw new InvalidOperationException("Transfer must be in Submitted status");
         if (transfer.RequestedById == userId)
             throw new UnauthorizedAccessException("The transfer requester cannot approve the same transfer.");
@@ -406,6 +432,8 @@ public class InventoryTransferService : IInventoryTransferService
             ?? throw new ArgumentException($"Transfer {transferId} not found");
 
         await EnsureTransferAccessAsync(transfer, TransferAccessDirection.Both, "reject");
+        if (!transfer.ApprovalRequired || transfer.Status != TransferStatus.Submitted)
+            throw new InvalidOperationException("Only a submitted transfer with required approval can be rejected.");
         if (transfer.RequestedById == userId)
             throw new UnauthorizedAccessException("The transfer requester cannot decide the same transfer.");
 
@@ -483,7 +511,7 @@ public class InventoryTransferService : IInventoryTransferService
 
         if (transfer.Status != TransferStatus.Approved && transfer.Status != TransferStatus.InTransit)
             throw new InvalidOperationException("Transfer must be approved or in transit to ship items");
-        if (userId == transfer.RequestedById || userId == transfer.ApprovedById)
+        if (transfer.ApprovalRequired && (userId == transfer.RequestedById || userId == transfer.ApprovedById))
             throw new UnauthorizedAccessException("The requester or transfer approver cannot dispatch the same transfer.");
         if (control is not null) EnsureRowVersion(transfer.RowVersion, control.RowVersion);
         if (shippedItems?.Keys.Any(id => transfer.Items.All(item => item.Id != id)) == true)
@@ -620,6 +648,8 @@ public class InventoryTransferService : IInventoryTransferService
                 });
             }
 
+            var outboundValue = await DispatchCarryingValueAsync(transfer, item, action, effectiveSourceWarehouseId, quantityToShip);
+
             // Bin-level tracking: if a source location is specified, it must have sufficient stock.
             // This is required for inter-bin transfers and optional for inter-warehouse transfers.
             if (sourceLocation != null)
@@ -653,8 +683,8 @@ public class InventoryTransferService : IInventoryTransferService
                 InventoryItemId = item.InventoryItemId,
                 MovementType = "TransferOut",
                 Quantity = -quantityToShip,
-                UnitCost = item.UnitCost,
-                TotalValue = -quantityToShip * item.UnitCost,
+                UnitCost = outboundValue / quantityToShip,
+                TotalValue = -outboundValue,
                 ReferenceType = ReferenceType.Transfer,
                 ReferenceNumber = transfer.TransferNumber,
                 ReferenceId = transfer.Id,
@@ -728,6 +758,9 @@ public class InventoryTransferService : IInventoryTransferService
         // Validate cost allocation method
         if (costsDto.CostAllocationMethod != SpreadToItemCost && costsDto.CostAllocationMethod != GLExpense)
             throw new ArgumentException("CostAllocationMethod must be either 'SpreadToItemCost' or 'GLExpense'");
+
+        if (costsDto.CostAllocationMethod == SpreadToItemCost && costsDto.ShippingCost + costsDto.MiscellaneousCost > 0)
+            throw new InvalidOperationException("Transfer shipping-cost capitalization requires a posted landed-cost voucher. No stock was dispatched; record the charges through that process.");
 
         if (costsDto.CostAllocationMethod == GLExpense && string.IsNullOrWhiteSpace(costsDto.ExpenseGLAccount))
             throw new ArgumentException("ExpenseGLAccount is required when CostAllocationMethod is GLExpense");
@@ -839,6 +872,10 @@ public class InventoryTransferService : IInventoryTransferService
             costsDto.CostAllocationMethod != SpreadToItemCost && costsDto.CostAllocationMethod != GLExpense)
             throw new ArgumentException("CostAllocationMethod must be either 'SpreadToItemCost' or 'GLExpense'");
 
+        if ((string.IsNullOrEmpty(costsDto.CostAllocationMethod) || costsDto.CostAllocationMethod == SpreadToItemCost) &&
+            costsDto.ShippingCost + costsDto.MiscellaneousCost > 0)
+            throw new InvalidOperationException("Transfer shipping-cost capitalization requires a posted landed-cost voucher. These charges were not saved to the transfer.");
+
         if (costsDto.CostAllocationMethod == GLExpense && string.IsNullOrWhiteSpace(costsDto.ExpenseGLAccount))
             throw new ArgumentException("ExpenseGLAccount is required when CostAllocationMethod is GLExpense");
 
@@ -869,7 +906,7 @@ public class InventoryTransferService : IInventoryTransferService
         }
         if (transfer.Status != TransferStatus.Approved || transfer.Items.Any(item => item.ShippedQuantity > 0))
             throw new InvalidOperationException("Shipping costs can only be prepared before the first controlled dispatch.");
-        if (userId == transfer.RequestedById || userId == transfer.ApprovedById)
+        if (transfer.ApprovalRequired && (userId == transfer.RequestedById || userId == transfer.ApprovedById))
             throw new UnauthorizedAccessException("The requester or transfer approver cannot prepare dispatch costs for the same transfer.");
         EnsureRowVersion(transfer.RowVersion, costsDto.RowVersion);
 
@@ -1053,10 +1090,12 @@ public class InventoryTransferService : IInventoryTransferService
             if (transfer.Status != TransferStatus.InTransit)
                 throw new InvalidOperationException("Transfer must be in transit to receive items.");
             if (control is not null) EnsureRowVersion(transfer.RowVersion, control.RowVersion);
-            if (userId == transfer.RequestedById || userId == transfer.ApprovedById || userId == transfer.ShippedById)
+            if (transfer.ApprovalRequired && (userId == transfer.RequestedById || userId == transfer.ApprovedById || userId == transfer.ShippedById))
                 throw new UnauthorizedAccessException("The requester, approver or dispatcher cannot receive the same transfer.");
             if (receivedItems?.Any(value => transfer.Items.All(item => item.Id != value.Id)) == true)
                 throw new ArgumentException("A receipt line does not belong to this transfer.");
+            if (receivedItems?.Any(value => value.DamagedQuantity != 0 || value.ShortageQuantity != 0) == true)
+                throw new InvalidOperationException("Receive only the quantity available in good condition. Leave damaged or missing units outstanding for a later receipt.");
 
             var normalizedLines = receivedItems ?? transfer.Items.Select(item => new InventoryTransferItemDto
             {
@@ -1141,6 +1180,7 @@ public class InventoryTransferService : IInventoryTransferService
             await AddAuditAsync("Receive", transfer, new { action.Id, action.Sequence, payloadHash });
             await _unitOfWork.SaveChangesAsync();
             await RecordControlEventAsync(transfer, "Receive", correlationId, action.Id, payloadHash);
+            await CompleteAfterReceiptAsync(transfer, userId, action, correlationId);
             if (ownsTransaction) await _unitOfWork.CommitAsync();
             return result;
         }
@@ -1224,6 +1264,10 @@ public class InventoryTransferService : IInventoryTransferService
                 }
             }
 
+            var inboundValue = receivedQty > 0
+                ? await ReceiveCarryingValueAsync(transfer, item, action, effectiveDestinationWarehouseId, receivedQty)
+                : 0;
+
             // Add to destination warehouse
             WarehouseQuantity? destQty = null;
             if (receivedQty > 0)
@@ -1278,8 +1322,8 @@ public class InventoryTransferService : IInventoryTransferService
                     InventoryItemId = item.InventoryItemId,
                     MovementType = "TransferIn",
                     Quantity = receivedQty,
-                    UnitCost = item.UnitCost,
-                    TotalValue = receivedQty * item.UnitCost,
+                    UnitCost = inboundValue / receivedQty,
+                    TotalValue = inboundValue,
                     ReferenceType = ReferenceType.Transfer,
                     ReferenceNumber = transfer.TransferNumber,
                     ReferenceId = transfer.Id,
@@ -1301,9 +1345,13 @@ public class InventoryTransferService : IInventoryTransferService
             }
         }
 
-        var fullyAccounted = transfer.Items.All(item =>
-            item.ShippedQuantity >= item.RequestedQuantity &&
-            item.ReceivedQuantity + item.DamagedQuantity + item.ShortageQuantity >= item.ShippedQuantity);
+        // The lifecycle trigger validates completed receipt totals from durable
+        // lines. Persist the line/balance/movement changes first, still inside the
+        // caller's transaction, before updating the header to Received.
+        await _unitOfWork.SaveChangesAsync();
+        var fullyAccounted = transfer.Items.Count > 0 && transfer.Items.All(item =>
+            item.ShippedQuantity == item.RequestedQuantity &&
+            item.ReceivedQuantity == item.ShippedQuantity);
         transfer.Status = fullyAccounted ? TransferStatus.Received : TransferStatus.InTransit;
         transfer.HasOpenDiscrepancy = transfer.HasOpenDiscrepancy || receivedItems.Any(value => value.DamagedQuantity > 0 || value.ShortageQuantity > 0);
         if (fullyAccounted) transfer.ReceivedDate = DateTime.UtcNow;
@@ -1343,11 +1391,13 @@ public class InventoryTransferService : IInventoryTransferService
             if (transfer.Status != TransferStatus.Received || !transfer.HasOpenDiscrepancy)
                 throw new InvalidOperationException("Only a fully accounted received transfer with open discrepancies can be resolved.");
             EnsureRowVersion(transfer.RowVersion, request.RowVersion);
-            if (userId == transfer.RequestedById || userId == transfer.ApprovedById ||
-                userId == transfer.ShippedById || userId == transfer.ReceivedById)
+            if (transfer.ApprovalRequired && (userId == transfer.RequestedById || userId == transfer.ApprovedById ||
+                userId == transfer.ShippedById || userId == transfer.ReceivedById))
                 throw new UnauthorizedAccessException("The requester, approver, dispatcher or receiver cannot resolve the same transfer discrepancy.");
             if (resolutionCode is null || !InventoryTransferDiscrepancyResolutionCodes.All.ContainsKey(resolutionCode))
                 throw new ArgumentException("A valid discrepancy resolution code is required.");
+            if (resolutionCode == InventoryTransferDiscrepancyResolutionCodes.ConfirmedLoss)
+                throw new InvalidOperationException("A confirmed transfer loss requires a controlled inventory write-off and Finance posting. Use that process; closing a discrepancy alone cannot remove its carrying value.");
             if (request.DiscrepancyIds.Count == 0 || request.DiscrepancyIds.Count != request.DiscrepancyIds.Distinct().Count())
                 throw new ArgumentException("At least one unique discrepancy is required.");
 
@@ -1426,6 +1476,7 @@ public class InventoryTransferService : IInventoryTransferService
                         TrackingExceptionId = item.InventoryTrackingExceptionId,
                         CorrelationId = correlationId
                     });
+                    var recoveredValue = await ReceiveCarryingValueAsync(transfer, item, action, inventoryWarehouseId, quantity, toSource);
                     quantityRecord.CurrentStock += quantity;
                     quantityRecord.AvailableStock += quantity;
                     quantityRecord.LastMovementDate = DateTime.UtcNow;
@@ -1443,8 +1494,8 @@ public class InventoryTransferService : IInventoryTransferService
                         InventoryItemId = item.InventoryItemId,
                         MovementType = toSource ? "TransferDiscrepancyReturn" : "TransferReplacementIn",
                         Quantity = quantity,
-                        UnitCost = item.UnitCost,
-                        TotalValue = quantity * item.UnitCost,
+                        UnitCost = recoveredValue / quantity,
+                        TotalValue = recoveredValue,
                         ReferenceType = ReferenceType.Transfer,
                         ReferenceId = transfer.Id,
                         ReferenceNumber = transfer.TransferNumber,
@@ -1496,6 +1547,7 @@ public class InventoryTransferService : IInventoryTransferService
             transfer.UpdatedAt = DateTime.UtcNow;
             await AddAuditAsync("ResolveDiscrepancy", transfer, new { action.Id, action.Sequence, payloadHash, resolutionCode });
             await _unitOfWork.SaveChangesAsync();
+            await CompleteAfterReceiptAsync(transfer, userId, action, correlationId);
             await RecordControlEventAsync(transfer, "ResolveDiscrepancy", correlationId, action.Id, payloadHash);
             if (ownsTransaction) await _unitOfWork.CommitAsync();
             return true;
@@ -1505,6 +1557,35 @@ public class InventoryTransferService : IInventoryTransferService
             if (ownsTransaction && _unitOfWork.HasActiveTransaction) await _unitOfWork.RollbackAsync();
             throw;
         }
+    }
+
+    private async Task CompleteAfterReceiptAsync(InventoryTransfer transfer, Guid userId,
+        InventoryTransferAction receiptAction, string correlationId)
+    {
+        // Completion is part of the successful receipt transaction, never an extra
+        // stock movement or a fabricated approval by a separate person.
+        if (transfer.Status != TransferStatus.Received || transfer.HasOpenDiscrepancy ||
+            transfer.Items.Count == 0 || transfer.Items.Any(item => item.RequestedQuantity <= 0 ||
+                item.ShippedQuantity != item.RequestedQuantity || item.ReceivedQuantity != item.ShippedQuantity ||
+                item.DamagedQuantity != 0 || item.ShortageQuantity != 0)) return;
+        if (receiptAction.ActorUserId != userId || receiptAction.InventoryTransferId != transfer.Id ||
+            receiptAction.ActionType is not (InventoryTransferActionType.Received or InventoryTransferActionType.DiscrepancyResolved))
+            throw new InvalidOperationException("Automatic completion requires the successful receipt action.");
+
+        var payloadHash = Hash($"automatic-completion:{transfer.Id:N}:{receiptAction.Id:N}");
+        var action = await AddActionAsync(transfer, InventoryTransferActionType.Closed, userId,
+            $"automatic-completion:{receiptAction.Id:N}", payloadHash, correlationId, null, [],
+            new { AutomaticCompletion = true, ReceiptActionId = receiptAction.Id });
+        // Persist the receipt-linked completion proof before changing header state:
+        // the lifecycle trigger checks this link within the same transaction.
+        await _unitOfWork.SaveChangesAsync();
+        transfer.Status = TransferStatus.Completed;
+        transfer.CompletedDate = DateTime.UtcNow;
+        transfer.ClosedById = userId;
+        transfer.UpdatedAt = DateTime.UtcNow;
+        await AddAuditAsync("AutoComplete", transfer, new { action.Id, action.Sequence, receiptActionId = receiptAction.Id, payloadHash });
+        await RecordControlEventAsync(transfer, "AutoComplete", correlationId, action.Id, payloadHash);
+        await _unitOfWork.SaveChangesAsync();
     }
 
     public async Task<bool> CloseAsync(Guid transferId, Guid userId, CloseInventoryTransferRequest request)
@@ -1529,8 +1610,8 @@ public class InventoryTransferService : IInventoryTransferService
             if (transfer.Status != TransferStatus.Received || transfer.HasOpenDiscrepancy)
                 throw new InvalidOperationException("Transfer must be fully received with every discrepancy resolved before closure.");
             EnsureRowVersion(transfer.RowVersion, request.RowVersion);
-            if (userId == transfer.RequestedById || userId == transfer.ApprovedById ||
-                userId == transfer.ShippedById || userId == transfer.ReceivedById)
+            if (transfer.ApprovalRequired && (userId == transfer.RequestedById || userId == transfer.ApprovedById ||
+                userId == transfer.ShippedById || userId == transfer.ReceivedById))
                 throw new UnauthorizedAccessException("The requester, approver, dispatcher or receiver cannot close the same transfer.");
             if (transfer.Items.Any(item => item.ShippedQuantity != item.RequestedQuantity || item.ReceivedQuantity + item.DamagedQuantity + item.ShortageQuantity != item.ShippedQuantity))
                 throw new InvalidOperationException("Every requested quantity must be dispatched and fully reconciled before closure.");
@@ -1694,7 +1775,7 @@ public class InventoryTransferService : IInventoryTransferService
             throw new InvalidOperationException("Only transfers that are in transit can be reversed. Once received, a transfer cannot be reversed.");
         if (transfer.Items.Any(item => item.ReceivedQuantity > 0 || item.DamagedQuantity > 0 || item.ShortageQuantity > 0))
             throw new InvalidOperationException("A transfer with any recorded receipt or discrepancy cannot reverse its shipment.");
-        if (userId == transfer.ShippedById)
+        if (transfer.ApprovalRequired && userId == transfer.ShippedById)
             throw new UnauthorizedAccessException("The dispatcher cannot reverse the same shipment.");
         if (control is not null) EnsureRowVersion(transfer.RowVersion, control.RowVersion);
         var correlationId = Normalize(control?.CorrelationId, 100) ?? $"transfer-reverse:{transfer.Id:N}:{Guid.NewGuid():N}";
@@ -1746,6 +1827,7 @@ public class InventoryTransferService : IInventoryTransferService
                 });
             }
 
+            var reversalValue = await ReceiveCarryingValueAsync(transfer, item, action, effectiveSourceWarehouseId, item.ShippedQuantity, true);
             var sourceQty = await _warehouseQuantityRepository.GetByWarehouseAndItemAsync(effectiveSourceWarehouseId, item.InventoryItemId);
             if (sourceQty != null)
             {
@@ -1769,8 +1851,8 @@ public class InventoryTransferService : IInventoryTransferService
                 InventoryItemId = item.InventoryItemId,
                 MovementType = "TransferReversal",
                 Quantity = item.ShippedQuantity,
-                UnitCost = item.UnitCost,
-                TotalValue = item.ShippedQuantity * item.UnitCost,
+                UnitCost = reversalValue / item.ShippedQuantity,
+                TotalValue = reversalValue,
                 ReferenceType = ReferenceType.Transfer,
                 ReferenceNumber = transfer.TransferNumber,
                 ReferenceId = transfer.Id,
@@ -1839,6 +1921,8 @@ public class InventoryTransferService : IInventoryTransferService
     {
         return await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
+            _valuation?.ResetProcessingAttempt();
+            _transferLocationBalanceCache.Clear();
             await _unitOfWork.BeginTransactionAsync(IsolationLevel.Serializable);
             try
             {
@@ -2195,9 +2279,9 @@ public class InventoryTransferService : IInventoryTransferService
         }
 
         var location = await _warehouseLocationRepository.GetByIdAsync(locationId);
-        if (location == null)
+        if (location == null || location.IsDeleted || !location.IsActive || location.TenantId != _currentUserProvider.TenantId)
         {
-            throw new InvalidOperationException($"{fieldName} ({locationId}) does not exist.");
+            throw new InvalidOperationException($"{fieldName} must be an active location in this tenant.");
         }
 
         if (location.WarehouseId != warehouseId)
@@ -2233,7 +2317,9 @@ public class InventoryTransferService : IInventoryTransferService
             return;
         }
 
-        var existing = await _inventoryLocationRepository.GetByLocationAndItemAsync(locationId, inventoryItemId);
+        var scopeKey = (locationId, inventoryItemId);
+        if (!_transferLocationBalanceCache.TryGetValue(scopeKey, out var existing))
+            existing = await _inventoryLocationRepository.GetByLocationAndItemAsync(locationId, inventoryItemId);
         if (existing == null)
         {
             // If we don't have location-level balances yet, allow the transfer to proceed by initializing
@@ -2255,6 +2341,7 @@ public class InventoryTransferService : IInventoryTransferService
 
             await _inventoryLocationRepository.AddAsync(existing);
         }
+        _transferLocationBalanceCache[scopeKey] = existing;
 
         var newQty = existing.Quantity + deltaQuantity;
         if (newQty < 0)
@@ -2268,7 +2355,10 @@ public class InventoryTransferService : IInventoryTransferService
         existing.UpdatedAt = DateTime.UtcNow;
         existing.LastModifiedById = _currentUserProvider.UserId;
 
-        await _inventoryLocationRepository.UpdateAsync(existing);
+        // Repository reads are tracking; new destination balances are Added.
+        // DbSet.Update here converts an Added GUID-keyed row to Modified and
+        // attempts to UPDATE a row that has never been inserted. Let the same
+        // transaction save the tracked scalar changes while retaining Added.
     }
 
     private async Task RevalidateDestinationCapacityAsync(
@@ -2491,6 +2581,7 @@ public class InventoryTransferService : IInventoryTransferService
             DestinationWarehouseName = transfer.DestinationWarehouse?.Name ?? string.Empty,
             Status = transfer.Status,
             TransferType = TransferType.Standard,
+            ApprovalRequired = transfer.ApprovalRequired,
             Priority = "Normal",
             RequestDate = transfer.RequestDate,
             RequiredDate = transfer.RequiredDate,
@@ -2526,6 +2617,7 @@ public class InventoryTransferService : IInventoryTransferService
             DestinationWarehouseName = transfer.DestinationWarehouse?.Name ?? string.Empty,
             Status = transfer.Status,
             TransferType = TransferType.Standard,
+            ApprovalRequired = transfer.ApprovalRequired,
             Priority = "Normal",
             RequestDate = transfer.RequestDate,
             RequiredDate = transfer.RequiredDate,

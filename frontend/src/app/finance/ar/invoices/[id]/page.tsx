@@ -34,6 +34,7 @@ import { canRecordArReceipt } from '@/lib/finance/ar-receipt-eligibility';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { useState } from 'react';
 import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 
 export default function InvoiceDetailsPage() {
     const router = useRouter();
@@ -44,6 +45,13 @@ export default function InvoiceDetailsPage() {
     const queryClient = useQueryClient();
     const { currentTenant, currentTenantCode } = useTenant();
     const [showSubmitConfirmation, setShowSubmitConfirmation] = useState(false);
+    const [showPostConfirmation, setShowPostConfirmation] = useState(false);
+    const workflow = useWorkflowSummary({ entityType: 'Invoice', entityId: id });
+    const errorDescription = (error: any, fallback: string) => {
+        const details = error?.response?.data ?? error?.response ?? error;
+        const message = details?.detail || details?.error || details?.message || fallback;
+        return details?.code ? `${message} (${details.code})` : message;
+    };
 
     const { data: invoice, isLoading } = useQuery({
         queryKey: ['invoice', id],
@@ -52,18 +60,35 @@ export default function InvoiceDetailsPage() {
 
     const submitInvoiceMutation = useMutation({
         mutationFn: () => arService.submitInvoiceForApproval(id),
-        onSuccess: () => {
+        onSuccess: (saved) => {
+            setShowSubmitConfirmation(false);
             queryClient.invalidateQueries({ queryKey: ['invoice', id] });
             queryClient.invalidateQueries({ queryKey: ['invoices'] });
-            toast({ title: 'Submitted', description: 'Invoice submitted to the Finance approval workflow' });
+            void workflow.refresh();
+            toast({ title: saved.approvalRequired === false || saved.status === 'Approved' ? 'Ready to post' : 'Submitted', description: saved.approvalRequired === false
+                ? 'No approval is required. A user with invoice posting permission can now select Post.'
+                : saved.status === 'Approved' ? 'The configured approval process completed. A user with invoice posting permission can now select Post.'
+                : 'Invoice submitted to the Finance approval workflow.' });
         },
         onError: (error: any) => {
             toast({
                 title: 'Error',
-                description: error.message || 'Failed to submit invoice for approval',
+                description: errorDescription(error, 'Failed to submit invoice'),
                 variant: 'destructive',
             });
         },
+    });
+
+    const postInvoiceMutation = useMutation({
+        mutationFn: () => arService.postInvoice(id),
+        onSuccess: () => {
+            setShowPostConfirmation(false);
+            queryClient.invalidateQueries({ queryKey: ['invoice', id] });
+            queryClient.invalidateQueries({ queryKey: ['invoices'] });
+            toast({ title: 'Posted', description: 'Invoice released and posted to the general ledger.' });
+        },
+        onError: (error: any) => toast({ title: 'Unable to post', variant: 'destructive',
+            description: errorDescription(error, 'Failed to post invoice') }),
     });
 
     if (isLoading) {
@@ -114,10 +139,16 @@ export default function InvoiceDetailsPage() {
                         <Printer className="mr-2 h-4 w-4" /> Print
                     </Button>
                     {(invoice.status === 'Draft' || invoice.status === 'Rejected') && hasPermission('Finance.AR.Invoices.Send') && (
-                    <Button variant="outline" size="sm" onClick={() => setShowSubmitConfirmation(true)} disabled={submitInvoiceMutation.isPending}>
+                    <Button variant="outline" size="sm" onClick={() => setShowSubmitConfirmation(true)} disabled={submitInvoiceMutation.isPending || !workflow.visibility.known}>
                         {submitInvoiceMutation.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                        Submit for Approval
+                        {workflow.visibility.direct ? 'Prepare to post' : 'Submit for Approval'}
                     </Button>
+                    )}
+                    {((invoice.status === 'ReadyToPost' && invoice.approvalRequired === false) ||
+                        (invoice.status === 'Approved' && invoice.approvalRequired !== false)) && hasPermission('Finance.AR.Invoices.ApprovePost') && (
+                        <Button size="sm" onClick={() => setShowPostConfirmation(true)} disabled={postInvoiceMutation.isPending}>
+                            {postInvoiceMutation.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}Post
+                        </Button>
                     )}
                     {showRecordReceipt && (
                         <Button size="sm" onClick={() => router.push(`/finance/ar/receipts/new?customerId=${invoice.customerId}&invoiceId=${invoice.id}`)}>
@@ -126,6 +157,12 @@ export default function InvoiceDetailsPage() {
                     )}
                 </div>
             </div>
+
+            {workflow.error && (invoice.status === 'Draft' || invoice.status === 'Rejected') && (
+                <div role="alert" className="text-sm text-destructive no-print">{workflow.error}
+                    <Button variant="link" size="sm" onClick={() => void workflow.refresh()}>Retry workflow check</Button>
+                </div>
+            )}
 
             <div className="no-print">
                 <SourceDocumentDimensionEvidence evidence={invoice.financeDimensions} />
@@ -206,13 +243,13 @@ export default function InvoiceDetailsPage() {
                             </div>
                             {lineDiscounts > 0 && (
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Line Discounts</span>
+                                    <span className="text-muted-foreground">Line Trade Discounts</span>
                                     <span>-{formatCurrency(lineDiscounts, invoice.currencyCode)}</span>
                                 </div>
                             )}
                             {documentDiscount > 0 && (
                                 <div className="flex justify-between text-sm">
-                                    <span className="text-muted-foreground">Discount Allowed</span>
+                                    <span className="text-muted-foreground">Document Trade Discount</span>
                                     <span>-{formatCurrency(documentDiscount, invoice.currencyCode)}</span>
                                 </div>
                             )}
@@ -244,15 +281,22 @@ export default function InvoiceDetailsPage() {
             <ConfirmationDialog
                 open={showSubmitConfirmation}
                 onOpenChange={setShowSubmitConfirmation}
-                title="Submit invoice for approval?"
-                description="The invoice will enter the Finance approval queue. It will only be posted and released after final approval."
-                confirmText="Submit for approval"
+                title={workflow.visibility.direct ? 'Prepare invoice for posting?' : 'Submit invoice for approval?'}
+                description={workflow.visibility.direct
+                    ? 'No approval process is active. This saves posting readiness only; select Post separately to release the invoice, update stock and customer balances, and post the journal.'
+                    : 'The invoice will enter the Finance approval queue. It will only be posted and released after final approval.'}
+                confirmText={workflow.visibility.direct ? 'Prepare to post' : 'Submit for approval'}
                 isLoading={submitInvoiceMutation.isPending}
                 onConfirm={async () => {
-                    await submitInvoiceMutation.mutateAsync();
+                    try { await submitInvoiceMutation.mutateAsync(); }
+                    catch { return false; }
                 }}
                 maxWidth="500px"
             />
+            <ConfirmationDialog open={showPostConfirmation} onOpenChange={setShowPostConfirmation}
+                title="Post invoice?" description="This releases the invoice, updates applicable stock and the customer balance, and posts its balanced journal."
+                confirmText="Post" isLoading={postInvoiceMutation.isPending}
+                onConfirm={async () => { try { await postInvoiceMutation.mutateAsync(); } catch { return false; } }} maxWidth="500px" />
         </div>
         <ArInvoicePrintDocument
             invoice={invoice}

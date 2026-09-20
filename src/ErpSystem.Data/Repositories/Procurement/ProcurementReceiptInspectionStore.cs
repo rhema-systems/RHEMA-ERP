@@ -24,7 +24,7 @@ public sealed class ProcurementReceiptInspectionStore :
 
     public Task SetWorkflowRebindContextAsync(
         Guid inspectionCaseId,
-        Guid workflowDefinitionId,
+        Guid? workflowDefinitionId,
         CancellationToken cancellationToken = default) =>
         SetContextAsync(inspectionCaseId, workflowDefinitionId, cancellationToken);
 

@@ -1,12 +1,14 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import {
   Search,
@@ -19,7 +21,9 @@ import {
   Trash2
 } from 'lucide-react';
 import { toast } from 'sonner';
-import { commonService, procurementPlanService, type DepartmentDto, type ProcurementPlanDto } from '@/services/procurementPlanningService';
+import { procurementPlanService, type ProcurementPlanDto } from '@/services/procurementPlanningService';
+import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import { format } from 'date-fns';
 import * as XLSX from 'xlsx';
 import { saveAs } from 'file-saver';
@@ -30,23 +34,26 @@ export default function ProcurementPlansPage() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
-  const [departments, setDepartments] = useState<DepartmentDto[]>([]);
-  const [departmentFilter, setDepartmentFilter] = useState('all');
+  const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnitSummary[]>([]);
+  const [organizationUnitFilter, setOrganizationUnitFilter] = useState('all');
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [planToDelete, setPlanToDelete] = useState<ProcurementPlanDto | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
-    commonService.getDepartments()
-      .then((data) => setDepartments(data.filter((department) => department.isActive !== false)))
+    organizationUnitService.getSummary()
+      .then((data) => setOrganizationUnits(data.filter((unit) => unit.isActive)))
       .catch((error) => {
-        console.error('Error loading departments:', error);
-        setDepartments([]);
+        console.error('Error loading organization units:', error);
+        setOrganizationUnits([]);
       });
   }, []);
 
   useEffect(() => {
     loadPlans();
-  }, [page, statusFilter, departmentFilter]);
+  }, [page, statusFilter, organizationUnitFilter]);
 
   const loadPlans = async () => {
     try {
@@ -56,7 +63,7 @@ export default function ProcurementPlansPage() {
         pageSize: 25,
         search: searchTerm || undefined,
         status: statusFilter !== 'all' ? statusFilter : undefined,
-        departmentId: departmentFilter !== 'all' ? departmentFilter : undefined,
+        departmentId: organizationUnitFilter !== 'all' ? organizationUnitFilter : undefined,
       });
       setPlans(result.items);
       setTotalPages(result.totalPages);
@@ -85,16 +92,31 @@ export default function ProcurementPlansPage() {
     router.push('/procurement/planning/plans/new');
   };
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this procurement plan?')) return;
+  const handleDelete = (id: string) => {
+    const selectedPlan = plans.find((plan) => plan.id === id);
+    if (!selectedPlan || deleting) return;
+    setDeleteError(null);
+    setPlanToDelete(selectedPlan);
+  };
 
+  const confirmDelete = async () => {
+    if (!planToDelete || deleting) return false;
     try {
-      await procurementPlanService.deletePlan(id);
+      setDeleting(true);
+      setDeleteError(null);
+      await procurementPlanService.deletePlan(planToDelete.id);
+      setPlans((current) => current.filter((plan) => plan.id !== planToDelete.id));
+      setPlanToDelete(null);
       toast.success('Procurement plan deleted successfully');
-      loadPlans();
+      await loadPlans();
+      return true;
     } catch (error) {
-      console.error('Error deleting procurement plan:', error);
-      toast.error('Failed to delete procurement plan');
+      const message = error instanceof Error ? error.message : 'Failed to delete procurement plan';
+      setDeleteError(message);
+      toast.error(message);
+      return false;
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -108,7 +130,7 @@ export default function ProcurementPlansPage() {
       const exportData = plans.map(plan => ({
         'Plan Number': plan.planNumber,
         'Title': plan.title,
-        'Department': plan.departmentName || '',
+        'Organization Unit': plan.organizationUnitName || plan.departmentName || '',
         'Fiscal Year': plan.fiscalYear,
         'Status': plan.status,
         'Start Date': format(new Date(plan.planStartDate), 'yyyy-MM-dd'),
@@ -170,7 +192,7 @@ export default function ProcurementPlansPage() {
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Procurement Plans</h1>
           <p className="text-muted-foreground">
-            Manage departmental procurement plans and requirements
+            Manage organization-unit procurement plans and requirements
           </p>
         </div>
         <Button onClick={handleCreateNew} className="gap-2">
@@ -218,15 +240,15 @@ export default function ProcurementPlansPage() {
               </SelectContent>
             </Select>
 
-            <Select value={departmentFilter} onValueChange={(value) => { setDepartmentFilter(value); setPage(1); }}>
+            <Select value={organizationUnitFilter} onValueChange={(value) => { setOrganizationUnitFilter(value); setPage(1); }}>
               <SelectTrigger>
-                <SelectValue placeholder="All Departments" />
+                <SelectValue placeholder="All Organization Units" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Departments</SelectItem>
-                {departments.map((department) => (
-                  <SelectItem key={department.id} value={department.id}>
-                    {department.code ? `${department.code} - ${department.name}` : department.name}
+                <SelectItem value="all">All Organization Units</SelectItem>
+                {organizationUnits.map((unit) => (
+                  <SelectItem key={unit.id} value={unit.id}>
+                    {unit.code ? `${unit.code} - ${unit.name}` : unit.name}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -266,7 +288,7 @@ export default function ProcurementPlansPage() {
                   <TableRow>
                     <TableHead>Plan #</TableHead>
                     <TableHead>Title</TableHead>
-                    <TableHead>Department</TableHead>
+                    <TableHead>Organization Unit</TableHead>
                     <TableHead>Fiscal Year</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Estimated Budget</TableHead>
@@ -286,7 +308,7 @@ export default function ProcurementPlansPage() {
                           </div>
                         </div>
                       </TableCell>
-                      <TableCell>{plan.departmentName || 'N/A'}</TableCell>
+                      <TableCell>{plan.organizationUnitName || plan.departmentName || 'N/A'}</TableCell>
                       <TableCell>
                         <div>{plan.fiscalYear}</div>
                         <div className="text-xs text-gray-500">
@@ -365,6 +387,23 @@ export default function ProcurementPlansPage() {
           )}
         </CardContent>
       </Card>
+      <ConfirmationDialog
+        open={planToDelete !== null}
+        onOpenChange={(open) => {
+          if (!open && !deleting) {
+            setPlanToDelete(null);
+            setDeleteError(null);
+          }
+        }}
+        title="Delete procurement plan?"
+        description={`Delete draft plan ${planToDelete?.planNumber || ''} - ${planToDelete?.title || ''}? Only this plan will be removed.`}
+        confirmText="Delete plan"
+        variant="destructive"
+        onConfirm={confirmDelete}
+        isLoading={deleting}
+      >
+        {deleteError && <Alert variant="destructive"><AlertDescription>{deleteError}</AlertDescription></Alert>}
+      </ConfirmationDialog>
     </div>
   );
 }

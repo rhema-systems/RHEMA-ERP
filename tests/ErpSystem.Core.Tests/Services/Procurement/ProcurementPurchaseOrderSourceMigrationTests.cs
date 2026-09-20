@@ -214,6 +214,31 @@ public sealed class ProcurementPurchaseOrderSourceMigrationTests
             "the corrective migration must match the deployed purchase-order item trigger baseline");
     }
 
+    [Fact]
+    public void ContractIdentityRepairTargetsBothInstalledTriggersAndOnlyActualContractKeys()
+    {
+        var sql = Sql(new AlignContractPurchaseOrderCommercialIdentity());
+        sql.Should().Contain("TR_PurchaseOrders_ApprovedCommercialCapacity")
+            .And.Contain("TR_PurchaseOrderItems_ApprovedCommercialCapacity")
+            .And.Contain("purchaseOrder.ProcurementSourceId AS ContractId,")
+            .And.Contain("CHARINDEX(N') actual'")
+            .And.Contain("STUFF(@definition, @start, @finish - @start, @repaired)")
+            .And.Contain("@count NOT IN (0, 2)");
+        sql.Should().NotContain("DISABLE TRIGGER").And.NotContain("UPDATE PurchaseOrderItems");
+    }
+
+    [Fact]
+    public void ContractIdentityRepairRejectsMissingOrDriftedGuardsAndPreservesCapacityChecks()
+    {
+        var sql = Sql(new AlignContractPurchaseOrderCommercialIdentity());
+        sql.Should().Contain("THROW 51983").And.Contain("THROW 51984")
+            .And.Contain("COLLATE Latin1_General_100_BIN2")
+            .And.Contain("actual.Quantity > approved.Quantity")
+            .And.Contain("actual.LineTotal > approved.LineTotal")
+            .And.Contain("Contracts contract WITH (UPDLOCK, HOLDLOCK)")
+            .And.Contain("IF @count = 2");
+    }
+
     private static int Count(string value, string fragment) =>
         (value.Length - value.Replace(fragment, string.Empty).Length) /
         fragment.Length;

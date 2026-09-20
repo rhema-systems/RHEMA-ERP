@@ -1,7 +1,9 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Procurement;
@@ -10,6 +12,7 @@ using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
 
@@ -17,6 +20,110 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementAwardReadinessEvaluatorSodTests
 {
+    [Theory]
+    [InlineData(ProcurementMethodType.PettyPurchase, false)]
+    [InlineData(ProcurementMethodType.SingleSource, true)]
+    [InlineData(ProcurementMethodType.RestrictedTendering, true)]
+    public async Task NegotiationEvidenceIsRequiredOnlyForNegotiatedMethods(
+        ProcurementMethodType method, bool negotiationRequired)
+    {
+        await using var fixture = new Fixture();
+        var source = await fixture.AddExceptionalTenderAsync(Guid.NewGuid());
+        var control = await fixture.Context.Set<ProcurementExceptionalSourcingControl>().SingleAsync();
+        control.Method = method;
+        var supplier = new BusinessPartner
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            PartnerCode = "TEST-EXCEPTION", PartnerName = "Test quotation supplier",
+            PartnerType = "Supplier", IsActive = true,
+            ApprovalStatus = "Approved", RegistrationStatus = "Approved",
+            ApprovedById = Guid.NewGuid()
+        };
+        var bid = new TenderBid
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = source.Id,
+            BusinessPartnerId = supplier.Id, BidNumber = "TEST-QUOTE",
+            Status = "Submitted", TotalBidAmount = 750, Currency = "GHS"
+        };
+        control.RecommendedBidId = bid.Id;
+        fixture.Context.AddRange(supplier, bid);
+        await fixture.Context.SaveChangesAsync();
+
+        var result = await fixture.Service.EvaluateAsync(source.Type, source.Id,
+            new EvaluateProcurementAwardReadinessRequest { IdempotencyKey = $"evidence-{method}" },
+            $"evidence-{method}");
+
+        result.BlockedReasons.Any(reason => reason.Contains("Negotiation minutes", StringComparison.Ordinal))
+            .Should().Be(negotiationRequired);
+        result.IsReady.Should().BeFalse("other missing approval and supplier prerequisites must still block");
+    }
+
+    [Theory]
+    [InlineData("legacy-submitter", true)]
+    [InlineData("approvers-only", true)]
+    [InlineData("unknown-actor", false)]
+    [InlineData("wrong-initiator", false)]
+    [InlineData("wrong-source", false)]
+    [InlineData("wrong-definition", false)]
+    [InlineData("pending-workflow", false)]
+    [InlineData("unverified-final-approver", false)]
+    public async Task ExceptionalAuthorityUsesExactCompletedWorkflowNotSubmissionHistory(
+        string scenario, bool allowed)
+    {
+        await using var fixture = new Fixture();
+        var evaluatorId = Guid.NewGuid();
+        var source = await fixture.AddExceptionalTenderAsync(evaluatorId);
+        var control = await fixture.Context.Set<ProcurementExceptionalSourcingControl>().SingleAsync();
+        var submitterId = Guid.NewGuid();
+        control.SubmittedForApprovalById = submitterId;
+        control.ApprovedById = scenario == "unverified-final-approver" ? submitterId : fixture.ActorId;
+        control.ApprovalActorsJson = JsonSerializer.Serialize(scenario switch
+        {
+            "approvers-only" => new[] { fixture.ActorId },
+            "unknown-actor" => new[] { submitterId, fixture.ActorId, Guid.NewGuid() },
+            _ => new[] { submitterId, fixture.ActorId }
+        });
+        var workflow = new WorkflowInstance
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            WorkflowDefinitionId = scenario == "wrong-definition" ? Guid.NewGuid() : control.WorkflowDefinitionId!.Value,
+            EntityId = scenario == "wrong-source" ? Guid.NewGuid() : source.Id,
+            EntityTypeId = Guid.NewGuid(),
+            InitiatedById = scenario == "wrong-initiator" ? Guid.NewGuid() : submitterId,
+            Status = scenario == "pending-workflow" ? WorkflowInstanceStatus.InProgress : WorkflowInstanceStatus.Completed,
+            CompletedDate = DateTime.UtcNow
+        };
+        control.WorkflowInstanceId = workflow.Id;
+        var step = new WorkflowStepInstance
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            WorkflowInstanceId = workflow.Id, WorkflowInstance = workflow,
+            WorkflowStepId = Guid.NewGuid(), Status = WorkflowStepInstanceStatus.Completed
+        };
+        fixture.Context.AddRange(workflow, step, new WorkflowApproval
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId,
+            StepInstanceId = step.Id, StepInstance = step,
+            Status = WorkflowApprovalStatus.Approved,
+            ProcessedById = fixture.ActorId, ProcessedDate = DateTime.UtcNow
+        });
+        await fixture.Context.SaveChangesAsync();
+        fixture.Context.ChangeTracker.Clear();
+
+        if (!allowed)
+        {
+            await fixture.Service.Invoking(service => service.GetEvaluatorAwardApproverSodStatusAsync(
+                    source.Type, source.Id, scenario))
+                .Should().ThrowAsync<ProcurementAwardReadinessValidationException>();
+            return;
+        }
+        var status = await fixture.Service.GetEvaluatorAwardApproverSodStatusAsync(source.Type, source.Id, scenario);
+        status.Allowed.Should().BeTrue();
+        status.EvaluatorUserIds.Should().Equal(evaluatorId);
+        status.IndependentApprovalActorUserIds.Should().Equal(fixture.ActorId);
+        status.IndependentApprovalActorUserIds.Should().NotContain(submitterId);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -208,6 +315,86 @@ public sealed class ProcurementAwardReadinessEvaluatorSodTests
         payload.Should().Contain(attempts[1].ScoreSheetId!.Value
             .ToString());
         payload.Should().Contain("attempt-history");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task StandardBidSubjectUsesSnapshotEvaluationAndRetainsEvaluatorAwardSeparation(
+        bool evaluatorIsCurrentActor)
+    {
+        await using var fixture = new Fixture();
+        var evaluatorId = evaluatorIsCurrentActor ? fixture.ActorId : Guid.NewGuid();
+        var source = await fixture.AddLegacyTenderAsync(evaluatorId);
+        var evaluation = await fixture.AddStandardScoreAttemptsAsync(source.Id, evaluatorId);
+
+        var status = await fixture.Service.GetEvaluatorAwardApproverSodStatusAsync(
+            source.Type, source.Id, "standard-bid-subject");
+
+        status.Allowed.Should().Be(!evaluatorIsCurrentActor);
+        status.EvaluatorUserIds.Should().Equal(evaluatorId);
+        var attempts = status.EvaluatorLineage.Where(item => item.ScoreSheetId.HasValue).ToList();
+        attempts.Should().HaveCount(2);
+        attempts.Should().OnlyContain(item =>
+            item.EvaluationId == evaluation.Id &&
+            item.ScoreSubjectId == evaluation.TenderBidId &&
+            item.EvaluatorUserId == evaluatorId &&
+            item.Phase == ProcurementEvaluationPhase.Combined);
+        attempts.Should().ContainSingle(item => item.IsRetainedAttempt);
+        attempts.Should().ContainSingle(item => item.IsRecalledAttempt);
+        fixture.SodRequests.Should().Contain(request =>
+            request.ProhibitedActorUserIds.Contains(evaluatorId));
+    }
+
+    [Theory]
+    [InlineData("subject")]
+    [InlineData("evaluationId")]
+    [InlineData("TenderBidId")]
+    [InlineData("TenderEvaluatorId")]
+    [InlineData("evaluatorUserId")]
+    [InlineData("submitter")]
+    [InlineData("appointment-tenant")]
+    [InlineData("evaluator-tenant")]
+    [InlineData("phase")]
+    [InlineData("missing-snapshot")]
+    [InlineData("malformed-snapshot")]
+    [InlineData("array-snapshot")]
+    [InlineData("non-string-id")]
+    public async Task StandardBidScoreLineageRejectsForeignOrMalformedBindings(string mismatch)
+    {
+        await using var fixture = new Fixture();
+        var evaluatorId = Guid.NewGuid();
+        var source = await fixture.AddLegacyTenderAsync(evaluatorId);
+        var evaluation = await fixture.AddStandardScoreAttemptsAsync(source.Id, evaluatorId);
+        var sheet = await fixture.Context.ProcurementEvaluationScoreSheets
+            .Include(item => item.Appointment)
+            .SingleAsync(item => item.Status == ProcurementEvaluationScoreSheetStatus.Locked);
+
+        switch (mismatch)
+        {
+            case "subject": sheet.ScoreSubjectId = evaluation.Id; break;
+            case "submitter": sheet.SubmittedByUserId = Guid.NewGuid(); break;
+            case "appointment-tenant": sheet.Appointment.TenantId = Guid.NewGuid(); break;
+            case "evaluator-tenant": evaluation.TenderEvaluator.TenantId = Guid.NewGuid(); break;
+            case "phase": sheet.Phase = ProcurementEvaluationPhase.Technical; break;
+            case "missing-snapshot": sheet.ScoreSnapshotJson = "{}"; break;
+            case "malformed-snapshot": sheet.ScoreSnapshotJson = "not-json"; break;
+            case "array-snapshot": sheet.ScoreSnapshotJson = "[]"; break;
+            default:
+                var snapshot = JsonNode.Parse(sheet.ScoreSnapshotJson)!;
+                if (mismatch == "non-string-id") snapshot["evaluationId"] = 17;
+                else snapshot[mismatch] = Guid.NewGuid().ToString();
+                sheet.ScoreSnapshotJson = snapshot.ToJsonString();
+                break;
+        }
+        await fixture.Context.SaveChangesAsync();
+
+        await fixture.Service.Invoking(service => service.GetEvaluatorAwardApproverSodStatusAsync(
+                source.Type, source.Id, $"standard-mismatch-{mismatch}"))
+            .Should().ThrowAsync<ProcurementAwardReadinessValidationException>()
+            .Where(exception => exception.Code == "AWARD_READINESS_EVALUATOR_LINEAGE_AMBIGUOUS");
+        fixture.Context.ProcurementAwardReadinessDecisions.Should().BeEmpty();
+        fixture.SodRequests.Should().BeEmpty();
     }
 
     [Fact]
@@ -417,7 +604,10 @@ public sealed class ProcurementAwardReadinessEvaluatorSodTests
                 _current.Object,
                 access.Object,
                 sod.Object,
-                events.Object);
+                events.Object,
+                new SupplierValidationService(_unitOfWork, _current.Object,
+                    Mock.Of<IProcurementSupplierEvidencePackService>(), events.Object,
+                    NullLogger<SupplierValidationService>.Instance));
         }
 
         public Guid TenantId { get; }
@@ -643,6 +833,26 @@ public sealed class ProcurementAwardReadinessEvaluatorSodTests
                 ProcurementEvaluationScoreSheetStatus.Locked);
             Context.AddRange(committee, appointment, first, second);
             await Context.SaveChangesAsync();
+        }
+
+        public async Task<TenderEvaluation> AddStandardScoreAttemptsAsync(
+            Guid tenderId, Guid evaluatorId)
+        {
+            await AddScoreAttemptsAsync(tenderId, evaluatorId);
+            var evaluation = await Context.TenderEvaluations
+                .Include(item => item.TenderEvaluator)
+                .SingleAsync(item => item.TenderBid.TenderId == tenderId);
+            evaluation.Status = "Submitted";
+            foreach (var sheet in await Context.ProcurementEvaluationScoreSheets.ToListAsync())
+            {
+                sheet.Phase = ProcurementEvaluationPhase.Combined;
+                sheet.ScoreSubjectType = "TenderEvaluation";
+                sheet.ScoreSubjectId = evaluation.TenderBidId;
+                sheet.ScoreSnapshotJson = TenderEvaluationService.BuildLegacyScoreSnapshot(
+                    evaluation, evaluation.SubmittedDate!.Value);
+            }
+            await Context.SaveChangesAsync();
+            return evaluation;
         }
 
         public async Task AddDuplicateFormalControlAsync(Guid tenderId)

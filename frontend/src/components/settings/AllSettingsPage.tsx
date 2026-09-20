@@ -32,6 +32,7 @@ export interface SettingsLink {
   searchPath: string;
   /** What the screen is for. Falls back to the ancestor path when a nav item does not carry one. */
   description?: string;
+  group?: string;
 }
 
 export interface SettingsCard {
@@ -71,6 +72,91 @@ const moduleOrder = [
   'Legal',
 ];
 
+const financeSettingsGroups = [
+  {
+    title: 'Core Accounting',
+    hrefs: [
+      '/administration/finance/settings',
+      '/administration/finance/access-scopes',
+      '/finance/accounts',
+      '/administration/finance/account-segments',
+      '/administration/finance/dimensions',
+      '/administration/finance/account-generator',
+    ],
+  },
+  {
+    title: 'Fiscal & Close',
+    hrefs: [
+      '/administration/finance/fiscal-calendar',
+      '/finance/fiscal-years',
+      '/finance/fiscal-periods',
+      '/administration/finance/close-templates',
+    ],
+  },
+  {
+    title: 'Banking',
+    hrefs: ['/finance/cash/accounts'],
+  },
+  {
+    title: 'Tax & Currency',
+    hrefs: [
+      '/administration/finance/tax',
+      '/administration/finance/currencies',
+    ],
+  },
+  {
+    title: 'Payments & Documents',
+    hrefs: [
+      '/administration/finance/payment-terms',
+      '/administration/finance/payment-methods',
+      '/administration/finance/document-numbering',
+    ],
+  },
+  {
+    title: 'Fixed Assets',
+    hrefs: ['/administration/finance/fixed-asset-categories'],
+  },
+  {
+    title: 'Unit Accounting',
+    hrefs: [
+      '/finance/unit-accounts',
+      '/administration/finance/unit-types',
+      '/administration/finance/ratio-definitions',
+    ],
+  },
+] as const;
+
+function organizeFinanceLinks(links: SettingsLink[]): SettingsLink[] {
+  const linksByHref = new Map(deduplicateLinks(links).map(link => [link.href, link]));
+  const groupedHrefs = new Set<string>(financeSettingsGroups.flatMap(group => [...group.hrefs]));
+
+  const grouped = financeSettingsGroups.flatMap(group =>
+    group.hrefs.flatMap(href => {
+      const link = linksByHref.get(href);
+      return link ? [{ ...link, group: group.title }] : [];
+    }),
+  );
+
+  const unclassified = Array.from(linksByHref.values())
+    .filter(link => !groupedHrefs.has(link.href))
+    .map(link => ({ ...link, group: 'Other Finance Settings' }));
+
+  return [...grouped, ...unclassified];
+}
+
+function groupCardLinks(links: SettingsLink[]) {
+  return links.reduce<Array<{ title: string; links: SettingsLink[] }>>((groups, link) => {
+    const title = link.group ?? '';
+    const existing = groups.find(group => group.title === title);
+    if (existing) {
+      existing.links.push(link);
+    } else {
+      groups.push({ title, links: [link] });
+    }
+    return groups;
+  }, []);
+}
+
 function flattenSettingsLinks(item: NavItem, trail: string[] = []): SettingsLink[] {
   const nextTrail = [...trail, item.title];
   if (item.children?.length) {
@@ -97,11 +183,13 @@ function addCardSource(cards: Map<string, SettingsCard>, item: NavItem, titleOve
   const existing = cards.get(key);
   const links = flattenSettingsLinks(item);
 
+  const mergedLinks = deduplicateLinks([...(existing?.links ?? []), ...links]);
+
   cards.set(key, {
     key,
     title,
     icon: existing?.icon ?? item.icon,
-    links: deduplicateLinks([...(existing?.links ?? []), ...links]),
+    links: title === 'Finance' ? organizeFinanceLinks(mergedLinks) : mergedLinks,
   });
 }
 

@@ -35,6 +35,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     private readonly IProcurementControlEventService _controlEvents;
     private readonly IProcurementSourcingCaseService _sourcingCases;
     private readonly IWorkflowService _workflowService;
+    private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly ISupplierValidationService _supplierValidation;
     private readonly IProcurementTenderDocumentControlService _tenderDocumentControlService;
     private readonly IProcurementEvaluationCommitteeControlService _evaluationCommittee;
@@ -51,7 +52,8 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         ISupplierValidationService supplierValidation,
         IProcurementTenderDocumentControlService tenderDocumentControlService,
         IProcurementEvaluationCommitteeControlService evaluationCommittee,
-        IProcurementAwardReadinessService awardReadiness)
+        IProcurementAwardReadinessService awardReadiness,
+        IWorkflowIntegrationService workflowIntegration)
     {
         _unitOfWork = unitOfWork;
         _currentUser = currentUser;
@@ -60,6 +62,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         _controlEvents = controlEvents;
         _sourcingCases = sourcingCases;
         _workflowService = workflowService;
+        _workflowIntegration = workflowIntegration;
         _supplierValidation = supplierValidation;
         _tenderDocumentControlService = tenderDocumentControlService;
         _evaluationCommittee = evaluationCommittee;
@@ -91,14 +94,18 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     public async Task<bool> IsControlledTenderMethodAsync(Guid tenderId, CancellationToken cancellationToken = default)
     {
         EnsureAuthenticatedTenant();
-        return await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+        // Once bound to the advanced lifecycle, never downgrade a retained control.
+        if (await Controls.GetQueryable(item => item.TenderId == tenderId &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted).AnyAsync(cancellationToken))
+            return true;
+        var source = await Tenders.GetQueryable(item => item.Id == tenderId && item.TenantId == _currentUser.TenantId && !item.IsDeleted)
             .Where(item => item.SourcingCaseId.HasValue)
             .Join(Cases.GetQueryable(item => item.TenantId == _currentUser.TenantId && !item.IsDeleted),
-                tender => tender.SourcingCaseId, sourcingCase => sourcingCase.Id, (_, sourcingCase) => sourcingCase.SelectedMethod)
-            .AnyAsync(method => method == ProcurementMethodType.NationalCompetitiveTendering ||
-                                method == ProcurementMethodType.InternationalCompetitiveTendering ||
-                                method == ProcurementMethodType.QualityBasedSelection ||
-                                method == ProcurementMethodType.QualityAndCostBasedSelection, cancellationToken);
+                tender => tender.SourcingCaseId, sourcingCase => sourcingCase.Id,
+                (_, sourcingCase) => new { sourcingCase.SelectedMethod, sourcingCase.AuthorityRouteId, sourcingCase.AuthorityRouteReference })
+            .SingleOrDefaultAsync(cancellationToken);
+        return source is not null && ProcurementTenderRouting.RequiresControlledLifecycle(
+            source.SelectedMethod, ProcurementTenderRouting.HasAdvancedAuthority(source.AuthorityRouteId, source.AuthorityRouteReference));
     }
 
     public async Task<bool> ShouldConcealFinancialProposalAsync(
@@ -186,6 +193,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 "This statutory tender-control stage requires an advanced authority route. The sourcing case remains valid for the standard approved-PR tender workflow.");
         if (!string.Equals(tender.Status, "Approved", StringComparison.OrdinalIgnoreCase))
             throw Conflict("TENDER_APPROVAL_REQUIRED", "The tender must complete its document approval workflow before advertisement.");
+        await TenderEvaluationConfiguration.ValidateAsync(_unitOfWork, tender);
         if (lineage.Case.SelectedMethod == ProcurementMethodType.QualityAndCostBasedSelection)
         {
             if (!tender.UseQCBSEvaluation)
@@ -216,7 +224,9 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         Require(request.AdvertisementReference, "TENDER_ADVERTISEMENT_REFERENCE_REQUIRED", "Advertisement reference is required.");
         Require(request.PublicationChannel, "TENDER_PUBLICATION_CHANNEL_REQUIRED", "Publication channel is required.");
         Require(request.AdvertisementEvidenceReference, "TENDER_ADVERTISEMENT_EVIDENCE_REQUIRED", "Advertisement evidence is required.");
-        if (!lineage.MethodRule.WorkflowDefinitionId.HasValue)
+        if (!lineage.MethodRule.WorkflowDefinitionId.HasValue &&
+            (await _workflowIntegration.HasActiveApprovalInstanceAsync(ApprovalSourceType, tenderId) ||
+             await _workflowIntegration.HasActiveApprovalWorkflowAsync(ApprovalSourceType)))
             throw Validation("TENDER_AWARD_WORKFLOW_REQUIRED", "The locked controlled method rule must select the shared award-approval workflow.");
 
         var now = DateTime.UtcNow;
@@ -412,7 +422,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         EnsureStatus(control, ProcurementTenderControlStatus.Advertised, "TENDER_OPENING_NOT_READY");
         if (DateTime.UtcNow < control.SubmissionDeadlineUtc)
             throw Conflict("TENDER_OPENING_BEFORE_DEADLINE", "Public opening cannot start before the submission deadline.");
-        await EnsureOpeningCommitteeQuorumAsync(control, cancellationToken);
+        await EnsureOpeningCommitteeQuorumAsync(control.TenderId, control.Method, control.SubmissionDeadlineUtc, cancellationToken);
         var onTime = control.SubmissionReceipts.Where(item => !item.IsDeleted &&
             item.Disposition == ProcurementTenderSubmissionDisposition.OnTimeAccepted).OrderBy(item => item.ReceivedAtUtc).ToList();
         var paymentAdmissions = await AssessPaymentAdmissionsAsync(
@@ -534,8 +544,33 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
     }
 
+    public async Task EnsureStandardOpeningReadyAsync(Guid tenderId, CancellationToken cancellationToken = default)
+    {
+        var tender = await LoadTenderAsync(tenderId, tracked: false, cancellationToken);
+        if (!tender.SourcingCaseId.HasValue) return;
+        var method = await Cases.GetQueryable(item => item.Id == tender.SourcingCaseId.Value &&
+                item.TenantId == _currentUser.TenantId && !item.IsDeleted)
+            .Select(item => (ProcurementMethodType?)item.SelectedMethod).SingleOrDefaultAsync(cancellationToken);
+        if (!method.HasValue)
+            throw Validation("TENDER_SOURCING_CASE_NOT_FOUND", "The locked sourcing case is unavailable.");
+        if (method is not (ProcurementMethodType.NationalCompetitiveTendering or ProcurementMethodType.InternationalCompetitiveTendering))
+            return;
+        var correlation = Guid.NewGuid().ToString("N");
+        var lineage = await RevalidateAsync(tender, correlation, cancellationToken);
+        if (await IsControlledTenderMethodAsync(tenderId, cancellationToken))
+            throw Conflict("TENDER_STATUTORY_OPENING_REQUIRED", "Use the signed controlled tender opening.");
+        if (!tender.SubmissionDeadline.HasValue || DateTime.UtcNow < EnsureUtc(tender.SubmissionDeadline.Value))
+            throw Conflict("TENDER_OPENING_BEFORE_DEADLINE", "Bids cannot be opened before the submission deadline.");
+        await _tenderDocumentControlService.EnsureOpeningReadyAsync(
+            ProcurementTenderDocumentSourceType.Tender, tenderId, correlation, cancellationToken);
+        await EnsureOpeningCommitteeQuorumAsync(tenderId, lineage.Case.SelectedMethod,
+            EnsureUtc(tender.SubmissionDeadline.Value), cancellationToken);
+    }
+
     private async Task EnsureOpeningCommitteeQuorumAsync(
-        ProcurementTenderControl control,
+        Guid tenderId,
+        ProcurementMethodType method,
+        DateTime submissionDeadlineUtc,
         CancellationToken cancellationToken)
     {
         ProcurementEvaluationCommitteeDto committee;
@@ -543,7 +578,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         {
             committee = await _evaluationCommittee.GetAsync(
                 ProcurementEvaluationSourceType.Tender,
-                control.TenderId,
+                tenderId,
                 cancellationToken);
         }
         catch (ProcurementEvaluationCommitteeNotFoundException)
@@ -553,7 +588,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 "Formal opening requires an active eligible evaluation committee and server-confirmed quorum recorded after the bidding window closed.");
         }
 
-        var permittedPhases = IsQualitySelection(control.Method)
+        var permittedPhases = IsQualitySelection(method)
             ? new[] { ProcurementEvaluationPhase.Technical }
             : new[]
             {
@@ -576,7 +611,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                              meeting.Status == ProcurementEvaluationMeetingStatus.QuorumConfirmed &&
                              meeting.QuorumMet &&
                              meeting.StartedAtUtc.HasValue &&
-                             meeting.StartedAtUtc.Value >= control.SubmissionDeadlineUtc;
+                             meeting.StartedAtUtc.Value >= submissionDeadlineUtc;
         if (!committeeReady)
             throw Conflict(
                 "TENDER_OPENING_COMMITTEE_QUORUM_REQUIRED",
@@ -790,28 +825,42 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
         var correlation = NormalizeCorrelation(correlationId);
         var control = await LoadControlAsync(tenderId, tracked: true, cancellationToken);
         await EnsureCapabilityAsync(ApprovePermission, control.Tender.TenderNumber, correlation, cancellationToken);
-        await RevalidateAsync(control.Tender, correlation, cancellationToken);
+        var lineage = await RevalidateAsync(control.Tender, correlation, cancellationToken);
         EnsureStatus(control, ProcurementTenderControlStatus.FinancialEvaluated, "TENDER_APPROVAL_NOT_READY");
         EnsureRowVersion(control.RowVersion, request.RowVersion);
         await EnsureCommitteeDecisionReadyAsync(control, correlation, cancellationToken);
-        if (!control.WorkflowDefinitionId.HasValue)
-            throw Validation("TENDER_AWARD_WORKFLOW_REQUIRED", "The locked method rule has no award approval workflow.");
+        if (control.WorkflowDefinitionId != lineage.MethodRule.WorkflowDefinitionId)
+            throw Validation("TENDER_AWARD_WORKFLOW_REQUIRED", "The recommendation must retain the exact workflow selected by its locked method rule.");
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
             await _unitOfWork.BeginTransactionAsync(cancellationToken);
             try
             {
-                var workflow = await _workflowService.StartApprovalWorkflowAsync(
-                    ApprovalSourceType, control.TenderId, control.WorkflowDefinitionId.Value);
-                if (!workflow.Success || !workflow.WorkflowInstanceId.HasValue)
+                var result = control.WorkflowDefinitionId.HasValue
+                    ? await _workflowIntegration.SubmitAsync(ApprovalSourceType, control.TenderId, control.WorkflowDefinitionId.Value)
+                    : await _workflowIntegration.SubmitAsync(ApprovalSourceType, control.TenderId);
+                var workflow = result.ExecutionResult;
+                if (!workflow.Success || (result.ApprovalRequired &&
+                    (!control.WorkflowDefinitionId.HasValue || !workflow.WorkflowInstanceId.HasValue ||
+                     result.Outcome != WorkflowOutcome.Pending)))
                     throw Conflict("TENDER_AWARD_WORKFLOW_START_FAILED", workflow.Message ?? "The exact award workflow could not be started.");
+                if (!result.ApprovalRequired && IsPpaRequired(lineage.Case.AuthorityRoute) &&
+                    string.IsNullOrWhiteSpace(request.PpaApprovalReference))
+                    throw Validation("TENDER_PPA_APPROVAL_REQUIRED", "The locked authority route still requires its PPA or central-review approval reference before completion.");
 
                 var now = DateTime.UtcNow;
-                control.Status = ProcurementTenderControlStatus.PendingApproval;
+                control.ApprovalRequired = result.ApprovalRequired;
+                control.Status = result.ApprovalRequired
+                    ? ProcurementTenderControlStatus.PendingApproval : ProcurementTenderControlStatus.Approved;
                 control.SubmittedForApprovalAtUtc = now;
                 control.SubmittedForApprovalById = _currentUser.UserId;
-                control.ApprovalActorsJson = JsonSerializer.Serialize(new[] { _currentUser.UserId }, JsonOptions);
+                control.ApprovalActorsJson = "[]";
                 control.WorkflowInstanceId = workflow.WorkflowInstanceId;
+                control.ApprovedAtUtc = null;
+                control.ApprovedById = null;
+                control.AuthorityApprovalReference = null;
+                if (!result.ApprovalRequired)
+                    control.PpaApprovalReference = NullIfWhiteSpace(request.PpaApprovalReference);
                 Touch(control, now);
                 await Controls.UpdateAsync(control);
                 await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -823,10 +872,12 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 throw;
             }
         }, cancellationToken);
-        await RecordAsync(control, "TenderRecommendationSubmitted", ProcurementControlEventResult.Allowed,
+        await RecordAsync(control, control.ApprovalRequired ? "TenderRecommendationSubmitted" : "TenderRecommendationCompleted", ProcurementControlEventResult.Allowed,
             new { control.RecommendedBidId, control.SubmittedForApprovalById },
             new { control.WorkflowDefinitionId, control.WorkflowInstanceId }, correlation, cancellationToken,
-            External($"workflow:{control.WorkflowInstanceId:N}", "Tender award workflow", "SRC-009"));
+            control.ApprovalRequired
+                ? External($"workflow:{control.WorkflowInstanceId:N}", "Tender award workflow", "SRC-009")
+                : External(control.FinancialEvaluationEvidenceReference!, "Completed tender recommendation", "SRC-009"));
         return Map(await LoadControlAsync(tenderId, tracked: false, cancellationToken));
     }
 
@@ -944,10 +995,10 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             correlation,
             cancellationToken);
         if (!control.SubmittedForApprovalById.HasValue ||
-            !control.ApprovedById.HasValue)
+            (control.ApprovalRequired && !control.ApprovedById.HasValue))
             throw Conflict("TENDER_AWARD_ACTOR_LINEAGE_REQUIRED",
                 "The controlled award requires both recommendation-maker and approval-actor lineage.");
-        if (control.SubmittedForApprovalById == control.ApprovedById)
+        if (control.ApprovalRequired && control.SubmittedForApprovalById == control.ApprovedById)
             throw new ProcurementTenderControlAuthorizationException(
                 "The recommendation maker cannot be the controlled award approver.");
         if (bid.TotalBidAmount <= 0m)
@@ -988,7 +1039,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                     OriginalBidAmount = bid.TotalBidAmount,
                     AwardedAmount = bid.TotalBidAmount,
                     Currency = awardCurrency,
-                    AwardedById = control.ApprovedById.Value,
+                    AwardedById = control.ApprovalRequired ? control.ApprovedById!.Value : _currentUser.UserId,
                     AwardJustification = request.AwardReference.Trim(),
                     Status = "Awarded",
                     Notes = $"Controlled statutory award evidence: {request.EvidenceReference.Trim()}",
@@ -1004,7 +1055,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                 control.Status = ProcurementTenderControlStatus.Awarded;
                 control.Tender.Status = "Awarded";
                 control.Tender.AwardDate = now;
-                control.Tender.AwardedById = control.ApprovedById.Value;
+                control.Tender.AwardedById = control.ApprovalRequired ? control.ApprovedById!.Value : _currentUser.UserId;
                 bid.Status = "Accepted";
                 bid.UpdatedAt = now;
                 Touch(control, now);
@@ -1416,7 +1467,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
     {
         control.LifecycleSnapshotJson = JsonSerializer.Serialize(new
         {
-            schemaVersion = "tdc.nct-ict-control.v1", control.Id, control.TenderId, control.SourcingCaseId,
+            schemaVersion = control.ApprovalRequired ? "tdc.nct-ict-control.v1" : "tdc.nct-ict-control.v2.no-approval", control.Id, control.TenderId, control.SourcingCaseId,
             control.MethodRuleId, control.AuthorityRouteId, control.Method, control.MethodRuleCode,
             control.AuthorityRouteReference, control.Status, control.AdvertisementReference, control.PublicationChannel,
             control.TenderDocumentReference, control.TenderDocumentVersion, control.DocumentFee,
@@ -1525,6 +1576,7 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
                     : control.RecommendedBidId == item.TenderBidId));
         return new ProcurementTenderControlDto
         {
+        ApprovalRequired = control.ApprovalRequired,
         TenderId = control.TenderId, TenderNumber = control.Tender.TenderNumber, TenderTitle = control.Tender.Title,
         Method = control.Method, MethodRuleCode = control.MethodRuleCode,
         AuthorityRouteReference = control.AuthorityRouteReference,
@@ -1570,10 +1622,13 @@ public sealed class ProcurementTenderControlService : IProcurementTenderControlS
             Milestone("DEC-006", "Signed public opening", control.OpenedAtUtc, control.OpeningEvidenceReference),
             Milestone("DEC-007", "Technical evaluation", control.TechnicalEvaluatedAtUtc, control.TechnicalEvaluationEvidenceReference),
             Milestone("DEC-008", "Financial evaluation", control.FinancialEvaluatedAtUtc, control.FinancialEvaluationEvidenceReference),
-            Milestone("DEC-009", "Exact authority approval", control.ApprovedAtUtc, control.AuthorityApprovalReference),
-            Milestone("DEC-010", "PPA or central approval", control.ApprovedAtUtc,
-                ppaRequired ? control.PpaApprovalReference : control.ApprovedAtUtc.HasValue ? "Not required by locked route" : null),
-            Milestone("DEC-011", "Approved recommendation", control.ApprovedAtUtc, control.RecommendedBidId?.ToString()),
+            Milestone("DEC-009", control.ApprovalRequired ? "Exact authority approval" : "Recommendation completion",
+                control.ApprovalRequired ? control.ApprovedAtUtc : control.SubmittedForApprovalAtUtc,
+                control.ApprovalRequired ? control.AuthorityApprovalReference : control.FinancialEvaluationEvidenceReference),
+            Milestone("DEC-010", "PPA or central approval", control.ApprovalRequired ? control.ApprovedAtUtc : control.SubmittedForApprovalAtUtc,
+                ppaRequired ? control.PpaApprovalReference : (control.ApprovalRequired ? control.ApprovedAtUtc : control.SubmittedForApprovalAtUtc).HasValue ? "Not required by locked route" : null),
+            Milestone("DEC-011", control.ApprovalRequired ? "Approved recommendation" : "Completed recommendation",
+                control.ApprovalRequired ? control.ApprovedAtUtc : control.SubmittedForApprovalAtUtc, control.RecommendedBidId?.ToString()),
             Milestone("DEC-012", "Award record", control.AwardedAtUtc, control.AwardReference),
             Milestone("DEC-013", "Executed contract", control.ContractedAtUtc, control.ContractReference),
             Milestone("DEC-014", "Successful bidder acceptance", control.AcceptedAtUtc, control.BidderAcceptanceReference)

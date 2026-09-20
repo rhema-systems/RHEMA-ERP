@@ -5,6 +5,7 @@ using ErpSystem.Core.Interfaces.Maintenance;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Services.Maintenance;
 using ErpSystem.Data;
+using ErpSystem.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -222,6 +223,14 @@ public class NotificationMonitoringController : ControllerBase
         var n = await repo.GetByIdAsync(notificationId);
 
         if (n == null || n.TenantId != tenantId || n.IsDeleted) return NotFound();
+
+        if (n.Message == UnifiedNotificationService.RedactedEmailAuditBody)
+        {
+            return BadRequest(new
+            {
+                error = "Sensitive email content was not retained. Retry delivery from the originating workflow to generate a fresh secret; the audit placeholder cannot be emailed."
+            });
+        }
 
         // Avoid accidental duplicate sends.
         if (string.Equals(n.Status, "Sent", StringComparison.OrdinalIgnoreCase))

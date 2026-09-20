@@ -32,6 +32,7 @@ public class PaymentCreateDto
     public string? Notes { get; set; }
     public bool IsCreditNote { get; set; }
     public List<InvoiceAllocationDto>? Allocations { get; set; }
+    public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class PaymentUpdateDto
@@ -55,6 +56,7 @@ public class PaymentUpdateDto
     public string? WithholdingCertificateNumber { get; set; }
     public DateTime? WithholdingCertificateDate { get; set; }
     public string? Notes { get; set; }
+    public ErpSystem.Core.DTOs.Finance.FinanceSourceDocumentDimensionInputDto? FinanceDimensions { get; set; }
 }
 
 public class PaymentQueryDto

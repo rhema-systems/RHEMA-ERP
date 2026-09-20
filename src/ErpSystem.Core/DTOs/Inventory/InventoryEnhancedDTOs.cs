@@ -369,6 +369,7 @@ public class InventoryTransferDto
     public Guid DestinationWarehouseId { get; set; }
     public string DestinationWarehouseName { get; set; } = string.Empty;
     public TransferStatus Status { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
     public TransferType TransferType { get; set; }
     public string Priority { get; set; } = "Normal";
     public DateTime RequestDate { get; set; }
@@ -704,6 +705,7 @@ public class ShipTransferItemDto
 
 public class PhysicalCountDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string CountNumber { get; set; } = string.Empty;
     public Guid WarehouseId { get; set; }
@@ -711,6 +713,7 @@ public class PhysicalCountDto
     public CountType CountType { get; set; }
     public string Status { get; set; } = string.Empty;
     public DateTime CountDate { get; set; }
+    public DateTime CreatedAt { get; set; }
     public DateTime? StartedDate { get; set; }
     public DateTime? CompletedDate { get; set; }
     public Guid? LocationId { get; set; }
@@ -738,6 +741,9 @@ public class PhysicalCountDto
 
 public class PhysicalCountDetailDto : PhysicalCountDto
 {
+    public bool CanReview { get; set; }
+    public bool CanDecide { get; set; }
+    public bool CanPost { get; set; }
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public Guid? StoresApprovedById { get; set; }
@@ -754,6 +760,8 @@ public class PhysicalCountDetailDto : PhysicalCountDto
 
 public sealed class PhysicalCountEvidenceDto
 {
+    public bool IsCurrentCountSheet { get; set; }
+    public bool IsImportedCountSheet { get; set; }
     public Guid CentralDocumentRecordId { get; set; }
     public Guid CentralDocumentVersionId { get; set; }
     public Guid FileUploadRecordId { get; set; }
@@ -781,6 +789,10 @@ public class PhysicalCountItemDto
     public decimal VarianceQuantity { get; set; }
     public decimal VarianceValue { get; set; }
     public decimal VariancePercent { get; set; }
+    /// <summary>Saved valuation unit cost for this count line; concealed during blind counting.</summary>
+    public decimal? CountUnitCost { get; set; }
+    /// <summary>Current stored InventoryItem.AverageCost across warehouses, for reference only.</summary>
+    public decimal? ItemAverageCost { get; set; }
     public string UnitOfMeasure { get; set; } = string.Empty;
     public string? LotNumber { get; set; }
     public string? SerialNumber { get; set; }
@@ -846,6 +858,8 @@ public class PhysicalCountMutationRequest
 
 public sealed class PhysicalCountDecisionRequest : PhysicalCountMutationRequest
 {
+    [Required, MaxLength(40)] public string DecisionCode { get; set; } = string.Empty;
+    [Required, MaxLength(64)] public string DecisionRevision { get; set; } = string.Empty;
     public bool Approved { get; set; } = true;
     [MaxLength(2000)] public string? Reason { get; set; }
 }
@@ -1072,6 +1086,9 @@ public class LandedCostDto
 
 public class LandedCostDetailDto : LandedCostDto
 {
+    public Guid? PurchaseOrderId { get; set; }
+    public Guid ReceiptId { get; set; }
+    public string EditToken { get; set; } = string.Empty;
     public string? ApprovedByName { get; set; }
     public DateTime? ApprovedDate { get; set; }
     public List<LandedCostItemDto> CostItems { get; set; } = new();
@@ -1080,6 +1097,10 @@ public class LandedCostDetailDto : LandedCostDto
 
 public class LandedCostItemDto
 {
+    public DateTime? InvoiceDate { get; set; }
+    public Guid? InvoiceId { get; set; }
+    public string? InvoiceNumber { get; set; }
+    public Guid? PurchaseOrderItemId { get; set; }
     public Guid Id { get; set; }
     public LandedCostType CostType { get; set; }
     public string Description { get; set; } = string.Empty;
@@ -1106,6 +1127,8 @@ public class LandedCostAllocationDto
 
 public class CreateLandedCostDto
 {
+    // A client-generated key allows an uncertain create response to be retried without duplicating charges.
+    public Guid? RequestId { get; set; }
     [Required]
     public Guid GoodsReceiptNoteId { get; set; }
 
@@ -1121,6 +1144,7 @@ public class CreateLandedCostDto
 
 public class CreateLandedCostItemDto
 {
+    public Guid? PurchaseOrderItemId { get; set; }
     [Required]
     public LandedCostType CostType { get; set; }
 
@@ -1145,6 +1169,12 @@ public class CreateLandedCostItemDto
 
     [MaxLength(100)]
     public string? ReferenceNumber { get; set; }
+}
+
+public class UpdateLandedCostDto : CreateLandedCostDto
+{
+    [Required]
+    public string EditToken { get; set; } = string.Empty;
 }
 
 public class SetManualLandedCostAllocationsDto
@@ -1172,6 +1202,13 @@ public class ManualLandedCostAllocationLineDto
 
 public class PurchaseReturnDto
 {
+    public Guid? SupplierDebitNoteId { get; set; }
+    public bool FinanceResolutionCompleted { get; set; }
+    public bool ApprovalRequired { get; set; } = true;
+    public bool CanSubmit { get; set; }
+    public bool CanApprove { get; set; }
+    public bool CanDispatch { get; set; }
+    public bool CanCancel { get; set; }
     public Guid Id { get; set; }
     public string ReturnNumber { get; set; } = string.Empty;
     public DateTime ReturnDate { get; set; }
@@ -1204,6 +1241,8 @@ public class PurchaseReturnDetailDto : PurchaseReturnDto
 
 public class PurchaseReturnItemDto
 {
+    public Guid? LocationId { get; set; }
+    public string? LocationName { get; set; }
     public Guid Id { get; set; }
     public Guid InventoryItemId { get; set; }
     public string ItemCode { get; set; } = string.Empty;
@@ -1277,8 +1316,10 @@ public class InventoryRequisitionDto
     public Guid Id { get; set; }
     public string RequisitionNumber { get; set; } = string.Empty;
     public string? Description { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public string? CostCenter { get; set; }
     public Guid WarehouseId { get; set; }
     public string WarehouseName { get; set; } = string.Empty;
@@ -1333,6 +1374,11 @@ public class InventoryRequisitionItemDto
     public decimal RequestedQuantity { get; set; }
     public decimal ApprovedQuantity { get; set; }
     public decimal IssuedQuantity { get; set; }
+    // IssuedQuantity is retained as the net balance for existing return/valuation clients.
+    public decimal GrossIssuedQuantity { get; set; }
+    public decimal ReturnedQuantity { get; set; }
+    public decimal NetIssuedQuantity => IssuedQuantity;
+    public decimal RemainingToIssueQuantity { get; set; }
     public string UnitOfMeasure { get; set; } = string.Empty;
     public decimal UnitCost { get; set; }
     public decimal TotalCost { get; set; }
@@ -1349,8 +1395,10 @@ public class InventoryRequisitionItemDto
 
 public class CreateInventoryRequisitionDto
 {
+    public Guid? DepartmentId { get; set; }
+
     [Required]
-    public Guid DepartmentId { get; set; }
+    public Guid OrganizationUnitId { get; set; }
 
     [MaxLength(100)]
     public string? DepartmentName { get; set; }
@@ -1388,6 +1436,7 @@ public class CreateInventoryRequisitionDto
 public class UpdateInventoryRequisitionDto
 {
     public Guid? DepartmentId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
 
     [MaxLength(100)]
     public string? DepartmentName { get; set; }
@@ -1595,8 +1644,10 @@ public sealed class InventoryIssueVoucherDto
     public string WarehouseName { get; set; } = string.Empty;
     public Guid? LocationId { get; set; }
     public string? LocationCode { get; set; }
-    public Guid DepartmentId { get; set; }
+    public Guid? DepartmentId { get; set; }
     public string? DepartmentName { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
+    public string? OrganizationUnitName { get; set; }
     public string? CostCenter { get; set; }
     public Guid? ProjectId { get; set; }
     public string? ProjectCode { get; set; }
@@ -1661,8 +1712,8 @@ public class ReturnRequisitionDto
     [Required, MaxLength(50)]
     public string ReasonCode { get; set; } = string.Empty;
 
-    [Required, MaxLength(1000)]
-    public string Reason { get; set; } = string.Empty;
+    [MaxLength(1000)]
+    public string? Reason { get; set; }
 
     [MaxLength(2000)]
     public string? Notes { get; set; }
@@ -1724,6 +1775,7 @@ public sealed class InventoryReturnVoucherActionDto
 
 public sealed class InventoryReturnVoucherDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid Id { get; set; }
     public string VoucherNumber { get; set; } = string.Empty;
     public Guid InventoryRequisitionId { get; set; }
@@ -1750,12 +1802,18 @@ public sealed class InventoryReturnVoucherDto
     public IReadOnlyList<InventoryReturnVoucherActionDto> Actions { get; set; } = Array.Empty<InventoryReturnVoucherActionDto>();
 }
 
-public sealed class DecideInventoryReturnVoucherRequest
+public sealed class DecideInventoryReturnVoucherRequest : IValidatableObject
 {
     public bool Approved { get; set; }
-    [Required, MaxLength(1000)] public string Comment { get; set; } = string.Empty;
+    [MaxLength(1000)] public string? Comment { get; set; }
     [Required] public string RowVersion { get; set; } = string.Empty;
     [Required, MaxLength(100)] public string IdempotencyKey { get; set; } = string.Empty;
+
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+    {
+        if (!Approved && string.IsNullOrWhiteSpace(Comment))
+            yield return new ValidationResult("A rejection reason is required.", new[] { nameof(Comment) });
+    }
 }
 
 public sealed class PostInventoryReturnVoucherRequest

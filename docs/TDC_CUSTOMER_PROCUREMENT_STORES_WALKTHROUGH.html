@@ -1,0 +1,1029 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>TDC Customer Procurement and Stores Walkthrough — updated 12 September 2026</title>
+<style>
+:root{--ink:#16283d;--muted:#52667a;--line:#dce5ec;--blue:#135d9e}
+*{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:#eef3f7;color:var(--ink);font:15px/1.65 "Segoe UI",Arial,sans-serif}
+header{background:#102b45;color:white;padding:24px max(24px,calc((100vw - 1136px)/2))}
+header strong{font-size:19px}header span{display:block;color:#c1d7eb;font-size:13px}
+nav{position:sticky;top:0;z-index:2;background:white;border-bottom:1px solid var(--line);display:flex;gap:10px;flex-wrap:wrap;padding:12px max(24px,calc((100vw - 1136px)/2))}
+nav a{border:1px solid #c3d6e6;border-radius:7px;padding:6px 12px;color:var(--blue);text-decoration:none;font-weight:600;font-size:13px}
+nav a:first-child{background:var(--blue);color:white;border-color:var(--blue)}nav a:hover{background:#e3eff9;color:var(--blue)}
+main{max-width:1184px;margin:28px auto;background:white;padding:40px 42px 55px;box-shadow:0 4px 28px #17324d0a;border:1px solid var(--line);border-radius:12px}
+h1{font-size:34px;line-height:1.2;letter-spacing:-.7px;margin:0 0 20px}h2{font-size:24px;line-height:1.3;color:#103d64;border-top:2px solid #dbe8f3;padding-top:24px;margin:40px 0 18px;scroll-margin-top:90px}
+h3{font-size:19px;line-height:1.4;margin:29px 0 13px;color:#164d78;scroll-margin-top:90px}
+h4{font-size:17px;margin:25px 0 12px;color:#164d78;scroll-margin-top:90px}
+p{margin:12px 0}a{color:#075da3;text-decoration-thickness:1px;text-underline-offset:2px}a:hover{color:#093e68}
+strong{font-weight:650}code{background:#f0f4f8;color:#153d63;border-radius:4px;padding:1px 4px;font-size:.88em;overflow-wrap:anywhere}
+table{width:100%;border-collapse:collapse;margin:18px 0 25px;font-size:13px;line-height:1.55}th,td{border:1px solid var(--line);padding:11px 12px;text-align:left;vertical-align:top;overflow-wrap:anywhere}th{background:#eaf2f8;color:#153e60;font-weight:650}tr:nth-child(even) td{background:#f8fafc}
+ul,ol{padding-left:24px}li{margin:7px 0}footer{color:var(--muted);font-size:12px;text-align:center;padding:0 20px 25px}
+details{margin:12px 0;padding:12px 16px;border:1px solid var(--line);border-radius:8px}summary{cursor:pointer;font-weight:650;color:var(--blue)}
+@media(max-width:760px){main{margin:12px;padding:22px 15px}h1{font-size:27px}h2{font-size:21px}table{font-size:12px}td,th{padding:7px}nav{position:static}}
+@page{size:A4 landscape;margin:14mm}
+@media print{body{background:white;font-size:10.5pt;line-height:1.5}header,nav,footer{display:none}main{margin:0;max-width:none;padding:0;box-shadow:none;border:0;border-radius:0}h1{font-size:25pt}h2{font-size:17pt;break-before:page;border-top:0;padding-top:0;margin-top:0}h3{font-size:13pt;break-after:avoid}h1,h2{break-after:avoid}table{font-size:9.5pt}th,td{padding:7px 8px}tr{break-inside:avoid}thead{display:table-header-group}a{color:#163f61;text-decoration:none}p{orphans:3;widows:3}code{font-size:9pt}li{margin:4px 0}}
+
+</style>
+</head>
+<body>
+<header><strong>TDC ERP · Customer walkthrough</strong><span>Updated 12 September 2026 · Count B20 · Transfer B21 · Supplier return B22 · Local UAT simulation · Browser print: Ctrl+P</span></header>
+<nav aria-label="Walkthrough sections"><a href="#part-a-30-minute-completed-record-demonstration">Start the 30-minute demo</a><a href="#part-s-supplier-onboarding-before-the-budget-walkthrough">Supplier onboarding</a><a href="#account-card-keep-this-beside-you">Accounts</a><a href="#part-b-fresh-run-transaction-script">Fresh-run steps</a><a href="#b15d-three-way-invoice-matching">Three-way matching</a><a href="#b20.physical-count-prepared-scope-only">B20 Physical count</a><a href="#b21-internal-stock-transfer">B21 Transfer</a><a href="#b22-supplier-return-from-an-accepted-grn">B22 Supplier return</a><a href="#b23-inventory-stock-disposal">B23 Disposal</a><a href="#part-c-alternative-procurement-routes">Alternative methods</a><a href="#part-d-if-something-unexpected-happens">Troubleshooting</a></nav>
+<main>
+<aside style="padding:16px;border:1px solid #c3d6e6;background:#eaf2f8;border-radius:8px"><strong>B12–B22 session guide:</strong> <a href="TDC_B12_B22_REHEARSAL_STEPS.html">Open the short, step-by-step script</a>. <a href="TDC_B12_B22_READINESS.md">Readiness and outstanding checks</a> are separate. This longer document retains reference material and historical evidence; old dates, costs, build and migration counts are not current readiness claims.</aside>
+<h1 id="tdc-customer-demonstration-uat-walkthrough">TDC customer demonstration &amp; UAT walkthrough</h1>
+<p><strong>Supplier onboarding, budget, procurement, receipt, invoice matching and Stores</strong><br>
+Prepared: <strong>7 September 2026, 09:04 UTC account check</strong> · Environment: <strong>localhost:3000 / DEFAULT</strong><br>
+Receipt-flow update: <strong>9 September 2026 — GRN-only walkthrough; rehearsal screen verified</strong>.<br>
+Invoice-flow update: <strong>10 September 2026 — separate landed-cost drafts from the goods invoice</strong>.<br>
+Physical-count update: <strong>12 September 2026 — B20 separates counter, Stores, Finance and Audit; remaining verification is listed explicitly</strong>.<br>
+Transfer/return update: <strong>12 September 2026 — B21 inter-bin transfer and automatic completion passed; B22 supplier-return edit and physical dispatch passed. Supplier-return Finance settlement remains pending.</strong><br>
+Disposal update: <strong>12 September 2026 — B23 implementation/testing in progress; live disposal not yet verified.</strong><br>
+All amounts are <strong>GHS</strong>. All examples are <strong>LOCAL UAT SIMULATION ONLY</strong>.</p>
+<h2 id="start-here-which-script-should-i-use-today">Start here — which script should I use today?</h2>
+<p><strong>For the customer session in 30 minutes, use Part A: the completed-record demonstration.</strong> It follows the actual record chain without repeating approvals, publishing another tender or posting stock again. Part B is the detailed fresh-transaction script for a prepared session, not a promise that an entire new procurement can be completed in 30 minutes.</p>
+<p>The Goods supplier-onboarding example reached approved supplier-portal access, with two contacts, two bank accounts and two verified test documents visible on both sides. The main Goods/NCT example then reached an active Supply contract, accepted receipt, issued GRN/MRN, an independently approved invoice, Stores issue/acknowledgement/return and a posted zero-variance count. The Petty example reached accepted receipt and issued GRN/MRN. These checkpoints were tested over several sessions, with fixes between stages. <strong>An uninterrupted rehearsal of this complete script has not been performed. Full UAT is not complete.</strong></p>
+<h3 id="important-before-the-customer-arrives">Important before the customer arrives</h3>
+<ul>
+<li><strong>GRN-only testing:</strong> use the <a href="http://127.0.0.1:3002/procurement/purchase-receipts/490b5d42-1a70-438a-9240-08de2223df82">rehearsal receipt</a> and confirm the <strong>REHEARSAL</strong> banner. Refresh if needed; the tab is <strong>GRN</strong>, with no MRN step. Stay on <strong>127.0.0.1:3002</strong> for every test and account change; this guide's <strong>localhost:3000</strong> links open the original UAT, not the rehearsal. Both production frontends have now been rebuilt and started; see B23's deployment checkpoint.</li>
+<li><strong>Control details:</strong> on the updated frontend, policy/compliance/gate details use <strong>Show details / Hide details</strong> accordions. Status and any current blocker remain visible; expand the relevant row for evidence or history. Collapsing a row does not bypass a check or remove a required action.</li>
+<li><strong>Stores access — corrected 9 September in both copies:</strong> <strong><code>manager</code> (John Manager)</strong> records and submits the receipt inspection using <code>TDC_STORES_OFFICER</code>. <strong><code>procurementapprover</code></strong> independently reviews it using the restored <code>TDC_STORES_MANAGER</code> role and a fresh active <strong>DEMO-PM</strong> assignment. Re-login as the approver after this access change. Neither account should approve its own work. These assignments remain available during the ongoing local UAT; review them for removal after demonstrations. Audit/count Finance and contract-review access still need their separate preparation checks.</li>
+<li><strong>Use existing records for today's demonstration.</strong> Do not reset data, resubmit completed approvals or create another invoice for the fully invoiced main receipt.</li>
+<li><strong>Do not pull, rebuild, restart or change policies immediately before the demonstration.</strong> The tested local checkout is not a claim that every fix is merged into the customer's deployment. Local preparation baseline: <code>e5ad6446c6</code>; Petty delivery work is in PR 205. Keep the currently running environment stable.</li>
+<li><strong>Sign in once before the session and open the intended pages.</strong> Local development pages have had slow initial compilation and occasional loading/chunk errors. A successful HTTP health check is not a browser rehearsal.</li>
+<li><strong>PDF presentation remains unverified:</strong> GRN/MRN records were issued, but the Open PDF click did not visibly open a PDF during the last tests. Do not promise a live PDF presentation without first opening it successfully. The award email was reported delivered by the user after a delay.</li>
+<li><strong>Supporting documents:</strong> the original bid had technical and commercial proposal files only. It is not evidence that business registration, tax clearance or financial statements were requested and submitted. Do not describe two proposal files as those compliance documents.</li>
+<li><strong>Alternative routes:</strong> RFQ, QBS, QCBS and Emergency remain unexecuted end to end. Demonstrate their intended route only, not a claimed completed transaction.</li>
+</ul>
+<h2 id="account-card-keep-this-beside-you">Account card — keep this beside you</h2>
+<p>Use <a href="http://localhost:3000/login">Sign in</a>. After every account change, select <strong>DEFAULT</strong>, check the displayed user, then reopen the record. Use the profile menu to sign out; changing the URL does not change the user. Passwords and OTPs are deliberately excluded: keep the privately agreed credentials separately.</p>
+<p>These are the local test-account mappings, not a statement that the architecture mandates these exact role names. Security-role memberships below were rechecked read-only at <strong>09:04 UTC on 7 September</strong>. This is not a fresh login test of every account or every permission.</p>
+<table>
+<thead>
+<tr>
+<th>Username</th>
+<th>Responsibility / relevant role</th>
+<th>Use in this script</th>
+<th>Current preparation note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>procurementofficer</code></td>
+<td>Procurement Officer / <code>TDC_PROCUREMENT_OFFICER</code></td>
+<td>Supplier application-fee verification/token-delivery controls; budget, market analysis, plan, PR, tender, publication, committee organization, award notification, PO maker and contract activation submitter</td>
+<td>Role present; current browser account at preparation. Not the supplier document-review/registration approver.</td>
+</tr>
+<tr>
+<td><code>financereviewer</code></td>
+<td>Finance Reviewer / <code>TDC_FINANCE_REVIEWER</code></td>
+<td>Budget approval; third plan review; count Finance review and posting</td>
+<td>Count Finance responsibility restored in both copies on 12 September; current rehearsal Finance review and posting verified</td>
+</tr>
+<tr>
+<td><code>manager</code></td>
+<td>John Manager / <code>TDC_USER_DEPARTMENT_HEAD</code></td>
+<td>First plan review</td>
+<td>Role present</td>
+</tr>
+<tr>
+<td><code>procurementapprover</code></td>
+<td>Head of Procurement / <code>TDC_HEAD_OF_PROCUREMENT</code></td>
+<td>Supplier document verification and registration approval; second plan review, tender/PO approval; configured document/bond review; tested contract draft creator</td>
+<td>Role present; do not approve its own contract or use as final Harbourline award approver: supplier-onboarding segregation blocked the latter in UAT</td>
+</tr>
+<tr>
+<td><code>employee</code></td>
+<td>Jane Employee / <code>TDC_MANAGING_DIRECTOR</code></td>
+<td>Final plan and PR approval; independent award approval; Stores requester and recipient; count Audit review</td>
+<td>Count <code>TDC_INTERNAL_AUDIT</code> role/responsibility restored in both copies on 12 September; MD role alone is insufficient</td>
+</tr>
+<tr>
+<td><code>tdc0102-checker-201531</code></td>
+<td>Specification Checker / <code>TDC_EVALUATOR</code></td>
+<td>Committee Chair and evaluator</td>
+<td>Role present; retain actual tender-specific appointment</td>
+</tr>
+<tr>
+<td><code>procurementevaluator</code></td>
+<td>Procurement Submitter / <code>TDC_EVALUATOR</code></td>
+<td>Committee Secretary and evaluator</td>
+<td>Role present; username differs from display name</td>
+</tr>
+<tr>
+<td><code>finance.manager</code></td>
+<td>Yaw Osei / Finance Manager and <code>TDC_EVALUATOR</code></td>
+<td>Committee voting member/evaluator; second invoice approval</td>
+<td>Both roles present; different responsibilities remain separate workflow actions</td>
+</tr>
+<tr>
+<td><code>ap.officer</code></td>
+<td>Akua Owusu / Accounts Payable Officer</td>
+<td>Receipt-linked invoice maker and submitter</td>
+<td>Role present</td>
+</tr>
+<tr>
+<td><code>accounts.officer</code></td>
+<td>Kofi Boateng / Accounts Officer</td>
+<td>First invoice approval</td>
+<td>Role present</td>
+</tr>
+<tr>
+<td><code>financial.controller</code></td>
+<td>Abena Dapaah / Financial Controller</td>
+<td>Final invoice approval</td>
+<td>Role present</td>
+</tr>
+<tr>
+<td><code>michael.martey@proton.me</code></td>
+<td>Harbourline Goods Supply Ltd supplier</td>
+<td>Supplier portal, bid and performance-bond submission</td>
+<td>Previously used supplier login; recheck privately before a supplier demonstration</td>
+</tr>
+<tr>
+<td>New applicant's own accessible email</td>
+<td>Applicant first; supplier user only after approval</td>
+<td>Fresh onboarding in Part S: email OTP, application token, then approved email/password login</td>
+<td>Supply a new email you control; do not invent an inbox or reuse Harbourline's existing email for a second registration</td>
+</tr>
+<tr>
+<td><code>admin</code></td>
+<td>Administrator</td>
+<td>Authorized setup only</td>
+<td>Never substitute Administrator for all business approvals</td>
+</tr>
+</tbody>
+</table>
+<h3 id="access-that-must-be-prepared-for-new-transactions">Access that must be prepared for new transactions</h3>
+<p>The following accounts use explicitly approved local-UAT access. Manager receiving and procurementapprover Stores Manager access were restored on 9 September; the count Finance/Audit responsibilities were restored in both copies on 12 September. Contract-review access still needs its separate preparation check. A listed username alone does not confirm every permission.</p>
+<table>
+<thead>
+<tr>
+<th>Intended actor</th>
+<th>Additional access used in the test</th>
+<th>Scope / independence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>manager</code></td>
+<td><code>TDC_STORES_OFFICER</code> — restored 9 September in main UAT and rehearsal</td>
+<td>Existing DEMO-PM warehouse scope, including LOC-001, retained. Distinct from requisition requester and Stores approver. Rehearsal receipt-source check verified Ready; refresh/re-login in the environment you will demonstrate.</td>
+</tr>
+<tr>
+<td><code>procurementapprover</code></td>
+<td><code>TDC_STORES_MANAGER</code> — restored 9 September in main UAT and rehearsal</td>
+<td>Fresh active DEMO-PM assignment, including its locations; no overnight expiry during ongoing UAT. Distinct from <code>manager</code>, who receives/submits. Sign out/in before reviewing the submitted inspection.</td>
+</tr>
+<tr>
+<td><code>manager</code></td>
+<td><code>TDC_HEAD_OF_PROCUREMENT</code> for the Supply contract review</td>
+<td>Independent of Procurement Approver (recorded creator) and Procurement Officer (activation submitter). This temporary role was removed. An equivalent independent authorized reviewer can be used only after preparation.</td>
+</tr>
+<tr>
+<td><code>financereviewer</code></td>
+<td>Active count Finance responsibility assignment — restored in both copies, 12 September</td>
+<td>Project Demo Warehouse (DEMO-PM), all its locations; count Finance review/posting only. Separate from counter and Stores reviewer.</td>
+</tr>
+<tr>
+<td><code>employee</code></td>
+<td><code>TDC_INTERNAL_AUDIT</code> plus Audit responsibility assignment — restored in both copies, 12 September</td>
+<td>Project Demo Warehouse (DEMO-PM), all its locations; separate from counter/Stores/Finance. Keep for the authorized UAT, then review temporary access for removal.</td>
+</tr>
+</tbody>
+</table>
+<p>Have the authorized administrator and the Finance owner confirm the remaining demo assignments through existing administration screens before new work. Do not bypass missing access or change Finance implementation. Re-login after any authorized role change. Keep the restored manager receiving and procurementapprover Stores approval access available while this UAT is ongoing; review temporary access for removal only after the relevant demonstrations are finished.</p>
+<h2 id="part-a-30-minute-completed-record-demonstration">Part A — 30-minute completed-record demonstration</h2>
+<p><strong>Mode: review only.</strong> Explain the business handoff, show status and workflow history, then move forward. Completed records usually do not show the action buttons used earlier. That is expected; do not reopen a transaction just to make a button appear. The links below are presenter shortcuts. During the explanation, point out the equivalent process-flow sidebar or module menu.</p>
+<table>
+<thead>
+<tr>
+<th>Minutes</th>
+<th>Account</th>
+<th>Open and show</th>
+<th>Suggested explanation / expected evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0–3</td>
+<td><code>procurementapprover</code></td>
+<td><a href="http://localhost:3000/administration/procurement/registrations/a5e48ae9-11ad-41cc-91d4-6e7b06384f81">Harbourline approved registration</a></td>
+<td>Show APP260EFAA91E, Goods, Approved, Contacts (2), Bank Accounts (2) and both Verified test documents. “The applicant verified their email, completed the fee/token stage and submitted these details; an independent staff reviewer approved them. Approval created the supplier account.” Do not approve or charge again.</td>
+</tr>
+<tr>
+<td>3–5</td>
+<td>Sign out; sign in <code>procurementofficer</code></td>
+<td><a href="http://localhost:3000/procurement/planning/budgets/81efe55a-9741-49ad-8ece-6e2685c18391">Budget PB-2026-0001</a></td>
+<td>“The approved Operations Goods budget is GHS 100,000. Finance reviewed it independently.” Current campaign remaining amount is GHS 47,250 after the main purchase and Petty receipt, not the earlier GHS 48,000 snapshot.</td>
+</tr>
+<tr>
+<td>5–7</td>
+<td>Same</td>
+<td><a href="http://localhost:3000/procurement/planning/market-analysis/2e485512-27d3-4321-804b-ba9203da5e42">Market analysis</a>, then <a href="http://localhost:3000/procurement/planning/plans/b3889e4f-5101-42ba-ad73-cb956cd768df">PP-2026-0001</a></td>
+<td>“Market analysis informed the Barcode estimate. The GHS 55,000 plan passed Department, Procurement, Finance and MD review, then publication.” Show two lines and workflow history.</td>
+</tr>
+<tr>
+<td>7–9</td>
+<td>Same</td>
+<td><a href="http://localhost:3000/procurement/planning/app-submissions">APP submissions</a>, then <a href="http://localhost:3000/procurement/purchase-requisitions/b9a17bc2-eb37-44ba-8601-dbf7c64250fc">PR-2026-0001</a></td>
+<td>“The approved plan has a controlled manual exchange record. This is a simulated acknowledgement, not an actual GHANEPS transmission. The PR retains its source lines and approval.”</td>
+</tr>
+<tr>
+<td>9–13</td>
+<td>Same</td>
+<td><a href="http://localhost:3000/procurement/tenders/55d2a153-a1ee-4217-9a8d-6014cd27a520">Tender TND-2026-0001</a>, then <a href="http://localhost:3000/procurement/bids/5367ed43-04bf-4b1e-a6c3-4d6b174b6b90">bid</a></td>
+<td>“Approved PR → sourcing decision → approved tender → controlled publication → supplier bid. After closing, committee attendance/quorum and opening permitted evaluation.” Show one GHS 52,000 bid and evaluation history. Proposal files are not tax-clearance evidence.</td>
+</tr>
+<tr>
+<td>13–17</td>
+<td>Same</td>
+<td><a href="http://localhost:3000/procurement/awards/7b579964-b892-46a8-a713-475087cae333">Award</a>, <a href="http://localhost:3000/procurement/purchase-orders/a0eae5c8-1915-4c68-9e94-001354ae5a34">PO-2026-0001</a>, <a href="http://localhost:3000/procurement/contracts/8a6347b8-b82b-4393-8b1c-db9e01c86a14">Supply contract</a></td>
+<td>“The award, PO and active Supply contract represent the same GHS 52,000 purchase, not two purchases. Commitment must not double. The performance-bond lifecycle was simulated.” Contract activation preceded receiving.</td>
+</tr>
+<tr>
+<td>17–20</td>
+<td>Same if read access permits; otherwise pre-authorized Stores viewer</td>
+<td>On the main PO, open the saved receipt → GRN</td>
+<td>Show REC260001 Accepted, inspection Closed and GRN-2026-0002 Issued/Reconciled. “Only accepted goods move into stock and become eligible for invoicing.” Avoid an unverified live PDF promise.</td>
+</tr>
+<tr>
+<td>20–24</td>
+<td>Sign out; sign in <code>ap.officer</code></td>
+<td><a href="http://localhost:3000/finance/ap/invoices/64e2e5a3-efe7-468c-a57f-cde051c67b76">Invoice VI-2026-00002</a></td>
+<td>Show GHS 52,000, matching Passed, Approved and Paid Amount zero. Explain <code>accounts.officer</code> → <code>finance.manager</code> → <code>financial.controller</code>; show history instead of repeating approvals. “The invoice was entered against accepted receipt quantities; it was not automatically generated as a supplier invoice PDF.”</td>
+</tr>
+<tr>
+<td>24–28</td>
+<td>Prepared authorized Stores viewer only</td>
+<td><a href="http://localhost:3000/inventory/warehouse-items">Warehouse Items</a>, <a href="http://localhost:3000/inventory/requisitions">Requisitions</a>, <a href="http://localhost:3000/inventory/physical-counts">Physical Counts</a></td>
+<td>Show 2 PVC issued, recipient acknowledgement, 1 returned, and the historical zero-variance count. Current PVC is 19; Barcode is now 21 after Petty. If view access is unavailable, use the recorded results below and explicitly say this part is evidence review, not a live click demonstration.</td>
+</tr>
+<tr>
+<td>28–30</td>
+<td><code>procurementofficer</code></td>
+<td><a href="http://localhost:3000/procurement/purchase-orders/f00862f4-712a-481b-8ee3-044489ff3934">Petty PO-2026-0002</a></td>
+<td>Show one Barcode at GHS 750, Received, REC260002 and issued GRN. Explain the shorter approved-quotation route. Close with the outstanding RFQ/QBS/QCBS/Emergency tests, not a claim that they passed.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Optional supplier view:</strong> if the supplier login is already prechecked, substitute two minutes of tender review with <a href="http://localhost:3000/external-portal/my-bids/5367ed43-04bf-4b1e-a6c3-4d6b174b6b90">My Bid</a>. Sign out of the staff account first. Show submitted proposal and bond history; do not upload or resubmit anything.</p>
+<h3 id="the-figures-to-say-aloud">The figures to say aloud</h3>
+<table>
+<thead>
+<tr>
+<th>Record / calculation</th>
+<th>Amount or quantity</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Approved budget</td>
+<td>GHS 100,000</td>
+</tr>
+<tr>
+<td>Main plan / PR estimate</td>
+<td>20 Barcode × 750 + 20 PVC × 2,000 = GHS 55,000</td>
+</tr>
+<tr>
+<td>Main bid / award / PO / contract / invoice</td>
+<td>20 Barcode × 700 + 20 PVC × 1,900 = GHS 52,000</td>
+</tr>
+<tr>
+<td>Historical budget availability immediately after main PO commitment</td>
+<td>GHS 48,000; not a second award or contract value</td>
+</tr>
+<tr>
+<td>Additional Petty purchase</td>
+<td>1 Barcode × 750 = GHS 750</td>
+</tr>
+<tr>
+<td>Campaign budget remaining after both receipts</td>
+<td>100,000 − 52,000 − 750 = GHS 47,250</td>
+</tr>
+<tr>
+<td>Current Barcode stock after Petty</td>
+<td>21 units / GHS 14,750</td>
+</tr>
+<tr>
+<td>Current PVC stock after issue and return</td>
+<td>20 − 2 + 1 = 19 units / GHS 36,100</td>
+</tr>
+<tr>
+<td>Main invoice paid amount</td>
+<td>GHS 0 — no payment demonstration</td>
+</tr>
+</tbody>
+</table>
+<p>These stock/budget values are the last reconciled campaign position around <strong>08:30 UTC on 7 September</strong>, not live telemetry. Recheck before presenting if another team member has posted transactions. The historical count shows Barcode 20 because it preceded the Petty receipt; that is not a contradiction.</p>
+<h2 id="part-s-supplier-onboarding-before-the-budget-walkthrough">Part S — supplier onboarding, before the budget walkthrough</h2>
+<p><strong>Account sequence:</strong> new applicant/email owner → <code>procurementofficer</code> (fee verification/token delivery) → applicant (application and documents) → <code>procurementapprover</code> (document review and approval) → newly approved supplier/email login.</p>
+<p>For today's three-minute review, use the approved <strong>Harbourline Goods Supply Ltd / APP260EFAA91E / SUP260001</strong> record linked in Part A. The steps below are for a <strong>new</strong> application. A fresh run depends on an accessible inbox, OTP/token delivery and the approved local fee-posting arrangement; it is not a guaranteed three-minute registration.</p>
+<h3 id="s0.prepare-the-new-supplier-and-evidence">S0. Prepare the new supplier and evidence</h3>
+<ul>
+<li>New example name: <strong>Seabright Demo Goods Ltd — LOCAL UAT</strong>; registration category <strong>Goods</strong>. This is a proposed fresh fixture, not an already registered company.</li>
+<li>Use a <strong>new email you control</strong> and a designated test contact number. Write the email on your private presenter sheet. Do not invent an inbox or use the existing Harbourline email for a duplicate application.</li>
+<li>Have two clearly labelled simulated contacts and two <strong>DO NOT PAY</strong> bank-detail fixtures ready. Use approved dummy account numbers, not real customer banking details. Choose one primary contact and one primary bank account; the historical example used GHS and USD bank-account currencies, while procurement remained GHS.</li>
+<li>Have a business-registration placeholder and tax-clearance placeholder ready, clearly marked <strong>LOCAL UAT ONLY — NOT A VALID CERTIFICATE</strong>. The earlier test reused <code>docs/erp-architecture-diagram.pdf</code> for both upload slots; that proved document handling, not genuine statutory compliance. Use current simulated issue/expiry dates where required.</li>
+<li>Confirm the configured application fee and payment methods. The tested Goods application used <strong>GHS 100</strong>, which is a local configuration value, not a universal TDC/PPA fee.</li>
+<li>Obtain the required authorization for any new <strong>simulated fee reconciliation/Finance posting</strong> before S3. No real transfer or bank settlement is part of this demonstration, and this script does not authorize Finance-code/configuration changes. If that setup is not ready, review the existing reconciled application instead.</li>
+</ul>
+<h3 id="s1.applicant-verifies-the-email-and-starts-the-application">S1. Applicant verifies the email and starts the application</h3>
+<p><strong>Actor:</strong> applicant; no staff account and no approved supplier password yet. Sign out of staff access and open <a href="http://localhost:3000/supplier-application">Supplier application</a>.</p>
+<p>Select the start-application tab, verification channel <strong>Email</strong>, enter the new email, company name and <strong>Goods</strong> category. Complete the displayed security challenge if enabled. Click <strong>Send verification code</strong> once. The email owner retrieves the newest OTP privately, enters it in the verification field and clicks <strong>Verify and continue</strong>.</p>
+<p><strong>Pass:</strong> a new application reference appears, initially Draft, with restricted payment-only access. Record its reference; do not expect a full approved supplier account yet. The OTP verifies contact ownership; it is <strong>not</strong> the later application token or supplier password.</p>
+<h3 id="s2.applicant-records-the-configured-application-fee">S2. Applicant records the configured application fee</h3>
+<p><strong>Actor:</strong> same applicant → <a href="http://localhost:3000/supplier-application/portal">Applicant portal</a> → <strong>Payment</strong>.</p>
+<p>Check the displayed fee/currency. For the authorized local simulation, choose <strong>Bank Transfer</strong> and a unique reference such as <code>LOCAL-UAT-SEABRIGHT-APP-FEE-001</code>; click <strong>Record configured payment</strong> once. This records the applicant's claim, not proof that money settled.</p>
+<p><strong>Pass:</strong> payment pending trusted verification; applicant returns to token login. Application editing, uploads and Submit for review remain unavailable while payment is unverified. Do not record another payment merely because the application token has not arrived.</p>
+<h3 id="s3.procurement-officer-verifies-the-fee-and-delivers-the-token">S3. Procurement Officer verifies the fee and delivers the token</h3>
+<p><strong>Actor:</strong> sign in as <strong><code>procurementofficer</code> / DEFAULT</strong> → Administration → Procurement → <a href="http://localhost:3000/administration/procurement/supplier-onboarding-tokens">Supplier onboarding tokens</a>.</p>
+<p>Find the <strong>new</strong> application/company and pending payment. Open it → <strong>Verify and post</strong>. Check amount, currency, payer and the authorized independent evidence; complete <strong>Provider transaction / cashier receipt reference</strong> and retain a clear simulated-UAT verification note. In real processing, use authentic provider/bank/cashier evidence, not only the applicant's reference. In the authorized simulation, explicitly label the evidence and posting as a test, with no real-settlement assertion. Confirm once through the ERP dialog.</p>
+<p><strong>Pass:</strong> payment Reconciled/Posted, one receipt and balanced fee journal, token Active and delivery recorded. Historical reference <strong>SUP-REC-2026-000008</strong> belongs to Harbourline and must not be reused for the new application. This onboarding fee is separate from the later purchase budget and supplier invoice.</p>
+<p>If delivery fails after posting, use <strong>Retry token delivery</strong> only when the application exposes that recovery action. It rotates/delivers a fresh token without reposting the fee. Do not verify/post the same payment again. A “Sent” audit entry alone is not proof of usable inbox content; confirm the applicant received the token. The earlier redacted-email-body defect required repair, so never accept “Sensitive email content omitted…” as a usable token email.</p>
+<h3 id="s4.applicant-opens-the-full-application-with-the-emailed-token">S4. Applicant opens the full application with the emailed token</h3>
+<p><strong>Actor:</strong> applicant. Sign out of staff access → <a href="http://localhost:3000/supplier-application?tab=login">Application token login</a>. Enter the <strong>latest application token</strong> privately in its named field and submit once.</p>
+<p><strong>Pass:</strong> the correct company/application opens at the restricted applicant portal, with <strong>Token Active</strong>, <strong>Payment Reconciled</strong> and no outstanding payment action. Application/Documents editing is now available. This is still the applicant portal, not the approved supplier's external portal.</p>
+<h3 id="s5.capture-company-details-multiple-contacts-and-multiple-banks">S5. Capture company details, multiple contacts and multiple banks</h3>
+<p><strong>Actor:</strong> applicant → <strong>Application</strong>.</p>
+<p>Complete Company name, Email, Phone, Tax number, Physical address, City, Country and <strong>Goods</strong> category using the prepared simulated fixture. Keep the verified email consistent. Under <strong>Contact Persons → Add contact</strong>, enter both test contacts and select exactly one primary. Under <strong>Bank Accounts → Add bank account</strong>, enter both DO NOT PAY test accounts, their currencies and exactly one primary. Use the fields shown; do not enter internal business-partner IDs.</p>
+<p>Click <strong>Save application</strong>, reopen Application and inspect both lists.</p>
+<p><strong>Pass:</strong> company details persist; <strong>2 contacts and 2 bank accounts</strong>, one primary in each list. Seeing only a legacy primary-contact/account summary is not sufficient to pass the multiple-record requirement.</p>
+<h3 id="s6.upload-the-required-documents-and-submit-for-review">S6. Upload the required documents and submit for review</h3>
+<p><strong>Actor:</strong> applicant → <strong>Documents</strong>. Select each configured requirement by name and upload its corresponding labelled placeholder using the file picker. Enter required simulated issue/expiry metadata. Check that the files are present under the correct requirement and their scanning state is usable; the historical configuration required business registration and tax clearance.</p>
+<p>Return to the application header → <strong>Submit for review</strong> once.</p>
+<p><strong>Pass:</strong> Submitted with retained contacts, banks and required attachments. Submit/upload/delete editing should no longer be offered for the submitted application. A filename alone does not verify the document or approve the supplier.</p>
+<h3 id="s7.independent-staff-review-verifies-documents-and-approves-onboarding">S7. Independent staff review verifies documents and approves onboarding</h3>
+<p><strong>Actor:</strong> sign in as <strong><code>procurementapprover</code> / DEFAULT</strong> → Administration → Procurement → <a href="http://localhost:3000/administration/procurement/registrations">Registrations</a> → open the <strong>new</strong> Submitted application.</p>
+<p>Inspect Company Details, <strong>Contacts (2)</strong> and <strong>Bank Accounts (2)</strong>, including primary flags and currencies. Review each scanned-clean file and use its <strong>Verify</strong> confirmation with explicit UAT-only notes. Then use the registration's approval action and proper confirmation, documenting that these are simulated records and <strong>not genuine certificates, banking instructions or real procurement authorization</strong>.</p>
+<p><strong>Pass:</strong> both configured documents Verified; application Approved; separate supplier master/account created; correct DEFAULT mapping and supplier-scoped access. The reviewer is different from the applicant and fee-verifying Procurement Officer. <strong>Do not use <code>procurementofficer</code> for document verification:</strong> its attempted review returned a permission denial in the tested run despite a visible button. Do not bypass it by granting broad admin access.</p>
+<p>The application token/session is retired when approval transitions the applicant to a supplier account. Do not continue using token login for normal supplier operations. Retain this onboarding reviewer's identity: later award segregation may prevent the same person approving an award to this supplier.</p>
+<h3 id="s8.supplier-activates-the-approved-account-and-checks-both-data-views">S8. Supplier activates the approved account and checks both data views</h3>
+<p><strong>Actor:</strong> newly approved supplier/email owner. Retrieve the <strong>Supplier portal account approved</strong> email privately. Use the approved email identifier and emailed temporary password at the normal <a href="http://localhost:3000/login">ERP sign-in page</a>, not the application-token form.</p>
+<p>Complete <strong>Change password</strong> if prompted, keeping both temporary and replacement credentials out of the script/screenshots. If returned to login, sign in again with the replacement password; select DEFAULT if required. Open <a href="http://localhost:3000/external-portal">External portal</a> and the approved application/business-partner entry from its dashboard.</p>
+<p><strong>Pass:</strong> the correct supplier sees Company Details / Goods, both contacts, both masked bank accounts and the two Verified onboarding documents. Staff already checked the same collections at S7. Confirm the account is supplier-scoped, not a platform administrator. For the historical supplier, the review shortcut is <a href="http://localhost:3000/external-portal/business-partner/a5e48ae9-11ad-41cc-91d4-6e7b06384f81">Harbourline supplier details</a>; access it only under its authorized supplier account. This route uses the registration reference, not the separately created supplier-master ID.</p>
+<p><strong>Handoff:</strong> record the supplier number and approved login identifier, sign out, then use <code>procurementofficer</code> for Part B's budget/plan/PR work. In a fresh procurement, choose this <strong>new supplier</strong> at participation/award stages rather than silently switching back to Harbourline. The existing-record presentation still uses Harbourline throughout its original linked chain. TDC supplier onboarding is not by itself proof of genuine GHANEPS registration or tender-specific eligibility.</p>
+<h3 id="supplier-specific-recovery-and-acceptance-notes">Supplier-specific recovery and acceptance notes</h3>
+<ul>
+<li><strong>Expired/invalid OTP:</strong> use the latest message and the same email; do not guess repeatedly. The tested page lacked a resend control after a challenge; recovery used a reload/re-entry/new request while preserving CAPTCHA/rate limits. If an application was already created, locate it before requesting another to avoid duplicates. This remains a recorded UX limitation.</li>
+<li><strong>Payment posted but token missing:</strong> inspect delivery state; recover delivery only, never pay/post again. A retried token can supersede the previous token.</li>
+<li><strong>Form Completion looks low:</strong> the historical submitted application displayed 10% despite saved data. Inspect the actual fields and required documents rather than approving solely from the percentage.</li>
+<li><strong>Password/portal acceptance:</strong> the earlier run verified a completed password-change state and subsequent supplier login, but did not directly observe the change screen or independently prove old-token/old-password rejection in that slice. This guide does not convert those gaps into passes.</li>
+<li><strong>Evidence:</strong> U01 core flow passed with two contacts, two banks, two Verified placeholders and approved portal access (EV-U01-001–019). Genuine statutory compliance, all negative/security cases and a fresh uninterrupted onboarding rehearsal remain unaccepted. No new emails, fees, approvals or account changes were triggered by adding this section.</li>
+</ul>
+<h2 id="part-b-fresh-run-transaction-script">Part B — fresh-run transaction script</h2>
+<h3 id="b0.preparation-gate-do-this-before-a-live-fresh-demonstration">B0. Preparation gate — do this before a live fresh demonstration</h3>
+<ul class="contains-task-list">
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Record the environment/build and use DEFAULT, Operations department and cost centre OPS; confirm the financial year is open and currency is GHS.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Verify every needed account can log in; restore only authorized temporary responsibilities and test their scope. Never use the maker for its independent approval.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Use a unique reference prefix, for example <code>LOCAL-DEMO-20260907-A</code>. Let the ERP generate document numbers. Do not type the historical IDs into business fields.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Arrange a <strong>fresh approved GHS 100,000 budget and GHS 55,000 plan</strong>, or an explicitly approved equivalent allocation. The existing budget's GHS 47,250 remaining is insufficient for another GHS 55,000 PR. Do not silently increase it.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Use the existing known Goods items and a verified supplier. Fresh supplier onboarding needs an accessible email and OTP/token delivery, followed by approval and portal login. Reusing Harbourline skips onboarding; disclose that choice.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Check published workflow, method/threshold policy, compatible evaluation template and controlled tender-document version. Match the <strong>exact policy version, source profile, procurement method and effective dates</strong>. A document published for policy v5 is not automatically valid for v8. Their local configuration is not automatically deployed by a code pull.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Choose future submission/opening dates with enough time for bidding. The historical 5 September dates are expired. Use only authorized accelerated local-test windows, never represent them as compliant public-notice periods.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Prepare separately named, clearly labelled simulated technical proposal, commercial proposal, supplier compliance documents, delivery evidence and any bond/signed-contract evidence. No genuine certificates or signatures are being asserted.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Record opening warehouse quantities and values. If replaying the main quantities against today's balance, expected ending stock will differ from the historical figures.</li>
+<li class="task-list-item"><input disabled="disabled" type="checkbox" /> Confirm the required accounting mappings through the existing setup; coordinate unresolved Finance-owned errors with that owner. No real bank/payment action belongs in this script.</li>
+</ul>
+<p><strong>Navigation rule:</strong> use the process-flow sidebar for the next stage and module menus for registers. “Open document register” is navigation; “Publish tender” changes tender state; formal bid opening is a later committee-controlled action. They are not interchangeable.</p>
+<h3 id="b1.create-and-approve-the-procurement-budget">B1. Create and approve the procurement budget</h3>
+<p><strong>Maker:</strong> <code>procurementofficer</code> → Procurement → Planning → <a href="http://localhost:3000/procurement/planning/budgets">Budgets</a> → New.</p>
+<p>Enter the fresh reference, Operations, open FY2026, GHS 100,000, valid effective date, and Goods allocation GHS 100,000. <strong>Check GHS explicitly</strong>: a USD default was observed earlier. Save, reopen and check Draft/zero usage, then Submit once using the ERP confirmation.</p>
+<p><strong>Handoff:</strong> <code>financereviewer</code> → open that budget → review allocation → Approve with a simulated-UAT comment.</p>
+<p><strong>Pass:</strong> Approved; independent Finance reviewer in workflow history; amount/allocation agree. Any later budget revision is a separate request and independent approval, not an immediately applied maker edit.</p>
+<h3 id="b2.publish-market-analysis-before-completing-the-plan">B2. Publish market analysis before completing the plan</h3>
+<p><strong>Actor:</strong> <code>procurementofficer</code> → Planning → <a href="http://localhost:3000/procurement/planning/market-analysis">Market Analysis</a> → New.</p>
+<p>Select <strong>PM-BARCODE-DEVICE / Barcode Device Kit</strong>, GHS, current test dates, historical price 700, estimate 750 and 14-day lead time. For a simulation, label survey entries “Simulated Vendor A/B/C — not received quotations”, with 700, 750 and 800 per EA. Save and Publish.</p>
+<p><strong>Pass:</strong> Published, three survey entries, average 750. Do not use an unknown catalogue product in the customer run: that path remains an open observation. These are planning survey entries, not three submitted RFQ offers.</p>
+<h3 id="b3.plan-four-reviews-then-publish">B3. Plan, four reviews, then publish</h3>
+<p><strong>Maker:</strong> <code>procurementofficer</code> → Planning → <a href="http://localhost:3000/procurement/planning/plans">Plans</a> → New. Link the new approved budget, Operations, Annual plan, current period and GHS 55,000 plan cap.</p>
+<p>Add Barcode <strong>20 EA × 750 = 15,000</strong>, linked to the Barcode analysis. Add PVC Pipe 50mm <strong>20 × 2,000 = 40,000</strong>, using its saved UOM and appropriate specification. Link both to Goods allocation. Set valid future delivery dates. Do not attach the Barcode analysis to PVC merely to fill a field. Final sourcing method is not chosen on the plan item.</p>
+<p>Submit. Sign out/in for <strong>this exact review order</strong>:</p>
+<ol>
+<li><code>manager</code> — Department Head review.</li>
+<li><code>procurementapprover</code> — Head of Procurement review.</li>
+<li><code>financereviewer</code> — Finance review.</li>
+<li><code>employee</code> — Managing Director final approval.</li>
+</ol>
+<p>Return as <code>procurementofficer</code> and Publish the approved plan.</p>
+<p><strong>Pass:</strong> Active/published plan; two approved lines totaling 55,000; four distinct reviewers in history. Do not assume approval alone means publication.</p>
+<h3 id="b4.record-the-controlled-manual-ghaneps-exchange">B4. Record the controlled manual GHANEPS exchange</h3>
+<p><strong>Actor:</strong> <code>procurementofficer</code> → Planning → <a href="http://localhost:3000/procurement/planning/app-submissions">APP submissions</a>.</p>
+<p>Generate export for the new published plan/revision; inspect its package and server-generated reference. Record submission with a unique <code>LOCAL-UAT-ONLY</code> reference, then record the simulated acknowledgement only as an explicitly labelled test event. Retain package/version/checksum and the event history. The negative rejection/resubmission branch is not needed in the customer happy path.</p>
+<p><strong>Pass:</strong> Acknowledged record for the exact published plan revision. This demonstrates controlled exchange, <strong>not an actual GHANEPS registration or transmission</strong>. In a real procurement use the actual external registration/submission and authentic response evidence required by the approved process; do not fabricate acknowledgement.</p>
+<h3 id="b5.create-the-pr-from-approved-plan-items">B5. Create the PR from approved plan items</h3>
+<p><strong>Maker:</strong> <code>procurementofficer</code> → open the Active plan → select both approved lines → Create/open Purchase Requisitions → <strong>Stock replenishment</strong> → <strong>Process 2 items</strong>.</p>
+<p>Open the new Draft PR. Check Operations/OPS, GHS 55,000, both source lines and dates. If category is blank, choose <strong>Goods</strong> on Edit. Upload a clearly named current simulated specification using the document selector; wait for its clean/usable DMS status. Review required details and acknowledged APP linkage; Submit for Approval once.</p>
+<p><strong>Handoff:</strong> <code>employee</code> → open the PR → assigned MD approval → Approve.</p>
+<p><strong>Pass:</strong> Approved; maker differs from approver; two 20-unit source lines; sourcing ready. The account named <code>procurementapprover</code> is not automatically the approver for every PR: follow the assigned published workflow.</p>
+<h3 id="b6.follow-the-sourcing-decision-from-the-approved-pr">B6. Follow the sourcing decision from the approved PR</h3>
+<p><strong>Actor:</strong> <code>procurementofficer</code> → approved PR → inspect recommended sourcing method → <strong>Create Tender</strong> when the approved policy recommends NCT.</p>
+<p>For the GHS 55,000 Goods example, the local policy routes to NCT. The PR-driven action creates/retains the sourcing release and case; do not separately create a duplicate case. Inspect source lineage using the sidebar if needed.</p>
+<p><strong>Pass:</strong> One linked sourcing release/case and tender draft, with both PR items. RFQ, Petty, QBS and QCBS are separate policy-driven branches; do not force their records through this NCT wizard.</p>
+<h3 id="b7.prepare-and-approve-the-tender">B7. Prepare and approve the tender</h3>
+<p><strong>Maker:</strong> <code>procurementofficer</code> → continue the PR-derived tender wizard.</p>
+<p>Use Goods/NCT, ITB, GHS and inherited items. Choose the <strong>standard Goods evaluation strategy before a compatible template</strong>; do not enable QCBS for this Goods example. The verified standard template is “LOCAL UAT - Standard Goods Evaluation”. Set future submission/opening dates and clear simulated terms. In <strong>Basic Information</strong>, record <strong>Bid validity period (calendar days)</strong> from the tender terms; the approver reviews this with the tender, and document binding calculates expiry from submission closing. No 30/60/90-day policy default is assumed. Confirm quantities, specification and lot totals before saving.</p>
+<p>Keep technical/commercial proposal requirements under their proper proposal classification. If the demonstration includes business registration, tax clearance or financial statements, configure those as the actual supporting-document requirements <strong>before publication</strong>, with matching labelled test files. That expanded supporting-document route needs a separate rehearsal; it was not covered by the original two-proposal test.</p>
+<p>Save the existing draft, Submit for Approval. <strong><code>procurementapprover</code></strong> independently reviews and approves.</p>
+<p><strong>Pass:</strong> Approved, not yet Published; correct method/template; one lot/two items and intentionally configured requirements. No premature document issue or bid opening.</p>
+<h3 id="b8.controlled-documents-and-publication">B8. Controlled documents and publication</h3>
+<p><strong>Document-step restart — TND-2026-0003:</strong> as <code>procurementofficer</code>, open <a href="http://localhost:3000/procurement/tender-documents/fd4b772b-5c76-43fd-8ba8-5e9fc96b9bf2">the empty v3 Draft</a> → <strong>Start document preparation</strong>, then follow B8a from step 2. This route passed through tender publication on 8 September and was reset to Approved/unbound. Demonstrate v3, not the retained Published v2. After <strong>8 September 11:00 UTC</strong>, use B8d before tender publication.</p>
+<p><strong>Start:</strong> the tender is <strong>Approved</strong>, but not Published. Sign in as <code>procurementofficer</code> and use the process sidebar → <strong>Open document register</strong>.</p>
+<p>Choose the matching starting point:</p>
+<ul>
+<li><strong>An Effective document is already listed:</strong> it is already bound; go to <strong>B8c</strong>.</li>
+<li><strong>Bind approved version is available:</strong> a published document exists; go to <strong>B8b</strong>.</li>
+<li><strong>No matching published document:</strong> prepare one using <strong>B8a</strong>.</li>
+</ul>
+<p>For a fresh document rehearsal, use B8a. A new Draft has no uploaded file; it does <strong>not</strong> reset a tender's existing binding.</p>
+<h4 id="b8a.prepare-and-approve-a-document">B8a. Prepare and approve a document</h4>
+<p>Have TDC's tender document ready: bidding instructions, specifications and terms—not the supplier's proposal. A clearly labelled sample file is acceptable for local UAT only.</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Account</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1. Create Draft</td>
+<td><code>procurementofficer</code></td>
+<td>Open <a href="http://localhost:3000/procurement/tender-documents">Controlled tender documents</a> → <strong>New controlled Draft</strong>, or open a suitable published version → <strong>Clone new Draft</strong>. Match the tender's policy, profile, method and workflow; save.</td>
+</tr>
+<tr>
+<td>2. Start preparation</td>
+<td><code>procurementofficer</code></td>
+<td><strong>Start document preparation</strong> → enter the preparation reference/comment → <strong>Start preparation</strong>. Expect <strong>Awaiting document upload</strong>.</td>
+</tr>
+<tr>
+<td>3. Upload and send</td>
+<td><code>procurementofficer</code></td>
+<td>Choose the file → <strong>Upload controlled content</strong> → wait for success → <strong>Send for approval</strong>. Check <strong>Waiting with</strong> for the reviewer.</td>
+</tr>
+<tr>
+<td>4. Review</td>
+<td>Assigned reviewer: <code>procurementapprover</code> in this setup</td>
+<td>Open the same document, review the clean-scanned file, complete required verification/checklists, then <strong>Approve workflow</strong>.</td>
+</tr>
+<tr>
+<td>5. Attach</td>
+<td><code>procurementofficer</code></td>
+<td>Select the reviewed file under <strong>Controlled workflow evidence document</strong> → <strong>Attach eligible content</strong>.</td>
+</tr>
+<tr>
+<td>6. Publish document</td>
+<td><code>procurementapprover</code></td>
+<td><strong>Publish approved version</strong> → review and confirm. Expect <strong>Document published</strong>.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Current NCT setup:</strong> policy <strong>TDC-F05B-NCT · v8</strong>; profile <strong>TDC-ACCEPTANCE-20260720201906</strong>; method <strong>NCT</strong>; workflow <strong>TDC Sourcing Approval · v1</strong>. Use the actual tender's settings for other routes.</p>
+<p><strong>Start preparation and Send for approval advance one workflow—not two approvals. Publishing the document does not publish the tender.</strong></p>
+<h4 id="b8b.bind-the-published-document">B8b. Bind the published document</h4>
+<p>As <code>procurementofficer</code>:</p>
+<ol>
+<li>Return to the tender → process sidebar → <strong>Open document register</strong> → <strong>Refresh</strong> → <strong>Bind approved version</strong>.</li>
+<li>Select the matching published version and check the submission/opening dates.</li>
+<li>If the validity period is blank, copy the days stated in the approved document; do not guess. <strong>Bid valid until</strong> calculates automatically. The <strong>page/clause note is optional</strong>.</li>
+<li>Check currency and free/paid document terms. If dates are suitable, leave <strong>Request new dates for approval</strong> unchecked.</li>
+<li>Click <strong>Bind immutable version</strong> once. Expect the effective document to be listed and readiness <strong>Ready</strong>; resolve any displayed blocker first.</li>
+</ol>
+<h4 id="b8c.publish-the-tender">B8c. Publish the tender</h4>
+<p>As <code>procurementofficer</code>, click <strong>Tender</strong> → <strong>Publish Tender</strong>. Review the publication checks and any required advertisement evidence, then confirm when ready.</p>
+<p><strong>Pass:</strong> tender status is <strong>Published</strong>. Only then issue documents to suppliers and continue to <strong>B9: supplier bidding</strong>.</p>
+<h4 id="b8d.date-changes-exception-only">B8d. Date changes — exception only</h4>
+<details>
+<summary>Open only if submission/opening dates need changing before publication</summary>
+<p>Use this only when the application offers the action.</p>
+<ol>
+<li><strong>Not bound yet:</strong> in <strong>Bind approved version</strong>, select <strong>Request new dates for approval</strong>. <strong>Already bound:</strong> use <strong>Reschedule before publication</strong>.</li>
+<li>Enter a future submission deadline later than the original, and an opening time later than both that deadline and the original opening. Select the approval workflow and enter the reason/evidence reference.</li>
+<li>Submit once. Follow <strong>Waiting with</strong>: complete any preparation task first, then the assigned independent reviewer approves the change. Requesters must not approve their own changes.</li>
+<li>Return as <code>procurementofficer</code> → <strong>Refresh</strong>. Continue only when the change is <strong>Approved</strong>, the effective dates are correct and readiness checks pass.</li>
+</ol>
+<p>Requesting dates does <strong>not</strong> immediately change them or publish the tender. Do not backdate or bypass controls.</p>
+</details>
+<h3 id="b9.supplier-submits-the-bid-before-closing">B9. Supplier submits the bid before closing</h3>
+<p><strong>Actor:</strong> supplier <code>michael.martey@proton.me</code> → <a href="http://localhost:3000/external-portal">External portal</a> → Available Tenders → the <strong>new</strong> published tender → create bid.</p>
+<p>Quote Barcode <strong>20 × 700 = 14,000</strong> and PVC <strong>20 × 1,900 = 38,000</strong>, total <strong>GHS 52,000</strong>, delivery 45 days for this simulated scenario. Complete terms, upload separately named technical/commercial proposals, and upload every actual supporting document configured on that tender. Verify each file appears under its intended requirement before submitting once.</p>
+<p><strong>Pass:</strong> Submitted before deadline; saved bid reference, amounts and files visible after reopening My Tender Bids. Check supporting-file count separately from the Proposals section. Do not substitute a portal registration for authentic GHANEPS eligibility evidence where required by the applicable tender.</p>
+<h3 id="b10.committee-attendance-quorum-and-bid-opening">B10. Committee, attendance, quorum and bid opening</h3>
+<p><strong>Organizer:</strong> <code>procurementofficer</code> → tender process sidebar → Committee controls. Use the tender-specific evaluation committee, with the prepared appointments below.</p>
+<table>
+<thead>
+<tr>
+<th>Account</th>
+<th>Assignment</th>
+<th>Own-account actions</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tdc0102-checker-201531</code></td>
+<td>Chair</td>
+<td>Accept invitation, record the test conflict declaration, confirm attendance, perform authorized Chair controls</td>
+</tr>
+<tr>
+<td><code>procurementevaluator</code></td>
+<td>Secretary</td>
+<td>Accept invitation, record declaration and attendance; retain meeting/opening record</td>
+</tr>
+<tr>
+<td><code>finance.manager</code></td>
+<td>Voting member</td>
+<td>Accept invitation, record declaration and attendance</td>
+</tr>
+</tbody>
+</table>
+<p>Create the meeting for after submission closes. Activate/complete the required appointments and collect each member's own response. For the tested configuration, minimum quorum is two <strong>and requires the Chair and Secretary</strong>; the historical meeting had all three present. A “No conflict” entry must only describe the simulated case, not invent a real disclosure.</p>
+<p>As <code>procurementofficer</code>, confirm quorum after the members' attendance is complete. After the actual deadline, use the tender register's <strong>Close</strong> action. From the Closed tender → Bids → View Details, use <strong>Open bid</strong> and its <strong>Mark Bid as Opened</strong> confirmation at/after the opening time. Closing submissions and opening the sealed bid are separate actions. Do not reopen an expired historical tender or backdate a new one to save time.</p>
+<p><strong>Pass:</strong> Closed/opened in the correct sequence; accepted members, meeting record, attendance, quorum and opening history retained. Evaluation documents become available only at the permitted stage.</p>
+<h3 id="b11.evaluate-verify-and-award">B11. Evaluate, verify and award</h3>
+<p><strong>Evaluators:</strong> each appointed member signs in separately and opens the bid's evaluation action. Use the compatible Standard Goods template. For the simulated scoring example enter <strong>90 for each criterion</strong>, with test-only reasons: Financial Stability 10%, Price Competitiveness 20%, Payment Terms 10%, Quality of Delivery 10%, Technical 50%. Total is 90%; template passing score is 80%. Submit each independent evaluation and the required recommendation.</p>
+<p><strong>Organizer / award preparation:</strong> <code>procurementofficer</code> → tender → Award / Award readiness. Review current evaluation results, bidder verification and any genuine policy blockers. If <strong>Verify selected</strong> is available, select the bidder and complete the actual configured verification/evidence action; a selection alone is not a passed verification. Supplier risk remains a feature, but a risk workflow is mandatory only where the applicable policy requires it.</p>
+<p><strong>Final approver:</strong> <code>employee</code> → assigned award approval → approve <strong>GHS 52,000</strong> with simulated evidence. Do not use the original supplier-onboarding reviewer to bypass the supplier/award segregation check. Do not type GHS 51,000 without the required authorized negotiation record and revised approval.</p>
+<p><strong>Pass:</strong> Approved award to Harbourline for 52,000, independent approver and current readiness evidence. Send the award notification once as <code>procurementofficer</code>; allow delivery time rather than repeatedly sending it.</p>
+<h3 id="b12.bond-po-and-required-supply-contract">B12. Bond, PO and required Supply contract</h3>
+<p><strong>Fresh rehearsal starting from the current UAT copy:</strong> continue <strong>PO-2026-0003</strong> and its existing active <strong>CTR-2026-00002</strong>. Do not create a second PO or contract from the same award. The creation steps below apply only when those records do not already exist.</p>
+<p><strong>Signed contract upload:</strong> open <strong>Contracts → CTR-2026-00002 → Documents → Upload Document</strong>. Set <strong>Document Type: Signed copy</strong>, choose <strong>CTR-2026-00002-SIMULATED-UAT-Supply-Contract.pdf</strong>, enter <strong>Simulated UAT only — not legally executed</strong>, then click <strong>Upload Document</strong>. Open the saved document and check the contract number, Harbourline supplier, GHS 52,000 total and both simulated signature sections. Refresh the PO's contract-signature check. The test file is prepared; upload and the refreshed check are not yet verified. Do not use the unrelated supplier-registration PDF as contract evidence.</p>
+<p><strong>Bond, when required:</strong> <code>procurementofficer</code> requests it with a clearly labelled simulated template; supplier uploads a simulated submission from My Bid → Performance Bond; the assigned independent reviewer reviews it. This is lifecycle testing, not a genuine bank guarantee.</p>
+<p><strong>PO maker:</strong> <code>procurementofficer</code> → award → <strong>Create Purchase Order / Contract</strong> → Purchase Order. Retain supplier, award and item lineage, GHS 52,000, warehouse <strong>DEMO-PM</strong> and line prices 700/1,900. Submit; <strong><code>procurementapprover</code></strong> independently approves. Check the formal budget commitment and the procurement's contract requirement.</p>
+<p><strong>PO line type:</strong> choose <strong>Stock goods</strong>, <strong>Non-stock goods</strong>, or <strong>Service</strong> as appropriate. Catalogue selection is optional: an ad hoc line needs its approved description, quantity, unit and price. For this goods walkthrough, keep Barcode and PVC as <strong>Stock goods</strong>; map or create their inventory records before stock receipt. Non-stock/service lines do not require a stock warehouse and must not generate inventory movements. Choosing an ad hoc line does not permit changing the approved source terms.</p>
+<p><strong>Contract maker:</strong> sign in as <code>procurementapprover</code>, the draft-creator account recorded in the tested contract history; return to the award's same action → <strong>Contract</strong> → type <strong>Supply</strong>, value 52,000, agreed simulated dates/45-day term and the required evidence. Retention is an architecture requirement to capture, but <strong>5% is not an architecture-prescribed default</strong>. The historical Supply test used <strong>0% as an explicit UAT assumption</strong>; positive retention needs its agreed clause/release terms.</p>
+<p>Return as <code>procurementofficer</code> and submit through <strong>Approval &amp; activation</strong>. <strong><code>manager</code>, only after the authorized independent Head-of-Procurement access is prepared</strong>, performs the assigned review and <strong>Revalidate and activate</strong> when all signature/evidence/bond conditions pass. The creator does not approve its own contract.</p>
+<p><strong>Pass:</strong> PO approved; required Supply contract Active <strong>before receipt</strong>; one GHS 52,000 purchase exposure, not GHS 104,000 for the same PO/contract. If contract is required but inactive, stop before receiving. Do not assume every Goods purchase is contract-exempt.</p>
+<p><strong>Check the PO document before issue:</strong> open the saved PO → <strong>Export PDF</strong>. Check the company, supplier, PO number/status, every item, quantity, unit, price, delivery details, agreed terms and <strong>GHS 52,000</strong> total. The export is a purchase-order document, not a copy of the screen's internal readiness panels. Draft/unapproved exports are marked <strong>NOT FOR ISSUE</strong>. <strong>Print</strong> opens the same PDF; use the PDF viewer's Print button. Planned landed-cost estimates are not added to the supplier's PO total by this export.</p>
+<h3 id="b13.receive-and-inspect-accepted-quantities-only">B13. Receive and inspect — accepted quantities only</h3>
+<p><strong>Account:</strong> <code>manager</code> (John Manager). Use <strong>127.0.0.1:3002</strong> for rehearsal; <strong>localhost:3000</strong> is the original UAT. The Stores Officer role was restored in both copies on 9 September. The PO must still be Approved and its required contract Active.</p>
+<p><strong>1. Create the receipt — on the Receive Goods page</strong></p>
+<ol>
+<li>Open the approved PO → <strong>Receive Goods</strong>. At the top, above <strong>Purchase Order Summary</strong>, check <strong>Governed receipt source: Ready</strong> and <strong>Receiving responsibility: Available to you</strong>. These are automatic status checks, not approval buttons. Use the circular refresh icon only if a status is stale after correcting a problem.</li>
+<li>Complete <strong>Receipt Date</strong> and the supplier's <strong>Delivery Note Number</strong>. Leave <strong>Requires Quality Inspection</strong> switched on for this walkthrough.</li>
+<li>For this full-delivery example, enter <strong>Received: 20</strong> for each item. Select <strong>DEMO-PM / Project Demo Warehouse</strong> and <strong>LOC-001 – Main on both lines</strong>. Use actual delivered quantities for a different delivery.</li>
+<li>Click <strong>Create Receipt</strong> once. After a successful save, the system opens the <strong>saved receipt details page</strong>. Note its receipt number. If saving fails, stay on the form and resolve the displayed error.</li>
+</ol>
+<p><strong>2. Attach the waybill — on the saved receipt page</strong></p>
+<ol start="5">
+<li>Stay as <code>manager</code>. Select the <strong>GRN</strong> tab at the top of the saved receipt. The <strong>GRN register</strong> button opens the same tab. <strong>This upload is not on the earlier Receive Goods form.</strong></li>
+<li>Under <strong>Supplier delivery evidence</strong>, select <strong>Evidence type: Waybill</strong>, enter <strong>Document reference</strong> and <strong>Document date</strong>, then use the file chooser under <strong>Clean-scanned file</strong> to select the simulated waybill PDF or image. Click <strong>Attach</strong>.</li>
+<li>Confirm <strong>Waybill ready</strong>, <strong>Attached</strong> and the correct filename. Entering a delivery-note/waybill number alone does not attach a file.</li>
+</ol>
+<p><strong>3. Record and submit inspection — on the same saved receipt</strong></p>
+<p>On the updated frontend, <strong>Inspection history &amp; technical details</strong> starts collapsed. DEC policy references and posting/audit details are for reference, not fields you need to complete. Quantities, required evidence, comments and action buttons remain visible.</p>
+<ol start="8">
+<li>Select <strong>Quality Inspection</strong>. If the page says no inspection case exists and shows <strong>Initialize inspection</strong>, click it once.</li>
+<li>For the full-acceptance example, record <strong>Accepted: 20</strong>, <strong>Rejected: 0</strong> on each line and appropriate inspection notes, then click <strong>Save inspection</strong>. <strong>Inspection actions → Comments (optional)</strong> is only for an additional note; leave it blank if not needed. Neither <strong>Save inspection</strong> nor <strong>Submit</strong> requires a comment. An independent approval/rejection or exception decision still requires its own reason.</li>
+<li>Under <strong>Controlled evidence</strong>, the <strong>Published DMS document</strong> list contains only current published evidence linked to this receipt or inspection, including its saved delivery attachments. Generated GRN/MRN documents and other receipts' documents are excluded. For <strong>Waybill</strong>, the file already attached in step 6 is linked automatically; confirm its filename and <strong>Linked evidence</strong>. If it is missing after an upload, click <strong>Refresh inspection evidence</strong>. For any additional requirement (such as an inspection report), select its correct receipt-linked published document. An attached waybill does not replace an inspection report. If the required report is absent, have it prepared/published and linked to this receipt or inspection through Document Management. Click <strong>Submit</strong> only after the displayed requirements are complete; do not select a GRN or MRN as substitute evidence.</li>
+</ol>
+<p><strong>4. Independent approval</strong></p>
+<ol start="11">
+<li>After <strong><code>manager</code></strong> successfully submits and the inspection shows <strong>Pending approval</strong>, sign out and sign in as <strong><code>procurementapprover</code></strong>. Its <strong><code>TDC_STORES_MANAGER</code></strong> role and fresh active DEMO-PM scope were configured in <strong>both local databases on 9 September</strong>. Reopen the <strong>same receipt number in the same environment</strong> → <strong>Quality Inspection</strong> → review quantities and evidence → enter the approval <strong>Comments</strong> → <strong>Approve</strong>. Do not approve as <code>manager</code>. The access repair did not submit or approve the inspection for you; a Draft inspection must first be submitted in step 10.</li>
+</ol>
+<p><strong>Pass:</strong> Receipt Accepted, inspection Closed, exactly the accepted quantities posted once. If only 10 units were accepted, only those 10 become eligible for stock and invoicing. Continue to <strong>B14 on this same receipt's GRN tab</strong>; attaching the waybill does not itself issue a GRN.</p>
+<details><summary>Accounting checkpoint: when the receipt reaches GL</summary><p>Approving accepted stock also creates the receipt's GL journal automatically, using <strong>Finance → Settings → Inventory Control</strong> (debit) and <strong>GRV Accrual Control</strong> (credit). This is separate from issuing the GRN document and from any later landed-cost posting. The local rehearsal REC260003 posted GHS 52,000 to Inventory (1200) / GRV Accrual Control (2110); do not manually post it again.</p></details>
+<p><strong>Display check:</strong> after inspection completion, <strong>PO → Receipts</strong> and the receipt details page should both show <strong>Inspection Complete</strong>. An unfinished inspection shows <strong>Inspection Required</strong>. Do not repeat a completed inspection because the receipt was originally marked as requiring one.</p>
+<h3 id="b14.complete-controlled-grnmrn-issuance">B14. Complete GRN issuance</h3>
+<p><strong>Where:</strong> on the saved receipt → <strong>GRN</strong> tab (or <strong>GRN register</strong> button). There is <strong>no MRN step</strong>.</p>
+<p><strong>Already issued?</strong> Skip signing and issuing. Review the GRN and continue to B15; use <strong>Open PDF</strong> only to check the output. Do not cancel or reissue it to repeat the demonstration.</p>
+<p>For a GRN that has not yet been issued:</p>
+<ol>
+<li>Confirm inspection approval is complete. Read <strong>Receipt document checks</strong>; expand <strong>Show details</strong> only if you need to resolve a failed check.</li>
+<li><strong><code>procurementapprover</code>:</strong> on the GRN card, select <strong>Signatory role → Approving Officer</strong> → <strong>Sign</strong>. Skip if that signature is already present.</li>
+<li>Sign out and log in as <strong><code>manager</code></strong>, reopening the same receipt in the same environment. Select <strong>Signatory role → Stores</strong> → <strong>Sign</strong>. Skip if already signed. A signing comment is optional.</li>
+<li>With both configured signatures present and checks passing, the account authorized to issue enters <strong>Action comment / cancellation reason</strong> → clicks <strong>Issue</strong> on the GRN card. This issue comment is required; it is separate from optional inspection comments. If <strong>Issue</strong> is unavailable, resolve the displayed check or use the configured authorized issuer; do not repeat inspection approval.</li>
+</ol>
+<p><strong>Pass:</strong> GRN <strong>Issued</strong>, with <strong>GRN reconciliation: Reconciled</strong> under <strong>GRN history &amp; technical details</strong>. Continue to <strong>B15</strong> against the same accepted receipt, using only quantities not already invoiced. PDF presentation is a separate check; issued status alone does not prove the PDF opened.</p>
+<p><strong>Verified rehearsal checkpoint — 9 September:</strong> <strong>REC260003 → GRN-2026-0004</strong> showed <strong>Issued</strong>, both signatures, four history events and <strong>6 of 6 checks passed / Ready</strong>. No MRN card or action was displayed. This is a completed checkpoint to review, not a request to create another receipt or issue another GRN.</p>
+<p><strong>Historical records:</strong> existing MRNs and their audit history remain stored. Earlier MRN references in this guide record past tests, not current operator steps. Approval checks and saved policies remain in force.</p>
+<h3 id="b15.record-the-supplier-invoice-against-accepted-supply">B15. Landed costs and supplier invoices</h3>
+<p><strong>Keep the two flows separate:</strong> landed-cost invoices are generated by <strong>Post</strong>. The goods invoice is recorded separately against accepted GRN quantities.</p>
+<p><strong>Stay in the same environment:</strong> <a href="http://127.0.0.1:3002/finance/ap/invoices">Rehearsal invoices — 127.0.0.1:3002</a> · <a href="http://localhost:3000/finance/ap/invoices">Main UAT invoices — localhost:3000</a>. Rehearsal deployment does not update main UAT automatically.</p>
+<p><strong>Continuing the current rehearsal?</strong> LC26090977 already has its GHS 310 and GHS 50 invoices. Start at <a href="#b15b-review-generated-landed-cost-invoices"><strong>B15b</strong></a>; do not repeat B15a.</p>
+<h4 id="b15a-post-new-landed-costs">B15a. Post new landed costs — <code>manager</code></h4>
+<p>Skip this step if there are no extra charges or all the voucher's invoices are already linked. Use the receiving account with the receipt's warehouse access.</p>
+<ol>
+<li>Open the saved receipt → <strong>Landed Cost → Add receipt costs</strong>. No PO estimate is required.</li>
+<li>Enter each charge's type, description, amount, currency/exchange rate and <strong>Cost supplier</strong>. Under <strong>Applies to</strong>, choose all received stock items and an allocation method, or one received item. Review → <strong>Save draft costs</strong>.</li>
+<li>Click <strong>Allocate</strong>. Check that allocated charges equal the voucher total and unallocated is <strong>0</strong>.</li>
+<li>Click <strong>Post</strong>. Confirm each supplier, supplier invoice reference and invoice date → <strong>Confirm Post</strong>. Capture tax later, not here.</li>
+</ol>
+<p><strong>Pass:</strong> inventory posted and one AP draft per supplier/currency/bill reference, with invoice links. This does not change the goods PO total or approve/pay the invoices.</p>
+<p><strong>Inventory posted but invoices missing?</strong> Use <strong>Retry Post → Finish invoice drafts</strong>. Do not allocate again or add duplicate charges.</p>
+<details>
+<summary>Allocation formula and GHS 360 worked example</summary>
+<p><strong>Allocate</strong> splits charges across eligible received items; it does not post inventory or create invoices.</p>
+<p><strong>Shared charge (ByValue):</strong> <code>Line allocation = charge amount × (eligible receipt line value ÷ total eligible receipt line value)</code>. Calculate each charge separately in the voucher currency. For this fully accepted receipt, line value is quantity × original unit cost, before landed costs.</p>
+<p><strong>Item-specific charge:</strong> choose that item under <strong>Applies to</strong>. Only its matching eligible receipt lines share the charge; when there is one matching line, it receives 100%.</p>
+<p><strong>Example — REC260003 / LC26090977, all amounts in GHS:</strong> freight <strong>310</strong> shared <strong>ByValue</strong>, plus handling <strong>50</strong> for PVC Pipe only. The eligible receipt value is <strong>38,000 + 14,000 = 52,000</strong>.</p>
+<table>
+<thead><tr><th>Received item</th><th>Receipt value</th><th>Shared freight calculation</th><th>Item-only handling</th><th>Total allocation</th></tr></thead>
+<tbody>
+<tr><td>PVC Pipe 50mm</td><td>20 × 1,900 = 38,000</td><td>310 × 38,000 ÷ 52,000 = 226.54</td><td>50.00</td><td><strong>276.54</strong></td></tr>
+<tr><td>Barcode Device Kit</td><td>20 × 700 = 14,000</td><td>310 × 14,000 ÷ 52,000 = 83.46</td><td>0.00</td><td><strong>83.46</strong></td></tr>
+<tr><td><strong>Total</strong></td><td><strong>52,000.00</strong></td><td><strong>310.00</strong></td><td><strong>50.00</strong></td><td><strong>360.00</strong></td></tr>
+</tbody>
+</table>
+<p><strong>Per-unit check:</strong> <code>Additional cost per unit = line's total allocation ÷ eligible quantity</code>; <code>New unit cost = original unit cost + additional cost per unit</code>. PVC: <strong>1,900 + 276.54 ÷ 20 = 1,913.8270</strong>. Barcode: <strong>700 + 83.46 ÷ 20 = 704.1730</strong>. Count each line's 20 units once, even when it receives both freight and handling.</p>
+<p><strong>Other methods:</strong> ByQuantity uses eligible quantity instead of value; ByWeight/ByVolume use eligible quantity × the item's saved unit weight/volume; Equal splits the charge equally between eligible receipt lines, not individual units. The selected method applies only within the charge's <strong>Applies to</strong> scope. Allocations are rounded to two decimals, with the final line taking any rounding remainder so the charge reconciles exactly.</p>
+<p><strong>Expected allocation:</strong> Total <strong>360.00</strong>, Allocated <strong>360.00</strong>, Unallocated <strong>0.00</strong>. LC26090977 is already posted in rehearsal; review it without reposting.</p>
+</details>
+<h4 id="b15b-review-generated-landed-cost-invoices">B15b. Review generated landed-cost invoices — <code>ap.officer</code></h4>
+<p><strong>Do not click Record Invoice for these charges.</strong></p>
+<ol>
+<li>Go to <strong>Finance → Accounts Payable → Invoices</strong> and open the existing landed-cost draft, or use its link on the receipt.</li>
+<li>Click <strong>Edit invoice</strong>. Check supplier, charges, invoice reference and date.</li>
+<li>Set each line's <strong>Tax treatment</strong>. For <strong>Standard</strong>, select the applicable purchase <strong>Tax Group</strong>; otherwise select the correct exempt/zero-rated/out-of-scope treatment. Do not leave <strong>Pending review</strong>.</li>
+<li>Click <strong>Save Changes</strong>, check the updated totals, then <strong>Submit for Approval</strong> when the invoice checks pass. Follow its configured approval workflow; stop before payment.</li>
+</ol>
+<p><strong>Current rehearsal — LC26090977 (GHS 360 before tax):</strong></p>
+<table>
+<thead><tr><th>Existing invoice</th><th>Supplier</th><th>Charge before tax</th></tr></thead>
+<tbody>
+<tr><td>VI-2026-00003</td><td>Adom Construction Ltd</td><td>GHS 310</td></tr>
+<tr><td>VI-2026-00004</td><td>Seabright Demo Goods Ltd</td><td>GHS 50</td></tr>
+</tbody>
+</table>
+<p><strong>Pass:</strong> existing drafts updated with the correct tax treatment; no duplicate invoices or inventory posting. If already submitted, review its status instead of submitting again.</p>
+<details>
+<summary>View cost links or link an already-recorded bill</summary>
+<p><strong>View:</strong> PO → <strong>Overview → Actual receipt landed costs → Show details</strong>. On an invoice, check <strong>Linked to this invoice</strong>.</p>
+<p><strong>Already recorded elsewhere?</strong> As <code>ap.officer</code>: receipt → <strong>Landed Cost → Cost Lines → Link invoice</strong> → select the existing bill. Check supplier, currency and charge. Do not generate another invoice for it.</p>
+<p>Posting a landed-cost invoice clears the landed-cost accrual and credits the supplier payable; it does not add inventory value again.</p>
+</details>
+<h4 id="b15c-record-goods-invoice">B15c. Record the goods invoice — accepted GRN quantities only — <code>ap.officer</code></h4>
+<p><strong>Only do this if the goods invoice has not already been recorded.</strong> This is Harbourline's goods bill, separate from the freight/handling invoices above.</p>
+<ol>
+<li>Go to <strong>Finance → Accounts Payable → Invoices</strong>. Search for the existing goods invoice first. If absent, click <strong>Record Invoice</strong>.</li>
+<li>Select <strong>Harbourline Goods Supply Ltd</strong>, the approved PO and the supplier invoice reference/date.</li>
+<li>Use only <strong>accepted receipt quantities not already invoiced</strong>. For the full example: <strong>20 × 700 + 20 × 1,900 = GHS 52,000 before tax</strong>. Do not add the separately invoiced landed costs.</li>
+<li>Enter the actual tax details → <strong>Save</strong> once → reopen the saved invoice.</li>
+<li>Continue to <a href="#b15d-three-way-invoice-matching"><strong>B15d — Three-way invoice matching</strong></a> before submitting for approval.</li>
+</ol>
+<p><strong>No accepted quantities available?</strong> Stop; do not manually enter ordered quantities to create another invoice.</p>
+<p><strong>Pass:</strong> goods invoice saved with the PO and accepted receipt linked. Landed-cost draft generation does not create this goods invoice.</p>
+<h4 id="b15d-three-way-invoice-matching">B15d. Three-way invoice matching — <code>ap.officer</code></h4>
+<p><strong>Match these three records: approved PO ↔ accepted GRN ↔ goods supplier invoice.</strong> This step is for Harbourline's goods invoice, not the GHS 310 and GHS 50 landed-cost invoices.</p>
+<ol>
+<li>Go to <strong>Finance → Accounts Payable → Invoices</strong> → open the saved <strong>goods invoice</strong>.</li>
+<li>On the invoice details page, find <strong>Mandatory three-way matching</strong> → click <strong>Re-evaluate</strong>.</li>
+<li>Review <strong>Control checks</strong>: the supplier and currency must match; prices must agree with the PO within configured tolerances; cumulative invoiced quantities must not exceed accepted receipt quantities within those tolerances. Rejected or unreceived goods must not be invoiced.</li>
+<li>For this no-variance UAT case, confirm <strong>Approval ready</strong>, <strong>Control passed</strong>, and the individual checks <strong>Passed</strong>. Review any <strong>Variances</strong> before proceeding.</li>
+<li>If <strong>Approval blocked</strong> or <strong>Hard stop active</strong> appears, stop and resolve the displayed issue. Otherwise click <strong>Submit for Approval</strong> → continue to <strong>B16</strong>.</li>
+</ol>
+<p><strong>Example:</strong> 20 Barcode Device Kits × GHS 700 and 20 PVC Pipes × GHS 1,900 = <strong>GHS 52,000 before tax</strong>, only when all those quantities are accepted and not already billed on another invoice.</p>
+<p><strong>Pass:</strong> the matching result allows approval and retains the PO/accepted-GRN links. If the invoice is already approved, review the result without submitting it again.</p>
+<h3 id="b16.complete-three-independent-invoice-reviews">B16. Complete three independent invoice reviews</h3>
+<p>Open the same saved invoice after each sign-out/sign-in:</p>
+<ol>
+<li><strong><code>accounts.officer</code></strong> — Accounts Officer Review → inspect matching → Approve.</li>
+<li><strong><code>finance.manager</code></strong> — Finance Manager Approval → inspect matching → Approve.</li>
+<li><strong><code>financial.controller</code></strong> — Financial Controller Final Approval → inspect matching → Approve.</li>
+</ol>
+<p><strong>Pass:</strong> Approved, Completed workflow, three distinct review entries, balanced AP journal, Paid Amount <strong>0</strong>. The AP maker does not approve its own invoice. Refresh read-only workflow state after a successful approval if the previous button lingers; do not click it a second time. <strong>Stop before payment.</strong> Finance implementation and payment permission changes are outside this walkthrough.</p>
+<h3 id="b17.reconcile-inventory-and-create-the-stores-requisition">B17. Reconcile inventory and create the Stores requisition</h3>
+<p><strong>Prepared Stores viewer:</strong> Inventory → Items &amp; Catalogue → <a href="http://localhost:3000/inventory/warehouse-items">Warehouse Items</a> → DEMO-PM. Record the new receipt's movements and before/after quantity/value. Do not confuse the historical count or a legacy movement list with the current posted inventory ledger.</p>
+<p><strong>Requester:</strong> sign in as <code>employee</code> → <strong>Inventory → My requisitions → New Requisition</strong> (<a href="http://localhost:3000/inventory/requisitions">open register</a>). Select Operations, <strong>Project Demo Warehouse (DEMO-PM)</strong>, required date and a departmental-use reason. Leave location as <strong>All locations</strong> if unknown; the stores officer selects the actual location when issuing. Cost centre is automatic. Under <strong>Items → Add Item → Select an item</strong>, search <strong>PVC Pipe 50mm</strong>, select it, enter <strong>2</strong>, then <strong>Add → Save → Submit</strong>. This account requests items; it does not issue stock or approve its own request.</p>
+<p><strong>Pass:</strong> Requisition submitted; no stock issue yet. Requester, issuer and approver must be distinct.</p>
+<h3 id="b18.approve-issue-and-acknowledge-receipt">B18. Approve, issue and acknowledge receipt</h3>
+<p><strong>Prepared <code>procurementapprover / TDC_STORES_MANAGER</code>:</strong> open the requisition → <strong>Approve Inventory Requisition</strong>.</p>
+<p><strong>Prepared <code>manager / TDC_STORES_OFFICER</code>:</strong> same register → <strong>Issue Items</strong> → <strong>Default issue location: LOC-001 - Main</strong> → <strong>Fill remaining quantities</strong> (or enter <strong>2</strong> for a partial issue) → confirm the PVC line's quantity/location, movement reason <strong>Department consumption</strong>, and <strong>Receiver: Jane Employee (requester)</strong> → <strong>Issue 2 Items</strong> once. Confirm a Store Issue Voucher appears.</p>
+<p>An <strong>active storage location is required for every stock line at issue or receipt</strong>, not when making the request. The default fills missing/unavailable locations; existing active selections stay unchanged and each line can be changed separately. <strong>Fill remaining quantities</strong> only fills the form; <strong>Issue</strong> posts stock. Keep the automatic receiver unless another person will collect (<strong>Change receiver</strong>). Leave <strong>Advanced tracking options</strong> closed for a normal issue.</p>
+<p><strong>Recipient <code>employee</code>:</strong> <strong>Inventory → My requisitions</strong> → find the same requisition → <strong>Issue vouchers → Acknowledge receipt</strong>. Enter a short handover comment confirming the simulated delivery. The voucher action is also available after a partial issue.</p>
+<p><strong>Pass:</strong> Posted SIV, 2-unit stock reduction and separate recipient acknowledgement. Historical source cost was <strong>2 × 1,900 = 3,800</strong>, not the draft planning price of 2,000. On a fresh run use actual retained valuation and compare with opening stock.</p>
+<h3 id="b19.return-one-unused-pvc-unit">B19. Return one unused PVC unit</h3>
+<p><strong>Prepared <code>manager</code>:</strong> original requisition/issue register → <strong>Return Items</strong> → enter 1 PVC → select <strong>Unused stock</strong> → <strong>Submit Return For Approval</strong>. Details and notes are optional.</p>
+<p><strong>Prepared <code>procurementapprover</code>:</strong> open the same return → review the saved quantity and reason → <strong>Approve</strong> → <strong>Approve return</strong> (comments optional) → <strong>Post</strong>. This is a review screen; do not create or submit another return. The return creator cannot approve or post their own return. Rejection and reversal still require a reason.</p>
+<p><strong>Pass:</strong> SRV <strong>Posted</strong> and 1 PVC restored at its original issue cost. Open the requisition → <strong>Items</strong>: <strong>Requested 2 · Approved 2 · Issued 2 · Returned 1 · Net issued 1</strong>. The requisition stays <strong>Issued</strong>. Returning stock does not reopen it for another issue; use a new requisition if more stock is needed. The original issue and return history remain available.</p>
+<h3 id="b20.physical-count-prepared-scope-only">B20. Physical count — step by step</h3>
+<p><strong>Use the correct copy:</strong> <a href="http://127.0.0.1:3002/inventory/physical-counts">Rehearsal — port 3002</a> for practice; <a href="http://localhost:3000/inventory/physical-counts">Main UAT — port 3000</a> for the customer session. Stay in that copy when changing accounts and keep the same count number throughout.</p>
+<p><strong>Current rehearsal — complete:</strong> <strong>PC-20260911-0004</strong> and <strong>ADJ260001</strong> are <strong>Posted</strong> (12 September). Separate Stores, Finance and Audit reviews were completed, then <code>financereviewer</code> posted. Verified: eight stock movements, reconciled stock/bin values, released freeze and one balanced GL journal — debits and credits each <strong>GHS 850,444.23</strong>. Use steps 13–14 to review the result; do not post again. Superseded rehearsal <strong>PC-20260910-0001</strong> and <strong>PC-20260911-0002</strong> remain <strong>Cancelled</strong>.</p>
+<p><strong>Main UAT preparation:</strong> both databases are at <strong>484 recorded migrations</strong>, with existing stock, count and approval records preserved. Use <strong>B23's deployment checkpoint</strong> for the latest build/start status; database migration parity alone is not proof of running-version parity. Do not copy rehearsal count quantities into main UAT or treat the remaining ERP-wide approval rollout as complete.</p>
+<p><strong>Default bin setup:</strong> <strong>Administration → Inventory → Warehouses → Locations</strong>. For a new bin, enter <strong>Code</strong>, <strong>Name</strong>, <strong>Type: Bin</strong>, enable <strong>Use as default bin</strong>, then <strong>Add</strong>. For an existing bin, select <strong>Edit → Default bin → Save Changes</strong>. Each warehouse has one active normal default bin. New warehouse-item assignments use it. Changing the default does not move stock already assigned elsewhere.</p>
+<p><strong>Choose the count scope.</strong> <strong>Warehouse-wide</strong> includes the whole selected warehouse, with a separate row for each item/location. <strong>Selected location</strong> includes only stock assigned to that location. Unlocated stock uses the warehouse default bin, without changing warehouse totals. Draft items, Excel and variances use the same scope. Older count snapshots retain their original quantities; a safe default-bin resolution is recorded in Control history. An old warehouse-total row spanning multiple bins needs a new scoped count.</p>
+<h4 id="b20-1-prepare-and-check-the-draft">B20.1. Prepare and check the draft</h4>
+<ol>
+<li><strong>Use four separate users:</strong> <code>manager</code> — counter; <code>procurementapprover</code> — Stores Manager; <code>financereviewer</code> — Finance; <code>employee</code> — Internal Audit. Their count responsibilities cover <strong>Project Demo Warehouse (DEMO-PM), all locations</strong>, including LOC-001 and the default bin. Finance/Audit setup is restored in both copies; the employee/MD role alone is not the Audit permission. Confirm <strong>Administration → Workflow → Definitions → TDC Stock Adjustment Approval</strong> remains <strong>Published</strong> with an independent Stores Manager approver. Re-login after setup; do not start a count while a later reviewer lacks access.</li>
+<li><strong><code>manager</code>:</strong> sign in → <strong>Inventory → Transactions → Physical Counts → New Count</strong>. Select <strong>Warehouse</strong>, then <strong>Count scope: Warehouse-wide</strong> or <strong>Selected location → Location</strong>. For this exercise, use <strong>Project Demo Warehouse → Selected location → LOC-001 / Main → Full Count</strong>, keep <strong>Freeze inventory</strong> checked, then <strong>Create Count</strong>. Open <strong>Edit draft</strong> and write down the count number. No evidence file is needed for a draft.</li>
+<li><strong>Items:</strong> confirm that only the chosen scope is included. Remove unwanted rows using <strong>Remove → Remove item</strong>. To add a missing assigned item, click <strong>Add item → Location → search/select Item → Add item</strong>; a location-scoped count keeps its location fixed. Each item change saves immediately. For this exercise, retain <strong>PVC Pipe 50mm</strong> and <strong>Barcode Device Kit</strong> at <strong>LOC-001 / Main</strong>. The support reviewer retains opening balances separately from the blind counter. Items and scope are locked after Start; do not start an empty count.</li>
+</ol>
+<p><strong>Large item lists:</strong> use <strong>Search</strong> and <strong>Rows: 25 / 50 / 100</strong> with the page arrows. Click <strong>Full page</strong> to expand Items, then <strong>Restore</strong> to return. <strong>Save Counts</strong> and the red <strong>Submit for approval</strong> button stay together in the bottom action bar in both views. Save all quantity changes before submitting. Hidden quantities show <strong>xxx</strong>. The count register shows newest counts first.</p>
+<p><strong>Cancel an unwanted draft:</strong> in the register, click its red <strong>Cancel draft count</strong> icon → enter <strong>Cancellation reason</strong> → <strong>Cancel count</strong>. <strong>Keep draft</strong> closes the popup without cancelling. The cancelled record is retained; stock quantities are unchanged.</p>
+<h4 id="b20-2-start-record-quantities-and-attach-evidence">B20.2. Start, record quantities and attach evidence</h4>
+<ol start="4">
+<li><strong><code>manager</code>:</strong> click <strong>Close</strong> to return to the register → <strong>Start</strong> beside that draft → <strong>View</strong> again. Expect <strong>In Progress</strong>. Starting activates the configured stock freeze; pause receipts, issues and returns in the affected scope until the count is posted or properly cancelled.</li>
+<li><strong>Choose direct entry or Excel.</strong> Direct: <strong>Items → Search → Counted Qty → Save Counts</strong>; <strong>Full page</strong> is available. Attach supporting count evidence in <strong>Details</strong>, then go to step 8. Excel: <strong>Items → Download count sheet</strong>. Fill <strong>Counted Qty</strong>; enter <strong>0</strong> for none, leave blank only if not counted. Keep the other columns unchanged and save the <code>.xlsx</code> file. <strong>Location</strong> appears only when saved locations exist.</li>
+<li><strong>Details → Current count sheet → Upload → Choose File.</strong> Select the completed Excel file, review the quantities → <strong>Save count sheet</strong>. This saves the quantities and marks that file <strong>Current</strong> together. Selecting a file alone does not save. Blank rows remain uncounted; no stock adjustment is posted.</li>
+<li>Confirm the uploaded filename marked <strong>Current</strong> and <strong>Counted = Total Items</strong>. To import another file, use <strong>Replace</strong> → select file → review → <strong>Save count sheet</strong>. Alternatively, correct quantities directly in <strong>Items → Save Counts</strong>; no replacement file is needed. Earlier files remain in <strong>Supporting files and upload history</strong>. In a blind count, saved inputs show <strong>Saved</strong>. <strong>Attach supporting file</strong> adds evidence only, not quantities.</li>
+<li>Click <strong>Review variance</strong> → <strong>Items</strong>. Expect <strong>Under review</strong>; compare <strong>System, Counted and Variance</strong>. Search for an item → edit <strong>Counted Qty</strong> → <strong>Save Counts</strong>. <strong>No revised Excel upload is needed.</strong> Earlier uploads remain as evidence/history. <strong>Save Counts</strong> and the red <strong>Submit for approval</strong> button stay together at the bottom in dialog and <strong>Full page</strong> views. When satisfied, <strong>Submit for approval</strong> → confirm. Expect <strong>Stores Approval</strong>; stock is unchanged.</li>
+</ol>
+<p><strong>Investigation:</strong> an approver selects <strong>Send for investigation</strong>, enters the issue and clicks <strong>Save decision</strong>. Posting is blocked. The original counter opens the same count, records <strong>Investigation findings → Resume review</strong>, corrects the quantities/current sheet and submits again. All approval stages restart; prior history is preserved. An older <strong>Awaiting review</strong> count uses <strong>Review variance</strong> to enter this flow.</p>
+<h4 id="b20-3-review-and-post-the-same-count">B20.3. Review and post the same count</h4>
+<p><strong>Administrator setup:</strong> <strong>Administration → Inventory → Physical Count Decisions</strong>. Maintain decision labels and select each effect: <strong>Approve adjustment</strong> (advances approval; stock changes only at final Post) or <strong>Start investigation</strong> (blocks posting). Save changes. Keep at least one active choice for each effect; the default labels below may be renamed.</p>
+<p>After each account change: select the same organization → <strong>Inventory → Transactions → Physical Counts → Refresh → View</strong> on the recorded count number. Review <strong>Details</strong> evidence and the variance columns in <strong>Items</strong> before acting. A visible button does not grant approval permission.</p>
+<p><strong>Decision loading:</strong> the choices are loaded for the saved count and its warehouse/location. Wait for <strong>Loading decisions...</strong> to finish. If <strong>Could not load decisions</strong> appears, select <strong>Retry decisions</strong>; if it still fails, resolve the displayed error before continuing. Do not change warehouse or substitute another reviewer to bypass access.</p>
+<p><strong>Before approval/posting:</strong> the fresh-run example is zero variance. The completed rehearsal used its saved nonzero test quantities; do not copy those figures into a new UAT count. Review the actual quantities and values for the count being approved. Stock-adjustment validation uses the same location valuation source as the count; do not substitute the item-wide average cost. Do not post main UAT to imitate the rehearsal result.</p>
+<p><strong>See the costs:</strong> an authorized reviewer opens <strong>Items → Show costs</strong>; use <strong>Full page</strong> if needed. <strong>Count unit cost</strong> is historical: rehearsal <strong>PC-20260911-0004 → SKU-001</strong> retains <strong>GHS 1,918.85</strong>. <strong>Item-wide avg. cost</strong> is current across owned locations; <strong>Warehouse Items → Average cost</strong> is warehouse-scoped. Compare current figures with the authoritative valuation balances for the same scope. <strong>GHS 1,907.09</strong> was the earlier stored item projection, not a fixed expected current cost. A later transfer, return or valuation correction must not rewrite the saved count cost. Blind counters do not see these costs.</p>
+<p><strong>If no approval process is active:</strong> a new count uses <strong>Complete count → Ready to Post → Post</strong>, without the Stores/Finance/Audit approval steps below. Posting permission and stock/evidence/valuation checks still apply. The prepared UAT has an active workflow, so follow steps 9–12. Already-submitted approvals retain their original route; deactivation does not silently complete them.</p>
+<ol start="9">
+<li><strong><code>procurementapprover</code> — Stores Manager:</strong> at <strong>Stores Approval</strong>, review the quantities, location and evidence → <strong>Decision: Approve adjustment → Save decision</strong>. Expect <strong>Finance Approval</strong>.</li>
+<li><strong><code>financereviewer</code> — Finance Reviewer:</strong> review the variance quantity/value → <strong>Decision: Approve adjustment → Save decision</strong>. Expect <strong>Audit Attestation</strong>.</li>
+<li><strong><code>employee</code> — Internal Audit:</strong> sign in separately and reopen the same count → review evidence, <strong>Items</strong> variances and <strong>Control history</strong> → <strong>Decision: Approve adjustment → Save decision</strong>. Expect <strong>Ready to Post</strong>. Do not use the counter, Stores reviewer or Finance reviewer for this stage.</li>
+<li><strong><code>financereviewer</code>:</strong> sign in separately and reopen the count at <strong>Ready to Post</strong> → check the approved results → <strong>Post</strong> once. The updated page shows Post only when the server confirms this user's posting access. Expect <strong>Posted</strong>. This final action posts any approved variance and releases the count freeze; the earlier approvals do not post stock.</li>
+</ol>
+<h4 id="b20-4-confirm-the-result">B20.4. Confirm the result</h4>
+<ol start="13">
+<li><strong>View → Details:</strong> confirm <strong>Counted = Total Items</strong>. For the zero-variance exercise, <strong>With Variance = 0</strong>; for the current nonzero rehearsal, confirm the saved approved variances instead. <strong>Control history</strong>, newest first, must show separate Stores, Finance and Audit users, then final posting.</li>
+<li><strong>Inventory → Items &amp; Catalogue → Warehouse Items:</strong> select <strong>Project Demo Warehouse</strong> and compare balances with the opening snapshot plus the approved quantity changes. Check each affected bin and <strong>Average cost</strong> in <strong>Reports → Inventory Reports → Balance Register</strong>. Confirm freeze release and any adjustment/journal against the same count. Zero variance must not change stock/value or create an unnecessary adjustment/journal. <strong>Details → Freeze: Yes</strong> is the original setting; use <strong>Posted</strong> and the recorded freeze release as completion evidence.</li>
+</ol>
+<p><strong>If preparation is not ready:</strong> demonstrate historical <strong>PC-20260906-0002 → Details (Posted) → Items → Control history</strong> without changing it. Its <strong>Barcode 20 / PVC 19</strong> values are historical, not today's balances; its old attachment was a plumbing-test placeholder. Use <strong>PC-20260911-0004</strong> for the verified current rehearsal result.</p>
+<h3 id="b21-internal-stock-transfer">B21. Internal stock transfer</h3>
+<p><strong>Actor:</strong> <code>manager</code>, with transfer permission and active responsibility for the selected source and destination. <strong>Page:</strong> Inventory → <a href="http://127.0.0.1:3002/inventory/transfers">Transfers — rehearsal</a> / <a href="http://localhost:3000/inventory/transfers">main UAT</a>. Use the same environment throughout. <strong>Pass — TRF26091922, including automatic completion, 12 September 2026 at 14:42 UTC.</strong></p>
+<ol>
+<li>Note the item's available quantity in both bins. Click <strong>New Transfer</strong>. For the prepared inter-bin example, select <strong>Project Demo Warehouse</strong> as both source and destination; notes are optional. Select <strong>Create Transfer</strong> and record the draft number.</li>
+<li>Open <strong>Items → Add Item</strong>. Select <strong>SKU-001 / PVC Pipe</strong>, quantity <strong>2</strong>, source bin <strong>LOC-001 / Main</strong>, destination bin <strong>DEFAULT</strong>. Confirm those bins are active and the source has at least 2 available, then <strong>Add Item</strong>. The same bin cannot be both source and destination. Use <strong>Full page</strong> to maximize Items and <strong>Restore</strong> to return; current edits are retained.</li>
+<li>Use the blue <strong>pencil (Edit)</strong> in the register to reopen the draft; use the item row's pencil to correct its quantity, then save. With no active approval process, select <strong>Finalize</strong>; expect <strong>Ready to ship</strong>, without a fabricated approver. An active process instead requires its assigned approvals. Existing in-flight approvals retain their route.</li>
+<li>Select <strong>Ship</strong>, enter <strong>2</strong> in <strong>Qty to Ship</strong>, check <strong>From Bin / To Bin</strong>, then <strong>Ship Items</strong>. The compact grid shows Item, From Bin, To Bin, Remaining and Qty to Ship. Use <strong>Columns</strong> for Requested, Already Shipped or UOM; use <strong>Full page / Restore</strong> for more space. Shipping cost and comments are optional for this ordinary transfer. Expect <strong>In Transit</strong> and a source-bin reduction of 2. For a partial dispatch, enter 1 and later use <strong>Dispatch More</strong> for the remainder.</li>
+<li>Select <strong>Receive</strong>. Check the common bins above the grid; use <strong>Columns → From Bin / To Bin</strong> for line-level bins and <strong>Full page / Restore</strong> for more space. Enter <strong>Qty to receive: 1</strong> → <strong>Receive Items</strong>. Reopen Receive and record the remaining 1. Confirm the destination increases by 2 in total; do not receive the same quantity twice.</li>
+<li>Receive only the quantity available in good condition. Leave missing or damaged units unreceived; the transfer stays <strong>In Transit</strong> until the remaining good units arrive. On the final receipt, expect <strong>Completed</strong> automatically. There is no separate <strong>Close transfer</strong> action. For a cost-free inter-bin transfer, total owned quantity/value must remain unchanged.</li>
+</ol>
+<p>With no approval process, the same authorized operator can perform this ordinary transfer. Active approval routes retain their assigned approval, dispatch and receiving checks. Receiving fewer good units does not require a damage report, DMS upload or separate closing action.</p>
+<p><strong>Earlier manual-close result:</strong> <code>manager</code> saved quantity <strong>2 → 3 → 2</strong>, finalized, dispatched 2 from LOC-001 to DEFAULT, received <strong>1 + 1</strong>, then closed. No approver, carrier reference or optional action comments were entered. Final PVC quantity stayed <strong>300</strong> and owned value <strong>GHS 575,654.86</strong>. The ledger shows <strong>GHS 3,800 out → 1,900 in + 1,900 in</strong>, no quantity in transit, and five control actions. The first receipt attempt failed and rolled back; the corrected retry completed. <a href="../local-artifacts/inventory-final-transfer-closed-20260912-130840346.json">Saved reconciliation evidence</a>. This pass covers the earlier <strong>cost-free inter-bin flow only</strong>, not automatic completion, inter-warehouse transfers, reversals, discrepancies or charges.</p>
+<p><strong>Automatic-completion result:</strong> <strong>TRF26091922</strong>, PVC Pipe <strong>2</strong>, <strong>DEFAULT → LOC-001</strong>. The first receipt of <strong>1</strong> left it <strong>In Transit</strong>; the second <strong>1</strong> completed it automatically, without a Close action or human approval. Quantity remained <strong>300</strong> and stock value <strong>GHS 575,654.86</strong>. Verified three valuation movements, three physical stock movements and five history actions; the automatic-completion entry links to the final receipt. <a href="../local-artifacts/inventory-final-fresh-transfer-completion-verifier-20260912-144318012.json">Saved completion evidence</a>. This proves the ordinary, zero-charge inter-bin flow only, not the separate removed-draft-line guard correction.</p>
+<p><strong>Current UI:</strong> the transfer dialog has fixed normal width/height, equal-width tabs and internal scrolling, with pencil editing and no transfer cost columns. <strong>History</strong> retains the audit trail. <strong>V5 Items → Full page / Restore passed visibly at 15:12 UTC</strong> on completed TRF26091922: 16px viewport margins when expanded, fixed normal width after Restore, stable width across tabs, seven columns without costing, and quantities <strong>2 / 2 / 2</strong> unchanged. Ship and Receive also have <strong>Full page / Restore</strong>, compact grids and Columns in V5. Their 13 focused tests passed, including retained quantities, notes and action buttons; those two dialogs were not separately checked live. Supplier-return grids remain scrollable without Full page.</p>
+<p><strong>Environment checkpoint:</strong> main UAT and rehearsal are now at <strong>schema 484</strong>, including <strong>20260912233000_InventoryTransferDraftLineCompletionGuard</strong> and the disposal migration. Verified migration checks preserved existing business records; no transfer or supplier-return test stock transactions were made in main UAT. See <strong>B23</strong> for current build/start status. The <strong>15-minute completion target was missed</strong>. The transfer result passed, but this is not a claim that all inventory scenarios are bug-free.</p>
+<h3 id="b22-supplier-return-from-an-accepted-grn">B22. Supplier return from an accepted GRN</h3>
+<p><strong>Actor:</strong> <code>manager</code>, with stock-issue permission and active <strong>Project Demo Warehouse</strong> responsibility. <strong>Page:</strong> Inventory → <a href="http://127.0.0.1:3002/inventory/supplier-returns">Supplier Returns — rehearsal</a> / <a href="http://localhost:3000/inventory/supplier-returns">main UAT</a>. <strong>Pass — draft editing, direct completion and physical dispatch, 12 September 2026 at 15:10 UTC. Finance settlement is pending.</strong></p>
+<ol>
+<li>Click <strong>New supplier return</strong>. Select the accepted, stock-updated GRN linked to <strong>REC260003</strong> in rehearsal. In main UAT, select that database's own eligible receipt. Supplier, warehouse and source bins come from the accepted receipt; only stock actually accepted and posted is eligible.</li>
+<li>Select a <strong>Return reason</strong>, enter <strong>1</strong> against <strong>PM-BARCODE-DEVICE / Barcode Device Kit</strong>, leave other quantities blank/zero, then <strong>Create draft</strong>. Notes are optional. Confirm the exact source bin still has 1 available and the quantity is within the receipt's unreturned balance.</li>
+<li>Record the return number. Use the blue <strong>pencil (Edit)</strong> to correct quantities or the reason; zero removes a draft line. <strong>Save</strong>. The original GRN stays fixed; use a new draft for a different GRN. <strong>View</strong> shows each source location and the GRN cost estimate.</li>
+<li>With no active approval process, select <strong>Complete</strong>. Expect <strong>Ready to dispatch</strong>, with no human approval recorded. If a process is active, use <strong>Submit</strong> and the assigned independent reviewer completes <strong>Approve</strong> before dispatch; the final approver must not dispatch it.</li>
+<li>Select <strong>Dispatch</strong>. The carrier tracking reference is optional. Check the return and select <strong>Dispatch stock</strong> once. Expect <strong>Shipped</strong> and <strong>Finance resolution pending</strong>. The authorized requester may dispatch when approval is not required.</li>
+<li>Check <strong>Stock Movement History</strong>, <strong>Warehouse Items</strong> and the source bin. Quantity decreases by 1 once, with the return reference and exact bin. The movement uses current carrying value; the draft's GRN cost estimate remains historical. Reopening the shipped return must not offer another dispatch.</li>
+</ol>
+<p><strong>Chosen supplier outcome: credit against the original goods invoice.</strong> The following Finance steps are being implemented; <strong>not yet deployed or live-verified</strong>. Do not treat the earlier physical-dispatch pass as a Finance pass.</p>
+<ol start="7">
+<li>Sign in as an authorized AP officer. Open this shipped return with the <strong>eye</strong> icon → <strong>Create credit draft</strong>. Select the original posted goods invoice, enter the supplier's credit reference and date, then <strong>Create draft</strong>. The returned quantities, price and tax come from the original invoice; do not enter a second stock reversal.</li>
+<li>Click <strong>Open credit</strong>. Review the supplier, original invoice, returned lines and credit total. Use the <strong>pencil</strong> to correct the draft's credit reference/date, then <strong>Save</strong>. If approval is inactive, click <strong>Continue</strong>. If active, click <strong>Submit for approval</strong> and have the configured reviewer approve it.</li>
+<li>The authorized poster selects <strong>Post</strong>, checks the invoice and amount in the confirmation, then confirms <strong>Post</strong> once. This applies the commercial credit directly to the invoice. No cash payment or second physical stock movement is created.</li>
+<li>Return to <strong>Supplier Returns</strong>, refresh and expect <strong>Credit applied</strong>. Open the original invoice: its outstanding balance must decrease by this credit. Verify the dispatch/credit journals are balanced, the return's Finance status remains resolved after reload, and stock is unchanged by credit posting.</li>
+</ol>
+<p><strong>Setup gate:</strong> Finance must configure Supplier Returns Clearing and Purchase Return Cost Variance before the integrated posting test. Existing uninvoiced or ambiguous returns remain visibly Finance-pending. Do not use the legacy Finance/AP returns screen to imitate completion. Record physical dispatch and Finance resolution separately.</p>
+<p><strong>Completed rehearsal:</strong> <strong>SRT-20260912131108-4cdc2070a96</strong> is <strong>Shipped — Finance resolution pending</strong>. Draft editing passed: saved Barcode <strong>2</strong> plus PVC <strong>1</strong> (GRN estimate <strong>GHS 3,300</strong>), reopened, then removed PVC and reduced Barcode to <strong>1</strong> (<strong>GHS 700</strong>). <strong>Complete</strong> produced <strong>Ready to dispatch</strong>, with no human approver. <strong>Dispatch</strong> reduced Barcode item/warehouse/LOC-001 stock <strong>430 → 429</strong> and value <strong>GHS 303,953.97 → 303,247.10</strong>. Exactly one physical and one valuation movement recorded <strong>1 unit / GHS 706.87</strong>; the historical GRN cost remained <strong>GHS 700</strong>. Edit and Dispatch were no longer offered. PVC and the posted physical count were unchanged. <a href="../local-artifacts/inventory-final-supplier-dispatched-verifier-20260912-151007516.json">Saved dispatch evidence</a>. Review this shipped record; do not dispatch it again. No supplier debit/credit note or Finance settlement was created.</p>
+<p><strong>Display labels (V6):</strong> View resolves <strong>Source bin</strong> to its code and name within the return's warehouse. The draft column is <strong>GRN unit cost</strong>, meaning the original receipt cost, not today's carrying cost. The production build and <strong>23 focused UI tests passed</strong>. Final live label confirmation is pending because the browser blocked automated navigation. No stock or costing calculation changed, and this cleanup adds no migration.</p>
+<h3 id="b23-inventory-stock-disposal">B23. Inventory stock disposal</h3>
+<p><strong>Status: Implementation/testing in progress; live disposal not yet verified.</strong> The browser currently reports <strong>ERR_BLOCKED_BY_CLIENT</strong>. No disposal reference or live pass is claimed. Both main UAT and rehearsal are now at <strong>schema 484</strong>. Fresh COPY_ONLY/CHECKSUM backups were verified; checks across <strong>86 protected business tables</strong> confirmed that stock, count and human-approval records were unchanged. Preserve the completed B21/B22 records.</p>
+<p><strong>Deployment checkpoint — 12 September, 17:06 UTC:</strong> <strong>120 API, 229 Core and 14 UI tests passed.</strong> Both production frontends are built and running: rehearsal <strong>3002</strong>, main UAT <strong>3000</strong>. Both APIs passed live/readiness checks; four page routes and 61 assets per copy returned HTTP200. Build IDs, matching source hashes, CORS and anonymous disposal-API rejection (401) were verified. <a href="../local-artifacts/disposal-release-verification.json">Release evidence</a>. These checks do not replace the blocked live disposal walkthrough.</p>
+<p><strong>Page:</strong> Inventory → <a href="http://127.0.0.1:3002/inventory/disposals">Disposals — rehearsal</a> / <a href="http://localhost:3000/inventory/disposals">main UAT</a>. <strong>Actor:</strong> an authorized Stores user with disposal and stock-posting rights for the chosen warehouse/bin. Verify that account's access first. Finance mappings and the posting period must be ready.</p>
+<ol>
+<li>Click <strong>New disposal</strong>. In <strong>Details</strong>, select the warehouse, <strong>Method</strong> and <strong>Reason</strong>. Notes are optional. For the first controlled test, use <strong>Write-off</strong> and a small available quantity of an ordinary stock item. This screen does not dispose of fixed assets.</li>
+<li>In <strong>Items</strong>, search for the item and bin by code/name. The warehouse's default bin is suggested; confirm it is the bin holding the stock to be disposed of. Enter a positive quantity → <strong>Add</strong>. Enter lot/batch/serial details only for tracked items.</li>
+<li>Correct quantities directly in the compact grid; use the remove icon to take out a line. Use <strong>Search item or bin</strong>, <strong>25 / 50 / 100 per page</strong>, <strong>Columns → Cost and value / Tracking</strong>, and <strong>Full page / Restore</strong> as needed. Costs are hidden initially; newly added lines show <strong>On save</strong> until the server calculates the estimate.</li>
+<li>In <strong>Supporting documents</strong>, select a current published document by name if needed. Files are optional when no approval process is active; the active approval route requires supporting evidence. Any attached file still has to pass the shared document-security checks. Do not type document IDs.</li>
+<li>Click <strong>Save draft</strong> and record the generated reference. Reopen with the register's pencil icon; add/remove an item or change a quantity, then <strong>Save draft</strong> again. Draft saving must not change stock. The eye icon opens View. To test cancellation, use a separate draft's cancel icon and enter its reason; do not cancel the disposal being posted.</li>
+<li>View the saved draft. With no active approval process, select <strong>Continue</strong> → <strong>Ready to post</strong>; no reviewer or fabricated approval is required. With an active process, select <strong>Submit for approval</strong> and have its eligible independent actor <strong>Approve</strong>. Existing in-flight approval history must remain intact. There is no separate compulsory stock-disposal committee outside the configured route.</li>
+<li>Check <strong>Details</strong> before posting. <strong>Auction / Sale</strong> requires buyer, positive proceeds and a searchable proceeds account. <strong>Donation</strong> requires a recipient. <strong>Write-off / Destruction</strong> has no sale proceeds. The disposal reference defaults to the case reference.</li>
+<li>Select <strong>Post</strong> and confirm <strong>Post</strong> once. For a new ready disposal, preparation and final stock/Finance posting run in one transaction; a failure rolls them back together. Correct the displayed issue and retry the same disposal. An older, already-prepared disposal reuses its linked adjustment; it must not create another. Any configured approval still applies and must finish before stock posts.</li>
+<li>Expect <strong>Completed</strong> after successful posting. Review <strong>Posted stock value</strong>, the exact source-bin reduction, stock movement, valuation and Finance journal. New adjustments use the execution date, not the draft creation date; an existing prepared adjustment retains its saved date. The saved <strong>Estimated stock value</strong> is not a promise of the final carrying cost. Verify balanced postings and any sale/auction proceeds separately. <strong>History</strong> must show newest actions first, with no invented human approval in the direct path.</li>
+<li>Reopen the completed record and verify that Post is no longer available. Record the actual reference, before/after quantity and value, movement/journal references and screenshot/history evidence. A controlled retry must not duplicate stock or Finance posting.</li>
+</ol>
+<p><strong>Architecture boundary:</strong> Sections <strong>16.1</strong>, <strong>18.2</strong> and <strong>20.1</strong> cover shared item/location/valuation/approval/ledger/audit controls and configurable routing for inventory disposals. <strong>FR-FA-008's Board of Survey requirement belongs to the separate fixed-asset disposal process</strong>; it is not an automatic three-person committee prerequisite for ordinary stock disposal. Stock, tenant, location, access, document security, accounting and duplicate-posting safeguards still apply.</p>
+<p><strong>Technical verification limit:</strong> Multi-line FIFO disposal is not verified. Different lot/serial rows for the same item and bin can reuse an opening-layer estimate; where layer costs differ, posting can fail the protected valuation check. The transaction must roll back without stock or Finance posting. Do not mark this case passed or bypass the valuation guard.</p>
+<h2 id="part-c-alternative-procurement-routes">Part C — alternative procurement routes</h2>
+<p>All routes still require the approved source/budget controls and a PO for procurement purchases. Do not add NCT publishing and committee steps automatically to a route that does not use them. Amount bands below are <strong>local UAT policy fixtures (TDC-F05B-NCT v8)</strong>, not statements of statutory thresholds. Recheck the published policy when beginning a fresh branch.</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Planned sequence and accounts</th>
+<th>Test data / preparation</th>
+<th>Evidence status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Petty Purchase</strong></td>
+<td><code>procurementofficer</code>: plan/PR and approved-source Petty quotation; <code>procurementapprover</code>: independent quotation approval; <code>procurementevaluator</code>: recommendation; <code>employee</code>: award. Officer creates PO; Procurement Approver approves; prepared Stores actors receive/inspect and issue GRN.</td>
+<td>Local Goods band 0–1,000; tested 1 Barcode × GHS 750, Harbourline, DEMO-PM. One quote, evidence and independent approval; no public tender bidding window.</td>
+<td><strong>Historical positive path passed through accepted receipt and issued GRN/MRN; MRN is now hidden from the receipt screen.</strong> Petty-specific invoice/payment not executed. PDF/negative cases remain.</td>
+</tr>
+<tr>
+<td><strong>Standard RFQ</strong></td>
+<td>Officer creates the policy-routed RFQ from approved PR; eligible suppliers submit quotations; assigned independent reviewers evaluate/recommend; configured independent award approver approves; PO → receipt → matching/Stores as applicable.</td>
+<td>Local Goods band above 1,000 through 10,000; three quotations required. Only one eligible Goods supplier was available: prepare two more genuine test supplier accounts/contact channels. Exact RFQ screen/role sequence still needs rehearsal.</td>
+<td><strong>Not executed end to end.</strong> Do not treat three planning survey rows as three RFQ submissions.</td>
+</tr>
+<tr>
+<td><strong>QBS</strong></td>
+<td>Officer selects Consultancy and <strong>QBS before the compatible template</strong>; qualified consultants submit; appointed committee evaluates technical quality; authorized negotiation/approval follows the configured QBS route, then PO/required contract and service certification before matching.</td>
+<td>Prepare an eligible consultancy supplier; do not reclassify Harbourline Goods just to bypass eligibility. Local explicit Consultancy route up to 100,000.</td>
+<td><strong>Not executed.</strong> Do not use stock GRNs/Stores issues for pure consultancy services.</td>
+</tr>
+<tr>
+<td><strong>QCBS</strong></td>
+<td>Officer selects Consultancy and <strong>QCBS before the template</strong>; technical evaluation and threshold decision precede controlled financial opening; apply published technical/financial weighting, rank, approve award and continue PO/contract/certification/matching.</td>
+<td>Consultancy suppliers, compatible QCBS template, approved weights/threshold and technical/financial proposals. Do not reuse Standard Goods 90-point scoring as a QCBS result.</td>
+<td><strong>Not executed.</strong> Weights and formula must come from the configured method/template, not an invented default.</td>
+</tr>
+<tr>
+<td><strong>Emergency</strong></td>
+<td>Officer documents the exception and evidence; separately authorized Internal Audit vouches; <code>employee</code> as MD approves under the configured route; execute purchase/PO and required retrospective filing, then receipt/certification and matching.</td>
+<td>Actual simulated emergency reason/evidence; independent Audit actor not yet prepared. Local rule uses a 7-day filing control; this is not a universal architecture time limit.</td>
+<td><strong>Not executed.</strong> No bypass of exception approval, budget or audit just to save time.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="completed-petty-example-to-open-today">Completed Petty example to open today</h3>
+<ul>
+<li>Plan <strong>PP-2026-0002</strong>, PR <strong>PR-2026-0002</strong>, source <strong>TND-2026-0002 / PettyPurchase</strong>. The underlying source number does not mean it followed an advertised NCT competition.</li>
+<li><a href="http://localhost:3000/procurement/purchase-orders/f00862f4-712a-481b-8ee3-044489ff3934">PO-2026-0002</a>: GHS 750, Received; receipt <strong>REC260002</strong> accepted 1 Barcode.</li>
+<li><strong>GRN-2026-0003 / MRN-2026-0003:</strong> issued and reconciled on 7 September. Contract was not required for this configured Petty purchase; that is not a global Goods exemption.</li>
+<li>Barcode stock increased from 20 / 14,000 to 21 / 14,750 exactly once. No Petty invoice or payment was created.</li>
+</ul>
+<h2 id="part-d-if-something-unexpected-happens">Part D — if something unexpected happens</h2>
+<table>
+<thead>
+<tr>
+<th>Symptom</th>
+<th>Safe response</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Page loads slowly or is blank</td>
+<td>Wait for the pending action. Check the register for its generated reference before retrying. A read-only reload recovered previous development-page failures; do not repeat Create/Submit/Approve blindly.</td>
+</tr>
+<tr>
+<td>Approve / Issue / Activate is missing</td>
+<td>Check current user, DEFAULT, record status, assigned workflow task, matching Security role and active warehouse responsibility. Completed actions intentionally disappear. Do not grant arbitrary roles or use admin as an approval bypass.</td>
+</tr>
+<tr>
+<td>USD or unexpected amount</td>
+<td>Check saved GHS currency and source-line values before saving. 55,000 is the estimate; 52,000 is the main award; 48,000 was remaining budget before Petty; 47,250 is the later campaign remainder.</td>
+</tr>
+<tr>
+<td>Documents count is not what you expect</td>
+<td>Check the tender's configured supporting requirements and their actual saved attachments. Proposal files and registration/tax/financial-statement evidence are different categories.</td>
+</tr>
+<tr>
+<td>Inspection says evidence missing</td>
+<td>Upload delivery evidence to the PO's controlled evidence area, wait for usable DMS status and select that saved record in inspection. A typed reference alone is not an uploaded file.</td>
+</tr>
+<tr>
+<td>No Published template matches the tender</td>
+<td>Compare its exact locked policy version/profile/method with the document template. Complete B8a–B8d for a matching version; do not change the tender's locked lineage or weaken readiness checks.</td>
+</tr>
+<tr>
+<td>Document was submitted without a file / generic Pending approval</td>
+<td>Starting preparation intentionally precedes upload. Stay as the recorded preparer, upload the file, then Send for approval. Check the current task/Waiting with panel; do not create a duplicate request. Older running builds may still show the former button labels until refreshed after deployment.</td>
+</tr>
+<tr>
+<td>Approval is complete but tender is not published</td>
+<td>Verify/attach eligible content and Publish approved version first, bind that document to the tender, then separately Publish Tender. These are different records and actions.</td>
+</tr>
+<tr>
+<td>Invoice quantities are unavailable/exceeded</td>
+<td>Check accepted inspection quantity less already invoiced quantity for the same PO line. Do not invoice unreceived/rejected goods or duplicate the main receipt's completed invoice.</td>
+</tr>
+<tr>
+<td>Matching fails or account mapping is missing</td>
+<td>Record the message/reference and hand the Finance-owned issue to its owner. Do not change source prices, tax or Finance implementation merely to get a green status.</td>
+</tr>
+<tr>
+<td>PDF/email is not visible</td>
+<td>Do not repeatedly send notifications. Show the issued record/history only and disclose the presentation gap; verify delivery separately before promising the customer a PDF.</td>
+</tr>
+<tr>
+<td>A genuine defect blocks the next stage</td>
+<td>Stop that transaction, capture reference, user/time and visible error/correlation ID. Continue the review-only demonstration from an already completed linked record, explicitly labelled as such. Never claim the blocked fresh step passed.</td>
+</tr>
+</tbody>
+</table>
+<p>Deliberate negative tests belong <strong>after</strong> the customer happy path: maker self-approval denial, duplicate/replay protection, expired bid dates, missing required documents, over-receipt/over-invoice, unauthorized warehouse and nonzero count variance. Do not introduce these into the 30-minute presentation unless explicitly planned.</p>
+<h2 id="part-e-test-record-and-sign-off">Part E — test record and sign-off</h2>
+<p>For each fresh step, record the new reference, actual actor, timestamp, expected versus actual state, screenshot/history and any stock/journal change. Use <strong>Pass / Fail / Blocked / Not run</strong>; a reviewed historical record is <strong>Reviewed</strong>, not a new test pass.</p>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>New reference</th>
+<th>Account(s)</th>
+<th>Result / evidence / defect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Supplier OTP → fee/token → details/documents → approval → portal login</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Budget → plan → APP</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>PR → sourcing → tender/RFQ</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Publication → bid → committee/opening</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Evaluation → verification → award</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>PO/commitment → required contract activation</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Accepted receipt → GRN</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Receipt-linked invoice → 3-way match → approvals</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Stock → Stores issue → acknowledgement → return</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>Count / final reconciliation</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>B21 Earlier transfer → partial receipt → manual close</td>
+<td>TRF26090177</td>
+<td>manager</td>
+<td>Pass — cost-free LOC-001 → DEFAULT, 2 received as 1 + 1; 12 Sep 2026 13:08 UTC</td>
+</tr>
+<tr>
+<td>B21 Current transfer → partial receipt → automatic completion</td>
+<td>TRF26091922</td>
+<td>manager</td>
+<td>Pass — 2 dispatched, received 1 + 1, automatic completion; 12 Sep 14:42 UTC</td>
+</tr>
+<tr>
+<td>B22 Supplier return → dispatch</td>
+<td>SRT-20260912131108-4cdc2070a96</td>
+<td>manager</td>
+<td>Pass — draft add/edit/remove, direct Complete, Barcode 1 dispatched; Finance pending; 12 Sep 15:10 UTC</td>
+</tr>
+<tr>
+<td>B22 Supplier-return Finance resolution</td>
+<td></td>
+<td></td>
+<td>Pending — no automatic debit note / GL integration</td>
+</tr>
+<tr>
+<td>B23 Inventory stock disposal → posting</td>
+<td></td>
+<td></td>
+<td>Live disposal walkthrough blocked by ERR_BLOCKED_BY_CLIENT; no transaction pass. Both databases484; API120/Core229/UI14 and both HTTP/runtime checks passed</td>
+</tr>
+<tr>
+<td>Petty / RFQ / QBS / QCBS / Emergency (separate results)</td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Completion decision:</strong> the main positive chain and Petty receipt have recorded passes, but the alternative branches, browser-only scoped count creation, PDF presentation and remaining regression/negative observations prevent full UAT sign-off. No guarantee of zero bugs is made. This script was prepared for immediate use; exact-script fresh browser rehearsal remains pending.</p>
+<h3 id="architecture-and-evidence-references">Architecture and evidence references</h3>
+<ul>
+<li><strong>TDC ERP Architecture and Design Document (002).docx:</strong> FR-PR-004 (PO creation), FR-PR-005 (commitments), FR-PR-006 (receipt/certificate before matching), FR-PR-007 (PO/receipt/invoice matching before payment), FR-PR-008 (contract register including retention), FR-PR-010 (exceptions, evidence, Audit and MD), FR-PR-011 (GHANEPS controlled exchange). These passages were re-read for this guide. Exact test accounts, local thresholds, MRN/signature detail and scoring fixtures are configuration/implementation choices, not verbatim architectural mandates.</li>
+<li><a href="PROCUREMENT_INVENTORY_STORES_FRESH_UAT_TRACKER.md">Fresh campaign evidence and open observations</a>, particularly supplier onboarding EV-U01-001–019, U02–U17 and EV-U17-028 through EV-U17-030.</li>
+<li><a href="PROCUREMENT_END_TO_END_UAT.md">Procurement test catalogue</a> and <a href="INVENTORY_STORES_END_TO_END_UAT.md">Inventory/Stores test catalogue</a>.</li>
+<li><a href="TDC_INVENTORY_STORES_ARCHITECTURE_REQUIREMENTS.md">Inventory/Stores architecture traceability</a> and <a href="QCBS_EVALUATION_FORMULA.md">QCBS formula reference</a>.</li>
+</ul>
+<p><strong>Presenter's closing statement:</strong> “This demonstration shows the completed Goods purchase and its controlled handoffs into Finance and Stores. It is local simulated evidence, not live procurement or payment. The remaining method-specific and regression tests are tracked separately before final acceptance.”</p>
+
+</main>
+<footer>Evidence-based presentation guide. Full fresh-run rehearsal and final UAT acceptance remain pending. No passwords are included.</footer>
+</body>
+</html>

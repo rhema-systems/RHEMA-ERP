@@ -1,3 +1,5 @@
+import { throwProcurementResponseError } from '@/lib/procurement-api-error';
+
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export interface EvaluationTemplateCriterion {
@@ -201,8 +203,7 @@ export const evaluationTemplateService = {
       body: JSON.stringify(data),
     });
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to update evaluation template');
+      await throwProcurementResponseError(response, 'Failed to update evaluation template');
     }
     return response.json();
   },
@@ -213,8 +214,7 @@ export const evaluationTemplateService = {
       headers: getAuthHeaders(),
     });
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to delete evaluation template');
+      await throwProcurementResponseError(response, 'Failed to delete evaluation template');
     }
   },
 

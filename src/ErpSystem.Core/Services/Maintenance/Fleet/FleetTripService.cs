@@ -367,7 +367,7 @@ public class FleetTripService : IFleetTripService
             throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to start workflow");
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(EntityType);
-        adapter.ApplySubmitOutcome(trip, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(trip, workflowResult, userId);
 
         trip.UpdatedAt = DateTime.UtcNow;
         trip.LastModifiedById = userId;
@@ -830,10 +830,10 @@ public class FleetTripService : IFleetTripService
         }
 
         var employee = await _unitOfWork.Repository<Employee>()
-            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.Department);
+            .FirstOrDefaultAsync(e => e.Id == employeeId && e.TenantId == _currentUserProvider.TenantId && e.IsActive, e => e.OrganizationUnit);
 
-        if (employee?.Department == null ||
-            !employee.Department.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
+        if (employee?.OrganizationUnit == null ||
+            !employee.OrganizationUnit.Name.Contains("Maintenance", StringComparison.OrdinalIgnoreCase))
         {
             return (false, null);
         }

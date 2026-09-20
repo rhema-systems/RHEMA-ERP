@@ -28,10 +28,26 @@ describe('purchase requisition linkage helpers', () => {
     expect(result).toEqual({
       requisitionType: 'StockReplenishment',
       sourcePlanItemId: 'plan-item',
+      sourcePlanItemIds: ['plan-item'],
       budgetId: 'approved-budget',
       procurementCategory: 'Goods',
       costCenter: undefined,
     });
+  });
+
+  it('retains both plan-item links when normalizing a multi-line requisition', () => {
+    const result = normalizeRequisitionLinkage({
+      sourcePlanItemId: ' item-a ',
+      sourcePlanItemIds: [' item-a ', 'item-b', ' '],
+      budgetId: ' approved-budget ',
+      procurementCategory: 'Goods',
+      requisitionType: 'StockReplenishment',
+    });
+
+    expect(result.sourcePlanItemId).toBe('item-a');
+    expect(result.sourcePlanItemIds).toEqual(['item-a', 'item-b']);
+    expect(result.budgetId).toBe('approved-budget');
+    expect(result.procurementCategory).toBe('Goods');
   });
 
   it('keeps every supported linkage field in the save contract', () => {

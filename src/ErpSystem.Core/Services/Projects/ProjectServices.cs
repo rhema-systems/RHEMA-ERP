@@ -557,7 +557,7 @@ public partial class ProjectService : IProjectService
         }
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter("Project");
-        adapter.ApplySubmitOutcome(project, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(project, workflowResult, userId);
         project.SubmittedAt = DateTime.UtcNow;
         project.UpdatedBy = _currentUserProvider.Username;
         project.LastModifiedById = _currentUserProvider.UserId;
@@ -3651,7 +3651,7 @@ public partial class ProjectService : IProjectService
         }
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(ProjectClosureWorkflowEntityType);
-        adapter.ApplySubmitOutcome(closure, workflowResult.Outcome, userId);
+        adapter.ApplySubmitOutcome(closure, workflowResult, userId);
         closure.SubmittedAt = DateTime.UtcNow;
         closure.RejectionReason = null;
         closure.UpdatedBy = _currentUserProvider.Username;
@@ -6921,7 +6921,7 @@ public partial class ProjectService : IProjectService
         }
 
         var adapter = _workflowStatusAdapterRegistry.GetAdapter(ProjectDeliverableWorkflowEntityType);
-        adapter.ApplySubmitOutcome(deliverable, workflowResult.Outcome, _currentUserProvider.UserId);
+        adapter.ApplySubmitOutcome(deliverable, workflowResult, _currentUserProvider.UserId);
         deliverable.UpdatedBy = _currentUserProvider.Username;
         deliverable.LastModifiedById = _currentUserProvider.UserId;
     }

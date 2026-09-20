@@ -11,6 +11,8 @@ namespace ErpSystem.Core.Entities.Finance
     /// </summary>
     public class FinanceSettings : BusinessEntity
     {
+        public Guid? ReturnToVendorClearingAccountId { get; set; }
+        public Guid? PurchaseReturnVarianceAccountId { get; set; }
         /// <summary>
         /// Tenant ID (one settings record per tenant)
         /// </summary>
@@ -231,8 +233,8 @@ namespace ErpSystem.Core.Entities.Finance
         public virtual Account? MigrationClearingAccount { get; set; }
 
         /// <summary>
-        /// When enabled, opening balance postings auto-route balancing/offset lines
-        /// to the Migration Clearing Account.
+        /// Retained for settings compatibility. The legacy opening-balance journal route remains
+        /// retired; governed opening balances use their dedicated Finance workflow.
         /// </summary>
         public bool OpeningBalanceAutoRoutingEnabled { get; set; } = true;
 

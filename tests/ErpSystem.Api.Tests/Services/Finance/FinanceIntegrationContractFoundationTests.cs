@@ -1,6 +1,8 @@
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Finance.Integration;
+using ErpSystem.Core.Interfaces.Finance;
 using FluentAssertions;
+using System.Text.Json;
 using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
@@ -32,19 +34,31 @@ public sealed class FinanceIntegrationContractFoundationTests
     }
 
     [Fact]
-    public void PostingContractShouldExposeOptionalStructuredDimensionsAsAdditiveVersion()
+    public void PostingContractShouldExposeOnlyTheCanonicalAccountingBookV2Boundary()
     {
         var contract = FinanceIntegrationContractCatalog.GetRequired("FIN-INT-001");
 
         contract.Status.Should().Be(FinanceIntegrationContractStatus.Available);
-        contract.Version.Should().Be("1.2");
+        contract.Version.Should().Be("2.1");
         contract.EntryPoint.Should().Contain(nameof(FinancePostingProducerContext));
-        contract.Notes.Should().Contain("Structured dimensions remain additive");
-        contract.Notes.Should().Contain("compiled FinancePostingProducerContext");
+        contract.EntryPoint.Should().Contain(nameof(FinancePostingRequestV2Dto));
+        contract.Notes.Should().Contain(nameof(FinancePostingRequestV2Dto.AccountingBookCode));
         typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.Dimensions)).Should().NotBeNull();
         typeof(FinancePostingLineDto).GetProperty(nameof(FinancePostingLineDto.FinanceDimensionSetId)).Should().NotBeNull();
         typeof(FinanceSourceLineDimensionInputDto)
             .GetProperty(nameof(FinanceSourceLineDimensionInputDto.SourceLineId)).Should().NotBeNull();
+
+        typeof(IFinancePostingEngine).GetMethods()
+            .Where(method => method.Name == nameof(IFinancePostingEngine.PostAsync))
+            .Should().OnlyContain(method => method.GetParameters()[0].ParameterType == typeof(FinancePostingRequestV2Dto));
+        typeof(IExternalFinancePostingAdapter).GetMethods()
+            .Should().OnlyContain(method => method.GetParameters()[0].ParameterType == typeof(FinanceExternalPostingEnvelopeV2Dto));
+
+        var json = JsonSerializer.Serialize(
+            new FinancePostingRequestV2Dto { AccountingBookCode = "IFRS" },
+            new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        json.Should().Contain("\"accountingBookCode\":\"IFRS\"")
+            .And.NotContain("bookClassification");
     }
 
     [Fact]
@@ -64,7 +78,8 @@ public sealed class FinanceIntegrationContractFoundationTests
                 FinanceDimensionRouteId.ManualJournalEntry,
                 FinanceDimensionRouteId.FinanceApVendorInvoice,
                 FinanceDimensionRouteId.FinanceApSupplierDebitNote,
-                FinanceDimensionRouteId.FinanceArCustomerInvoice
+                FinanceDimensionRouteId.FinanceArCustomerInvoice,
+                FinanceDimensionRouteId.FinanceArCustomerPayment
             ]);
 
         var sales = FinanceDimensionRouteCatalog.GetRequired(FinanceDimensionRouteId.SalesCreditNote);
@@ -72,7 +87,14 @@ public sealed class FinanceIntegrationContractFoundationTests
         sales.PostingSourceModule.Should().Be("AR");
         sales.DefaultState.Should().Be(FinanceDimensionCertificationState.CaptureOptional);
         sales.Notes.Should().Contain("contract only");
-        routes.Should().NotContain(route => route.DocumentType == "CustomerPayment");
+        var customerPayment = routes.Should()
+            .ContainSingle(route => route.DocumentType == "CustomerPayment")
+            .Which;
+        customerPayment.Id.Should().Be(FinanceDimensionRouteId.FinanceArCustomerPayment);
+        customerPayment.ProducerModule.Should().Be("Finance");
+        customerPayment.PostingSourceModule.Should().Be("AR");
+        customerPayment.SourceRoute.Should().Be("finance.ar.customer-payments.manual");
+        customerPayment.Owner.Should().Be("Finance / Accounts Receivable");
     }
 
     [Fact]
@@ -157,7 +179,7 @@ public sealed class FinanceIntegrationContractFoundationTests
     {
         var tenantId = Guid.NewGuid();
         var sourceId = Guid.NewGuid();
-        var request = new FinancePostingRequestDto
+        var request = new FinancePostingRequestV2Dto
         {
             SourceModule = "Inventory",
             OriginModuleCode = "Inventory",
@@ -166,8 +188,9 @@ public sealed class FinanceIntegrationContractFoundationTests
             SourceDocumentTenantId = tenantId,
             SourceDocumentReference = "ADJ-CONTRACT-001",
             Description = "Approved cycle-count shortage",
+            AccountingBookCode = "IFRS",
             FunctionalCurrencyCode = "GHS",
-            IdempotencyKey = $"inventory-adjustment:{sourceId:N}:post:v1",
+            IdempotencyKey = $"inventory-adjustment:{sourceId:N}:post:v2",
             Lines =
             [
                 new FinancePostingLineDto { AccountId = Guid.NewGuid(), DebitAmount = 25m },

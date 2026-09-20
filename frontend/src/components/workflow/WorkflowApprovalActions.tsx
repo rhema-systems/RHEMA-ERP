@@ -15,6 +15,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { WorkflowApprovalCommentDialog, WorkflowApprovalDialogMode } from '@/components/workflow/WorkflowApprovalCommentDialog';
 import { workflowApiService } from '@/services/workflow-api.service';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import type {
   WorkflowApprovalChecklistResponseDto,
   WorkflowDocumentRequirementDto,
@@ -22,7 +23,6 @@ import type {
   WorkflowPendingApproverDto,
   WorkflowQualityCheckDto,
   WorkflowTaskAttachmentDto,
-  WorkflowTaskConfigDto,
   WorkflowDirectoryUser,
   WorkflowSignatureSubmissionDto,
 } from '@/types/workflow';
@@ -42,6 +42,8 @@ export interface WorkflowApprovalActionsProps {
 
   // Optional: externally-provided summary (preferred for list/grid usage with batch endpoint)
   workflowSummary?: WorkflowEntitySummaryDto;
+  workflowSummaryLoading?: boolean;
+  workflowSummaryError?: string;
 
   // If true, fetches workflow entity summary (single-entity usage, recommended for detail pages)
   loadWorkflowSummary?: boolean;
@@ -106,9 +108,10 @@ export interface WorkflowApprovalActionsProps {
 
 export function shouldUseApprovalSubmitCopy(
   directLifecycle: boolean,
-  submitCopyMode: 'automatic' | 'approval' = 'automatic'
+  _submitCopyMode: 'automatic' | 'approval' = 'automatic'
 ) {
-  return submitCopyMode === 'approval' || !directLifecycle;
+  // A caller's legacy label override cannot imply approval when the server disabled it.
+  return !directLifecycle;
 }
 
 /**
@@ -136,6 +139,8 @@ export function WorkflowApprovalActions({
   showStepBadge = false,
   currentStepName,
   workflowSummary,
+  workflowSummaryLoading,
+  workflowSummaryError,
   loadWorkflowSummary = true,
   canSubmit,
   canApproveReject,
@@ -204,30 +209,17 @@ export function WorkflowApprovalActions({
   const [recallReason, setRecallReason] = React.useState('');
   const [recallProcessing, setRecallProcessing] = React.useState(false);
 
-  const [summaryLoading, setSummaryLoading] = React.useState(false);
-  const [summaryStepName, setSummaryStepName] = React.useState<string | undefined>(undefined);
-  const [summaryStepInstanceId, setSummaryStepInstanceId] = React.useState<string | undefined>(undefined);
-  const [summaryStepType, setSummaryStepType] = React.useState<WorkflowStepType | string | undefined>(undefined);
-  const [summaryChecklist, setSummaryChecklist] = React.useState<WorkflowQualityCheckDto[]>([]);
-  const [summaryTaskConfig, setSummaryTaskConfig] = React.useState<WorkflowTaskConfigDto | undefined>(undefined);
-  const [summaryTaskAttachments, setSummaryTaskAttachments] = React.useState<WorkflowTaskAttachmentDto[]>([]);
-  const [canCurrentUserApprove, setCanCurrentUserApprove] = React.useState<boolean | undefined>(undefined);
-  const [summaryApprovalRequired, setSummaryApprovalRequired] = React.useState<boolean | undefined>(undefined);
-  const [canCurrentUserRecall, setCanCurrentUserRecall] = React.useState<boolean | undefined>(undefined);
-  const [canCurrentUserComplete, setCanCurrentUserComplete] = React.useState<boolean | undefined>(undefined);
-  const [summaryPendingApprovers, setSummaryPendingApprovers] = React.useState<WorkflowPendingApproverDto[]>([]);
-
-  const hasActiveSummary = workflowSummary?.hasActiveInstance === true;
-  const effectiveApprovalRequired = hasActiveSummary
-    ? true
-    : workflowSummary
-      ? workflowSummary.approvalRequired !== false
-      : summaryApprovalRequired === true;
-  const approvalAvailabilityKnown = hasActiveSummary || workflowSummary !== undefined || summaryApprovalRequired !== undefined;
-  const effectiveStepName = currentStepName || (hasActiveSummary ? workflowSummary?.currentStepName : undefined) || summaryStepName;
-  const effectiveStepInstanceId = (hasActiveSummary ? workflowSummary?.currentStepInstanceId : undefined) || summaryStepInstanceId;
-  const effectiveStepType = hasActiveSummary ? workflowSummary?.currentStepType : summaryStepType;
-  const effectiveChecklist = hasActiveSummary ? (workflowSummary?.currentStepChecklist ?? []) : summaryChecklist;
+  const workflowState = useWorkflowSummary({
+    entityType, entityId, workflowSummary, workflowSummaryLoading, workflowSummaryError, loadWorkflowSummary,
+  });
+  const { summary: effectiveSummary, loading: summaryLoading, error: summaryError, visibility } = workflowState;
+  const hasActiveSummary = visibility.active;
+  const effectiveApprovalRequired = visibility.approvalRequired;
+  const approvalAvailabilityKnown = visibility.known;
+  const effectiveStepName = hasActiveSummary ? currentStepName || effectiveSummary?.currentStepName : undefined;
+  const effectiveStepInstanceId = hasActiveSummary ? effectiveSummary?.currentStepInstanceId : undefined;
+  const effectiveStepType = hasActiveSummary ? effectiveSummary?.currentStepType : undefined;
+  const effectiveChecklist = hasActiveSummary ? (effectiveSummary?.currentStepChecklist ?? []) : [];
   const approvalChecklist = React.useMemo(
     () => hideDocumentChecklistItems
       ? effectiveChecklist.filter((item) => !item.requiresDocument)
@@ -240,10 +232,10 @@ export function WorkflowApprovalActions({
       : [],
     [effectiveChecklist, hideDocumentChecklistItems]
   );
-  const effectiveTaskConfig = hasActiveSummary ? workflowSummary?.currentStepTaskConfig : summaryTaskConfig;
+  const effectiveTaskConfig = hasActiveSummary ? effectiveSummary?.currentStepTaskConfig : undefined;
   const baseTaskAttachments = hasActiveSummary
-    ? (workflowSummary?.currentStepTaskAttachments ?? summaryTaskAttachments)
-    : summaryTaskAttachments;
+    ? (effectiveSummary?.currentStepTaskAttachments ?? [])
+    : [];
   const effectiveTaskAttachments = React.useMemo(() => {
     const byId = new Map<string, WorkflowTaskAttachmentDto>();
     [...baseTaskAttachments, ...externalTaskAttachments, ...taskLocalAttachments].forEach((attachment) => {
@@ -251,27 +243,27 @@ export function WorkflowApprovalActions({
     });
     return Array.from(byId.values());
   }, [baseTaskAttachments, externalTaskAttachments, taskLocalAttachments]);
-  const effectivePendingApprovers = hasActiveSummary ? (workflowSummary?.pendingApprovers ?? []) : summaryPendingApprovers;
+  const effectivePendingApprovers = hasActiveSummary ? (effectiveSummary?.pendingApprovers ?? []) : [];
   const pendingApproversText = formatPendingApprovers(effectivePendingApprovers);
 
   const defaultCanSubmit = status === 'Draft';
   const defaultCanApproveReject = status === 'Pending Approval' || status === 'Submitted';
 
-  const submitEnabled = approvalAvailabilityKnown && (canSubmit ?? defaultCanSubmit) && !!onSubmit;
-  const directLifecycle = submitEnabled && !effectiveApprovalRequired;
+  const submitEnabled = approvalAvailabilityKnown && !hasActiveSummary && (canSubmit ?? defaultCanSubmit) && !!onSubmit;
+  const directLifecycle = visibility.direct;
   const approvalSubmitCopy = shouldUseApprovalSubmitCopy(
     directLifecycle,
     submitCopyMode
   );
-  const approveRejectEnabledByStatus = effectiveApprovalRequired &&
+  const approveRejectEnabledByStatus = visibility.showApprovalControls && effectiveApprovalRequired &&
     (canApproveReject ?? defaultCanApproveReject) && !!onApprove && !!onReject;
 
   const effectiveCanApproveFlag =
-    hasActiveSummary ? workflowSummary?.canCurrentUserApprove : canCurrentUserApprove;
+    hasActiveSummary ? effectiveSummary?.canCurrentUserApprove : false;
   const effectiveCanRecallFlag =
-    hasActiveSummary ? workflowSummary?.canCurrentUserRecall : canCurrentUserRecall;
+    hasActiveSummary ? effectiveSummary?.canCurrentUserRecall : false;
   const effectiveCanCompleteFlag =
-    hasActiveSummary ? workflowSummary?.canCurrentUserComplete : canCurrentUserComplete;
+    hasActiveSummary ? effectiveSummary?.canCurrentUserComplete : false;
 
   const normalizedStepType = `${effectiveStepType ?? ''}`.toLowerCase();
   const hasKnownStepType =
@@ -298,11 +290,16 @@ export function WorkflowApprovalActions({
     ['submitted', 'pendingapproval', 'underreview', 'inreview'].includes(normalizedStatus);
   // Two ways in: a screen that knows its own recall rule passes `canRecall`, everything else
   // leans on the server's canCurrentUserRecall. The caller's answer wins when it gives one.
-  const recallAllowed = canRecall === undefined ? effectiveCanRecallFlag === true : canRecall === true;
+  // The server-flag path additionally waits for the summary to load (visibility.known), so no
+  // recall control is guessed at before the server has answered; a caller-supplied answer does
+  // not need the summary and is honoured immediately.
+  const recallAllowed = canRecall === undefined
+    ? (visibility.known && effectiveCanRecallFlag === true)
+    : canRecall === true;
   const canShowRecall = recallEnabledByStatus && recallAllowed && !effectiveCanApprove;
   const recallPromptMode = resolveRecallPrompt(recallPrompt, !!onRecall);
   const showApproveRejectControls = canShowApprovalActions && !canShowRecall;
-  const canCompleteTask = isCurrentTaskStep && effectiveCanCompleteFlag === true && !!effectiveStepInstanceId;
+  const canCompleteTask = visibility.known && isCurrentTaskStep && effectiveCanCompleteFlag === true && !!effectiveStepInstanceId;
   const normalizedTaskAction = effectiveTaskConfig?.taskActionType?.trim().toLowerCase();
   // Stage-level document requirements define the uploads needed before this task can advance.
   const taskDocumentRequirements = React.useMemo<WorkflowDocumentRequirementDto[]>(() => {
@@ -387,50 +384,12 @@ export function WorkflowApprovalActions({
     return getWorkflowChecklistAttachments(item, index, effectiveTaskAttachments).length === 0;
   });
   const taskConfirmDisabled =
+    forwardActionsDisabled ||
     taskProcessing ||
     taskChecklistUploadingKey !== null ||
     missingTaskDocumentRequirements.length > 0 ||
     taskRequiredChecklistIncomplete ||
     taskRequiredDocumentIncomplete;
-
-  React.useEffect(() => {
-    if (!loadWorkflowSummary) return;
-    if (workflowSummary) return; // parent is providing it
-    if (!entityType || !entityId) return;
-
-    let mounted = true;
-    (async () => {
-      try {
-        setSummaryLoading(true);
-        const s = await workflowApiService.getWorkflowEntitySummary(entityType, entityId);
-        if (!mounted) return;
-        setSummaryApprovalRequired(s.approvalRequired);
-        setSummaryStepName(s.currentStepName || undefined);
-        setSummaryStepInstanceId(s.currentStepInstanceId || undefined);
-        setSummaryStepType(s.currentStepType);
-        setSummaryChecklist(s.currentStepChecklist || []);
-        setSummaryTaskConfig(s.currentStepTaskConfig || undefined);
-        setSummaryTaskAttachments(s.currentStepTaskAttachments || []);
-        setCanCurrentUserApprove(!!s.canCurrentUserApprove);
-        setCanCurrentUserRecall(!!s.canCurrentUserRecall);
-        setCanCurrentUserComplete(!!s.canCurrentUserComplete);
-        setSummaryPendingApprovers(s.pendingApprovers || []);
-      } catch (e: any) {
-        // Fail closed: approval actions are unsafe unless an active workflow is confirmed.
-        if (!mounted) return;
-        setSummaryApprovalRequired(undefined);
-        setCanCurrentUserApprove(undefined);
-        setCanCurrentUserRecall(undefined);
-        setCanCurrentUserComplete(undefined);
-      } finally {
-        if (mounted) setSummaryLoading(false);
-      }
-    })();
-
-    return () => {
-      mounted = false;
-    };
-  }, [loadWorkflowSummary, workflowSummary, entityType, entityId]);
 
   React.useEffect(() => {
     if (!taskOpen) {
@@ -461,26 +420,7 @@ export function WorkflowApprovalActions({
     return [baseDescription, routingText].filter(Boolean).join(' ') || undefined;
   };
 
-  const refreshSummaryForAction = async () => {
-    try {
-      const s = await workflowApiService.getWorkflowEntitySummary(entityType, entityId);
-      if (loadWorkflowSummary && !workflowSummary) {
-        setSummaryStepName(s.currentStepName || undefined);
-        setSummaryStepInstanceId(s.currentStepInstanceId || undefined);
-        setSummaryStepType(s.currentStepType);
-        setSummaryChecklist(s.currentStepChecklist || []);
-        setSummaryTaskConfig(s.currentStepTaskConfig || undefined);
-        setSummaryTaskAttachments(s.currentStepTaskAttachments || []);
-        setCanCurrentUserApprove(!!s.canCurrentUserApprove);
-        setCanCurrentUserRecall(!!s.canCurrentUserRecall);
-        setCanCurrentUserComplete(!!s.canCurrentUserComplete);
-        setSummaryPendingApprovers(s.pendingApprovers || []);
-      }
-      return s;
-    } catch {
-      return undefined;
-    }
-  };
+  const refreshSummaryForAction = workflowState.refresh;
 
   const runAfter = async () => {
     const refreshedSummary = await refreshSummaryForAction();
@@ -493,7 +433,7 @@ export function WorkflowApprovalActions({
       toast.error(forwardActionsDisabledReason || 'Complete all required inputs before submitting.');
       return false;
     }
-    if (!onSubmit) return false;
+    if (!onSubmit || !submitEnabled) return false;
     try {
       setSubmitting(true);
       await onSubmit();
@@ -543,6 +483,8 @@ export function WorkflowApprovalActions({
    * system. Rejection demands a reason because somebody is ruling against someone else.
    */
   const confirmRecall = async () => {
+    // Master #219: never act on a recall the control would not have offered.
+    if (!canShowRecall) return false;
     const reason = recallReason.trim();
     try {
       setRecallProcessing(true);
@@ -582,7 +524,7 @@ export function WorkflowApprovalActions({
 
   const confirmApproval = async (comments: string, checklistResponses?: WorkflowApprovalChecklistResponseDto[], signature?: WorkflowSignatureSubmissionDto) => {
     const handler = approvalMode === 'approve' ? onApprove : onReject;
-    if (!handler) return false;
+    if (!handler || !visibility.showApprovalControls || !effectiveCanApprove) return false;
     const persistedChecklistResponses = approvalMode === 'approve'
       ? [
           ...(checklistResponses ?? []),
@@ -615,8 +557,8 @@ export function WorkflowApprovalActions({
         await workflowApiService.saveStepChecklistResponses(effectiveStepInstanceId, persistedChecklistResponses);
       }
 
-      if (approvalMode === 'approve' && signature && workflowSummary?.currentUserApprovalId) {
-        await workflowApiService.stageWorkflowSignature(workflowSummary.currentUserApprovalId, signature);
+      if (approvalMode === 'approve' && signature && effectiveSummary?.currentUserApprovalId) {
+        await workflowApiService.stageWorkflowSignature(effectiveSummary.currentUserApprovalId, signature);
       }
       if (approvalMode === 'approve') await onApprove?.(comments, persistedChecklistResponses, signature);
       else await onReject?.(comments, checklistResponses);
@@ -697,10 +639,6 @@ export function WorkflowApprovalActions({
         ...current.filter((existing) => existing.id !== attachment.id),
         attachment,
       ]);
-      setSummaryTaskAttachments((current) => [
-        ...current.filter((existing) => existing.id !== attachment.id),
-        attachment,
-      ]);
       toast.success('Document attached', { description: file.name });
     } catch (error: any) {
       toast.error('Failed to attach document', { description: error?.message || undefined });
@@ -710,6 +648,7 @@ export function WorkflowApprovalActions({
   };
 
   const completeTask = async () => {
+    if (!canCompleteTask) return;
     if (forwardActionsDisabled) {
       toast.error(forwardActionsDisabledReason || 'Complete all required inputs before completing this task.');
       return;
@@ -766,7 +705,6 @@ export function WorkflowApprovalActions({
           requirement.documentType
         );
         uploadedAttachments.push(uploadedAttachment);
-        setSummaryTaskAttachments((prev) => [...prev.filter((item) => item.id !== uploadedAttachment.id), uploadedAttachment]);
         setTaskLocalAttachments((prev) => [...prev.filter((item) => item.id !== uploadedAttachment.id), uploadedAttachment]);
       }
 
@@ -830,7 +768,7 @@ export function WorkflowApprovalActions({
   };
 
   const confirmGovernanceAction = async () => {
-    const approvalId = hasActiveSummary ? workflowSummary?.currentUserApprovalId : undefined;
+    const approvalId = hasActiveSummary ? effectiveSummary?.currentUserApprovalId : undefined;
     if (!approvalId || !governanceReason.trim()) {
       toast.error('A pending approval and reason are required.'); return;
     }
@@ -933,7 +871,7 @@ export function WorkflowApprovalActions({
   );
 
   const resubmitCorrection = async () => {
-    const correctionId = workflowSummary?.currentUserCorrectionId;
+    const correctionId = visibility.showApprovalControls ? effectiveSummary?.currentUserCorrectionId : undefined;
     if (!correctionId) return;
     try {
       setResubmitProcessing(true);
@@ -945,7 +883,7 @@ export function WorkflowApprovalActions({
 
   const resubmitDialog = (
     <Dialog open={resubmitOpen} onOpenChange={setResubmitOpen}><DialogContent className="sm:max-w-lg"><DialogHeader>
-      <DialogTitle>Resubmit correction</DialogTitle><DialogDescription>{workflowSummary?.correctionInstructions || entityNumber || entityLabel}</DialogDescription>
+      <DialogTitle>Resubmit correction</DialogTitle><DialogDescription>{effectiveSummary?.correctionInstructions || entityNumber || entityLabel}</DialogDescription>
       </DialogHeader><div className="space-y-2"><Label>Response</Label><Textarea value={resubmitComments} onChange={event => setResubmitComments(event.target.value)} /></div>
       <DialogFooter><Button variant="outline" onClick={() => setResubmitOpen(false)} disabled={resubmitProcessing}>Cancel</Button><Button onClick={() => void resubmitCorrection()} disabled={resubmitProcessing}>Resubmit</Button></DialogFooter>
     </DialogContent></Dialog>
@@ -954,6 +892,11 @@ export function WorkflowApprovalActions({
   if (renderMode === 'menu-items') {
     return (
       <>
+        {!approvalAvailabilityKnown && (onSubmit || onApprove || onReject) && (
+          <DropdownMenuItem disabled title={summaryError}>
+            {summaryLoading ? 'Checking workflow...' : 'Workflow status unavailable'}
+          </DropdownMenuItem>
+        )}
         {submitEnabled && (
           <DropdownMenuItem
             onSelect={(event) => {
@@ -996,14 +939,14 @@ export function WorkflowApprovalActions({
           </>
         )}
 
-        {!hideGovernanceActions && effectiveCanApprove && workflowSummary?.currentUserApprovalId && (
+        {!hideGovernanceActions && effectiveCanApprove && effectiveSummary?.currentUserApprovalId && (
           <>
             <DropdownMenuItem onSelect={event => { event.preventDefault(); void openGovernanceAction('delegate'); }}><UserRoundCog className="mr-2 h-4 w-4" />Delegate</DropdownMenuItem>
             <DropdownMenuItem onSelect={event => { event.preventDefault(); void openGovernanceAction('send-back'); }}><CornerUpLeft className="mr-2 h-4 w-4" />Send back</DropdownMenuItem>
           </>
         )}
 
-        {workflowSummary?.canCurrentUserResubmit && workflowSummary.currentUserCorrectionId && (
+        {visibility.showApprovalControls && effectiveSummary?.canCurrentUserResubmit && effectiveSummary.currentUserCorrectionId && (
           <DropdownMenuItem disabled={forwardActionsDisabled} title={forwardActionsDisabled ? forwardActionsDisabledReason : undefined} onSelect={event => { event.preventDefault(); setResubmitOpen(true); }}><Send className="mr-2 h-4 w-4" />Resubmit correction</DropdownMenuItem>
         )}
 
@@ -1076,7 +1019,7 @@ export function WorkflowApprovalActions({
           checklistItems={approvalMode === 'approve' ? approvalChecklist : []}
           stepInstanceId={effectiveStepInstanceId}
           initialAttachments={effectiveTaskAttachments}
-          signaturePolicy={approvalMode === 'approve' ? workflowSummary?.currentStepSignaturePolicy : undefined}
+          signaturePolicy={approvalMode === 'approve' ? effectiveSummary?.currentStepSignaturePolicy : undefined}
           entitySummary={
             entityNumber ? (
               <div className="flex justify-between">
@@ -1135,6 +1078,7 @@ export function WorkflowApprovalActions({
                           <Input
                             id={inputId}
                             type="file"
+                            aria-label={`Upload ${requirement.documentName}`}
                             onChange={(event) =>
                               setTaskFiles((current) => ({
                                 ...current,
@@ -1298,6 +1242,11 @@ export function WorkflowApprovalActions({
   return (
     <div className={className}>
       <div className="flex flex-wrap items-center gap-2">
+        {!approvalAvailabilityKnown && (onSubmit || onApprove || onReject) && (
+          <span role="status" className="text-xs text-muted-foreground" title={summaryError}>
+            {summaryLoading ? 'Checking workflow...' : 'Workflow status unavailable. Refresh to try again.'}
+          </span>
+        )}
         {showStepBadge && effectiveStepName && (
           <Badge variant="outline" className="text-xs">
             Step: {effectiveStepName}
@@ -1351,14 +1300,14 @@ export function WorkflowApprovalActions({
           </>
         )}
 
-        {!hideGovernanceActions && effectiveCanApprove && workflowSummary?.currentUserApprovalId && (
+        {!hideGovernanceActions && effectiveCanApprove && effectiveSummary?.currentUserApprovalId && (
           <>
             <Button size={size} variant="outline" onClick={() => void openGovernanceAction('delegate')} title="Delegate approval"><UserRoundCog className={iconOnly ? 'h-4 w-4' : 'mr-1 h-4 w-4'} />{!iconOnly && 'Delegate'}</Button>
             <Button size={size} variant="outline" onClick={() => void openGovernanceAction('send-back')} title="Send back for correction"><CornerUpLeft className={iconOnly ? 'h-4 w-4' : 'mr-1 h-4 w-4'} />{!iconOnly && 'Send back'}</Button>
           </>
         )}
 
-        {workflowSummary?.canCurrentUserResubmit && workflowSummary.currentUserCorrectionId && (
+        {visibility.showApprovalControls && effectiveSummary?.canCurrentUserResubmit && effectiveSummary.currentUserCorrectionId && (
           <Button size={size} variant="outline" onClick={() => setResubmitOpen(true)} disabled={forwardActionsDisabled} title={forwardActionsDisabled ? forwardActionsDisabledReason : 'Resubmit correction'}><Send className={iconOnly ? 'h-4 w-4' : 'mr-1 h-4 w-4'} />{!iconOnly && 'Resubmit'}</Button>
         )}
 
@@ -1433,7 +1382,7 @@ export function WorkflowApprovalActions({
         checklistItems={approvalMode === 'approve' ? approvalChecklist : []}
         stepInstanceId={effectiveStepInstanceId}
         initialAttachments={effectiveTaskAttachments}
-        signaturePolicy={approvalMode === 'approve' ? workflowSummary?.currentStepSignaturePolicy : undefined}
+        signaturePolicy={approvalMode === 'approve' ? effectiveSummary?.currentStepSignaturePolicy : undefined}
         entitySummary={
           entityNumber ? (
             <div className="flex justify-between">
@@ -1492,6 +1441,7 @@ export function WorkflowApprovalActions({
                         <Input
                           id={inputId}
                           type="file"
+                          aria-label={`Upload ${requirement.documentName}`}
                           onChange={(event) =>
                             setTaskFiles((current) => ({
                               ...current,

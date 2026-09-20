@@ -50,6 +50,8 @@ describe('ReceiptSourceControlCard', () => {
 
     expect(markup).toContain('Ready');
     expect(markup).toContain('10.5');
+    expect(markup).toContain('Max. incl. tolerance');
+    expect(markup).not.toContain('>Remaining<');
     expect(markup).toContain('DEC-001');
     expect(markup).toContain('DEC-014');
   });

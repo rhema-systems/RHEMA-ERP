@@ -363,17 +363,22 @@ public partial class ProjectService
             && !asset.IsDeleted
             && asset.AssetType == EstateManagedAssetType.Land
             && asset.Status == EstateManagedAssetStatus.LandBank
-            && !asset.IsPublishedToExternalPortal
-            && asset.IsReadyForProjectManagement);
+            && !asset.IsPublishedToExternalPortal);
 
         var readyAssetList = readyLandAssets.ToList();
         var readyAssetIds = readyAssetList.Select(asset => asset.Id).ToList();
-        var verifiedDemarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
+        var allDemarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
-                && readyAssetIds.Contains(item.EstateManagedAssetId)
-                && item.BoundaryVerified))
+                && readyAssetIds.Contains(item.EstateManagedAssetId)))
             .ToList();
+        var verifiedDemarcations = allDemarcations
+            .Where(item => item.BoundaryVerified)
+            .ToList();
+        var parentDemarcationIds = allDemarcations
+            .Where(item => item.ParentDemarcationId.HasValue)
+            .Select(item => item.ParentDemarcationId!.Value)
+            .ToHashSet();
         var assignedLandReferences = (await _unitOfWork.Repository<ProjectDevelopmentProfile>().FindAsync(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
@@ -391,6 +396,17 @@ public partial class ProjectService
                 .ToList();
             foreach (var demarcation in assetDemarcations)
             {
+                if (parentDemarcationIds.Contains(demarcation.Id))
+                {
+                    continue;
+                }
+
+                if ((!asset.IsReadyForProjectManagement && !demarcation.IsReadyForProjectManagement)
+                    || demarcation.IsPublishedToExternalPortal)
+                {
+                    continue;
+                }
+
                 var demarcationReference = EstateLandDemarcationReference.Build(
                     asset.AssetCode,
                     demarcation.DemarcationNumber);
@@ -488,12 +504,18 @@ public partial class ProjectService
                 && asset.AssetType == EstateManagedAssetType.Land))
             .ToList();
         var assetIds = assets.Select(asset => asset.Id).ToList();
-        var demarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
+        var allDemarcations = (await _unitOfWork.Repository<EstateLandDemarcation>().FindAsync(item =>
                 item.TenantId == _currentUserProvider.TenantId
                 && !item.IsDeleted
-                && item.BoundaryVerified
                 && assetIds.Contains(item.EstateManagedAssetId)))
             .ToList();
+        var demarcations = allDemarcations
+            .Where(item => item.BoundaryVerified)
+            .ToList();
+        var parentDemarcationIds = allDemarcations
+            .Where(item => item.ParentDemarcationId.HasValue)
+            .Select(item => item.ParentDemarcationId!.Value)
+            .ToHashSet();
 
         foreach (var asset in assets)
         {
@@ -503,6 +525,11 @@ public partial class ProjectService
                 .ToList();
             foreach (var demarcation in assetDemarcations)
             {
+                if (parentDemarcationIds.Contains(demarcation.Id))
+                {
+                    continue;
+                }
+
                 var demarcationReference = EstateLandDemarcationReference.Build(
                     asset.AssetCode,
                     demarcation.DemarcationNumber);

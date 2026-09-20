@@ -8,6 +8,8 @@ public interface IInventoryDisposalService
     Task<IReadOnlyList<InventoryDisposalDto>> GetAsync(InventoryDisposalStatus? status, Guid? warehouseId, int take, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> GetByIdAsync(Guid id, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> CreateAsync(CreateInventoryDisposalRequest request, CancellationToken cancellationToken = default);
+    Task<InventoryDisposalDto> UpdateAsync(Guid id, UpdateInventoryDisposalRequest request, CancellationToken cancellationToken = default);
+    Task<InventoryDisposalDto> CancelAsync(Guid id, CancelInventoryDisposalRequest request, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> VerifyAsync(Guid id, VerifyInventoryDisposalRequest request, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> ScheduleCommitteeAsync(Guid id, ScheduleInventoryDisposalCommitteeRequest request, CancellationToken cancellationToken = default);
     Task<InventoryDisposalDto> VoteAsync(Guid id, VoteInventoryDisposalRequest request, CancellationToken cancellationToken = default);

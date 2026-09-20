@@ -37,6 +37,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { unitAccountsDataService } from '@/services/finance/unit-accounts-data.service';
 import type { AllocationRunBatch, AllocationRunBatchStatus } from '@/types/unit-accounts';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
+import { useAuth } from '@/hooks/use-auth';
 
 function formatDate(value?: string) {
     return value ? new Date(value).toLocaleDateString() : '-';
@@ -48,6 +50,8 @@ function formatMoney(currency: string, amount: number) {
 
 function statusBadge(status: AllocationRunBatchStatus) {
     switch (status) {
+        case 'ReadyToPost':
+            return <Badge className="bg-blue-100 text-blue-800">Ready to post</Badge>;
         case 'Draft':
             return <Badge variant="secondary">Draft</Badge>;
         case 'PendingApproval':
@@ -67,6 +71,9 @@ export default function AllocationRunBatchDetailPage() {
     const router = useRouter();
     const params = useParams();
     const batchId = params.id as string;
+    const { hasPermission } = useAuth();
+    const canManage = hasPermission('Finance.Admin');
+    const workflow = useWorkflowSummary({ entityType: 'AllocationRunBatch', entityId: batchId });
     const [batch, setBatch] = useState<AllocationRunBatch | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isWorking, setIsWorking] = useState(false);
@@ -106,7 +113,7 @@ export default function AllocationRunBatchDetailPage() {
             let updated: AllocationRunBatch;
             if (action === 'submit') {
                 updated = await unitAccountsDataService.submitAllocationRunBatch(batch.id, comment.trim() || undefined);
-                toast.success('Allocation run batch submitted for approval.');
+                toast.success(updated.approvalRequired === false ? 'Allocation is ready to post.' : 'Allocation run batch submitted for approval.');
             } else if (action === 'approve') {
                 updated = await unitAccountsDataService.approveAllocationRunBatch(batch.id, comment.trim() || undefined);
                 toast.success(updated.status === 'Approved' ? 'Allocation run batch approved.' : 'Approval recorded.');
@@ -119,6 +126,7 @@ export default function AllocationRunBatchDetailPage() {
             }
 
             setBatch(updated);
+            await workflow.refresh();
             setComment('');
             setRejectionReason('');
         } catch (error: any) {
@@ -150,6 +158,10 @@ export default function AllocationRunBatchDetailPage() {
             </Card>
         );
     }
+
+    const canReview = canManage && batch.status === 'PendingApproval' && workflow.visibility.showApprovalControls &&
+        workflow.summary?.canCurrentUserApprove === true;
+    const canPost = canManage && (batch.approvalRequired === false ? batch.status === 'ReadyToPost' : batch.status === 'Approved');
 
     return (
         <div className="space-y-6">
@@ -281,14 +293,15 @@ export default function AllocationRunBatchDetailPage() {
 
                 <Card className="h-fit">
                     <CardHeader>
-                        <CardTitle>Workflow Actions</CardTitle>
+                        <CardTitle>Actions</CardTitle>
                         <CardDescription>
-                            Submit, approve, and post this calculated batch
+                            Finalize the saved calculation, then post it to the ledger.
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                        {workflow.error && <Alert variant="destructive"><AlertDescription>{workflow.error} <Button variant="link" onClick={() => void workflow.refresh()}>Retry</Button></AlertDescription></Alert>}
                         <div className="space-y-2">
-                            <Label htmlFor="comment">Approval / Posting Comment</Label>
+                            <Label htmlFor="comment">Comments (optional)</Label>
                             <Textarea
                                 id="comment"
                                 value={comment}
@@ -299,7 +312,7 @@ export default function AllocationRunBatchDetailPage() {
                             />
                         </div>
 
-                        {batch.status === 'PendingApproval' && (
+                        {canReview && (
                             <div className="space-y-2">
                                 <Label htmlFor="rejectionReason">Rejection Reason</Label>
                                 <Input
@@ -313,13 +326,13 @@ export default function AllocationRunBatchDetailPage() {
                         )}
 
                         <div className="space-y-2">
-                            {batch.status === 'Draft' && (
-                                <Button className="w-full" onClick={() => runAction('submit')} disabled={isWorking}>
+                            {batch.status === 'Draft' && canManage && (
+                                <Button className="w-full" onClick={() => runAction('submit')} disabled={isWorking || !workflow.visibility.known}>
                                     <Send className="mr-2 h-4 w-4" />
-                                    Submit for Approval
+                                    {!workflow.visibility.known ? 'Checking approval status…' : workflow.visibility.direct ? 'Finalize' : 'Submit for Approval'}
                                 </Button>
                             )}
-                            {batch.status === 'PendingApproval' && (
+                            {canReview && (
                                 <>
                                     <Button className="w-full" onClick={() => runAction('approve')} disabled={isWorking}>
                                         <CheckCircle2 className="mr-2 h-4 w-4" />
@@ -336,10 +349,10 @@ export default function AllocationRunBatchDetailPage() {
                                     </Button>
                                 </>
                             )}
-                            {batch.status === 'Approved' && (
+                            {canPost && (
                                 <Button className="w-full" onClick={() => runAction('post')} disabled={isWorking}>
                                     <ArrowRight className="mr-2 h-4 w-4" />
-                                    Post to GL
+                                    Post
                                 </Button>
                             )}
                             {batch.status === 'Posted' && batch.journalEntryId && (

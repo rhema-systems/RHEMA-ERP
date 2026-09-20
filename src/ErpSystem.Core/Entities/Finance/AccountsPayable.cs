@@ -203,8 +203,12 @@ public class VendorInvoice : TenantEntity
 
     // ── Withholding Tax ─────────────────────────────────────────────────
 
-    [Column(TypeName = "decimal(5,2)")]
+    [Column(TypeName = "decimal(18,4)")]
     public decimal WithholdingTaxRate { get; set; }
+    public bool? ApplySupplierWithholdingDefaults { get; set; }
+    [Column(TypeName = "decimal(18,4)")]
+    public decimal? WithholdingTaxRateOverride { get; set; }
+    public bool WithholdingDecisionPending { get; set; }
 
     [Column(TypeName = "decimal(18,2)")]
     public decimal WithholdingTaxAmount { get; set; }
@@ -276,7 +280,8 @@ public class VendorInvoice : TenantEntity
     public VendorInvoiceStatus Status { get; set; } = VendorInvoiceStatus.Draft;
 
     [MaxLength(50)]
-    public string ApprovalStatus { get; set; } = "Draft"; // Draft, PendingApproval, Approved, Rejected
+    public string ApprovalStatus { get; set; } = "Draft"; // Draft, PendingApproval, Approved, Rejected, NotRequired
+    public bool ApprovalRequired { get; set; } = true;
 
     public Guid? SubmittedById { get; set; }
     public DateTime? SubmittedDate { get; set; }
@@ -331,6 +336,9 @@ public class VendorInvoice : TenantEntity
 /// </summary>
 public class VendorInvoiceLineItem : TenantEntity
 {
+    /// <summary>Posted landed-cost charge cleared by this AP line; assigned only by the AP handoff.</summary>
+    public Guid? LandedCostItemId { get; set; }
+
     [Required]
     public Guid VendorInvoiceId { get; set; }
     public virtual VendorInvoice VendorInvoice { get; set; } = null!;
@@ -595,6 +603,9 @@ public class VendorPayment : TenantEntity
     // ── Status & Authorization ──────────────────────────────────────────
 
     public VendorPaymentStatus Status { get; set; } = VendorPaymentStatus.Draft;
+
+    /// <summary>Server-captured approval requirement; existing payments retain their approval route.</summary>
+    public bool ApprovalRequired { get; set; } = true;
 
     /// <summary>
     /// Direct payments use the platform workflow just like payment batches. These fields retain
@@ -861,6 +872,8 @@ public class PaymentBatch : TenantEntity
     // ── Status & Authorization ──────────────────────────────────────────
 
     public PaymentBatchStatus Status { get; set; } = PaymentBatchStatus.Draft;
+
+    public bool ApprovalRequired { get; set; } = true;
 
     public Guid? CreatedById { get; set; }
     public Guid? ApprovedById { get; set; }

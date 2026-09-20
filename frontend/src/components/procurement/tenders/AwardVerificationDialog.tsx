@@ -9,7 +9,11 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Loader2, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, Building2, MinusCircle, Award, DollarSign } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, AlertCircle, ClipboardCheck, Building2, MinusCircle, Award } from 'lucide-react';
+import { formatProcurementMoney } from '@/lib/procurement-currency';
+import { getAwardBidderReviewStatus, isAwardVerificationClosed } from '@/lib/award-verification-status';
+import { hasAwardVerificationEvidence } from '@/lib/award-verification-evidence';
+import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { toast } from 'sonner';
 import {
   awardVerificationService,
@@ -27,12 +31,14 @@ interface BidderInfo {
   businessPartnerName: string;
   bidNumber: string;
   totalBidAmount: number;
+  currency?: string;
 }
 
 interface AwardVerificationDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tenderId: string;
+  tenderCurrency?: string;
   bidders: BidderInfo[];
   onVerificationComplete?: (verification: TenderAwardVerification) => void;
   onAwardBidder?: (bidId: string, bidAmount: number) => void;
@@ -44,6 +50,7 @@ interface ItemVerification {
   itemText: string;
   description?: string;
   isRequired: boolean;
+  requiresDocument?: boolean;
   isVerified: boolean;
   status: string;
   comments: string;
@@ -65,16 +72,19 @@ export function AwardVerificationDialog({
   open,
   onOpenChange,
   tenderId,
+  tenderCurrency,
   bidders,
   onVerificationComplete,
   onAwardBidder,
 }: AwardVerificationDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [template, setTemplate] = useState<AwardVerificationChecklistTemplate | null>(null);
   const [verification, setVerification] = useState<TenderAwardVerification | null>(null);
   const [bidderVerifications, setBidderVerifications] = useState<BidderVerification[]>([]);
   const [activeTab, setActiveTab] = useState<string>('');
+  const readOnly = isAwardVerificationClosed(verification?.status);
 
   useEffect(() => {
     if (open && tenderId && bidders.length > 0) {
@@ -85,6 +95,9 @@ export function AwardVerificationDialog({
   const loadVerificationData = async () => {
     try {
       setLoading(true);
+      setLoadError(null);
+      setVerification(null);
+      setBidderVerifications([]);
       
       // Check for existing verification
       let existingVerification = await awardVerificationService.getVerificationByTender(tenderId);
@@ -123,14 +136,14 @@ export function AwardVerificationDialog({
             businessPartnerName: bidder.businessPartnerName,
             bidNumber: bidder.bidNumber,
             overallComments: existingBidder.overallComments || '',
-            status: existingBidder.status === 'Verified' ? 'verified' :
-                   existingBidder.status === 'Failed' ? 'failed' : 'pending',
+            status: getAwardBidderReviewStatus(existingBidder.status),
             items: existingBidder.itemResults?.map(item => ({
               itemResultId: item.id,
               checklistItemId: item.checklistItemId,
               itemText: item.checklistItemText || item.itemText || '',
               description: item.itemDescription || '',
               isRequired: item.isRequired ?? true,
+              requiresDocument: item.requiresDocument ?? false,
               isVerified: item.isVerified,
               status: item.status,
               comments: item.comments || '',
@@ -161,6 +174,7 @@ export function AwardVerificationDialog({
             itemText: item.itemText,
             description: item.description,
             isRequired: item.isRequired,
+            requiresDocument: item.requiresDocument ?? false,
             isVerified: false,
             status: 'Pending',
             comments: '',
@@ -175,7 +189,11 @@ export function AwardVerificationDialog({
       }
     } catch (error: any) {
       console.error('Error loading verification data:', error);
-      toast.error(error.message || 'Failed to load verification data');
+      let problem: unknown = error;
+      try { problem = JSON.parse(error?.message); } catch { /* Retain non-JSON errors. */ }
+      const message = getProcurementProblemMessage(problem, 'Failed to load verification data');
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -226,10 +244,10 @@ export function AwardVerificationDialog({
   };
 
   const handleVerifyBidder = async (bidId: string) => {
-    if (!verification) return;
+    if (!verification || readOnly || loading || loadError || saving) return;
 
     const bidderVerification = bidderVerifications.find(bv => bv.bidId === bidId);
-    if (!bidderVerification) return;
+    if (!bidderVerification || bidderVerification.status === 'verified') return;
 
     // Check required items - must be Passed or Failed (not Pending or N/A)
     const unverifiedRequired = bidderVerification.items.filter(
@@ -238,6 +256,12 @@ export function AwardVerificationDialog({
 
     if (unverifiedRequired.length > 0) {
       toast.error(`Please verify all required items (${unverifiedRequired.length} remaining)`);
+      return;
+    }
+
+    const missingEvidence = bidderVerification.items.filter(item => !hasAwardVerificationEvidence(item));
+    if (missingEvidence.length > 0) {
+      toast.error(missingEvidence.map(item => `${item.itemText}: attach the required document`).join('; '));
       return;
     }
 
@@ -264,28 +288,39 @@ export function AwardVerificationDialog({
         return;
       }
 
-      await awardVerificationService.verifyBidder(verification.id, {
+      const savedBidder = await awardVerificationService.verifyBidder(verification.id, {
         bidderId: existingBidder.id,
         overallComments: bidderVerification.overallComments || undefined,
         itemResults,
       });
 
-      // Update local state
+      // Use the persisted outcome: a failed review must not turn green locally.
+      const savedStatus = getAwardBidderReviewStatus(savedBidder.status);
       setBidderVerifications(prev => prev.map(bv =>
-        bv.bidId === bidId ? { ...bv, status: 'verified' } : bv
+        bv.bidId === bidId ? { ...bv, status: savedStatus } : bv
       ));
 
-      toast.success(`${bidderVerification.businessPartnerName} verified successfully`);
+      if (savedStatus === 'verified') {
+        toast.success(`${bidderVerification.businessPartnerName} verified successfully`);
+      } else {
+        toast.warning(`${bidderVerification.businessPartnerName}: ${savedBidder.status}`);
+      }
     } catch (error: any) {
       console.error('Error verifying bidder:', error);
-      toast.error(error.message || 'Failed to verify bidder');
+      let problem: unknown = error;
+      try { problem = JSON.parse(error?.message); } catch { /* Keep plain errors. */ }
+      toast.error(getProcurementProblemMessage(problem, 'Failed to verify bidder'));
     } finally {
       setSaving(false);
     }
   };
 
   const handleCompleteVerification = async () => {
-    if (!verification) return;
+    if (!verification || readOnly || loading || loadError || saving || bidderVerifications.length === 0) return;
+    if (bidderVerifications.some(bidder => bidder.items.some(item => !hasAwardVerificationEvidence(item)))) {
+      toast.error('Required evidence is missing. Review the checklist before completing verification.');
+      return;
+    }
 
     const unverifiedBidders = bidderVerifications.filter(bv => bv.status !== 'verified');
     if (unverifiedBidders.length > 0) {
@@ -299,12 +334,15 @@ export function AwardVerificationDialog({
         verification.id,
         'Verification completed for all selected bidders'
       );
+      setVerification(completed);
       toast.success('Verification completed successfully');
       onVerificationComplete?.(completed);
       onOpenChange(false);
     } catch (error: any) {
       console.error('Error completing verification:', error);
-      toast.error(error.message || 'Failed to complete verification');
+      let problem: unknown = error;
+      try { problem = JSON.parse(error?.message); } catch { /* Keep plain errors. */ }
+      toast.error(getProcurementProblemMessage(problem, 'Failed to complete verification'));
     } finally {
       setSaving(false);
     }
@@ -334,6 +372,11 @@ export function AwardVerificationDialog({
         {loading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </div>
+        ) : loadError ? (
+          <div className="space-y-4">
+            <p role="alert" className="text-sm text-destructive">{loadError}</p>
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           </div>
         ) : (
           <div className="space-y-4">
@@ -406,7 +449,7 @@ export function AwardVerificationDialog({
                                   variant={item.status === 'Passed' ? 'default' : 'outline'}
                                   className={item.status === 'Passed' ? 'bg-green-600 hover:bg-green-700' : ''}
                                   onClick={() => handleVerifyItem(bv.bidId, item.checklistItemId, 'Passed')}
-                                  disabled={bv.status === 'verified'}
+                                  disabled={readOnly || saving || bv.status === 'verified'}
                                 >
                                   <CheckCircle2 className="h-4 w-4 mr-1" />
                                   Pass
@@ -415,7 +458,7 @@ export function AwardVerificationDialog({
                                   size="sm"
                                   variant={item.status === 'Failed' ? 'destructive' : 'outline'}
                                   onClick={() => handleVerifyItem(bv.bidId, item.checklistItemId, 'Failed')}
-                                  disabled={bv.status === 'verified'}
+                                  disabled={readOnly || saving || bv.status === 'verified'}
                                 >
                                   <XCircle className="h-4 w-4 mr-1" />
                                   Fail
@@ -424,7 +467,7 @@ export function AwardVerificationDialog({
                                   size="sm"
                                   variant={item.status === 'NotApplicable' ? 'secondary' : 'outline'}
                                   onClick={() => handleVerifyItem(bv.bidId, item.checklistItemId, 'NotApplicable')}
-                                  disabled={bv.status === 'verified' || item.isRequired}
+                                  disabled={readOnly || saving || bv.status === 'verified' || item.isRequired}
                                   title={item.isRequired ? 'Required items cannot be marked as N/A' : ''}
                                 >
                                   <MinusCircle className="h-4 w-4 mr-1" />
@@ -433,22 +476,31 @@ export function AwardVerificationDialog({
                               </div>
 
                               {/* Comments */}
+                              <Label htmlFor={`review-comments-${bv.bidId}-${item.checklistItemId}`}>
+                                Review comments (optional)
+                              </Label>
                               <Textarea
-                                placeholder="Comments (optional)"
+                                id={`review-comments-${bv.bidId}-${item.checklistItemId}`}
+                                placeholder="Add context if needed"
                                 value={item.comments}
                                 onChange={(e) =>
                                   handleItemChange(bv.bidId, item.checklistItemId, 'comments', e.target.value)
                                 }
-                                disabled={bv.status === 'verified'}
+                                disabled={readOnly || saving || bv.status === 'verified'}
                                 rows={2}
                               />
+                              <p className="text-xs text-muted-foreground">
+                                {item.requiresDocument
+                                  ? 'Document required: retain the supporting file for this check.'
+                                  : 'Comments and attachments are optional. Click Verify Bidder to save your decisions.'}
+                              </p>
 
                               {/* Document Attachments */}
                               {item.itemResultId && (
                                 <VerificationItemDocuments
                                   itemResultId={item.itemResultId}
                                   documents={item.documents}
-                                  disabled={bv.status === 'verified'}
+                                  disabled={readOnly || saving || bv.status === 'verified'}
                                   onDocumentsChange={(docs) =>
                                     handleDocumentsChange(bv.bidId, item.checklistItemId, docs)
                                   }
@@ -458,12 +510,12 @@ export function AwardVerificationDialog({
                           ))}
 
                           <div className="border-t pt-4 mt-4">
-                            <Label>Overall Comments</Label>
+                            <Label>Overall comments (optional)</Label>
                             <Textarea
                               placeholder="Overall verification comments for this bidder..."
                               value={bv.overallComments}
                               onChange={(e) => handleOverallCommentsChange(bv.bidId, e.target.value)}
-                              disabled={bv.status === 'verified'}
+                              disabled={readOnly || saving || bv.status === 'verified'}
                               className="mt-2"
                               rows={3}
                             />
@@ -474,12 +526,14 @@ export function AwardVerificationDialog({
                       <div className="flex justify-between items-center mt-4 pt-4 border-t">
                         {/* Show bid amount */}
                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                          <DollarSign className="h-4 w-4" />
-                          <span>Bid Amount: <strong className="text-foreground">${bidders.find(b => b.bidId === bv.bidId)?.totalBidAmount.toLocaleString() || 0}</strong></span>
+                          <span>Bid Amount: <strong className="text-foreground">{formatProcurementMoney(
+                            bidders.find(b => b.bidId === bv.bidId)?.totalBidAmount ?? 0,
+                            bidders.find(b => b.bidId === bv.bidId)?.currency || tenderCurrency
+                          )}</strong></span>
                         </div>
 
                         <div className="flex gap-2">
-                          {bv.status !== 'verified' && (
+                          {!readOnly && bv.status !== 'verified' && (
                             <Button onClick={() => handleVerifyBidder(bv.bidId)} disabled={saving}>
                               {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <CheckCircle2 className="h-4 w-4 mr-2" />}
                               Verify Bidder
@@ -487,7 +541,7 @@ export function AwardVerificationDialog({
                           )}
 
                           {/* Award button - enabled only when bidder is verified */}
-                          {onAwardBidder && (
+                          {onAwardBidder && verification?.status === 'Completed' && (
                             <Button
                               onClick={() => {
                                 const bidAmount = bidders.find(b => b.bidId === bv.bidId)?.totalBidAmount || 0;
@@ -512,21 +566,24 @@ export function AwardVerificationDialog({
 
             <div className="flex items-center justify-between pt-4 border-t">
               <div className="text-sm text-muted-foreground">
-                {progress.verified === progress.total ? (
+                {readOnly ? (
+                  <span className="font-medium">Verification {verification?.status.toLowerCase()} · read-only</span>
+                ) : progress.total > 0 && progress.verified === progress.total ? (
                   <span className="text-green-600 font-medium">All bidders verified!</span>
                 ) : (
                   <span>{progress.total - progress.verified} bidder(s) remaining</span>
                 )}
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-                <Button
+                <Button variant="outline" onClick={() => onOpenChange(false)}>{readOnly ? 'Close' : 'Cancel'}</Button>
+                {!readOnly && <Button
                   onClick={handleCompleteVerification}
-                  disabled={saving || progress.verified !== progress.total}
+                  disabled={saving || !verification || progress.total === 0 || progress.verified !== progress.total ||
+                    bidderVerifications.some(bidder => bidder.items.some(item => !hasAwardVerificationEvidence(item)))}
                 >
                   {saving ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : null}
                   Complete Verification
-                </Button>
+                </Button>}
               </div>
             </div>
           </div>

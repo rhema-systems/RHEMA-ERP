@@ -1,4 +1,5 @@
 using ErpSystem.Core.Entities.Inventory;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Inventory;
 using Microsoft.AspNetCore.Authorization;
@@ -19,6 +20,7 @@ public class StockMovementsController : ControllerBase
     private readonly IInventoryMovementRepository _inventoryMovementRepository;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<StockMovementsController> _logger;
+    private readonly IUnitOfWork _unitOfWork;
 
     private static readonly Guid DefaultTenantId = Guid.Parse("00000000-0000-0000-0000-000000000001");
 
@@ -26,12 +28,14 @@ public class StockMovementsController : ControllerBase
         IStockMovementRepository stockMovementRepository,
         IInventoryMovementRepository inventoryMovementRepository,
         ICurrentUserProvider currentUserProvider,
-        ILogger<StockMovementsController> logger)
+        ILogger<StockMovementsController> logger,
+        IUnitOfWork unitOfWork)
     {
         _stockMovementRepository = stockMovementRepository;
         _inventoryMovementRepository = inventoryMovementRepository;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
+        _unitOfWork = unitOfWork;
     }
 
     /// <summary>
@@ -54,6 +58,14 @@ public class StockMovementsController : ControllerBase
                 inventoryItemId, warehouseId, movementType, startDate, endDate, referenceNumber, limit);
 
             var tenantId = GetTenantId();
+
+            // Inventory valuation is in functional currency. Return only this display
+            // metadata so stores users do not need access to Finance settings APIs.
+            var settings = await _unitOfWork.Repository<FinanceSettings>()
+                .FirstOrDefaultAsync(value => value.TenantId == tenantId && !value.IsDeleted);
+            var currencyCode = settings?.BaseCurrency?.Trim().ToUpperInvariant();
+            if (currencyCode?.Length != 3 || !currencyCode.All(c => c is >= 'A' and <= 'Z'))
+                currencyCode = null;
 
             // We have two movement systems:
             // 1) StockMovement (legacy operational movement log)
@@ -150,6 +162,9 @@ public class StockMovementsController : ControllerBase
                 .OrderByDescending(m => m.MovementDate)
                 .Take(Math.Clamp(limit, 1, 500))
                 .ToList();
+
+            foreach (var movement in result)
+                movement.CurrencyCode = currencyCode;
 
             _logger.LogInformation("Returning {Count} movements (StockMovements={StockCount}, InventoryMovements={InvCount})",
                 result.Count, stockMovements.Count, invMovements.Count);
@@ -393,6 +408,7 @@ public class StockMovementsController : ControllerBase
 /// </summary>
 public class StockMovementDto
 {
+    public string? CurrencyCode { get; set; }
     public Guid Id { get; set; }
     public string MovementNumber { get; set; } = string.Empty;
     public Guid InventoryItemId { get; set; }

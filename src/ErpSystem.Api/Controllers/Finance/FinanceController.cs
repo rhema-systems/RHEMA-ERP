@@ -201,7 +201,66 @@ namespace ErpSystem.Api.Controllers
             try
             {
                 var journalEntry = await _revaluationService.RunCurrencyRevaluationAsync(requestDto);
-                return Ok(journalEntry);
+                return Ok(new CurrencyRevaluationPostingResultDto
+                {
+                    Id = journalEntry.Id,
+                    JournalEntryNumber = journalEntry.JournalEntryNumber,
+                    PostingStatus = journalEntry.PostingStatus,
+                    TotalDebitAmount = journalEntry.TotalDebitAmount,
+                    TotalCreditAmount = journalEntry.TotalCreditAmount,
+                    PostingDate = journalEntry.PostingDate
+                });
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("revaluation/preview")]
+        public async Task<IActionResult> PreviewRevaluation([FromBody] RevaluationRequestDto requestDto)
+        {
+            try
+            {
+                requestDto.PreviewOnly = true;
+                var preview = await _revaluationService.PreviewCurrencyRevaluationAsync(requestDto);
+                return Ok(preview);
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpGet("revaluation/history")]
+        public async Task<IActionResult> GetRevaluationHistory(
+            [FromQuery] DateTime startDate,
+            [FromQuery] DateTime endDate,
+            [FromQuery] string? currencyCode = null)
+        {
+            try
+            {
+                return Ok(await _revaluationService.GetRevaluationBatchesAsync(startDate, endDate, currencyCode));
+            }
+            catch (Exception ex)
+            {
+                return BadRequest(new { message = ex.Message });
+            }
+        }
+
+        [HttpPost("revaluation/{batchId:guid}/reverse")]
+        public async Task<IActionResult> ReverseRevaluation(Guid batchId, [FromBody] ReverseFxRevaluationRequestDto request)
+        {
+            try
+            {
+                var batch = await _revaluationService.ReverseRevaluationBatchAsync(batchId, request.ReversalDate, request.Reason);
+                return Ok(new
+                {
+                    batch.Id,
+                    batch.Status,
+                    batch.ReversalJournalEntryId,
+                    batch.ReversedAt
+                });
             }
             catch (Exception ex)
             {

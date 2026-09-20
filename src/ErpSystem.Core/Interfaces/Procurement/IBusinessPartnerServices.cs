@@ -12,6 +12,7 @@ namespace ErpSystem.Core.Interfaces.Procurement;
 /// </summary>
 public interface IBusinessPartnerService
 {
+    Task<BusinessPartnerPostingOptionsDto> GetPostingOptionsAsync(string? partnerType = null);
     // Basic CRUD
     Task<BusinessPartnerDetailDto?> GetByIdAsync(Guid id);
     Task<BusinessPartnerDto?> GetByCodeAsync(string partnerCode);

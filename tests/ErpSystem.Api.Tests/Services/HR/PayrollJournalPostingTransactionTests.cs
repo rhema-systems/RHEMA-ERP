@@ -72,7 +72,8 @@ public sealed class PayrollJournalPostingTransactionTests
         method.Should().Contain("SourceDocumentId = run.Id");
         method.Should().Contain("SourceDocumentTenantId = tenantId");
         method.Should().Contain("IdempotencyKey = $");
-        method.Should().Contain("_financePostingEngine.PostAsync(postingRequest, cancellationToken)");
+        method.Should().Contain("FinanceExternalProducerContractId.HrPayrollJournal");
+        method.Should().Contain("_financePostingEngine.PostAsync(postingRequest, payrollProducer, cancellationToken)");
         method.Should().NotContain("_journalEntryService.CreateJournalEntryAsync");
         method.Should().NotContain("_journalEntryService.PostJournalEntryAsync");
     }
@@ -88,7 +89,7 @@ public sealed class PayrollJournalPostingTransactionTests
             root,
             "src",
             "ErpSystem.Data",
-            "Migrations",
+            "LegacyMigrationsArchive",
             "20260903235000_FilterPayrollJournalLineSequenceIndex.cs"));
 
         model.Should().Contain(

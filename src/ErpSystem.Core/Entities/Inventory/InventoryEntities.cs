@@ -122,6 +122,24 @@ public class InventoryItem : TenantEntity
     /// </summary>
     public Guid? DefaultTaxGroupId { get; set; }
 
+    // Optional GL defaults; posting services fall back to Finance settings when unset.
+    public Guid? InventoryAccountId { get; set; }
+    public Guid? InventoryOffsetAccountId { get; set; }
+    public Guid? CostOfGoodsSoldAccountId { get; set; }
+    public Guid? SalesAccountId { get; set; }
+    public Guid? MarkdownsAccountId { get; set; }
+    public Guid? SalesReturnsAccountId { get; set; }
+    public Guid? InUseAccountId { get; set; }
+    public Guid? InServiceAccountId { get; set; }
+    public Guid? DamagedAccountId { get; set; }
+    public Guid? VarianceAccountId { get; set; }
+    public Guid? DropShipItemsAccountId { get; set; }
+    public Guid? PurchasePriceVarianceAccountId { get; set; }
+    public Guid? UnrealisedPurchasePriceVarianceAccountId { get; set; }
+    public Guid? InventoryReturnsAccountId { get; set; }
+    public Guid? AssemblyVarianceAccountId { get; set; }
+    public Guid? StandardCostRevaluationAccountId { get; set; }
+
     // Physical Properties
     public decimal ShippingWeight { get; set; }
     public decimal? Weight { get; set; }
@@ -342,6 +360,9 @@ public class StockAdjustment : TenantEntity
     [MaxLength(20)]
     public string Status { get; set; } = "Draft"; // Draft, Approved, Posted
 
+    // Server-owned submission snapshot. Existing records retain their approval obligations.
+    public bool ApprovalRequired { get; set; } = true;
+
     public Guid? ApprovedById { get; set; }
     public DateTime? ApprovedAt { get; set; }
 
@@ -505,6 +526,8 @@ public class WarehouseLocation : TenantEntity
 
     public Guid? ParentLocationId { get; set; }
 
+    /// <summary>The warehouse's normal fallback bin for newly assigned items.</summary>
+    public bool IsDefault { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsPickingLocation { get; set; } = true;
     public bool IsReceivingLocation { get; set; } = true;
@@ -709,6 +732,7 @@ public class InventoryAllocation : TenantEntity
     public Guid? InventoryRequisitionItemId { get; set; }
     public Guid? ProjectId { get; set; }
     public Guid? DepartmentId { get; set; }
+    public Guid? OrganizationUnitId { get; set; }
     public Guid? SubstitutedFromAllocationId { get; set; }
 
     public decimal AllocatedQuantity { get; set; } = 0;

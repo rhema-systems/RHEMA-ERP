@@ -33,7 +33,10 @@ export const createAwardReadinessEvaluationRequest = (
   expectedRecommendedSubjectIds: latest?.recommendation.subjectIds ?? [],
   expectedBusinessPartnerIds:
     latest?.recommendation.businessPartnerIds ?? [],
-  expectedSourceIntegrityHash: latest?.sourceIntegrityHash,
+  // A historical decision's hash cannot describe the source being re-evaluated.
+  // Retain the guard unless the server explicitly marks that decision stale.
+  expectedSourceIntegrityHash:
+    latest?.isCurrent === false ? undefined : latest?.sourceIntegrityHash,
 });
 
 export type AwardReadinessSodPresentation =

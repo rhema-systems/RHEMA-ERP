@@ -1786,6 +1786,63 @@ Priority: Critical
 
 Go-live blocker: Yes
 
+### FIN-028 - Remove COA Read-Path Backfill And Bound Account Queries
+
+Status: To be worked on
+
+Date observed: 2026-09-01
+
+Suggested implementation order: 3
+
+Affected files/classes/methods:
+
+- `src/ErpSystem.Api/Services/Finance/GL/AccountService.cs` (`GetAllAsync`)
+- `src/ErpSystem.Api/Services/Finance/Settings/AccountingBookService.cs` (`EnsureTenantDefaultsAsync`, `BackfillAccountMappingsAsync`)
+- `src/ErpSystem.Api/Controllers/Finance/AccountController.cs` (`GetAllAccounts`)
+- `frontend/src/app/finance/accounts/page.tsx`
+- `frontend/src/services/api.service.ts`
+
+Problem statement:
+
+Loading the Chart of Accounts can exceed the frontend's 20-second request deadline. The GET path currently calls accounting-book default creation and mapping backfill before reading accounts. That backfill loads all tenant accounts and mappings, scans mappings per account, unconditionally updates mapping audit fields, and saves changes. The subsequent account read is unbounded and includes multiple child collections in one tracked EF query, increasing row multiplication, memory use, database work, and lock contention. Client cancellation is then surfaced as HTTP 500 rather than a cancellation response.
+
+Observed evidence:
+
+- `GET /api/finance/accounts?coaType=Segmented` timed out in the browser after 20 seconds.
+- The server recorded cancellation in `AccountService.GetAllAsync` after approximately 26.3 seconds.
+- A separate already-cancelled request stopped in HR identity access and was also logged as HTTP 500.
+
+Proposed implementation approach:
+
+- Remove tenant-default creation and historical mapping backfill from the COA GET request.
+- Run backfill through migration/startup repair or an explicit idempotent administrative operation.
+- Change mapping reconciliation to indexed lookups and update only records whose business values changed.
+- Make COA reads no-tracking and use a bounded projection or split query that avoids collection Cartesian expansion.
+- Add server-side paging, search, type/status filters, and a safe maximum page size; stop loading and filtering the full COA in the browser.
+- Treat request-aborted `OperationCanceledException` as client cancellation instead of logging it as an application HTTP 500.
+- Do not increase the frontend timeout as the primary remedy.
+
+Acceptance criteria:
+
+- A COA GET performs no inserts or updates.
+- The first and subsequent segmented-COA page loads complete within the agreed performance budget under representative tenant volume.
+- SQL/query telemetry proves bounded rows and no collection Cartesian explosion.
+- Concurrent COA requests do not block each other on accounting-book mappings.
+- Browser cancellation is not reported as an application HTTP 500.
+- Pagination, filtering, and account ordering remain tenant-scoped and deterministic.
+
+Test cases:
+
+- Load the first COA page for a tenant with representative account, segment, and accounting-book volumes.
+- Execute concurrent identical COA reads and verify no database writes or lock waits are introduced.
+- Verify paging and filters cannot expose another tenant's accounts.
+- Cancel a request and verify cancellation handling and logging.
+- Run a separate accounting-book repair and prove it is idempotent.
+
+Priority: High
+
+Go-live blocker: Yes for representative-volume tenants
+
 ## Dependency Matrix
 
 | Dependency | Tickets |
@@ -1797,6 +1854,7 @@ Go-live blocker: Yes
 | Tax | FIN-008, FIN-009, FIN-014, FIN-015, FIN-026, FIN-027 |
 | FX | FIN-008, FIN-009, FIN-016, FIN-017, FIN-018, FIN-024, FIN-027 |
 | Migration | FIN-005, FIN-013, FIN-016, FIN-019, FIN-024, FIN-027 |
+| COA performance | FIN-003, FIN-013, FIN-025, FIN-028 |
 
 ## Go-Live Readiness Gate
 

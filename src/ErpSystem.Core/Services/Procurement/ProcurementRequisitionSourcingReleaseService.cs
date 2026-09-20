@@ -250,7 +250,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         var requirements = new List<PurchaseRequisitionSourcingRequirementDto>();
         Add(requirements, "PR_STATUS", "Approved requisition",
             string.Equals(requisition.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
-            requisition.ApprovedAt.HasValue && requisition.ApprovedById.HasValue,
+            (!requisition.ApprovalRequired || (requisition.ApprovedAt.HasValue && requisition.ApprovedById.HasValue)),
             "PR_NOT_APPROVED",
             "Complete the configured Purchase Requisition approval workflow with a different authorized approver before sourcing.");
 
@@ -283,7 +283,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
 
         var fingerprintObject = new
         {
-            schemaVersion = "tdc.pr-sourcing-release.v2",
+            schemaVersion = requisition.ApprovalRequired ? "tdc.pr-sourcing-release.v2" : "tdc.pr-sourcing-release.v3.no-approval",
             requisition.Id,
             requisition.Status,
             requisition.ApprovedById,
@@ -586,7 +586,7 @@ public sealed class ProcurementRequisitionSourcingReleaseService : IProcurementR
         var releaseReference = Truncate($"SRL-{requisition.RequisitionNumber}-A{attempt}", 100);
         var snapshot = new
         {
-            schemaVersion = "tdc.pr-sourcing-release.v2",
+            schemaVersion = requisition.ApprovalRequired ? "tdc.pr-sourcing-release.v2" : "tdc.pr-sourcing-release.v3.no-approval",
             id,
             purchaseRequisitionId = requisition.Id,
             requisition.RequisitionNumber,

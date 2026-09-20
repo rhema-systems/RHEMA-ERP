@@ -1,6 +1,7 @@
 using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AP;
 using ErpSystem.Api.Services.Finance.GL;
+using ErpSystem.Api.Services.Finance.Taxation;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities;
@@ -9,9 +10,11 @@ using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.Numbering;
 using ErpSystem.Core.Interfaces.Procurement;
 using ErpSystem.Core.Services.Procurement;
+using ErpSystem.Core.Services.Workflow;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using FluentAssertions;
@@ -26,8 +29,212 @@ using Xunit;
 
 namespace ErpSystem.Api.Tests.Services.Finance;
 
-public sealed class ApPaymentPostingMigrationTests
+public sealed partial class ApPaymentPostingMigrationTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(5)]
+    public async Task InvoiceChosenRate_ShouldSurvivePaymentCalculationAndPosting(decimal chosenRate)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId, allocationAmount: 100m - chosenRate);
+        var tax = await SeedPaymentWithholdingTaxAsync(db, fixture, null);
+        fixture.Invoice.ApplySupplierWithholdingDefaults = true;
+        fixture.Invoice.WithholdingTaxId = tax.Id;
+        fixture.Invoice.WithholdingTaxRate = chosenRate;
+        fixture.Invoice.WithholdingTaxRateOverride = chosenRate;
+        fixture.Invoice.WithholdingTaxAccountId = tax.TaxPayableAccountId;
+        fixture.Allocation.WithholdingTaxAmount = chosenRate;
+        fixture.Payment.WithholdingTaxAmount = chosenRate;
+        fixture.Payment.WithholdingTaxId = null; // Inherit the invoice even if a payment client omitted it.
+        await db.SaveChangesAsync();
+        var calculator = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
+        var (service, _) = CreateService(db, tenantId, withholdingTaxService: calculator);
+
+        var result = await service.PostAsync(fixture.Payment.Id);
+
+        result.WithholdingTaxRate.Should().Be(chosenRate);
+        result.WithholdingTaxAmount.Should().Be(chosenRate);
+        result.WithholdingTaxId.Should().Be(tax.Id);
+        tax.Rate.Should().Be(10m, "the invoice choice must not change the tax master");
+        var lines = await db.AccountTransactions.Where(line => line.JournalEntryId == result.JournalEntryId).ToListAsync();
+        lines.Single(line => line.TransactionTag == "AP-Control").DebitAmount.Should().Be(100m);
+        lines.Single(line => line.TransactionTag == "AP-Bank").CreditAmount.Should().Be(100m - chosenRate);
+        lines.Where(line => line.TransactionTag == "AP-WHT").Sum(line => line.CreditAmount).Should().Be(chosenRate);
+    }
+
+    [Fact]
+    public async Task InvoiceNoWithholding_ShouldNotBeReappliedDuringPaymentPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId,
+            configureInvoice: invoice => invoice.ApplySupplierWithholdingDefaults = false);
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Payment.Id);
+
+        result.WithholdingTaxId.Should().BeNull();
+        result.WithholdingTaxAmount.Should().Be(0m);
+        (await db.AccountTransactions.Where(line => line.JournalEntryId == result.JournalEntryId).ToListAsync())
+            .Should().NotContain(line => line.TransactionTag == "AP-WHT");
+    }
+
+    [Fact]
+    public async Task InvoiceNoWithholding_ShouldRejectAConflictingPaymentTax()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId,
+            configureInvoice: invoice => invoice.ApplySupplierWithholdingDefaults = false);
+        await SeedPaymentWithholdingTaxAsync(db, fixture, null);
+        var calculator = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
+        var (service, _) = CreateService(db, tenantId, withholdingTaxService: calculator);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        await post.Should().ThrowAsync<InvalidOperationException>().WithMessage("*disabled on this invoice*");
+        (await db.FinancePostingEvents.CountAsync(value => value.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    public void MixedInvoiceChoicesOrRates_ShouldRequireSeparatePayments()
+    {
+        var taxId = Guid.NewGuid();
+        var taxed = new VendorInvoice { Id = Guid.NewGuid(), ApplySupplierWithholdingDefaults = true, WithholdingTaxId = taxId, WithholdingTaxRate = 5m };
+        var declined = new VendorInvoice { Id = Guid.NewGuid(), ApplySupplierWithholdingDefaults = false };
+        var otherRate = new VendorInvoice { Id = Guid.NewGuid(), ApplySupplierWithholdingDefaults = true, WithholdingTaxId = taxId, WithholdingTaxRate = 10m };
+
+        var mixedChoice = () => ApInvoiceWithholdingPolicy.Resolve(new[] { taxed, declined }, taxId);
+        var mixedRate = () => ApInvoiceWithholdingPolicy.Resolve(new[] { taxed, otherRate }, taxId);
+
+        mixedChoice.Should().Throw<InvalidOperationException>().WithMessage("*separate payments*");
+        mixedRate.Should().Throw<InvalidOperationException>().WithMessage("*separate payments*");
+    }
+
+    [Fact]
+    public async Task Calculation_ShouldNotUseAnotherSuppliersInvoiceRateOverride()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var tax = await SeedPaymentWithholdingTaxAsync(db, fixture, null);
+        var otherSupplier = SeedSupplier(db, tenantId, fixture.ApAccount.Id);
+        await db.SaveChangesAsync();
+        var calculator = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
+
+        var calculate = () => calculator.CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            SupplierId = otherSupplier.Id, TaxId = tax.Id, PaymentDate = fixture.Payment.PaymentDate,
+            TaxableBase = 100m, VendorInvoiceIds = new() { fixture.Invoice.Id }
+        });
+
+        await calculate.Should().ThrowAsync<InvalidOperationException>().WithMessage("*does not belong to this supplier and tenant*");
+    }
+
+    [Fact]
+    public async Task BelowThresholdPayment_ShouldPreserveItsBaseAndExcludeItselfDuringPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        var tax = await SeedPaymentWithholdingTaxAsync(db, fixture, 150m);
+        var calculator = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
+        var (service, _) = CreateService(db, tenantId, withholdingTaxService: calculator);
+
+        var result = await service.PostAsync(fixture.Payment.Id);
+
+        result.WithholdingTaxAmount.Should().Be(0m);
+        result.WithholdingTaxBaseAmount.Should().Be(100m);
+        result.WithholdingTaxRate.Should().Be(10m);
+        result.WithholdingTaxCumulativeBefore.Should().Be(0m);
+        result.WithholdingTaxThresholdAmount.Should().Be(150m);
+        result.WithholdingTaxThresholdApplied.Should().BeFalse();
+        result.WithholdingTaxAccountId.Should().Be(tax.TaxPayableAccountId);
+        result.WithholdingTaxCalculationNote.Should().NotBeNullOrWhiteSpace();
+        var journalLines = await db.AccountTransactions.Where(line => line.JournalEntryId == result.JournalEntryId).ToListAsync();
+        journalLines.Should().NotContain(line => line.TransactionTag == "AP-WHT");
+
+        var nextPayment = await calculator.CalculateApWithholdingAsync(new WhtCalculationRequestDto
+        {
+            TaxId = tax.Id, SupplierId = fixture.Supplier.Id,
+            PaymentDate = fixture.Payment.PaymentDate.AddDays(1), TaxableBase = 50m
+        });
+        nextPayment.CumulativeBefore.Should().Be(100m);
+        nextPayment.ThresholdApplied.Should().BeTrue();
+        nextPayment.WithholdingAmount.Should().Be(5m);
+    }
+
+    [Fact]
+    public async Task ConfiguredPayment_ShouldRejectOmittedDeductionWhenItsThresholdRequiresWithholding()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId);
+        await SeedPaymentWithholdingTaxAsync(db, fixture, null);
+        var calculator = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
+        var (service, _) = CreateService(db, tenantId, withholdingTaxService: calculator);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        await post.Should().ThrowAsync<InvalidOperationException>().WithMessage("*WHT totals*requires*");
+        (await db.FinancePostingEvents.CountAsync(value => value.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task WithholdingPayment_ShouldExcludeItsSavedBaseAndPostTheDeductionOnlyOnce()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(db, tenantId, allocationAmount: 90m);
+        var tax = await SeedPaymentWithholdingTaxAsync(db, fixture, 150m);
+        fixture.Allocation.WithholdingTaxAmount = 10m;
+        fixture.Payment.WithholdingTaxAmount = 10m;
+        db.Set<VendorPayment>().Add(new VendorPayment
+        {
+            TenantId = tenantId, PaymentNumber = "VP-WHT-PRIOR", SupplierId = fixture.Supplier.Id,
+            PaymentDate = fixture.Payment.PaymentDate.AddDays(-1), TotalAmount = 50m,
+            CurrencyCode = "GHS", ExchangeRate = 1m, Status = VendorPaymentStatus.Processed,
+            WithholdingTaxId = tax.Id, WithholdingTaxBaseAmount = 50m
+        });
+        await db.SaveChangesAsync();
+        var calculator = new WithholdingTaxCertificateService(db, CreateCurrentUser(tenantId).Object);
+        var (service, _) = CreateService(db, tenantId, withholdingTaxService: calculator);
+
+        var result = await service.PostAsync(fixture.Payment.Id);
+        var replay = await service.PostAsync(fixture.Payment.Id);
+
+        result.WithholdingTaxCumulativeBefore.Should().Be(50m);
+        result.WithholdingTaxBaseAmount.Should().Be(100m);
+        result.WithholdingTaxAmount.Should().Be(10m);
+        replay.JournalEntryId.Should().Be(result.JournalEntryId);
+        var lines = await db.AccountTransactions.Where(line => line.JournalEntryId == result.JournalEntryId).ToListAsync();
+        lines.Single(line => line.TransactionTag == "AP-Control").DebitAmount.Should().Be(100m);
+        lines.Single(line => line.TransactionTag == "AP-Bank").CreditAmount.Should().Be(90m);
+        lines.Single(line => line.TransactionTag == "AP-WHT").CreditAmount.Should().Be(10m);
+        (await db.FinancePostingEvents.CountAsync(value => value.SourceDocumentId == fixture.Payment.Id && value.PostingAction == "Post")).Should().Be(1);
+    }
+
+    private static async Task<Tax> SeedPaymentWithholdingTaxAsync(ApplicationDbContext db, ApPaymentFixture fixture, decimal? threshold)
+    {
+        var payableAccount = (await db.FinanceSettings.SingleAsync(value => value.TenantId == fixture.Payment.TenantId)).ControlAccountTaxId;
+        var tax = new Tax
+        {
+            TenantId = fixture.Payment.TenantId, Code = "WHT-PAYMENT-COMPLIANCE", Name = "Configured payment withholding",
+            Category = TaxCategory.Withholding, Applicability = TaxApplicability.Purchases,
+            IsActive = true, Rate = 10m, EffectiveFrom = new DateTime(2026, 1, 1),
+            ThresholdAmount = threshold, TaxPayableAccountId = payableAccount
+        };
+        db.Taxes.Add(tax);
+        fixture.Payment.WithholdingTaxId = tax.Id;
+        fixture.Payment.WithholdingTaxRate = 10m;
+        fixture.Payment.WithholdingTaxBaseAmount = 100m;
+        fixture.Payment.WithholdingTaxAccountId = payableAccount;
+        await db.SaveChangesAsync();
+        return tax;
+    }
+
     [Fact]
     [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
     [Trait("Category", "AccountsPayable")]
@@ -62,9 +269,56 @@ public sealed class ApPaymentPostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.BankGlAccount.Id).CreditAmount.Should().Be(100m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ApPaymentPosted && a.TenantId == tenantId)).Should().Be(1);
-        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
-        fixture.ApAccount.Balance.Should().Be(-100m);
-        fixture.BankGlAccount.Balance.Should().Be(-100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.ApAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.BankGlAccount.Id)).ClosingBalance.Should().Be(-100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task PartialCashAllocationPlusResidualAdvance_ShouldRemainUnsupported()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment => payment.TotalAmount = 100m,
+            allocationAmount: 60m);
+        var (service, _) = CreateService(db, tenantId);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        var error = await post.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-APPaymentPosting")]
+    [Trait("Category", "AccountsPayable")]
+    public async Task NonCashSettlementComponents_ShouldNotReplaceAllocatedPaymentCash()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedApprovedApPaymentAsync(
+            db,
+            tenantId,
+            payment => payment.TotalAmount = 100m,
+            allocationAmount: 60m);
+        fixture.Allocation.DiscountAmount = 40m;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var post = () => service.PostAsync(fixture.Payment.Id);
+
+        var error = await post.Should().ThrowAsync<VendorPaymentControlException>();
+        error.Which.Code.Should().Be("AP_PAYMENT_ALLOCATION_TOTAL_MISMATCH");
+        (await db.FinancePostingEvents.CountAsync(item =>
+            item.SourceDocumentType == "VendorPayment" &&
+            item.SourceDocumentId == fixture.Payment.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -855,7 +1109,13 @@ public sealed class ApPaymentPostingMigrationTests
         Guid tenantId,
         IFxAccountingService? fxAccountingService = null,
         IWithholdingTaxCertificateService? withholdingTaxService = null,
-        IExchangeRateService? exchangeRateService = null)
+        IExchangeRateService? exchangeRateService = null,
+        IWorkflowService? workflowService = null,
+        IWorkflowApprovalPolicyResolver? approvalPolicyResolver = null,
+        bool useRealPaymentSod = false,
+        ICentralDocumentRepositoryFileService? paymentEvidenceFiles = null,
+        IControlledFileUploadService? paymentEvidenceUploader = null,
+        IFinanceAccessScopeService? paymentEvidenceAccess = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -909,19 +1169,26 @@ public sealed class ApPaymentPostingMigrationTests
             tenantSettings.Object,
             Mock.Of<ILogger<VendorPaymentService>>(),
             Mock.Of<IDocumentNumberingService>(),
-            Mock.Of<IWorkflowService>(),
+            workflowService ?? Mock.Of<IWorkflowService>(),
             // Existing posting tests run with access-scope enforcement disabled. The no-op mock
             // isolates those posting assertions while dedicated scope tests exercise fail-closed
             // enforcement separately.
-            Mock.Of<IFinanceAccessScopeService>(),
+            paymentEvidenceAccess ?? Mock.Of<IFinanceAccessScopeService>(),
             new FinanceReversalPolicyService(db, currentUser.Object),
             postingEngine,
             auditService,
             fxAccountingService: fxAccountingService,
+            approvalPolicyResolver: approvalPolicyResolver,
             withholdingTaxService: withholdingTaxService,
             procurementControlEvents: procurementControlEvents.Object,
-            invoicePaymentSod: invoicePaymentSod.Object,
-            exchangeRateService: exchangeRateService);
+            invoicePaymentSod: useRealPaymentSod
+                ? new ProcurementInvoicePaymentSodService(new UnitOfWork(db), currentUser.Object,
+                    Mock.Of<IProcurementSodGuardService>(), procurementControlEvents.Object,
+                    Mock.Of<ILogger<ProcurementInvoicePaymentSodService>>())
+                : invoicePaymentSod.Object,
+            exchangeRateService: exchangeRateService,
+            controlledFiles: paymentEvidenceUploader,
+            centralDocuments: paymentEvidenceFiles);
 
         return (service, subledgerPostingMock);
     }
@@ -1030,6 +1297,13 @@ public sealed class ApPaymentPostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -1057,6 +1331,7 @@ public sealed class ApPaymentPostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -1071,7 +1346,7 @@ public sealed class ApPaymentPostingMigrationTests
 
         var start = new DateTime(today.Year, today.Month, 1);
         var end = start.AddMonths(1).AddDays(-1);
-        db.FiscalPeriods.Add(new FiscalPeriod
+        var currentPeriod = new FiscalPeriod
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
@@ -1087,7 +1362,9 @@ public sealed class ApPaymentPostingMigrationTests
             IsOpen = seededPeriod.IsOpen,
             IsClosed = seededPeriod.IsClosed,
             IsLocked = seededPeriod.IsLocked
-        });
+        };
+        db.FiscalPeriods.Add(currentPeriod);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, currentPeriod);
     }
 
     private static Account SeedAccount(
@@ -1114,6 +1391,8 @@ public sealed class ApPaymentPostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 
@@ -1196,6 +1475,7 @@ public sealed class ApPaymentPostingMigrationTests
         Guid? fiscalPeriodId = null,
         bool seedPostingEvent = true)
     {
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
         var invoice = new VendorInvoice
         {
             Id = Guid.NewGuid(),
@@ -1237,6 +1517,7 @@ public sealed class ApPaymentPostingMigrationTests
             TotalCreditAmount = amount,
             IsBalanced = true,
             FiscalPeriodId = fiscalPeriodId ?? Guid.NewGuid(),
+            AccountingBookId = book.Id,
             PostingStatus = "Posted",
             ApprovalStatus = "Approved",
             PostingDate = invoiceDate,
@@ -1262,6 +1543,7 @@ public sealed class ApPaymentPostingMigrationTests
                 SourceDocumentReference = invoice.InvoiceNumber,
                 IdempotencyKey = $"AP:VendorInvoice:{tenantId:N}:{invoice.Id:N}:Post",
                 JournalEntryId = invoiceJournal.Id,
+                AccountingBookId = book.Id,
                 PostingStatus = "Posted",
                 PostingDate = invoiceDate,
                 RequestedAt = DateTime.UtcNow,

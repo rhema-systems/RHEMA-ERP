@@ -28,6 +28,20 @@ public static class FinancePermissions
     public const string ManageFinanceAccessScopes = "Finance.AccessScopes.Manage";
 
     public const string ManageChartOfAccounts = "Finance.ChartOfAccounts.Manage";
+    public const string ManageAccountingBooks = "Finance.AccountingBooks.Manage";
+    public const string RequestAccountingBookTransitions = "Finance.AccountingBooks.Transitions.Request";
+    public const string ApproveAccountingBookTransitions = "Finance.AccountingBooks.Transitions.Approve";
+    public const string ManageAccountingBookPeriods = "Finance.AccountingBooks.Periods.Manage";
+    public const string ApproveAccountingBookPeriods = "Finance.AccountingBooks.Periods.Approve";
+    public const string ManageAccountingBookInitialization = "Finance.AccountingBooks.Initialization.Manage";
+    public const string ApproveAccountingBookInitialization = "Finance.AccountingBooks.Initialization.Approve";
+    public const string ViewAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Read";
+    public const string ManageAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Manage";
+    public const string ApproveAccountingBookApplicabilityPolicy = "Finance.AccountingBooks.ApplicabilityPolicy.Approve";
+    public const string ResolveAccountingBookApplicability = "Finance.AccountingBooks.Applicability.Resolve";
+    public const string ViewAccountingEvents = "Finance.AccountingEvents.Read";
+    public const string PrepareAccountingEvents = "Finance.AccountingEvents.Prepare";
+    public const string OrchestrateAccountingEvents = "Finance.AccountingEvents.Orchestrate";
     public const string ManageCodingDimensions = "Finance.Dimensions.Manage";
     public const string ManageDimensionCertification = "Finance.Dimensions.Certification.Manage";
     public const string ConfigureChartOfAccountsPolicy = "Finance.Policy.ConfigureChartOfAccounts";
@@ -111,6 +125,8 @@ public static class FinancePermissions
 
     public const string ManageFxRates = "Finance.FX.Rates.Manage";
     public const string RunFxRevaluation = "Finance.FX.Revaluation.Run";
+    public const string OverrideFxRevaluationPolicy = "Finance.FX.Policy.Override";
+    public const string ApproveFxRevaluationPolicy = "Finance.FX.Policy.Approve";
 
     public const string ManageFixedAssets = "Finance.FixedAssets.Manage";
     public const string RunDepreciation = "Finance.FixedAssets.Depreciation.Run";
@@ -152,6 +168,7 @@ public static class FinancePermissions
     public const string RunMigrationDiagnostics = "Finance.Migration.Diagnostics.Run";
     public const string RunMigrationAdjustments = "Finance.Migration.Adjustments.Run";
     public const string PrepareOpeningBalances = "Finance.Migration.OpeningBalances.Prepare";
+    public const string ApproveOpeningBalanceReversal = "Finance.Migration.OpeningBalances.Reversal.Approve";
 
     public const string ViewBudgets = "Finance.Budgeting.Read";
     public const string MaintainBudgets = "Finance.Budgeting.Write";
@@ -173,6 +190,20 @@ public static class FinancePermissions
         new(ManageFinanceAccessScopes, "Manage Finance Access Scopes", "Assign effective-dated tenant and Finance-resource data scopes to users.", CategoryCore),
 
         new(ManageChartOfAccounts, "Manage Chart of Accounts", "Create, update, delete, and configure chart of accounts structures and account combinations.", CategoryGeneralLedger),
+        new(ManageAccountingBooks, "Manage Accounting Books", "Create and maintain governed accounting-book structures before accounting use or initialization.", CategoryGeneralLedger),
+        new(RequestAccountingBookTransitions, "Request Accounting Book Transitions", "Request governed accounting-book lifecycle transitions with immutable reason evidence.", CategoryGeneralLedger),
+        new(ApproveAccountingBookTransitions, "Approve Accounting Book Transitions", "Independently approve or reject accounting-book lifecycle transitions.", CategoryGeneralLedger),
+        new(ManageAccountingBookPeriods, "Manage Accounting Book Periods", "Create and request governed exact-book period transitions.", CategoryPeriodClose),
+        new(ApproveAccountingBookPeriods, "Approve Accounting Book Periods", "Independently approve exact-book period transitions.", CategoryPeriodClose),
+        new(ManageAccountingBookInitialization, "Manage Accounting Book Initialization", "Prepare and submit governed exact-book opening evidence.", CategoryMigration),
+        new(ApproveAccountingBookInitialization, "Approve Accounting Book Initialization", "Independently approve governed accounting-book opening evidence.", CategoryMigration),
+        new(ViewAccountingBookApplicabilityPolicy, "View Accounting Book Applicability Policy", "View Finance-owned book-selection policy configuration.", CategoryGeneralLedger),
+        new(ManageAccountingBookApplicabilityPolicy, "Manage Accounting Book Applicability Policy", "Create and submit effective-dated book-selection policy versions.", CategoryGeneralLedger),
+        new(ApproveAccountingBookApplicabilityPolicy, "Approve Accounting Book Applicability Policy", "Independently approve, reject, or retire book-selection policies.", CategoryGeneralLedger),
+        new(ResolveAccountingBookApplicability, "Resolve Accounting Book Applicability", "Resolve and freeze governed book-selection evidence without posting.", CategoryGeneralLedger),
+        new(ViewAccountingEvents, "View Accounting Events", "View canonical event groups and exact-book posting evidence.", CategoryGeneralLedger),
+        new(PrepareAccountingEvents, "Prepare Accounting Events", "Prepare an immutable accounting event for independent release.", CategoryGeneralLedger),
+        new(OrchestrateAccountingEvents, "Orchestrate Accounting Events", "Create an atomic set of governed accounting-book representations.", CategoryGeneralLedger),
         new(ManageCodingDimensions, "Manage Coding Dimensions", "Configure tenant-owned transaction dimensions, values, and certified account applicability rules.", CategoryGeneralLedger),
         new(ManageDimensionCertification, "Manage Dimension Certification", "Assess and promote recognized Finance dimension routes using governed readiness evidence.", CategoryGeneralLedger),
         new(CreateJournalEntries, "Create Journal Entries", "Create draft manual journal entries.", CategoryGeneralLedger),
@@ -249,6 +280,8 @@ public static class FinancePermissions
 
         new(ManageFxRates, "Manage FX Rates", "Maintain tenant exchange rates and currency setup.", CategoryFx),
         new(RunFxRevaluation, "Run FX Revaluation", "Run foreign currency revaluation and related journals.", CategoryFx),
+        new(OverrideFxRevaluationPolicy, "Override FX Revaluation Policy", "Request or apply a reasoned book-specific GL revaluation override.", CategoryFx),
+        new(ApproveFxRevaluationPolicy, "Approve FX Revaluation Policy", "Independently approve or reject non-standard Equity, Revenue, or Expense revaluation inclusion.", CategoryFx),
 
         new(ManageFixedAssets, "Manage Fixed Assets", "Create, update, transfer, verify, value, import, and administer fixed assets.", CategoryFixedAssets),
         new(RunDepreciation, "Run Depreciation", "Run fixed asset depreciation.", CategoryFixedAssets),
@@ -290,6 +323,7 @@ public static class FinancePermissions
         new(RunMigrationDiagnostics, "Run Finance Migration Diagnostics", "Run finance migration diagnostics and reconciliation checks.", CategoryMigration),
         new(RunMigrationAdjustments, "Run Finance Migration Adjustments", "Run approved finance migration adjustment actions.", CategoryMigration),
         new(PrepareOpeningBalances, "Prepare Opening Balances", "Create, validate, and submit controlled opening-balance batches for approval.", CategoryMigration),
+        new(ApproveOpeningBalanceReversal, "Approve Opening Balance Reversal", "Independently approve or reject controlled opening-balance reversal requests.", CategoryMigration),
 
         new(ViewBudgets, "View Budgets", "View budget scenarios, returns, and worksheets.", CategoryBudgeting),
         new(MaintainBudgets, "Maintain Budgets", "Create budget scenarios, returns, and entries.", CategoryBudgeting),

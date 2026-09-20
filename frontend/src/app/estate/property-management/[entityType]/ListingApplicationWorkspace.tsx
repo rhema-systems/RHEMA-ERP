@@ -152,7 +152,10 @@ const summaryFieldValue = (procedureCase: ProcedureCaseSummary, key: string) =>
   procedureCase.fieldValues?.[key]?.trim() || '';
 
 const isSaleSummary = (procedureCase: ProcedureCaseSummary) => {
-  const requestType = summaryFieldValue(procedureCase, 'requestType').toLowerCase();
+  const requestType = summaryFieldValue(
+    procedureCase,
+    'requestType'
+  ).toLowerCase();
   const title = procedureCase.title.toLowerCase();
   return (
     requestType.includes('purchase') ||
@@ -392,23 +395,26 @@ export function ListingApplicationWorkspace() {
   const selectedAgreementReference = selectedCase
     ? caseFieldValue(selectedCase, 'generatedAgreementReference')
     : '';
-  const rememberSaleOwnershipCompletion = React.useCallback((caseId: string) => {
-    setCompletedSaleOwnershipCaseIds((current) => {
-      if (current.has(caseId)) {
-        return current;
-      }
+  const rememberSaleOwnershipCompletion = React.useCallback(
+    (caseId: string) => {
+      setCompletedSaleOwnershipCaseIds((current) => {
+        if (current.has(caseId)) {
+          return current;
+        }
 
-      const next = new Set(current);
-      next.add(caseId);
-      if (typeof window !== 'undefined') {
-        window.localStorage.setItem(
-          SALE_CLOSEOUT_COMPLETED_QUEUE_KEY,
-          JSON.stringify(Array.from(next))
-        );
-      }
-      return next;
-    });
-  }, []);
+        const next = new Set(current);
+        next.add(caseId);
+        if (typeof window !== 'undefined') {
+          window.localStorage.setItem(
+            SALE_CLOSEOUT_COMPLETED_QUEUE_KEY,
+            JSON.stringify(Array.from(next))
+          );
+        }
+        return next;
+      });
+    },
+    []
+  );
 
   const loadCases = React.useCallback(async () => {
     setIsLoading(true);
@@ -445,7 +451,11 @@ export function ListingApplicationWorkspace() {
     } finally {
       setIsLoading(false);
     }
-  }, [completedSaleOwnershipCaseIds, rememberSaleOwnershipCompletion, requestedCaseId]);
+  }, [
+    completedSaleOwnershipCaseIds,
+    rememberSaleOwnershipCompletion,
+    requestedCaseId,
+  ]);
 
   React.useEffect(() => {
     void loadCases();
@@ -619,7 +629,10 @@ export function ListingApplicationWorkspace() {
       );
       toast.success('Stage updates saved.');
     } catch (saveError) {
-      const message = errorMessage(saveError, 'Unable to save the current stage.');
+      const message = errorMessage(
+        saveError,
+        'Unable to save the current stage.'
+      );
       setError(message);
       toast.error(message);
     } finally {
@@ -704,7 +717,10 @@ export function ListingApplicationWorkspace() {
           : `Stage routed to ${updated.currentStageName}.`
       );
     } catch (completeError) {
-      const message = errorMessage(completeError, 'Unable to complete the stage.');
+      const message = errorMessage(
+        completeError,
+        'Unable to complete the stage.'
+      );
       setError(message);
       toast.error(message);
     } finally {
@@ -1192,7 +1208,12 @@ export function ListingApplicationWorkspace() {
     ? caseFieldValue(selectedCase, 'salePaymentStatus').toLowerCase()
     : '';
   const saleInvoiceBalance = selectedCase
-    ? Number(caseFieldValue(selectedCase, 'saleInvoiceBalance').replace(/[^\d.-]/g, ''))
+    ? Number(
+        caseFieldValue(selectedCase, 'saleInvoiceBalance').replace(
+          /[^\d.-]/g,
+          ''
+        )
+      )
     : Number.NaN;
   const saleInvoicePaid = Boolean(
     selectedCase &&
@@ -1200,8 +1221,7 @@ export function ListingApplicationWorkspace() {
       Number.isFinite(saleInvoiceBalance) &&
       saleInvoiceBalance <= 0
   );
-  const canCompleteSaleOwnership =
-    saleInvoicePaid && legalConveyanceCompleted;
+  const canCompleteSaleOwnership = saleInvoicePaid && legalConveyanceCompleted;
   const ownershipTransferCompleted = Boolean(
     selectedCase &&
       caseFieldValue(selectedCase, 'ownershipTransferStatus')
@@ -1413,7 +1433,7 @@ export function ListingApplicationWorkspace() {
                     <div className="mt-2 flex flex-wrap gap-1">
                       <Badge variant="secondary">{item.currentStageName}</Badge>
                       {!item.usesConfiguredWorkflow ? (
-                        <Badge variant="destructive">Legacy</Badge>
+                        <Badge variant="secondary">Manual</Badge>
                       ) : null}
                       {item.status.trim().toLowerCase() === 'completed' ? (
                         <Badge>{queueStatusLabel(item, queueView)}</Badge>
@@ -1446,10 +1466,11 @@ export function ListingApplicationWorkspace() {
                 <Card className="border-amber-400/50 bg-amber-50/70 dark:bg-amber-950/20">
                   <CardContent className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between">
                     <div>
-                      <p className="font-medium">Legacy request workflow</p>
+                      <p className="font-medium">Manual request flow</p>
                       <p className="text-sm text-muted-foreground">
-                        This request was opened before the central workflow was
-                        published. New requests use Workflow Setup only.
+                        No active published workflow is configured for this
+                        request type. Estate can continue it through the manual
+                        review stages while Workflow Setup is completed.
                       </p>
                     </div>
                     <Button asChild variant="outline" size="sm">
@@ -1878,10 +1899,10 @@ export function ListingApplicationWorkspace() {
                           {legalAgreementReviewSubmitting
                             ? 'Submitting to Legal...'
                             : legalAgreementReviewApproved
-                            ? 'Approved by Legal'
-                            : legalAgreementReviewStarted
-                              ? 'Under Legal review'
-                              : 'Submit draft to Legal'}
+                              ? 'Approved by Legal'
+                              : legalAgreementReviewStarted
+                                ? 'Under Legal review'
+                                : 'Submit draft to Legal'}
                         </Button>
                       </div>
                     ) : null}
@@ -2076,9 +2097,15 @@ export function ListingApplicationWorkspace() {
                                 ? `${caseFieldValue(selectedCase, 'saleInvoiceReference')} · ${caseFieldValue(selectedCase, 'salePaymentStatus') || caseFieldValue(selectedCase, 'saleInvoiceStatus')}`
                                 : 'Create the one-time Finance AR invoice for the approved purchase price.'}
                             </p>
-                            {caseFieldValue(selectedCase, 'salePaymentCheckStatus') ? (
+                            {caseFieldValue(
+                              selectedCase,
+                              'salePaymentCheckStatus'
+                            ) ? (
                               <p className="mt-1 text-xs text-muted-foreground">
-                                {caseFieldValue(selectedCase, 'salePaymentCheckStatus')}
+                                {caseFieldValue(
+                                  selectedCase,
+                                  'salePaymentCheckStatus'
+                                )}
                               </p>
                             ) : null}
                           </div>
@@ -2236,172 +2263,169 @@ export function ListingApplicationWorkspace() {
                 </Card>
               ) : null}
 
-              {selectedCase.usesConfiguredWorkflow ? (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-base">
-                      Complete this stage
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    {!caseIsCompleted && !selectedCase.canEditCurrentStage ? (
-                      <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        This stage is assigned to{' '}
-                        <span className="font-medium">
-                          {selectedCase.currentAssignedRole ||
-                            selectedCase.currentStageOwner ||
-                            'another workflow role'}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">
+                    Complete this stage
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {!caseIsCompleted && !selectedCase.canEditCurrentStage ? (
+                    <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      This stage is assigned to{' '}
+                      <span className="font-medium">
+                        {selectedCase.currentAssignedRole ||
+                          selectedCase.currentStageOwner ||
+                          'another workflow role'}
+                      </span>
+                      . Sign in as a user with that role to update, reject, or
+                      route the request.
+                    </div>
+                  ) : null}
+                  {saleWorkflowCompleted ? (
+                    <>
+                      <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                        <Checkbox
+                          checked={saleCloseoutChecklist.customerStatus}
+                          onCheckedChange={(checked) =>
+                            setSaleCloseoutChecklist((current) => ({
+                              ...current,
+                              customerStatus: checked === true,
+                            }))
+                          }
+                          disabled={isSaving || saleCloseoutArchived}
+                        />
+                        <span>
+                          Customer-facing request status reflects the final
+                          outcome
                         </span>
-                        . Sign in as a user with that role to update, reject, or
-                        route the request.
-                      </div>
-                    ) : null}
-                    {saleWorkflowCompleted ? (
-                      <>
-                        <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
-                          <Checkbox
-                            checked={saleCloseoutChecklist.customerStatus}
-                            onCheckedChange={(checked) =>
-                              setSaleCloseoutChecklist((current) => ({
-                                ...current,
-                                customerStatus: checked === true,
-                              }))
-                            }
-                            disabled={isSaving || saleCloseoutArchived}
-                          />
-                          <span>
-                            Customer-facing request status reflects the final
-                            outcome
-                          </span>
-                        </label>
-                        <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
-                          <Checkbox
-                            checked={saleCloseoutChecklist.auditReferences}
-                            onCheckedChange={(checked) =>
-                              setSaleCloseoutChecklist((current) => ({
-                                ...current,
-                                auditReferences: checked === true,
-                              }))
-                            }
-                            disabled={isSaving || saleCloseoutArchived}
-                          />
-                          <span>
-                            Request is closed with its decision and transaction
-                            audit references
-                          </span>
-                        </label>
-                      </>
-                    ) : (
-                      stageItems.map((item) => (
-                        <label
-                          key={item.id}
-                          className="flex items-start gap-3 rounded-md border p-3 text-sm"
-                        >
-                          <Checkbox
-                            checked={item.isCompleted}
-                            onCheckedChange={(checked) =>
-                              void updateChecklist(item.id, checked === true)
-                            }
-                            disabled={
-                              isSaving ||
-                              caseIsCompleted ||
-                              !selectedCase.canEditCurrentStage
-                            }
-                          />
-                          <span>{item.text}</span>
-                        </label>
-                      ))
-                    )}
-                    <Textarea
-                      value={completionNotes}
-                      onChange={(event) =>
-                        setCompletionNotes(event.target.value)
-                      }
-                      placeholder="Stage completion notes (optional)"
-                      disabled={
-                        saleWorkflowCompleted
-                          ? isSaving || saleCloseoutArchived
-                          : isSaving ||
+                      </label>
+                      <label className="flex items-start gap-3 rounded-md border p-3 text-sm">
+                        <Checkbox
+                          checked={saleCloseoutChecklist.auditReferences}
+                          onCheckedChange={(checked) =>
+                            setSaleCloseoutChecklist((current) => ({
+                              ...current,
+                              auditReferences: checked === true,
+                            }))
+                          }
+                          disabled={isSaving || saleCloseoutArchived}
+                        />
+                        <span>
+                          Request is closed with its decision and transaction
+                          audit references
+                        </span>
+                      </label>
+                    </>
+                  ) : (
+                    stageItems.map((item) => (
+                      <label
+                        key={item.id}
+                        className="flex items-start gap-3 rounded-md border p-3 text-sm"
+                      >
+                        <Checkbox
+                          checked={item.isCompleted}
+                          onCheckedChange={(checked) =>
+                            void updateChecklist(item.id, checked === true)
+                          }
+                          disabled={
+                            isSaving ||
                             caseIsCompleted ||
                             !selectedCase.canEditCurrentStage
-                      }
-                    />
-                    <Button
-                      type="button"
-                      className="gap-2"
-                      onClick={() =>
-                        saleWorkflowCompleted
-                          ? completeSaleCloseout()
-                          : void completeStage()
-                      }
-                      disabled={
-                        saleWorkflowCompleted
-                          ? isSaving ||
-                            saleCloseoutArchived ||
-                            !ownershipTransferCompleted ||
-                            !saleCloseoutConfirmed
-                          : isSaving ||
-                            caseIsCompleted ||
-                            !selectedCase.canEditCurrentStage ||
-                            !stageConfirmed ||
-                            missingApprovedMoveInDate ||
-                            missingApprovedAgreement ||
-                            missingLegalAgreementReview
-                      }
-                    >
-                      {isSaving ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                      {saleWorkflowCompleted
-                        ? saleCloseoutArchived
-                          ? 'Sale closeout archived'
-                          : ownershipTransferCompleted
-                            ? 'Complete sale closeout'
-                            : 'Pending ownership transfer'
-                        : caseIsCompleted
-                          ? 'Case completed'
-                          : 'Complete stage and route forward'}
-                    </Button>
-                    {missingLegalAgreementReview &&
-                    !missingApprovedAgreement ? (
-                      <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                        Submit the generated agreement to Legal and wait for
-                        Legal approval before routing this stage forward.
-                      </p>
-                    ) : null}
-                    {!caseIsCompleted && selectedCase.canEditCurrentStage ? (
-                      <div className="flex flex-wrap gap-2 border-t pt-4">
-                        {selectedCase.currentStageIndex > 0 ? (
-                          <Button
-                            type="button"
-                            variant="outline"
-                            className="gap-2"
-                            disabled={isSaving}
-                            onClick={() =>
-                              setReviewAction('RequestClarification')
-                            }
-                          >
-                            <Undo2 className="h-4 w-4" />
-                            Return for clarification
-                          </Button>
-                        ) : null}
+                          }
+                        />
+                        <span>{item.text}</span>
+                      </label>
+                    ))
+                  )}
+                  <Textarea
+                    value={completionNotes}
+                    onChange={(event) => setCompletionNotes(event.target.value)}
+                    placeholder="Stage completion notes (optional)"
+                    disabled={
+                      saleWorkflowCompleted
+                        ? isSaving || saleCloseoutArchived
+                        : isSaving ||
+                          caseIsCompleted ||
+                          !selectedCase.canEditCurrentStage
+                    }
+                  />
+                  <Button
+                    type="button"
+                    className="gap-2"
+                    onClick={() =>
+                      saleWorkflowCompleted
+                        ? completeSaleCloseout()
+                        : void completeStage()
+                    }
+                    disabled={
+                      saleWorkflowCompleted
+                        ? isSaving ||
+                          saleCloseoutArchived ||
+                          !ownershipTransferCompleted ||
+                          !saleCloseoutConfirmed
+                        : isSaving ||
+                          caseIsCompleted ||
+                          !selectedCase.canEditCurrentStage ||
+                          !stageConfirmed ||
+                          missingApprovedMoveInDate ||
+                          missingApprovedAgreement ||
+                          missingLegalAgreementReview
+                    }
+                  >
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Send className="h-4 w-4" />
+                    )}
+                    {saleWorkflowCompleted
+                      ? saleCloseoutArchived
+                        ? 'Sale closeout archived'
+                        : ownershipTransferCompleted
+                          ? 'Complete sale closeout'
+                          : 'Pending ownership transfer'
+                      : caseIsCompleted
+                        ? 'Case completed'
+                        : selectedCase.usesConfiguredWorkflow
+                          ? 'Complete stage and route forward'
+                          : 'Complete manual stage'}
+                  </Button>
+                  {missingLegalAgreementReview && !missingApprovedAgreement ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Submit the generated agreement to Legal and wait for Legal
+                      approval before routing this stage forward.
+                    </p>
+                  ) : null}
+                  {!caseIsCompleted && selectedCase.canEditCurrentStage ? (
+                    <div className="flex flex-wrap gap-2 border-t pt-4">
+                      {selectedCase.currentStageIndex > 0 ? (
                         <Button
                           type="button"
                           variant="outline"
-                          className="gap-2 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                          className="gap-2"
                           disabled={isSaving}
-                          onClick={() => setReviewAction('Reject')}
+                          onClick={() =>
+                            setReviewAction('RequestClarification')
+                          }
                         >
-                          <XCircle className="h-4 w-4" />
-                          Reject application
+                          <Undo2 className="h-4 w-4" />
+                          Return for clarification
                         </Button>
-                      </div>
-                    ) : null}
-                  </CardContent>
-                </Card>
-              ) : null}
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-2 border-red-300 text-red-700 hover:bg-red-50 hover:text-red-800"
+                        disabled={isSaving}
+                        onClick={() => setReviewAction('Reject')}
+                      >
+                        <XCircle className="h-4 w-4" />
+                        Reject application
+                      </Button>
+                    </div>
+                  ) : null}
+                </CardContent>
+              </Card>
             </div>
           )}
         </div>

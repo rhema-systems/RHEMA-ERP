@@ -291,6 +291,9 @@ public sealed class FixedAssetOpeningBalanceCandidateDto
     public decimal NetBookValue { get; set; }
     public bool OpeningPostedToGl { get; set; }
     public Guid? OpeningJournalEntryId { get; set; }
+    public Guid? OpeningReversalJournalEntryId { get; set; }
+    public Guid? OpeningReversalPostingEventId { get; set; }
+    public DateTime? OpeningReversedAt { get; set; }
 }
 
 public sealed class OpeningBalanceBatchDto
@@ -323,6 +326,48 @@ public sealed class OpeningBalanceBatchDto
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public IReadOnlyList<OpeningBalanceLineDto> Lines { get; set; } = Array.Empty<OpeningBalanceLineDto>();
+    public IReadOnlyList<OpeningBalanceBatchReversalDto> Reversals { get; set; } = Array.Empty<OpeningBalanceBatchReversalDto>();
+}
+
+public sealed class RequestOpeningBalanceBatchReversalDto
+{
+    public DateTime ReversalDate { get; set; }
+    public string Reason { get; set; } = string.Empty;
+    public string ImpactAssessment { get; set; } = string.Empty;
+}
+
+public sealed class ReviewOpeningBalanceBatchReversalDto
+{
+    public bool Approved { get; set; }
+    public string ReviewComment { get; set; } = string.Empty;
+}
+
+public sealed class OpeningBalanceBatchReversalDto
+{
+    public Guid Id { get; set; }
+    public Guid OpeningBalanceBatchId { get; set; }
+    public Guid OriginalPostingEventId { get; set; }
+    public Guid OriginalJournalEntryId { get; set; }
+    public Guid? ReversalPostingEventId { get; set; }
+    public Guid? ReversalJournalEntryId { get; set; }
+    public string SourceKind { get; set; } = string.Empty;
+    public string BookClassification { get; set; } = string.Empty;
+    public DateTime OriginalOpeningDate { get; set; }
+    public decimal OriginalTotalDebit { get; set; }
+    public decimal OriginalTotalCredit { get; set; }
+    public string Status { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string ImpactAssessment { get; set; } = string.Empty;
+    public DateTime RequestedReversalDate { get; set; }
+    public Guid RequestedByUserId { get; set; }
+    public string RequestedByUserName { get; set; } = string.Empty;
+    public DateTime RequestedAt { get; set; }
+    public Guid? ReviewedByUserId { get; set; }
+    public string? ReviewedByUserName { get; set; }
+    public DateTime? ReviewedAt { get; set; }
+    public string? ReviewComment { get; set; }
+    public DateTime? PostedAt { get; set; }
+    public string? FailureReason { get; set; }
 }
 
 public sealed class OpeningBalanceLineDto

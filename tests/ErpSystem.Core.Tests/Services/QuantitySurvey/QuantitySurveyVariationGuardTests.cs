@@ -8,7 +8,7 @@ public sealed class QuantitySurveyVariationGuardTests
     [Fact]
     public void Migration_is_scoped_and_enforces_lineage_lifecycle_sod_and_append_only_history()
     {
-        var source = Source("src", "ErpSystem.Data", "Migrations",
+        var source = Source("src", "ErpSystem.Data", "LegacyMigrationsArchive",
             "20260810234912_AddQuantitySurveyVariationLifecycle.cs");
 
         source.Should().Contain("QuantitySurveyVariationValuationLines")

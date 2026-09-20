@@ -238,7 +238,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
             if (!result.ExecutionResult.Success)
                 throw Conflict(result.ExecutionResult.Message ?? "The configured QS valuation workflow could not be started.");
             workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Valuation)
-                .ApplySubmitOutcome(entity, result.Outcome, UserId);
+                .ApplySubmitOutcome(entity, result, UserId);
             if (result.Outcome != WorkflowOutcome.Pending)
                 throw Conflict("The QS valuation workflow must stop at an independent approval step; automatic terminal outcomes are not permitted.");
             QuantitySurveyValuationWorksheetRules.RequireTransition(

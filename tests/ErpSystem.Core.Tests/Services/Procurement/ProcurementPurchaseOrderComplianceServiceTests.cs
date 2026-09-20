@@ -16,6 +16,63 @@ namespace ErpSystem.Core.Tests.Services.Procurement;
 
 public sealed class ProcurementPurchaseOrderComplianceServiceTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task ExceptionGhanepsUsesUnderlyingTenderAndRetainsMappingDecision(bool compliant)
+    {
+        await using var fixture = new Fixture();
+        var control = new ProcurementExceptionalSourcingControl
+        {
+            Id = Guid.NewGuid(), TenantId = fixture.TenantId, TenderId = Guid.NewGuid()
+        };
+        fixture.PurchaseOrder.ProcurementSourceType = ProcurementPurchaseOrderSourceType.ApprovedException;
+        fixture.PurchaseOrder.ProcurementSourceId = control.Id;
+        fixture.Sources.Setup(x => x.EvaluateCurrentAsync(It.IsAny<PurchaseOrder>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPurchaseOrderSourceResolution());
+        fixture.Ghaneps.Setup(x => x.GetAwardComplianceAsync(ProcurementGhanepsSourceType.ExceptionalSourcing,
+                control.TenderId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementGhanepsComplianceDto
+            { HasApplicableMapping = true, IsCompliant = compliant, Code = "TEST_MAPPING", Message = "Configured mapping result." });
+        await fixture.SeedAsync(control);
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(x => x.Key == "ghaneps");
+
+        check.Required.Should().BeTrue();
+        check.Passed.Should().Be(compliant);
+        fixture.Ghaneps.Verify(x => x.GetAwardComplianceAsync(ProcurementGhanepsSourceType.ExceptionalSourcing,
+            control.TenderId, It.IsAny<CancellationToken>()), Times.Once);
+        fixture.Ghaneps.Verify(x => x.GetAwardComplianceAsync(It.IsAny<ProcurementGhanepsSourceType>(),
+            control.Id, It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("foreign")]
+    [InlineData("deleted")]
+    [InlineData("empty-tender")]
+    public async Task InvalidExceptionGhanepsLineageDoesNotBecomeNotApplicable(string invalid)
+    {
+        await using var fixture = new Fixture();
+        var control = new ProcurementExceptionalSourcingControl
+        {
+            Id = Guid.NewGuid(), TenantId = invalid == "foreign" ? Guid.NewGuid() : fixture.TenantId,
+            TenderId = invalid == "empty-tender" ? Guid.Empty : Guid.NewGuid(), IsDeleted = invalid == "deleted"
+        };
+        fixture.PurchaseOrder.ProcurementSourceType = ProcurementPurchaseOrderSourceType.ApprovedException;
+        fixture.PurchaseOrder.ProcurementSourceId = control.Id;
+        fixture.Sources.Setup(x => x.EvaluateCurrentAsync(It.IsAny<PurchaseOrder>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new ProcurementPurchaseOrderSourceResolution());
+        if (invalid != "missing") await fixture.SeedAsync(control);
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(x => x.Key == "ghaneps");
+
+        check.Passed.Should().BeFalse();
+        check.Code.Should().Be("PO_GHANEPS_CHECK_FAILED");
+        fixture.Ghaneps.Verify(x => x.GetAwardComplianceAsync(It.IsAny<ProcurementGhanepsSourceType>(),
+            It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
     [Fact]
     public async Task BlockedEnforcementReturnsTenChecksAndRecordsImmutableAudit()
     {
@@ -245,6 +302,233 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
         commitment.Message.Should().Contain("no active reservation");
     }
 
+    [Theory]
+    [InlineData("Preview")]
+    [InlineData("Submit")]
+    [InlineData("Approve")]
+    public async Task EnabledContractSettingBlocksAwardWithoutContract(string action)
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync(fixture.Setting(true), fixture.Award());
+
+        var readiness = await fixture.ReadinessAsync(action);
+
+        var contract = readiness.Checks.Single(item => item.Key == "contract");
+        contract.Required.Should().BeTrue();
+        contract.Passed.Should().BeFalse();
+        contract.Message.Should().Contain("Require contract for PO");
+        readiness.Checks.Single(item => item.Key == "signature").Passed.Should().BeFalse();
+        fixture.ControlEvents.Should().BeEmpty("preview must not create audit or configuration records");
+
+        if (action != "Preview")
+        {
+            var enforce = () => fixture.Service.EnforceAsync(fixture.PurchaseOrder, action, "contract-setting");
+            var error = await enforce.Should().ThrowAsync<ProcurementPurchaseOrderComplianceBlockedException>();
+            error.Which.Readiness.BlockedReasons.Should().Contain(item => item.Contains("Require contract for PO"));
+        }
+    }
+
+    [Fact]
+    public async Task DisabledContractSettingExplainsPolicyRatherThanClaimingAwardWaiver()
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync(fixture.Setting(false), fixture.Award());
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract");
+
+        check.Passed.Should().BeTrue();
+        check.Required.Should().BeFalse();
+        check.Message.Should().Contain("Require contract for PO").And.Contain("off");
+        check.Message.Should().NotContain("governed award does not require");
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ContractSettingUsesOnlyCurrentTenant(bool required)
+    {
+        await using var fixture = new Fixture();
+        var foreign = fixture.Setting(!required);
+        foreign.TenantId = Guid.NewGuid();
+        await fixture.SeedAsync(foreign, fixture.Setting(required), fixture.Award());
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract");
+
+        check.Required.Should().Be(required);
+        check.Passed.Should().Be(!required);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("foreign")]
+    [InlineData("deleted")]
+    public async Task AbsentTenantSettingRetainsDefaultWithoutWritingConfiguration(string scope)
+    {
+        await using var fixture = new Fixture();
+        await fixture.SeedAsync(fixture.Award());
+        if (scope != "missing")
+        {
+            var setting = fixture.Setting(true);
+            setting.IsDeleted = scope == "deleted";
+            if (scope == "foreign") setting.TenantId = Guid.NewGuid();
+            await fixture.SeedAsync(setting);
+        }
+        var count = await fixture.Context.Set<ProcurementSettings>().CountAsync();
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract");
+
+        check.Required.Should().BeFalse();
+        check.Message.Should().Contain("No tenant").And.NotContain("is off");
+        (await fixture.Context.Set<ProcurementSettings>().CountAsync()).Should().Be(count);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ActiveSignedAwardContractPassesForEitherSetting(bool required)
+    {
+        await using var fixture = new Fixture();
+        var award = fixture.Award();
+        await fixture.SeedAsync(fixture.Setting(required), award, fixture.Contract(award.Id));
+
+        var checks = (await fixture.ReadinessAsync()).Checks;
+
+        checks.Single(item => item.Key == "contract").Passed.Should().BeTrue();
+        checks.Single(item => item.Key == "contract").Required.Should().BeTrue();
+        checks.Single(item => item.Key == "signature").Passed.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData("Draft", true, false, true)]
+    [InlineData("Active", false, true, false)]
+    [InlineData("Suspended", true, false, true)]
+    public async Task DisabledSettingDoesNotBypassExistingContractControls(
+        string status, bool signed, bool contractPasses, bool signaturePasses)
+    {
+        await using var fixture = new Fixture();
+        var award = fixture.Award();
+        var contract = fixture.Contract(award.Id);
+        contract.Status = status;
+        if (!signed) contract.ContractorSignedDate = null;
+        await fixture.SeedAsync(fixture.Setting(false), award, contract);
+
+        var checks = (await fixture.ReadinessAsync()).Checks;
+
+        checks.Single(item => item.Key == "contract").Required.Should().BeTrue();
+        checks.Single(item => item.Key == "contract").Passed.Should().Be(contractPasses);
+        checks.Single(item => item.Key == "signature").Passed.Should().Be(signaturePasses);
+    }
+
+    [Theory]
+    [InlineData("missing")]
+    [InlineData("foreign")]
+    [InlineData("deleted")]
+    [InlineData("supplier")]
+    [InlineData("award")]
+    public async Task ExactLinkedContractCannotBeReplacedByAnotherValidAwardContract(string invalid)
+    {
+        await using var fixture = new Fixture();
+        var award = fixture.Award();
+        var exact = fixture.Contract(award.Id);
+        fixture.PurchaseOrder.ContractId = exact.Id;
+        if (invalid == "foreign") exact.TenantId = Guid.NewGuid();
+        if (invalid == "deleted") exact.IsDeleted = true;
+        if (invalid == "supplier") exact.BusinessPartnerId = Guid.NewGuid();
+        if (invalid == "award") exact.TenderAwardId = Guid.NewGuid();
+        await fixture.SeedAsync(fixture.Setting(false), award, fixture.Contract(award.Id));
+        if (invalid != "missing") await fixture.SeedAsync(exact);
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract");
+
+        check.Required.Should().BeTrue();
+        check.Passed.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(ProcurementPurchaseOrderSourceType.Contract, false)]
+    [InlineData(ProcurementPurchaseOrderSourceType.RfqAward, true)]
+    [InlineData(ProcurementPurchaseOrderSourceType.ApprovedException, true)]
+    public async Task ContractRequirementAlsoAppliesOutsideTenderAward(
+        ProcurementPurchaseOrderSourceType sourceType, bool settingRequired)
+    {
+        await using var fixture = new Fixture();
+        fixture.PurchaseOrder.ProcurementSourceType = sourceType;
+        fixture.PurchaseOrder.ProcurementSourceId = Guid.NewGuid();
+        await fixture.SeedAsync(fixture.Setting(settingRequired));
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract");
+
+        check.Required.Should().BeTrue();
+        check.Passed.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData(ProcurementPurchaseOrderSourceType.Contract)]
+    [InlineData(ProcurementPurchaseOrderSourceType.TenderAward)]
+    [InlineData(ProcurementPurchaseOrderSourceType.RfqAward)]
+    public async Task ExactActiveSignedContractSatisfiesConfiguredRequirement(
+        ProcurementPurchaseOrderSourceType sourceType)
+    {
+        await using var fixture = new Fixture();
+        var award = fixture.Award();
+        var contract = fixture.Contract(award.Id);
+        fixture.PurchaseOrder.ContractId = contract.Id;
+        fixture.PurchaseOrder.ProcurementSourceType = sourceType;
+        if (sourceType == ProcurementPurchaseOrderSourceType.Contract)
+            fixture.PurchaseOrder.ProcurementSourceId = contract.Id;
+        await fixture.SeedAsync(fixture.Setting(true), award, contract);
+
+        var checks = (await fixture.ReadinessAsync()).Checks;
+
+        checks.Single(item => item.Key == "contract").ReferenceId.Should().Be(contract.Id);
+        checks.Single(item => item.Key == "contract").Passed.Should().BeTrue();
+        checks.Single(item => item.Key == "signature").Passed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ContractSourceWithoutReferenceCannotBecomeOptional()
+    {
+        await using var fixture = new Fixture();
+        fixture.PurchaseOrder.ProcurementSourceType = ProcurementPurchaseOrderSourceType.Contract;
+        await fixture.SeedAsync(fixture.Setting(false));
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract");
+
+        check.Required.Should().BeTrue();
+        check.Passed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ContractSignedAwardStillRequiresContractWhenSettingIsOff()
+    {
+        await using var fixture = new Fixture();
+        var award = fixture.Award();
+        award.Status = "ContractSigned";
+        await fixture.SeedAsync(fixture.Setting(false), award);
+
+        var check = (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract");
+
+        check.Required.Should().BeTrue();
+        check.Passed.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ContractSettingChangeIsReReadWithoutMutatingApprovedPurchaseOrder()
+    {
+        await using var fixture = new Fixture();
+        var setting = fixture.Setting(false);
+        fixture.PurchaseOrder.Status = "Approved";
+        await fixture.SeedAsync(setting, fixture.Award());
+        (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract").Required.Should().BeFalse();
+        setting.RequireContractForPO = true;
+        await fixture.Context.SaveChangesAsync();
+
+        (await fixture.ReadinessAsync()).Checks.Single(item => item.Key == "contract").Passed.Should().BeFalse();
+        fixture.PurchaseOrder.Status.Should().Be("Approved");
+        fixture.PurchaseOrder.TotalAmount.Should().Be(100m);
+        fixture.ControlEvents.Should().BeEmpty();
+    }
+
     private sealed class Fixture : IAsyncDisposable
     {
         private readonly ApplicationDbContext _context;
@@ -292,7 +576,7 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
                     Message = "Allowed"
                 });
 
-            var sources = new Mock<IProcurementPurchaseOrderSourceService>();
+            var sources = Sources;
             sources.Setup(item => item.EvaluateCurrentAsync(
                     It.IsAny<PurchaseOrder>(),
                     It.IsAny<CancellationToken>()))
@@ -316,7 +600,7 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
                     PartnerName = "Controlled Supplier"
                 });
 
-            var ghaneps = new Mock<IProcurementGhanepsExchangeService>();
+            var ghaneps = Ghaneps;
             var controlEvents = new Mock<IProcurementControlEventService>();
             controlEvents.Setup(item => item.RecordAsync(
                     It.IsAny<ProcurementControlEventWriteRequest>(),
@@ -350,9 +634,54 @@ public sealed class ProcurementPurchaseOrderComplianceServiceTests
         public Guid UserId { get; }
         public PurchaseOrder PurchaseOrder { get; }
         public Mock<IProcurementRequisitionBudgetControlService> BudgetControl { get; }
+        public Mock<IProcurementPurchaseOrderSourceService> Sources { get; } = new();
+        public Mock<IProcurementGhanepsExchangeService> Ghaneps { get; } = new();
         public ProcurementPurchaseOrderComplianceService Service { get; }
         public List<ProcurementControlEventWriteRequest> ControlEvents { get; } = [];
         public List<NotificationTopicEvent> Notifications { get; } = [];
+        public ApplicationDbContext Context => _context;
+
+        public ProcurementSettings Setting(bool required) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, RequireContractForPO = required
+        };
+
+        public TenderAward Award()
+        {
+            var award = new TenderAward
+            {
+                Id = Guid.NewGuid(), TenantId = TenantId, Status = "Awarded",
+                BusinessPartnerId = PurchaseOrder.BusinessPartnerId
+            };
+            PurchaseOrder.ProcurementSourceType = ProcurementPurchaseOrderSourceType.TenderAward;
+            PurchaseOrder.ProcurementSourceId = award.Id;
+            PurchaseOrder.TenderAwardId = award.Id;
+            return award;
+        }
+
+        public Contract Contract(Guid awardId) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = TenantId, TenderAwardId = awardId,
+            BusinessPartnerId = PurchaseOrder.BusinessPartnerId, Status = "Active",
+            ContractNumber = "CON-TEST-001", ContractTitle = "Test contract",
+            SignedDate = DateTime.UtcNow, SignedById = UserId, SignedByName = "Organization signer",
+            ContractorSignedDate = DateTime.UtcNow, ContractorSignatoryName = "Supplier signer",
+            ContractDocumentPath = "test-only-signed-copy.pdf"
+        };
+
+        public async Task SeedAsync(params object[] entities)
+        {
+            _context.AddRange(entities);
+            await _context.SaveChangesAsync();
+        }
+
+        public async Task<ProcurementPurchaseOrderComplianceDto> ReadinessAsync(string action = "Preview")
+        {
+            if (_context.Entry(PurchaseOrder).State == EntityState.Detached)
+                _context.Add(PurchaseOrder);
+            await _context.SaveChangesAsync();
+            return await Service.GetReadinessAsync(PurchaseOrder.Id, action, "contract-setting-test");
+        }
 
         public async ValueTask DisposeAsync()
         {

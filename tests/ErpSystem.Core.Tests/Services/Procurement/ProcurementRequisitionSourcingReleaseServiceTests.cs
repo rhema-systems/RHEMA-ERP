@@ -45,6 +45,32 @@ public sealed class ProcurementRequisitionSourcingReleaseServiceTests
     }
 
     [Fact]
+    public async Task DirectFinalizedRequisitionCanSourceWithoutFabricatedWorkflowOrApprover()
+    {
+        await using var fixture = new Fixture();
+        fixture.Requisition.ApprovalRequired = false;
+        fixture.Requisition.ApprovedById = null;
+        fixture.Requisition.ApprovedAt = null;
+        fixture.Workflow.IsDeleted = true;
+        fixture.Route.IsDeleted = true;
+        await fixture.Context.SaveChangesAsync();
+
+        var readiness = await fixture.Service.GetReadinessAsync(fixture.Requisition.Id);
+        var release = await fixture.Service.ReleaseAsync(fixture.Requisition.Id,
+            "Release direct-finalized requisition", "direct-source");
+
+        readiness.IsCompliant.Should().BeTrue();
+        release.Should().NotBeNull();
+        var stored = await fixture.Context.ProcurementRequisitionSourcingReleases.SingleAsync();
+        stored.WorkflowInstanceId.Should().BeNull();
+        stored.AuthorityRouteId.Should().BeNull();
+        stored.BudgetCommitmentId.Should().Be(fixture.BudgetCommitmentId);
+        stored.SnapshotJson.Should().Contain("tdc.pr-sourcing-release.v3.no-approval");
+        fixture.Requisition.ApprovedById.Should().BeNull();
+        fixture.Requisition.ApprovedAt.Should().BeNull();
+    }
+
+    [Fact]
     public async Task CompleteControlLineageCreatesOneImmutableIdempotentReleaseAndAuditHistory()
     {
         await using var fixture = new Fixture();

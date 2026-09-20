@@ -3,7 +3,11 @@ using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Inventory;
 using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.Procurement;
+using ErpSystem.Core.Interfaces;
+using ErpSystem.Api.Services.Finance;
 using ErpSystem.Data;
+using ErpSystem.Core.Enums;
+using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -38,6 +42,100 @@ public class PurchaseOrderReceiptsController : ControllerBase
     [HttpGet("{id:guid}/inspection-control")]
     public Task<ActionResult<ProcurementReceiptInspectionOverviewDto>> GetInspectionControl(Guid id) =>
         ExecuteInspectionAsync(() => _inspectionService.GetOverviewAsync(id, HttpContext.RequestAborted));
+
+    [HttpGet("{id:guid}/distribution")]
+    public Task<ActionResult<PurchaseReceiptDistributionDto>> GetDistribution(Guid id,
+        [FromServices] ICurrentUserProvider currentUser,
+        [FromServices] IProcurementAccessControlService access) => ExecuteInspectionAsync(async () =>
+    {
+        if (currentUser.IsExternalUser)
+            throw new ProcurementReceiptInspectionAuthorizationException("Receipt distributions are available to internal users only.");
+        // Reuse receipt read permission, tenant and warehouse authorization, not broad Finance access.
+        var overview = await _inspectionService.GetOverviewAsync(id, HttpContext.RequestAborted);
+        try
+        {
+            var result = await new ProcurementReceiptDistributionService(_context)
+                .GetAsync(currentUser.TenantId, id, HttpContext.RequestAborted);
+            result.CanEdit &= await CanEditDistributionAsync(overview, currentUser, access, false);
+            return result;
+        }
+        catch (InvalidOperationException ex)
+        {
+            throw new ProcurementReceiptInspectionValidationException("RCV_DISTRIBUTION_INVALID", ex.Message);
+        }
+    });
+
+    [HttpGet("{id:guid}/distribution/accounts")]
+    public Task<ActionResult<IReadOnlyList<PurchaseReceiptDistributionAccountDto>>> GetDistributionAccounts(Guid id,
+        [FromServices] ICurrentUserProvider currentUser,
+        [FromServices] IProcurementAccessControlService access) => ExecuteInspectionAsync(async () =>
+    {
+        var overview = await _inspectionService.GetOverviewAsync(id, HttpContext.RequestAborted);
+        await CanEditDistributionAsync(overview, currentUser, access, true);
+        return await new ProcurementReceiptDistributionService(_context).AccountsAsync(currentUser.TenantId, HttpContext.RequestAborted);
+    });
+
+    [HttpPut("{id:guid}/distribution")]
+    public Task<ActionResult<PurchaseReceiptDistributionDto>> SaveDistribution(Guid id,
+        [FromBody] SavePurchaseReceiptDistributionRequest request,
+        [FromServices] ICurrentUserProvider currentUser,
+        [FromServices] IProcurementAccessControlService access,
+        [FromServices] IProcurementControlEventService events) => ExecuteInspectionAsync(() =>
+            WriteDistributionAsync(id, request, currentUser, access, events, false));
+
+    [HttpPost("{id:guid}/distribution/reset")]
+    public Task<ActionResult<PurchaseReceiptDistributionDto>> ResetDistribution(Guid id,
+        [FromBody] PurchaseReceiptDistributionVersionRequest request,
+        [FromServices] ICurrentUserProvider currentUser,
+        [FromServices] IProcurementAccessControlService access,
+        [FromServices] IProcurementControlEventService events) => ExecuteInspectionAsync(() =>
+            WriteDistributionAsync(id, request, currentUser, access, events, true));
+
+    private async Task<PurchaseReceiptDistributionDto> WriteDistributionAsync(Guid id,
+        PurchaseReceiptDistributionVersionRequest request, ICurrentUserProvider currentUser,
+        IProcurementAccessControlService access, IProcurementControlEventService events, bool reset)
+    {
+        var overview = await _inspectionService.GetOverviewAsync(id, HttpContext.RequestAborted);
+        await CanEditDistributionAsync(overview, currentUser, access, true);
+        var service = new ProcurementReceiptDistributionService(_context);
+        async Task Audit(string? before, string? after) => await events.RecordAsync(new ProcurementControlEventWriteRequest
+        {
+            EventKey = $"receipt-distribution:{id:N}:{Guid.NewGuid():N}", EventType = "ReceiptDistribution",
+            Action = reset ? "Reset" : "Save", Result = ProcurementControlEventResult.Succeeded,
+            SourceType = "PurchaseOrderReceipt", SourceId = id, SourceReference = overview.ReceiptNumber,
+            Before = before, After = after, Reason = "Receipt-only distribution; later stock movements retain item account defaults.",
+            CorrelationId = HttpContext.TraceIdentifier, OccurredAtUtc = DateTime.UtcNow
+        }, HttpContext.RequestAborted);
+        try
+        {
+            return reset
+                ? await service.ResetAsync(currentUser.TenantId, id, request, currentUser.UserId, Audit, HttpContext.RequestAborted)
+                : await service.SaveAsync(currentUser.TenantId, id, (SavePurchaseReceiptDistributionRequest)request,
+                    currentUser.UserId, Audit, HttpContext.RequestAborted);
+        }
+        catch (InvalidOperationException ex) when (ex is not ProcurementReceiptInspectionException)
+        {
+            throw new ProcurementReceiptInspectionValidationException("RCV_DISTRIBUTION_INVALID", ex.Message);
+        }
+    }
+
+    private async Task<bool> CanEditDistributionAsync(ProcurementReceiptInspectionOverviewDto overview,
+        ICurrentUserProvider currentUser, IProcurementAccessControlService access, bool enforce)
+    {
+        if (!currentUser.IsAuthenticated || currentUser.IsExternalUser || currentUser.TenantId == Guid.Empty)
+            throw new ProcurementReceiptInspectionAuthorizationException("An authenticated internal tenant user is required.");
+        if (currentUser.HasRole(Constants.Roles.SuperAdmin)) return true;
+        var request = new ProcurementAccessCapabilityRequest
+        {
+            PermissionCode = "procurement.inventory.receive", WarehouseId = overview.WarehouseId,
+            SourceType = "PurchaseOrderReceipt", SourceReference = overview.ReceiptNumber
+        };
+        var decision = enforce
+            ? await access.EnforceCapabilityAsync(request, HttpContext.TraceIdentifier, HttpContext.RequestAborted)
+            : await access.CheckCapabilityAsync(request, HttpContext.TraceIdentifier, HttpContext.RequestAborted);
+        if (enforce && !decision.Allowed) throw new ProcurementReceiptInspectionAuthorizationException(decision.Message);
+        return decision.Allowed;
+    }
 
     [HttpGet("inspection-control/supplier")]
     public Task<ActionResult<PagedResult<ProcurementReceiptInspectionOverviewDto>>>
@@ -343,6 +441,21 @@ public class PurchaseOrderReceiptsController : ControllerBase
         catch (ProcurementReceiptInspectionNotFoundException ex)
         {
             return NotFound(InspectionProblem(ex.Code, ex.Message, StatusCodes.Status404NotFound));
+        }
+        catch (ProcurementReceiptSourceNotFoundException ex)
+        {
+            return NotFound(InspectionProblem(ex.Code, ex.Message, StatusCodes.Status404NotFound));
+        }
+        catch (ProcurementReceiptSourceAuthorizationException ex)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden,
+                InspectionProblem("RCV_SOURCE_FORBIDDEN", ex.Message, StatusCodes.Status403Forbidden));
+        }
+        catch (ProcurementReceiptSourceValidationException ex)
+        {
+            var problem = InspectionProblem(ex.Code, ex.Message, StatusCodes.Status422UnprocessableEntity);
+            if (ex.Readiness is not null) problem.Extensions["readiness"] = ex.Readiness;
+            return UnprocessableEntity(problem);
         }
         catch (ProcurementReceiptInspectionAuthorizationException ex)
         {

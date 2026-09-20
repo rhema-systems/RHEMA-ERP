@@ -11,7 +11,7 @@ public sealed class CivilEngineeringMigrationWorkbenchGuardTests
     public void Migration_creates_only_governed_staging_registers_with_immutable_lineage()
     {
         var root = FindRepositoryRoot();
-        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "Migrations", MigrationId + ".cs"));
+        var migration = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Data", "LegacyMigrationsArchive", MigrationId + ".cs"));
         var preflight = File.ReadAllText(Path.Combine(root, "scripts", "vps", "Invoke-RhemaVpsRemote.ps1"));
         var upMigration = migration[..migration.IndexOf("protected override void Down", StringComparison.Ordinal)];
         var sqlBlocks = upMigration.Split("migrationBuilder.Sql(\"\"\"", StringSplitOptions.None).Skip(1).ToList();

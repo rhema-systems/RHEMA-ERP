@@ -28,6 +28,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import {
   exceptionalMethodLabel,
   exceptionalSourcingStatusLabel,
@@ -39,6 +40,7 @@ import { procurementExceptionalSourcingControlService as service } from '@/servi
 import { procurementAwardReadinessService } from '@/services/procurement-award-readiness.service';
 import { hasAwardReadinessAction } from '@/lib/procurement-award-readiness';
 import { useAuth } from '@/hooks/use-auth';
+import { useWorkflowSummary } from '@/hooks/useWorkflowSummary';
 import {
   ProcurementExceptionalSourcingControlStatus as Status,
   type PrepareExceptionalSourcingRequest,
@@ -52,6 +54,7 @@ const formatDate = (value?: string) =>
 
 export default function ExceptionalSourcingControlsPage() {
   const { id: tenderId } = useParams<{ id: string }>();
+  const workflow = useWorkflowSummary({ entityType: 'TenderException', entityId: tenderId });
   const { hasPermission } = useAuth();
   const [control, setControl] =
     useState<ProcurementExceptionalSourcingControl | null>(null);
@@ -61,11 +64,16 @@ export default function ExceptionalSourcingControlsPage() {
     useState<ProcurementAwardReadinessDecision | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
   const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([]);
   const [justification, setJustification] = useState('');
   const [justificationEvidence, setJustificationEvidence] = useState('');
   const [supplierEvidence, setSupplierEvidence] = useState('');
+  const [quoteReference, setQuoteReference] = useState('');
+  const [quoteEvidence, setQuoteEvidence] = useState('');
+  const [quotePrices, setQuotePrices] = useState<Record<string, string>>({});
+  const [confirmPrepare, setConfirmPrepare] = useState(false);
   const [evidence, setEvidence] = useState<
     Record<string, { evidenceReference: string; verificationReference: string }>
   >({});
@@ -178,23 +186,26 @@ export default function ExceptionalSourcingControlsPage() {
   ) => {
     try {
       setBusy(key);
+      setActionError('');
       await action();
       toast.success(success);
-      await load();
+      await Promise.all([load(), workflow.refresh()]);
+      return true;
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Exceptional-sourcing action failed'
-      );
+      const message = error instanceof Error ? error.message : 'Exceptional-sourcing action failed';
+      setActionError(message);
+      toast.error(message);
+      return false;
     } finally {
       setBusy(null);
     }
   };
 
-  const prepare = () => {
-    if (!readiness) return;
+  const prepare = async () => {
+    if (!readiness) return false;
     const request: PrepareExceptionalSourcingRequest = {
+      quotation: readiness.method === 5 ? { reference: quoteReference, evidenceReference: quoteEvidence,
+        items: (readiness.quotationItems ?? []).map(item => ({ tenderItemId: item.tenderItemId, unitPrice: Number(quotePrices[item.tenderItemId]) })) } : undefined,
       justification,
       justificationEvidenceReference: justificationEvidence,
       supplierSelectionEvidenceReference: supplierEvidence,
@@ -209,10 +220,11 @@ export default function ExceptionalSourcingControlsPage() {
     };
     const error = validateExceptionalPreparation(readiness, request);
     if (error) {
+      setActionError(error);
       toast.error(error);
-      return;
+      return false;
     }
-    void run(
+    return run(
       'prepare',
       () => service.prepare(tenderId, request),
       'Exceptional-sourcing record prepared'
@@ -259,12 +271,17 @@ export default function ExceptionalSourcingControlsPage() {
       className="space-y-6 p-6"
       data-testid="exceptional-sourcing-control-page"
     >
+      {workflow.error && <div role="alert" className="flex items-center gap-3 rounded border p-3 text-sm text-destructive">
+        {workflow.error}<Button variant="outline" size="sm" onClick={() => void workflow.refresh()}>Retry workflow setup</Button>
+      </div>}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <Button variant="ghost" asChild className="mb-2 px-0">
-            <Link href={`/procurement/tenders/${tenderId}`}>
+            <Link href={(control?.method ?? readiness?.method) === 5
+              ? `/procurement/purchase-requisitions/${control?.sourceRequisitionId ?? readiness?.sourceRequisitionId}`
+              : `/procurement/tenders/${tenderId}`}>
               <ArrowLeft className="mr-2 h-4 w-4" />
-              Tender
+              {(control?.method ?? readiness?.method) === 5 ? 'Requisition' : 'Tender'}
             </Link>
           </Button>
           <h1 className="text-2xl font-semibold">
@@ -283,34 +300,34 @@ export default function ExceptionalSourcingControlsPage() {
                 control.status === Status.Rejected ? 'destructive' : 'secondary'
               }
             >
-              {exceptionalSourcingStatusLabel[control.status]}
+              {control.approvalRequired === false && control.status === Status.Approved ? 'Sourcing complete' : exceptionalSourcingStatusLabel[control.status]}
             </Badge>
           )}
           {!control && <Badge variant="outline">Preparation required</Badge>}
-          <Button asChild variant="outline" size="sm">
+          {control && control.status >= Status.Recommended && <Button asChild variant="outline" size="sm">
             <Link
               href={`/procurement/tenders/${tenderId}/award-readiness?sourceType=ExceptionalSourcing`}
             >
               <ShieldAlert className="mr-2 h-4 w-4" />
               Award readiness
             </Link>
-          </Button>
-          <Button asChild variant="outline" size="sm">
+          </Button>}
+          {(control?.method ?? readiness?.method) !== 5 && <Button asChild variant="outline" size="sm">
             <Link
               href={`/procurement/tenders/${tenderId}/bidder-communications?sourceType=ExceptionalSourcing`}
             >
               <MailCheck className="mr-2 h-4 w-4" />
               Bidder communications
             </Link>
-          </Button>
-          <Button asChild variant="outline" size="sm">
+          </Button>}
+          {(control?.method ?? readiness?.method) !== 5 && <Button asChild variant="outline" size="sm">
             <Link
               href={`/procurement/tenders/${tenderId}/ghaneps-exchange?sourceType=ExceptionalSourcing`}
             >
               <Share2 className="mr-2 h-4 w-4" />
               GHANEPS exchange
             </Link>
-          </Button>
+          </Button>}
           <Button variant="outline" size="sm" onClick={() => void load()}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Refresh
@@ -318,6 +335,7 @@ export default function ExceptionalSourcingControlsPage() {
         </div>
       </div>
 
+      {actionError && !confirmPrepare && <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 p-3 text-sm text-destructive">{actionError}</p>}
       {!control && readiness && (
         <Card data-testid="exceptional-preparation">
           <CardHeader>
@@ -337,10 +355,10 @@ export default function ExceptionalSourcingControlsPage() {
               />
               <Summary
                 label="Authority route"
-                value={readiness.authorityRouteReference}
+                value={readiness.authorityRouteReference || 'Configured independent workflow'}
               />
             </div>
-            {readiness.tenderStatus !== 'Approved' && (
+            {readiness.method !== 5 && readiness.tenderStatus !== 'Approved' && (
               <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
                 Complete the tender-document approval first. Current status:{' '}
                 {readiness.tenderStatus}.
@@ -461,37 +479,59 @@ export default function ExceptionalSourcingControlsPage() {
                 </div>
               ))}
             </div>
+            {readiness.method === 5 && <section className="space-y-3 rounded-lg border p-4" aria-label="Supplier quotation">
+              <h2 className="font-semibold">Supplier quotation</h2>
+              <p className="text-sm text-muted-foreground">Quantities are locked. Total must not exceed {readiness.currency} {readiness.estimatedValue?.toLocaleString()}.</p>
+              <Field label="Quotation reference"><Input aria-label="Quotation reference" value={quoteReference} onChange={event => setQuoteReference(event.target.value)}/></Field>
+              <Field label="Quotation evidence"><Input aria-label="Quotation evidence" value={quoteEvidence} onChange={event => setQuoteEvidence(event.target.value)}/></Field>
+              {(readiness.quotationItems ?? []).map(item => <Field key={item.tenderItemId} label={`${item.description} · ${item.quantity} ${item.unitOfMeasure ?? ''} · unit price (${readiness.currency})`}>
+                <Input aria-label={`Unit price for ${item.description}`} type="number" min="0.01" step="0.01" value={quotePrices[item.tenderItemId] ?? ''}
+                  onChange={event => setQuotePrices(current => ({ ...current, [item.tenderItemId]: event.target.value }))}/>
+              </Field>)}
+            </section>}
             <Button
-              onClick={prepare}
-              disabled={busy !== null || readiness.tenderStatus !== 'Approved'}
+              onClick={() => setConfirmPrepare(true)}
+              disabled={busy !== null || (readiness.tenderStatus !== 'Approved' && !(readiness.method === 5 && readiness.tenderStatus === 'Draft'))}
             >
               {busy === 'prepare' && (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               )}
               Prepare immutable record
             </Button>
+            <ConfirmationDialog open={confirmPrepare} onOpenChange={setConfirmPrepare} title="Lock supplier, quotation and evidence?"
+              description="These details will be retained for independent approval. No award, order or payment is created."
+              confirmText="Prepare record" onConfirm={prepare} isLoading={busy === 'prepare'}>
+              {actionError && <p role="alert" className="text-sm text-destructive">{actionError}</p>}
+            </ConfirmationDialog>
           </CardContent>
         </Card>
       )}
 
       {control && actions && (
         <>
+          {control.method === 5 && control.status === Status.Awarded && control.sourceRequisitionId &&
+            <Card><CardHeader><CardTitle>Next: Purchase order</CardTitle></CardHeader><CardContent>
+              <p className="mb-3 text-sm text-muted-foreground">The quotation award is complete. Create the PO from this approved source, then follow PO approval and receipt. No payment has been made.</p>
+              <Button asChild><Link href={`/procurement/purchase-requisitions/${control.sourceRequisitionId}`}>Continue to purchase order</Link></Button>
+            </CardContent></Card>}
           <div className="grid gap-3 md:grid-cols-4">
             <Summary
               label="Method / exception"
               value={`${exceptionalMethodLabel(control.method)} · ${control.exceptionRuleCode}`}
             />
             <Summary
-              label="Authority route"
-              value={control.authorityRouteReference}
+              label={control.method === 5 ? 'Approval route' : 'Authority route'}
+              value={control.authorityRouteReference || (control.method === 5 ? 'Configured independent workflow' : '—')}
             />
             <Summary
               label="Suppliers / evidence"
               value={`${control.suppliers.length} / ${control.evidenceChecklist.length}`}
             />
             <Summary
-              label="Integrity"
-              value={`${control.integrityHash.slice(0, 16)}…`}
+              label={control.method === 5 ? 'Quotation amount' : 'Integrity'}
+              value={control.method === 5 && control.bids[0]
+                ? `${control.bids[0].currency} ${control.bids[0].bidAmount.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                : `${control.integrityHash.slice(0, 16)}…`}
             />
           </div>
 
@@ -499,7 +539,7 @@ export default function ExceptionalSourcingControlsPage() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <CheckCircle2 className="h-5 w-5" />
-                Immutable statutory history
+                {control.method === 5 ? 'Purchase progress' : 'Immutable statutory history'}
               </CardTitle>
             </CardHeader>
             <CardContent className="grid gap-3 md:grid-cols-2">
@@ -547,16 +587,16 @@ export default function ExceptionalSourcingControlsPage() {
                     className="rounded border p-2"
                   >
                     <strong>{supplier.supplierName}</strong>
-                    <p className="text-xs text-muted-foreground">
+                    {control.method !== 5 && <p className="text-xs text-muted-foreground">
                       {supplier.businessPartnerId}
-                    </p>
+                    </p>}
                   </div>
                 ))}
               </CardContent>
             </Card>
             <Card>
               <CardHeader>
-                <CardTitle>Verified evidence checklist</CardTitle>
+                <CardTitle>{control.method === 5 ? 'Evidence references' : 'Verified evidence checklist'}</CardTitle>
               </CardHeader>
               <CardContent className="space-y-2">
                 {control.evidenceChecklist.map((item) => (
@@ -576,27 +616,43 @@ export default function ExceptionalSourcingControlsPage() {
           </div>
 
           {actions.canSubmitApproval && (
-            <ActionCard title="Submit exact sourcing-approval workflow">
+            <ActionCard title={workflow.visibility.direct ? 'Complete sourcing' : 'Submit sourcing workflow'}>
               <p className="text-sm text-muted-foreground">
-                This locks the preparation and starts the authority route
-                selected by the current policy.
+                {workflow.visibility.direct
+                  ? 'Record the required authority evidence, then complete the sourcing preparation.'
+                  : 'Send the prepared sourcing record through the configured approval process.'}
               </p>
+              {workflow.visibility.direct && <div className="grid gap-3 md:grid-cols-3">
+                {control.boardApprovalRequired && <Field label="Board approval reference"><Input aria-label="Board approval reference" value={boardReference} onChange={(event) => setBoardReference(event.target.value)} /></Field>}
+                {control.managingDirectorApprovalRequired && <Field label="Managing Director reference"><Input aria-label="Managing Director reference" value={mdReference} onChange={(event) => setMdReference(event.target.value)} /></Field>}
+                {control.ppaApprovalRequired && <Field label="PPA approval reference"><Input aria-label="PPA approval reference" value={ppaReference} onChange={(event) => setPpaReference(event.target.value)} /></Field>}
+              </div>}
               <Button
                 onClick={() =>
                   void run(
                     'submit',
-                    () => service.submitApproval(tenderId, control.rowVersion),
-                    'Approval workflow submitted'
+                    () => service.submitApproval(tenderId, control.rowVersion, workflow.visibility.direct ? {
+                      boardApprovalReference: boardReference || undefined,
+                      managingDirectorApprovalReference: mdReference || undefined,
+                      ppaApprovalReference: ppaReference || undefined,
+                    } : undefined),
+                    workflow.visibility.direct ? 'Sourcing completed' : 'Approval workflow submitted'
                   )
                 }
-                disabled={busy !== null}
+                disabled={busy !== null || !workflow.visibility.known || (workflow.visibility.direct &&
+                  ((control.boardApprovalRequired && !boardReference.trim()) ||
+                   (control.managingDirectorApprovalRequired && !mdReference.trim()) ||
+                   (control.ppaApprovalRequired && !ppaReference.trim())))}
               >
-                Submit approval
+                {workflow.visibility.direct ? 'Complete sourcing' : 'Submit for approval'}
               </Button>
             </ActionCard>
           )}
 
-          {actions.canDecideApproval && (
+          {actions.canDecideApproval && !hasPermission('procurement.tender.approve') && (
+            <p className="rounded-md border p-3 text-sm text-muted-foreground">Awaiting the configured independent approver. Your account cannot approve this purchase.</p>
+          )}
+          {actions.canDecideApproval && workflow.visibility.showApprovalControls && hasPermission('procurement.tender.approve') && (
             <ActionCard title="Record authority decision">
               <div className="grid gap-3 md:grid-cols-3">
                 {control.boardApprovalRequired && (
@@ -742,8 +798,13 @@ export default function ExceptionalSourcingControlsPage() {
             </ActionCard>
           )}
 
-          {actions.canRecommend && (
-            <ActionCard title="Record negotiated recommendation">
+          {actions.canRecommend && !hasPermission('procurement.tender.evaluate') && (
+            <p className="text-sm text-muted-foreground">
+              Awaiting a recommendation from an authorized evaluator.
+            </p>
+          )}
+          {actions.canRecommend && hasPermission('procurement.tender.evaluate') && (
+            <ActionCard title={control.method === 5 ? 'Recommend approved quotation' : 'Record negotiated recommendation'}>
               <BidSelect
                 control={control}
                 value={selectedBidId}
@@ -789,9 +850,9 @@ export default function ExceptionalSourcingControlsPage() {
           {actions.canAward && !awardGateAllows && (
             <ActionCard title="Award-readiness gate">
               <p className="text-sm text-muted-foreground">
-                A current server-derived Ready decision for the exact negotiated
-                recommendation is required before the controlled award action is
-                available.
+                A current server-derived Ready decision for the exact{' '}
+                {control.method === 5 ? 'approved quotation' : 'negotiated recommendation'}{' '}
+                is required before the controlled award action is available.
               </p>
               <Button asChild variant="outline">
                 <Link
@@ -802,7 +863,7 @@ export default function ExceptionalSourcingControlsPage() {
               </Button>
             </ActionCard>
           )}
-          {actions.canAward && awardGateAllows && (
+          {actions.canAward && awardGateAllows && hasPermission('procurement.tender.approve') && (
             <ActionCard title="Record controlled award">
               <Field label="Award reference">
                 <Input

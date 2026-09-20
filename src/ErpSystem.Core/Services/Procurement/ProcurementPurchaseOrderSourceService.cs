@@ -415,12 +415,23 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 cancellationToken);
         }
 
+        var sourceHashMatches = string.Equals(current.SourceIntegrityHash,
+            purchaseOrder.SourceIntegrityHash, StringComparison.OrdinalIgnoreCase);
+        if (!sourceHashMatches &&
+            purchaseOrder.ProcurementSourceType == ProcurementPurchaseOrderSourceType.TenderAward &&
+            ProcurementTenderAwardSnapshot.IsContractActivationOnlyChange(
+                purchaseOrder.SourceSnapshotJson, purchaseOrder.SourceIntegrityHash,
+                current.SourceSnapshotJson, current.SourceIntegrityHash))
+        {
+            sourceHashMatches = await HasMatchingActivatedSupplyContractAsync(
+                purchaseOrder, cancellationToken);
+        }
+
         if (current.PurchaseRequisitionId != purchaseOrder.SourceRequisitionId ||
             current.SourcingReleaseId != purchaseOrder.SourcingReleaseId ||
             NormalizeOptionalId(current.SourcingCaseId) != purchaseOrder.SourcingCaseId ||
             NormalizeOptionalId(current.AwardReadinessDecisionId) != purchaseOrder.AwardReadinessDecisionId ||
-            !string.Equals(current.SourceIntegrityHash,
-                purchaseOrder.SourceIntegrityHash, StringComparison.OrdinalIgnoreCase))
+            !sourceHashMatches)
         {
             throw Invalid("PO_SOURCE_LINEAGE_CHANGED",
                 "The persisted purchase-order source snapshot no longer matches the authoritative approved source.");
@@ -467,6 +478,40 @@ public sealed class ProcurementPurchaseOrderSourceService :
         }
 
         return current;
+    }
+
+    private async Task<bool> HasMatchingActivatedSupplyContractAsync(
+        PurchaseOrder purchaseOrder, CancellationToken cancellationToken)
+    {
+        if (purchaseOrder.ProcurementCategory != ProcurementCategoryClass.Goods ||
+            (purchaseOrder.ApprovalRequired && (!purchaseOrder.ApprovedAt.HasValue ||
+            !purchaseOrder.ApprovedById.HasValue || purchaseOrder.ApprovedById == Guid.Empty)) ||
+            purchaseOrder.Status is not ("Approved" or "Sent" or "Acknowledged" or "PartiallyReceived" or "Partially Received" or "Received"))
+            return false;
+
+        var contracts = await _unitOfWork.Repository<Contract>()
+            .GetQueryable(item => item.TenantId == purchaseOrder.TenantId &&
+                item.TenderAwardId == purchaseOrder.ProcurementSourceId && !item.IsDeleted)
+            .AsNoTracking().ToListAsync(cancellationToken);
+        if (contracts.Count != 1)
+            return false;
+        var contract = contracts[0];
+        if (contract.Status != "Active" || contract.ContractType != "Supply" ||
+            contract.BusinessPartnerId != purchaseOrder.BusinessPartnerId ||
+            contract.ContractValue != purchaseOrder.TotalAmount ||
+            !string.Equals(contract.Currency, purchaseOrder.Currency, StringComparison.OrdinalIgnoreCase) ||
+            !contract.ActivatedAt.HasValue)
+            return false;
+
+        return await _unitOfWork.Repository<ProcurementContractActivation>()
+            .GetQueryable(item => item.TenantId == purchaseOrder.TenantId &&
+                item.ContractId == contract.Id && !item.IsDeleted &&
+                item.Status == ProcurementContractActivationStatus.Activated &&
+                item.ActivatedAtUtc == contract.ActivatedAt &&
+                item.ActivatedById != null && item.ActivatedById != Guid.Empty &&
+                item.DecidedAtUtc != null && item.DecidedById != null &&
+                item.WorkflowInstanceId != null)
+            .AnyAsync(cancellationToken);
     }
 
     public async Task ValidateOrderAsync(
@@ -1793,7 +1838,7 @@ public sealed class ProcurementPurchaseOrderSourceService :
         if (budget.TenantId != _currentUser.TenantId || budget.IsDeleted ||
             (!string.Equals(budget.Status, "Approved", StringComparison.OrdinalIgnoreCase) &&
              !string.Equals(budget.Status, "Active", StringComparison.OrdinalIgnoreCase)) ||
-            !budget.ApprovedById.HasValue || !budget.ApprovedDate.HasValue ||
+            (budget.ApprovalRequired && (!budget.ApprovedById.HasValue || !budget.ApprovedDate.HasValue)) ||
             (budget.EffectiveDate.HasValue && budget.EffectiveDate.Value > now) ||
             (budget.ExpiryDate.HasValue && budget.ExpiryDate.Value < now))
             throw Invalid(
@@ -1996,7 +2041,8 @@ public sealed class ProcurementPurchaseOrderSourceService :
                 budget.ExpiryDate,
                 requiredExposure,
                 currencyCode ?? source.CurrencyCode,
-                DateTime.UtcNow));
+                DateTime.UtcNow,
+                budget.ApprovalRequired));
         if (!result.IsValid)
             throw Invalid(result.Code, result.Message);
     }

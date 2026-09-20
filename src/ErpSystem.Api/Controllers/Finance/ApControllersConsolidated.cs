@@ -10,6 +10,7 @@ using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using ErpSystem.Api.Services.Finance;
+using ErpSystem.Api.Services.Finance.AP;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -53,6 +54,20 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         private static readonly string[] PrivilegedRoles = { "SuperAdmin", "TenantAdmin" };
+        [HttpGet("supplier-defaults")]
+        public async Task<ActionResult<PurchaseOrderSupplierDefaultsDto?>> GetSupplierDefaults(
+            [FromQuery] Guid supplierId, [FromQuery] Guid? purchaseOrderId, CancellationToken cancellationToken,
+            [FromQuery] DateTime? invoiceDate = null)
+        {
+            if (!await HasAnyPermissionAsync(FinancePermissions.CreateApInvoices, FinancePermissions.MaintainApInvoices, FinancePermissions.ManageApInvoices))
+                return Forbid();
+            try { return Ok(await _invoiceService.GetSupplierDefaultsAsync(supplierId, purchaseOrderId, cancellationToken, invoiceDate)); }
+            catch (KeyNotFoundException exception)
+            { return NotFound(new ProblemDetails { Status = 404, Title = "Supplier defaults unavailable", Detail = exception.Message }); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(new ProblemDetails { Status = 422, Title = "Supplier defaults unavailable", Detail = exception.Message }); }
+        }
+
         private static readonly FinancePostingProducerContext DimensionProducer =
             new(FinanceDimensionRouteId.FinanceApVendorInvoice);
 
@@ -81,6 +96,18 @@ namespace ErpSystem.Api.Controllers.Finance
         {
             var invoice = await _invoiceService.GetByIdAsync(id, DimensionProducer);
             return invoice == null ? NotFound() : Ok(invoice);
+        }
+
+        /// <summary>Reads proposed invoice accounts or the original posted journal without changing the invoice.</summary>
+        [HttpGet("{id:guid}/distribution")]
+        public async Task<ActionResult<VendorInvoiceDistributionDto>> GetDistribution(Guid id, CancellationToken cancellationToken)
+        {
+            // Same invoice-read authorization as GetById; this is not a GL maintenance operation.
+            try { return Ok(await _invoiceService.GetDistributionAsync(id, cancellationToken)); }
+            catch (KeyNotFoundException exception)
+            { return NotFound(new ProblemDetails { Status = 404, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(new ProblemDetails { Status = 422, Title = "Invoice distribution unavailable", Detail = exception.Message }); }
         }
 
         /// <summary>Retrieves a vendor invoice by its system-generated invoice number.</summary>
@@ -119,6 +146,23 @@ namespace ErpSystem.Api.Controllers.Finance
                     message = exception.Message
                 });
             }
+        }
+
+        /// <summary>
+        /// Returns the payable Goods quantities from accepted receipts, not ordered quantities.
+        /// </summary>
+        [HttpGet("goods-entry")]
+        public async Task<ActionResult<ApGoodsInvoiceEntryDto>> GetGoodsEntry(
+            [FromQuery] Guid purchaseOrderId, [FromQuery] Guid? currentInvoiceId,
+            CancellationToken cancellationToken)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write"))
+                return Forbid();
+            try { return Ok(await _invoiceService.GetGoodsInvoiceEntryAsync(purchaseOrderId, currentInvoiceId, cancellationToken)); }
+            catch (ProcurementAcceptedSupplyValidationException exception)
+            { return UnprocessableEntity(new { code = exception.Code, message = exception.Message }); }
+            catch (InvalidOperationException exception)
+            { return UnprocessableEntity(new { code = "AP_GOODS_ENTRY_UNAVAILABLE", message = exception.Message }); }
         }
 
         /// <summary>
@@ -167,6 +211,92 @@ namespace ErpSystem.Api.Controllers.Finance
         }
 
         /// <summary>
+        /// Returns AP invoice-entry options across the approved Business Partner and canonical
+        /// Supplier masters. The query is read-only: an unmatched Business Partner is resolved to
+        /// a Supplier only inside the purpose-authorized invoice command transaction.
+        /// </summary>
+        [HttpGet("entry-suppliers")]
+        [Authorize(Policy = FinancePermissions.ViewFinance)]
+        [ProducesResponseType(typeof(IReadOnlyList<ApInvoiceSupplierEntryOptionDto>), StatusCodes.Status200OK)]
+        [ProducesResponseType(StatusCodes.Status403Forbidden)]
+        public async Task<ActionResult<IReadOnlyList<ApInvoiceSupplierEntryOptionDto>>> GetEntrySuppliers(
+            CancellationToken cancellationToken)
+        {
+            Guid tenantId;
+            try { tenantId = _currentUserService.GetRequiredFinanceTenantId(); }
+            catch (InvalidOperationException) { return Forbid(); }
+
+            // Include inactive/deleted identities in collision checks; neither a stale link nor
+            // an approved partner may bypass an unavailable canonical Finance supplier.
+            var allSuppliers = await _dbContext.Suppliers.IgnoreQueryFilters().AsNoTracking()
+                .Where(s => s.TenantId == tenantId).ToListAsync(cancellationToken);
+            var allPartners = await _dbContext.BusinessPartners.IgnoreQueryFilters().AsNoTracking()
+                .Where(p => p.TenantId == tenantId).ToListAsync(cancellationToken);
+            var links = await _dbContext.ApSupplierIdentityLinks
+                .AsNoTracking()
+                .Where(link => link.TenantId == tenantId && !link.IsDeleted)
+                .ToListAsync(cancellationToken);
+            var matchedPartnerIds = new HashSet<Guid>();
+            var options = new List<ApInvoiceSupplierEntryOptionDto>();
+            foreach (var supplier in allSuppliers.Where(ApInvoiceSupplierEligibility.IsActiveSupplier))
+            {
+                var exactMatches = allPartners.Where(partner =>
+                    ApInvoiceSupplierEligibility.IsLinked(supplier, partner)).ToList();
+                var supplierLinks = links.Where(link => link.SupplierId == supplier.Id).ToList();
+                if (exactMatches.Count > 1 || supplierLinks.Count > 1)
+                    continue;
+                var partner = supplierLinks.Count == 1
+                    ? allPartners.SingleOrDefault(candidate => candidate.Id == supplierLinks[0].BusinessPartnerId)
+                    : exactMatches.SingleOrDefault();
+                if (supplierLinks.Count == 1 &&
+                    (partner == null || links.Count(link => link.BusinessPartnerId == partner.Id) != 1 ||
+                     exactMatches.Any(candidate => candidate.Id != partner.Id)))
+                    continue;
+                if (partner != null &&
+                    (!ApInvoiceSupplierEligibility.IsEligiblePartner(partner, true) ||
+                     partner.ApprovalStatus != BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus ||
+                     links.Any(link => link.BusinessPartnerId == partner.Id && link.SupplierId != supplier.Id) ||
+                     allSuppliers.Any(other => other.Id != supplier.Id &&
+                         ApInvoiceSupplierEligibility.IsLinked(other, partner))))
+                    continue;
+
+                if (partner != null)
+                    matchedPartnerIds.Add(partner.Id);
+
+                options.Add(new ApInvoiceSupplierEntryOptionDto
+                {
+                    Id = supplier.Id,
+                    SupplierId = supplier.Id,
+                    BusinessPartnerId = partner?.Id,
+                    Code = partner?.PartnerCode ?? supplier.SupplierCode,
+                    Name = partner?.PartnerName ?? supplier.Name,
+                    PaymentTermId = partner?.PaymentTermId ?? supplier.PaymentTermId,
+                    Currency = partner?.Currency
+                });
+            }
+            options.AddRange(allPartners
+                .Where(partner => ApInvoiceSupplierEligibility.IsEligiblePartner(partner, false) &&
+                    partner.ApprovalStatus == BusinessPartnerLifecyclePolicy.ApprovedApprovalStatus &&
+                    !matchedPartnerIds.Contains(partner.Id) &&
+                    !links.Any(link => link.BusinessPartnerId == partner.Id) &&
+                    !allSuppliers.Any(supplier => ApInvoiceSupplierEligibility.IsLinked(supplier, partner)))
+                .Select(partner => new ApInvoiceSupplierEntryOptionDto
+                {
+                    Id = partner.Id,
+                    BusinessPartnerId = partner.Id,
+                    Code = partner.PartnerCode,
+                    Name = partner.PartnerName,
+                    PaymentTermId = partner.PaymentTermId,
+                    Currency = partner.Currency
+                }));
+
+            return Ok(options
+                .OrderBy(option => option.Name)
+                .ThenBy(option => option.Code)
+                .ToList());
+        }
+
+        /// <summary>
         /// Returns adopted Finance budget cells for one AP expense account and invoice date.
         /// AP receives selectable evidence only; it never mutates budget setup through this route.
         /// </summary>
@@ -197,6 +327,15 @@ namespace ErpSystem.Api.Controllers.Finance
             {
                 return UnprocessableEntity(new { code = exception.Code, message = exception.Message });
             }
+        }
+
+        [HttpPost("from-landed-cost/{landedCostId:guid}")]
+        public async Task<ActionResult<List<VendorInvoiceDto>>> CreateFromLandedCost(Guid landedCostId, CreateLandedCostInvoicesDto dto)
+        {
+            if (!await HasAnyPermissionAsync("Finance.AP.Invoices.Create", "Finance.AP.Invoices.Write")) return Forbid();
+            try { return Ok(await _invoiceService.CreateFromLandedCostAsync(landedCostId, dto, DimensionProducer, HttpContext.RequestAborted)); }
+            catch (ArgumentException ex) { return BadRequest(new { code = "LANDED_COST_INVOICE_INVALID", message = ex.Message }); }
+            catch (InvalidOperationException ex) { return UnprocessableEntity(new { code = "LANDED_COST_INVOICE_NOT_READY", message = ex.Message }); }
         }
 
         /// <summary>Creates a new vendor invoice in Draft status with the supplied line items.</summary>

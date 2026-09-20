@@ -1,5 +1,12 @@
 export type InventoryTransferControlKind = 'resolve' | 'close';
 
+export function getInventoryTransferStatusLabel(status: string, approvalRequired?: boolean): string {
+  if (status === 'Approved' && approvalRequired === false) return 'Ready to ship';
+  if (status === 'Submitted') return 'Pending Approval';
+  if (status === 'InTransit') return 'In Transit';
+  return status;
+}
+
 export interface InventoryTransferControlAction {
   actionType: string;
   actorUserId: string;
@@ -10,6 +17,7 @@ export interface InventoryTransferControlCapabilityInput {
   status: string;
   hasOpenDiscrepancy: boolean;
   hasTransferPermission: boolean;
+  approvalRequired?: boolean;
   currentUserId?: string | null;
   actions: InventoryTransferControlAction[];
 }
@@ -65,7 +73,7 @@ export function getInventoryTransferControlCapability(
     normalize(action.actorUserId) === currentUserId
   );
 
-  if (participated) {
+  if (participated && input.approvalRequired !== false) {
     return {
       allowed: false,
       reason: 'An independent authorized user who did not request, approve, dispatch or receive this transfer must perform this action.',

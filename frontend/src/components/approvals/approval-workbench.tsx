@@ -50,6 +50,7 @@ export interface ApprovalQueueItem {
     submittedBy?: string | null;
     canApprove?: boolean;
     canReject?: boolean;
+    decisionOnDetailPage?: boolean;
     approveDisabledReason?: string | null;
     rejectDisabledReason?: string | null;
     metadata?: Array<{
@@ -490,10 +491,10 @@ export function ApprovalWorkbench({
                                                     <Button variant="outline" asChild>
                                                         <Link href={row.detailHref}>
                                                             <Clock className="mr-2 h-4 w-4" />
-                                                            Review
+                                                            {row.decisionOnDetailPage ? 'Review & decide' : 'Review'}
                                                         </Link>
                                                     </Button>
-                                                    <Button
+                                                    {!row.decisionOnDetailPage && <Button
                                                         onClick={() => handleApprove(definition, row)}
                                                         disabled={actionKey !== null || row.canApprove === false}
                                                         title={row.canApprove === false ? row.approveDisabledReason || 'Approval unavailable' : undefined}
@@ -504,8 +505,8 @@ export function ApprovalWorkbench({
                                                             <CheckCircle2 className="mr-2 h-4 w-4" />
                                                         )}
                                                         Approve
-                                                    </Button>
-                                                    {definition.reject && (
+                                                    </Button>}
+                                                    {!row.decisionOnDetailPage && definition.reject && (
                                                         <Button
                                                             variant="destructive"
                                                             onClick={() => setRejectTarget({ definition, item: row })}

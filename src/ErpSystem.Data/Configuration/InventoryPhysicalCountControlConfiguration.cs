@@ -75,7 +75,7 @@ public sealed class PhysicalCountActionConfiguration : IEntityTypeConfiguration<
         builder.ToTable("PhysicalCountActions", table =>
         {
             table.HasTrigger("TR_PhysicalCountActions_AppendOnly");
-            table.HasCheckConstraint("CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 13");
+            table.HasCheckConstraint("CK_PhysicalCountActions_ActionType", "[ActionType] BETWEEN 1 AND 16");
         });
         builder.HasIndex(x => new { x.TenantId, x.PhysicalCountId, x.Sequence }).IsUnique();
         builder.HasIndex(x => new { x.TenantId, x.PhysicalCountId, x.ActionType, x.IdempotencyKey }).IsUnique();

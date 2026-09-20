@@ -22,5 +22,8 @@ public interface ICapitalProjectService
     Task<CapitalProjectDetailDto> RemoveSettlementRuleAsync(Guid projectId, Guid ruleId);
 
     // Capitalization — the key operation: AUC → Fixed Assets + GL journal
-    Task<CapitalProjectDetailDto> CapitalizeProjectAsync(Guid projectId);
+    Task<CapitalProjectDetailDto> CapitalizeProjectAsync(
+        Guid projectId,
+        CapitalizeCapitalProjectDto? dto = null,
+        CancellationToken cancellationToken = default);
 }

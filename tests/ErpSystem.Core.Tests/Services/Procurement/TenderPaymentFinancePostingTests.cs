@@ -29,12 +29,12 @@ public sealed class TenderPaymentFinancePostingTests
     public async Task ApprovingPendingPaymentPostsBalancedTenderFeeReceiptAndRetainsFinanceLineage()
     {
         using var fixture = new Fixture();
-        FinancePostingRequestDto? request = null;
+        FinancePostingRequestV2Dto? request = null;
         fixture.FinancePosting
             .Setup(engine => engine.PostAsync(
-                It.IsAny<FinancePostingRequestDto>(),
+                It.IsAny<FinancePostingRequestV2Dto>(),
                 It.IsAny<CancellationToken>()))
-            .Callback<FinancePostingRequestDto, CancellationToken>((value, _) => request = value)
+            .Callback<FinancePostingRequestV2Dto, CancellationToken>((value, _) => request = value)
             .ReturnsAsync(fixture.PostingResult);
 
         var result = await fixture.Service.VerifyPaymentAsync(
@@ -55,7 +55,8 @@ public sealed class TenderPaymentFinancePostingTests
         request.SourceDocumentReference.Should().Be(fixture.Payment.PaymentReference);
         request.FunctionalCurrencyCode.Should().Be("GHS");
         request.IdempotencyKey.Should().Be(
-            $"PROCUREMENT|TENDER-FEE|{fixture.Payment.Id:N}|POST");
+            $"PROCUREMENT|TENDER-FEE|{fixture.Payment.Id:N}|IFRS|POST");
+        request.AccountingBookCode.Should().Be("IFRS");
         request.ReturnExistingOnDuplicate.Should().BeTrue();
         request.Lines.Should().HaveCount(2);
         request.Lines.Should().ContainSingle(line =>
@@ -70,6 +71,62 @@ public sealed class TenderPaymentFinancePostingTests
             .Should().Be(request.Lines.Sum(line => line.CreditAmount));
         fixture.Payments.Verify(repository => repository.UpdateAsync(fixture.Payment), Times.Once);
         fixture.UnitOfWork.Verify(unit => unit.CommitAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("Local", "LOCAL_STATUTORY")]
+    [InlineData("Management", "MANAGEMENT")]
+    [InlineData("IFRS", "IFRS")]
+    public async Task PostingUsesFinanceOwnedConcreteBookAlias(string configured, string expected)
+    {
+        using var fixture = new Fixture();
+        fixture.SetPostingMode(configured);
+        FinancePostingRequestV2Dto? captured = null;
+        fixture.FinancePosting.Setup(item => item.PostAsync(
+                It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(fixture.PostingResult);
+
+        await fixture.Service.VerifyPaymentAsync(fixture.Bid.Id, fixture.Payment.Id,
+            new VerifyPaymentDto { IsApproved = true });
+
+        captured!.AccountingBookCode.Should().Be(expected);
+        captured.IdempotencyKey.Should().Contain($"|{expected}|POST");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("AllClassifiedBooks")]
+    [InlineData("UnknownBook")]
+    public async Task InvalidBookConfigurationFailsBeforeFinanceAndPaymentMutation(string configured)
+    {
+        using var fixture = new Fixture();
+        fixture.SetPostingMode(configured);
+
+        var action = () => fixture.Service.VerifyPaymentAsync(fixture.Bid.Id, fixture.Payment.Id,
+            new VerifyPaymentDto { IsApproved = true });
+
+        await action.Should().ThrowAsync<TenderBidInitiationValidationException>();
+        fixture.Payment.Status.Should().Be("Pending");
+        fixture.FinancePosting.Verify(item => item.PostAsync(
+            It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task MissingFinanceSettingsPreservesV1IfrsDefault()
+    {
+        using var fixture = new Fixture();
+        fixture.RemoveFinanceSettings();
+        FinancePostingRequestV2Dto? captured = null;
+        fixture.FinancePosting.Setup(item => item.PostAsync(
+                It.IsAny<FinancePostingRequestV2Dto>(), It.IsAny<CancellationToken>()))
+            .Callback<FinancePostingRequestV2Dto, CancellationToken>((request, _) => captured = request)
+            .ReturnsAsync(fixture.PostingResult);
+
+        await fixture.Service.VerifyPaymentAsync(fixture.Bid.Id, fixture.Payment.Id,
+            new VerifyPaymentDto { IsApproved = true });
+
+        captured!.AccountingBookCode.Should().Be("IFRS");
     }
 
     [Fact]
@@ -88,7 +145,7 @@ public sealed class TenderPaymentFinancePostingTests
 
         result.Status.Should().Be("Verified");
         fixture.FinancePosting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(),
+            It.IsAny<FinancePostingRequestV2Dto>(),
             It.IsAny<CancellationToken>()), Times.Never);
         fixture.Payments.Verify(repository => repository.UpdateAsync(It.IsAny<TenderPayment>()), Times.Never);
         fixture.UnitOfWork.Verify(unit => unit.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
@@ -102,7 +159,7 @@ public sealed class TenderPaymentFinancePostingTests
         fixture.Payment.VerifiedDate = DateTime.UtcNow.AddDays(-1);
         fixture.FinancePosting
             .Setup(engine => engine.PostAsync(
-                It.IsAny<FinancePostingRequestDto>(),
+                It.IsAny<FinancePostingRequestV2Dto>(),
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(fixture.PostingResult);
 
@@ -115,9 +172,9 @@ public sealed class TenderPaymentFinancePostingTests
         fixture.Payment.PostingEventId.Should().Be(fixture.PostingResult.PostingEventId);
         fixture.Payment.JournalEntryId.Should().Be(fixture.PostingResult.JournalEntryId);
         fixture.FinancePosting.Verify(engine => engine.PostAsync(
-            It.Is<FinancePostingRequestDto>(request =>
+            It.Is<FinancePostingRequestV2Dto>(request =>
                 request.IdempotencyKey ==
-                $"PROCUREMENT|TENDER-FEE|{fixture.Payment.Id:N}|POST" &&
+                $"PROCUREMENT|TENDER-FEE|{fixture.Payment.Id:N}|IFRS|POST" &&
                 request.ReturnExistingOnDuplicate),
             It.IsAny<CancellationToken>()), Times.Once);
         fixture.Payments.Verify(repository => repository.UpdateAsync(fixture.Payment), Times.Once);
@@ -138,7 +195,7 @@ public sealed class TenderPaymentFinancePostingTests
         fixture.Payment.JournalEntryId.Should().BeNull();
         fixture.Payment.PostedAtUtc.Should().BeNull();
         fixture.FinancePosting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(),
+            It.IsAny<FinancePostingRequestV2Dto>(),
             It.IsAny<CancellationToken>()), Times.Never);
         fixture.Payments.Verify(repository => repository.UpdateAsync(fixture.Payment), Times.Once);
     }
@@ -159,7 +216,7 @@ public sealed class TenderPaymentFinancePostingTests
             .WithMessage("*non-control asset account*");
         fixture.Payment.Status.Should().Be("Pending");
         fixture.FinancePosting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(),
+            It.IsAny<FinancePostingRequestV2Dto>(),
             It.IsAny<CancellationToken>()), Times.Never);
         fixture.UnitOfWork.Verify(unit => unit.RollbackAsync(
             It.IsAny<CancellationToken>()), Times.Once);
@@ -183,7 +240,7 @@ public sealed class TenderPaymentFinancePostingTests
             .WithMessage("*controlled Finance reversal*");
         fixture.Payment.Status.Should().Be("Pending");
         fixture.FinancePosting.Verify(engine => engine.PostAsync(
-            It.IsAny<FinancePostingRequestDto>(),
+            It.IsAny<FinancePostingRequestV2Dto>(),
             It.IsAny<CancellationToken>()), Times.Never);
     }
 
@@ -193,7 +250,7 @@ public sealed class TenderPaymentFinancePostingTests
         using var fixture = new Fixture();
         fixture.FinancePosting
             .Setup(engine => engine.PostAsync(
-                It.IsAny<FinancePostingRequestDto>(),
+            It.IsAny<FinancePostingRequestV2Dto>(),
                 It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException("Finance posting unavailable."));
 
@@ -218,7 +275,7 @@ public sealed class TenderPaymentFinancePostingTests
     }
 
     [Fact]
-    public void MigrationIsDiscoverableAndContainsThePostingLineageSchema()
+    public void ArchivedMigrationContainsPostingLineageWhileOnlyCurrentBaselineIsDiscoverable()
     {
         var options = new DbContextOptionsBuilder<ApplicationDbContext>()
             .UseSqlServer(
@@ -226,8 +283,10 @@ public sealed class TenderPaymentFinancePostingTests
             .Options;
         using var context = new ApplicationDbContext(options);
 
-        context.GetService<IMigrationsAssembly>().Migrations.Should()
-            .ContainKey("20260831203000_AddTenderFeeFinancePostingLineage");
+        var discovered = context.GetService<IMigrationsAssembly>().Migrations;
+        discovered.Should().ContainSingle();
+        discovered.Should().ContainKey("20260916132000_DisposableDevelopmentCurrentModelBaseline");
+        discovered.Should().NotContainKey("20260831203000_AddTenderFeeFinancePostingLineage");
 
         var migration = new AddTenderFeeFinancePostingLineage();
         var builder = new MigrationBuilder("Microsoft.EntityFrameworkCore.SqlServer");
@@ -269,6 +328,18 @@ public sealed class TenderPaymentFinancePostingTests
         public Mock<IUnitOfWork> UnitOfWork { get; } = new();
         public Mock<IFinancePostingEngine> FinancePosting { get; } = new();
         public TenderBidService Service { get; }
+
+        public void SetPostingMode(string? value)
+        {
+            _db.FinanceSettings.Single().SubledgerPostingMode = value!;
+            _db.SaveChanges();
+        }
+
+        public void RemoveFinanceSettings()
+        {
+            _db.FinanceSettings.RemoveRange(_db.FinanceSettings);
+            _db.SaveChanges();
+        }
 
         public Fixture()
         {

@@ -27,6 +27,10 @@ export interface ExceptionalSupplierOption {
 }
 
 export interface ProcurementExceptionalSourcingReadiness {
+  sourceRequisitionId?: string;
+  currency: string;
+  estimatedValue?: number;
+  quotationItems: Array<{ tenderItemId: string; description: string; quantity: number; unitOfMeasure?: string }>;
   tenderId: string;
   tenderNumber: string;
   tenderTitle: string;
@@ -47,6 +51,8 @@ export interface ProcurementExceptionalSourcingReadiness {
 }
 
 export interface ProcurementExceptionalSourcingControl {
+  approvalRequired?: boolean;
+  sourceRequisitionId?: string;
   tenderId: string;
   tenderNumber: string;
   tenderTitle: string;
@@ -106,6 +112,7 @@ export interface ProcurementExceptionalSourcingControl {
 }
 
 export interface PrepareExceptionalSourcingRequest {
+  quotation?: { reference: string; evidenceReference: string; items: Array<{ tenderItemId: string; unitPrice: number }> };
   justification: string;
   justificationEvidenceReference: string;
   supplierSelectionEvidenceReference: string;

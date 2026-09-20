@@ -92,23 +92,52 @@ public static class FinanceAdHocReportCatalog
                 Text("serialNumber", "Serial number", "[f].[SerialNumber]"))),
 
         new("chart-of-accounts", "Chart of accounts",
-            "Account classifications, balances, posting controls, currency and reporting mappings.",
-            "[Accounts] [a]", "[a].[TenantId]", "[a].[IsDeleted] = 0",
+            "Account classifications, posting controls, currency and reporting mappings. Use book-balances for balances.",
+            "[Accounts] [a] OUTER APPLY (SELECT [ac].[Code], [ac].[Name], [parent].[Name] AS [ParentName] " +
+            "FROM [AccountAccountingBooks] [aab] INNER JOIN [AccountingBooks] [ab] ON [ab].[Id] = [aab].[AccountingBookId] " +
+            "AND [ab].[TenantId] = [a].[TenantId] AND [ab].[IsDeleted] = 0 AND [ab].[IsActive] = 1 AND [ab].[AllowsPosting] = 1 AND [ab].[IsDefault] = 1 " +
+            "INNER JOIN [AccountClassifications] [ac] ON [ac].[Id] = [aab].[AccountClassificationId] " +
+            "AND [ac].[TenantId] = [a].[TenantId] AND [ac].[AccountingBookId] = [ab].[Id] AND [ac].[IsDeleted] = 0 AND [ac].[Status] = 2 " +
+            "LEFT JOIN [AccountClassifications] [parent] ON [parent].[Id] = [ac].[ParentClassificationId] " +
+            "AND [parent].[TenantId] = [a].[TenantId] AND [parent].[AccountingBookId] = [ab].[Id] AND [parent].[IsDeleted] = 0 " +
+            "WHERE [aab].[AccountId] = [a].[Id] AND [aab].[TenantId] = [a].[TenantId] AND [aab].[IsDeleted] = 0 " +
+            "AND [aab].[IsEnabled] = 1 AND (SELECT COUNT_BIG(*) FROM [AccountingBooks] [authority] " +
+            "WHERE [authority].[TenantId] = [a].[TenantId] AND [authority].[IsDeleted] = 0 AND [authority].[IsActive] = 1 " +
+            "AND [authority].[AllowsPosting] = 1 AND [authority].[IsDefault] = 1) = 1) [classification]",
+            "[a].[TenantId]", "[a].[IsDeleted] = 0",
             Fields(
                 Text("accountNumber", "Account number", "[a].[AccountNumber]"),
                 Text("accountCode", "Account code", "[a].[AccountCode]"),
                 Text("accountName", "Account name", "[a].[AccountName]"),
                 Text("accountType", "Account type", "CASE [a].[AccountType] WHEN 1 THEN 'Asset' WHEN 2 THEN 'Liability' WHEN 3 THEN 'Equity' WHEN 4 THEN 'Revenue' WHEN 5 THEN 'Expense' ELSE 'Unknown' END"),
-                Text("category", "Category", "[a].[AccountCategory]"),
-                Text("subCategory", "Sub-category", "[a].[AccountSubCategory]"),
+                Text("category", "Classification parent", "COALESCE([classification].[ParentName], [classification].[Name])"),
+                Text("subCategory", "Classification", "[classification].[Name]"),
+                Text("classificationCode", "Classification code", "[classification].[Code]"),
                 Text("currency", "Currency", "[a].[CurrencyCode]"),
-                Money("balance", "Current balance", "[a].[Balance]"),
-                Money("debitBalance", "Cumulative debit", "[a].[DebitBalance]"),
-                Money("creditBalance", "Cumulative credit", "[a].[CreditBalance]"),
                 Bool("allowPosting", "Allows direct posting", "[a].[AllowDirectPosting]"),
                 Bool("controlAccount", "Control account", "[a].[IsControlAccount]"),
                 Text("status", "Account status", "CASE [a].[Status] WHEN 1 THEN 'Active' WHEN 2 THEN 'Inactive' WHEN 3 THEN 'Closed' WHEN 4 THEN 'Pending approval' ELSE 'Unknown' END"),
-                Date("lastTransactionDate", "Last transaction date", "[a].[LastTransactionDate]")))
+                Date("lastTransactionDate", "Last transaction date", "[a].[LastTransactionDate]"))),
+
+        new("book-balances", "Accounting book balances",
+            "Period balances and movements for an exact accounting book, account and functional currency.",
+            "[AccountBalances] [b] INNER JOIN [Accounts] [a] ON [a].[Id] = [b].[AccountId] " +
+            "AND [a].[TenantId] = [b].[TenantId] AND [a].[IsDeleted] = 0 " +
+            "INNER JOIN [AccountingBooks] [book] ON [book].[Id] = [b].[AccountingBookId] " +
+            "AND [book].[TenantId] = [b].[TenantId] AND [book].[IsDeleted] = 0 " +
+            "INNER JOIN [FiscalPeriods] [period] ON [period].[Id] = [b].[FiscalPeriodId] " +
+            "AND [period].[TenantId] = [b].[TenantId] AND [period].[IsDeleted] = 0",
+            "[b].[TenantId]", "[b].[IsDeleted] = 0",
+            Fields(
+                Text("accountNumber", "Account number", "[a].[AccountNumber]"),
+                Text("accountName", "Account name", "[a].[AccountName]"),
+                Text("book", "Accounting book", "[book].[Code]"),
+                Text("period", "Fiscal period", "[period].[PeriodCode]"),
+                Text("currency", "Functional currency", "[b].[Currency]"),
+                Money("openingBalance", "Opening signed balance", "[b].[OpeningBalance]"),
+                Money("periodDebits", "Period debits", "[b].[PeriodDebits]"),
+                Money("periodCredits", "Period credits", "[b].[PeriodCredits]"),
+                Money("closingBalance", "Closing signed balance", "[b].[ClosingBalance]")))
     ];
 
     public static FinanceAdHocDataset Required(string code) => All.FirstOrDefault(item =>

@@ -576,4 +576,3 @@ reporter only for SHE Write (same arm as incidents/stop-work); the desk door get
 "Reported by" picker; the detail page shows it. Migration: user scaffolds
 `AddSheHazardReporter`, I guard it and list it in FastBuildMigrationMetadata. Slice 12 gains the
 hazard on-behalf + forced-self lines.
-

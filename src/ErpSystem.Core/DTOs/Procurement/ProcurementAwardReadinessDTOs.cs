@@ -182,6 +182,7 @@ public sealed class ProcurementAwardReadinessVerificationDto
 
 public sealed class ProcurementAwardReadinessAuthorityDto
 {
+    public bool ApprovalRequired { get; set; } = true;
     public Guid? MethodRuleId { get; set; }
     public string? MethodRuleCode { get; set; }
     public Guid? AuthorityRouteId { get; set; }

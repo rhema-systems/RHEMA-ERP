@@ -15,7 +15,8 @@ public enum InventoryDisposalStatus
     AdjustmentPending = 7,
     Completed = 8,
     Rejected = 9,
-    Cancelled = 10
+    Cancelled = 10,
+    ReadyForExecution = 11
 }
 
 public enum InventoryDisposalMethod
@@ -41,7 +42,9 @@ public enum InventoryDisposalActionType
     Rejected = 10,
     AdjustmentStaged = 11,
     Completed = 12,
-    Cancelled = 13
+    Cancelled = 13,
+    Edited = 14,
+    ApprovalNotRequired = 15
 }
 
 public sealed class InventoryDisposalCase : TenantEntity
@@ -49,6 +52,7 @@ public sealed class InventoryDisposalCase : TenantEntity
     [Required, MaxLength(50)] public string DisposalNumber { get; set; } = string.Empty;
     public Guid WarehouseId { get; set; }
     public InventoryDisposalStatus Status { get; set; } = InventoryDisposalStatus.Identified;
+    public bool ApprovalRequired { get; set; } = true;
     public InventoryDisposalMethod Method { get; set; }
     [Required, MaxLength(1000)] public string Reason { get; set; } = string.Empty;
     [Required, MaxLength(2000)] public string IdentificationDetails { get; set; } = string.Empty;

@@ -13,11 +13,15 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { useToast } from '@/components/ui/use-toast';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import { FixedAssetCapitalizationReversalPanel } from '@/components/finance/FixedAssetCapitalizationReversalPanel';
+import { FixedAssetCapitalizationApprovalPanel } from '@/components/finance/FixedAssetCapitalizationApprovalPanel';
+import { SourceDocumentDimensionEvidence } from '@/components/finance/dimensions/source-document-dimension-panel';
+import { AssetLocationCombobox } from '@/components/finance/fixed-assets/AssetLocationCombobox';
+import { DepreciationConventionField } from '@/components/finance/fixed-assets/DepreciationConventionField';
 import type {
-  DepreciationConvention,
   DepreciationMethod,
   FixedAsset,
   FixedAssetCategory,
+  FixedAssetLocationOption,
   FixedAssetStatus,
   UpdateFixedAssetDto,
 } from '@/types/fixed-assets';
@@ -29,6 +33,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
   const router = useRouter();
   const { toast } = useToast();
   const [categories, setCategories] = useState<FixedAssetCategory[]>([]);
+  const [locationOptions, setLocationOptions] = useState<FixedAssetLocationOption[]>([]);
   const [asset, setAsset] = useState<FixedAsset | null>(null);
   const [formData, setFormData] = useState<UpdateFixedAssetDto | null>(null);
   const [loading, setLoading] = useState(true);
@@ -38,12 +43,14 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
     const loadData = async () => {
       try {
         setLoading(true);
-        const [asset, categoryData] = await Promise.all([
+        const [asset, categoryData, locationData] = await Promise.all([
           fixedAssetsDataService.getAssetById(id),
           fixedAssetsDataService.getCategories(),
+          fixedAssetsDataService.getLocationOptions(),
         ]);
 
         setCategories(categoryData);
+        setLocationOptions(locationData);
         setAsset(asset);
         setFormData({
           assetCode: asset.assetCode,
@@ -192,7 +199,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
             <p className="text-muted-foreground">Update asset details and depreciation settings.</p>
           </div>
         </div>
-        <Button onClick={handleSave} disabled={saving}>
+        <Button onClick={handleSave} disabled={saving || asset?.status === 'PendingApproval' || (!!asset?.capitalizationApprovalApprovedAt && !asset?.capitalizationApprovalInvalidatedAt)}>
           <Save className="mr-2 h-4 w-4" />
           Save Changes
         </Button>
@@ -260,11 +267,18 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           </div>
           <div className="space-y-2">
             <Label htmlFor="location">Location</Label>
-            <Input
+            <AssetLocationCombobox
               id="location"
-              value={formData.location || ''}
-              onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+              options={locationOptions}
+              value={locationOptions.find(option => option.displayName === formData.location)?.id}
+              placeholder={formData.location ? `Legacy: ${formData.location}` : undefined}
+              onValueChange={(location) => setFormData({ ...formData, location: location?.displayName })}
             />
+            {formData.location && !locationOptions.some(option => option.displayName === formData.location) && (
+              <p className="text-xs text-amber-700">
+                This legacy value is not linked to an active HR/Payroll location. Select a configured location to reconcile it.
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <Label htmlFor="serialNumber">Serial Number</Label>
@@ -423,24 +437,12 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               </p>
             </div>
           )}
-          <div className="space-y-2">
-            <Label htmlFor="convention">Depreciation Convention</Label>
-            <Select
-              value={formData.depreciationConvention}
-              onValueChange={(value) => setFormData({ ...formData, depreciationConvention: value as DepreciationConvention })}
-              disabled={accountingLocked}
-            >
-              <SelectTrigger id="convention">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="FullMonth">Full Month</SelectItem>
-                <SelectItem value="MidMonth">Mid Month</SelectItem>
-                <SelectItem value="HalfYear">Half Year</SelectItem>
-                <SelectItem value="ActualDays">Actual Days</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <DepreciationConventionField
+            value={formData.depreciationConvention}
+            method={formData.depreciationMethod}
+            disabled={accountingLocked}
+            onChange={(depreciationConvention) => setFormData({ ...formData, depreciationConvention })}
+          />
           <div className="space-y-2">
             <Label htmlFor="usefulLife">Useful Life (Months)</Label>
             <Input
@@ -465,6 +467,18 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
       </Card>
 
       {asset && (
+        <SourceDocumentDimensionEvidence evidence={asset.financeDimensions} />
+      )}
+
+      {asset && (
+        <FixedAssetCapitalizationApprovalPanel
+          asset={asset}
+          category={categories.find(category => category.id === asset.fixedAssetCategoryId)}
+          onChanged={refreshAccountingState}
+        />
+      )}
+
+      {asset && (
         <FixedAssetCapitalizationReversalPanel
           asset={asset}
           onChanged={refreshAccountingState}
@@ -478,7 +492,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
           <CardDescription>Current status: <Badge variant="outline">{formData.status}</Badge></CardDescription>
         </CardHeader>
         <CardContent className="flex gap-3">
-          {formData.status === 'Draft' && (
+          {formData.status === 'Capitalized' && (
             <Button onClick={handleActivate} className="bg-emerald-600 hover:bg-emerald-700">
               <Play className="h-4 w-4 mr-2" />Activate Asset
             </Button>
@@ -493,7 +507,7 @@ export default function EditFixedAssetPage({ params }: { params: Promise<{ id: s
               <RotateCcw className="h-4 w-4 mr-2" />Resume Asset
             </Button>
           )}
-          {(formData.status !== 'Draft' && formData.status !== 'Disposed' && formData.status !== 'WrittenOff') && formData.status !== 'OnHold' && formData.status !== 'Active' && (
+          {(formData.status !== 'Capitalized' && formData.status !== 'Disposed' && formData.status !== 'WrittenOff') && formData.status !== 'OnHold' && formData.status !== 'Active' && (
             <p className="text-sm text-muted-foreground">No lifecycle actions available for the current status.</p>
           )}
         </CardContent>

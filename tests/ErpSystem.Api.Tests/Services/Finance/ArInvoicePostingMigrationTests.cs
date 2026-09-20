@@ -2,10 +2,14 @@ using ErpSystem.Api.Services.Finance;
 using ErpSystem.Api.Services.Finance.AR;
 using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.AR;
+using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
 using ErpSystem.Core.Entities.Procurement;
+using ErpSystem.Core.Entities.Workflow;
+using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -61,9 +65,128 @@ public sealed class ArInvoicePostingMigrationTests
         journal.Transactions.Single(t => t.AccountId == fixture.RevenueAccount.Id).CreditAmount.Should().Be(100m);
 
         (await db.AuditLogs.CountAsync(a => a.Action == FinanceAuditEvents.ArInvoicePosted && a.TenantId == tenantId)).Should().Be(1);
-        // The posting engine keeps Account.Balance as a read-side snapshot for legacy balance APIs.
-        fixture.ArAccount.Balance.Should().Be(100m);
-        fixture.RevenueAccount.Balance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.ArAccount.Id)).ClosingBalance.Should().Be(100m);
+        (await db.AccountBalances.SingleAsync(x => x.AccountId == fixture.RevenueAccount.Id)).ClosingBalance.Should().Be(-100m);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task InvoiceTradeDiscounts_ShouldReduceRevenueWithoutDiscountAllowedAccount()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice =>
+        {
+            var line = invoice.LineItems.Single();
+            line.DiscountPercentage = 10m;
+            line.DiscountAmount = 10m;
+            invoice.SubTotal = 90m;
+            invoice.DiscountAmount = 5m;
+            invoice.TotalAmount = 85m;
+            invoice.BaseCurrencyAmount = 85m;
+        });
+        var settings = await db.FinanceSettings.SingleAsync(item => item.TenantId == tenantId);
+        settings.DiscountAllowedAccountId = null;
+        await db.SaveChangesAsync();
+        var (service, _) = CreateService(db, tenantId);
+
+        var result = await service.PostAsync(fixture.Invoice.Id);
+
+        var journal = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.Id == result.JournalEntryId);
+        journal.Transactions.Should().HaveCount(2);
+        journal.Transactions.Single(item => item.AccountId == fixture.ArAccount.Id)
+            .DebitAmount.Should().Be(85m);
+        journal.Transactions.Single(item => item.AccountId == fixture.RevenueAccount.Id)
+            .CreditAmount.Should().Be(85m);
+        journal.Transactions.Should().NotContain(item => item.AccountId == fixture.DiscountAccount.Id);
+    }
+
+    [Fact]
+    public async Task CreateInvoice_ShouldApplyLineAndDocumentTradeDiscountBeforeTax()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        TaxCalculationRequestDto? capturedTaxRequest = null;
+        var taxEngine = new Mock<ITaxCalculationEngine>();
+        taxEngine.Setup(engine => engine.CalculateTaxesAsync(
+                It.IsAny<TaxCalculationRequestDto>(),
+                It.IsAny<CancellationToken>()))
+            .Callback<TaxCalculationRequestDto, CancellationToken>((request, _) => capturedTaxRequest = request)
+            .ReturnsAsync((TaxCalculationRequestDto request, CancellationToken _) => new TaxCalculationResultDto
+            {
+                TotalTaxAmount = decimal.Round(request.BaseAmount * 0.15m, 2, MidpointRounding.AwayFromZero)
+            });
+        var (service, _) = CreateService(db, tenantId, taxEngine: taxEngine.Object);
+
+        var created = await service.CreateAsync(new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            DiscountAmount = 10m,
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Discounted service",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    DiscountPercentage = 10m,
+                    TaxGroupId = Guid.NewGuid(),
+                    TaxTreatment = TaxTreatment.Standard
+                }
+            }
+        });
+
+        capturedTaxRequest.Should().NotBeNull();
+        capturedTaxRequest!.BaseAmount.Should().Be(80m);
+        created.SubTotal.Should().Be(90m);
+        created.DiscountAmount.Should().Be(10m);
+        created.TaxAmount.Should().Be(12m);
+        created.TotalAmount.Should().Be(92m);
+    }
+
+    [Theory]
+    [InlineData(101, 0)]
+    [InlineData(0, 101)]
+    public async Task CreateInvoice_ShouldRejectInvalidTradeDiscounts(decimal linePercentage, decimal documentDiscount)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+
+        var action = () => service.CreateAsync(new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            DiscountAmount = documentDiscount,
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Invalid discount",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    DiscountPercentage = linePercentage,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        });
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*trade discount*");
+        (await db.Invoices.CountAsync()).Should().Be(1);
     }
 
     [Fact]
@@ -105,7 +228,7 @@ public sealed class ArInvoicePostingMigrationTests
             e.SourceDocumentType == "CustomerInvoice" &&
             e.SourceDocumentId == fixture.Invoice.Id)).Should().Be(1);
         (await db.Set<TaxCalculation>().CountAsync()).Should().Be(0);
-        fixture.RevenueAccount.Balance.Should().Be(0m);
+        (await db.AccountBalances.CountAsync(x => x.AccountId == fixture.RevenueAccount.Id)).Should().Be(0);
     }
 
     [Fact]
@@ -179,10 +302,12 @@ public sealed class ArInvoicePostingMigrationTests
         (await db.FinancePostingEvents.AnyAsync()).Should().BeFalse();
     }
 
-    [Fact]
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
     [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
     [Trait("Category", "AccountsReceivable")]
-    public async Task ForeignOpeningBalanceArInvoice_ShouldRejectCreateWithoutRateEvidence()
+    public async Task ForeignArInvoice_ShouldRejectCreateWithoutRateEvidence(bool isOpeningBalance)
     {
         var tenantId = Guid.NewGuid();
         await using var db = CreateContext();
@@ -196,7 +321,7 @@ public sealed class ArInvoicePostingMigrationTests
             DueDate = new DateTime(2026, 8, 4),
             CurrencyCode = "USD",
             ExchangeRate = 15m,
-            IsOpeningBalance = true,
+            IsOpeningBalance = isOpeningBalance,
             LineItems = new List<InvoiceLineItemCreateDto>
             {
                 new()
@@ -214,6 +339,85 @@ public sealed class ArInvoicePostingMigrationTests
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("*require an approved exchange-rate record*");
         (await db.Invoices.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task RepeatedArInvoiceCreateWithSameLineIdentity_ShouldReturnCommittedInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var lineId = Guid.NewGuid();
+        var request = new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = lineId,
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Retry-safe consulting invoice",
+                    Quantity = 1m,
+                    UnitPrice = 15000m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        };
+
+        var first = await service.CreateAsync(request);
+        var replay = await service.CreateAsync(request);
+
+        replay.Id.Should().Be(first.Id);
+        replay.LineItems.Should().ContainSingle(line => line.Id == lineId);
+        (await db.Invoices.CountAsync()).Should().Be(2);
+        (await db.Set<InvoiceLineItem>().CountAsync(line => line.Id == lineId)).Should().Be(1);
+    }
+
+    [Fact]
+    [Trait("Batch", "FinanceGoLive-ARInvoicePosting")]
+    [Trait("Category", "AccountsReceivable")]
+    public async Task ReusedArInvoiceLineIdentityWithChangedPayload_ShouldBeRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId);
+        var (service, _) = CreateService(db, tenantId);
+        var request = new InvoiceCreateDto
+        {
+            CustomerId = fixture.Customer.Id,
+            InvoiceDate = new DateTime(2026, 7, 6),
+            DueDate = new DateTime(2026, 8, 5),
+            CurrencyCode = "GHS",
+            LineItems = new List<InvoiceLineItemCreateDto>
+            {
+                new()
+                {
+                    Id = Guid.NewGuid(),
+                    LineItemType = "GLAccount",
+                    GLAccountId = fixture.RevenueAccount.Id,
+                    Description = "Original request",
+                    Quantity = 1m,
+                    UnitPrice = 100m,
+                    TaxTreatment = TaxTreatment.OutOfScope
+                }
+            }
+        };
+        await service.CreateAsync(request);
+        request.LineItems[0].UnitPrice = 200m;
+
+        var action = () => service.CreateAsync(request);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*already bound to a different request*");
+        (await db.Invoices.CountAsync()).Should().Be(2);
     }
 
     [Fact]
@@ -260,6 +464,7 @@ public sealed class ArInvoicePostingMigrationTests
         {
             invoice.Status = InvoiceStatus.PendingApproval;
         });
+        await SeedCompletedInvoiceWorkflowAsync(db, fixture.Invoice);
         var (service, _) = CreateService(db, tenantId);
 
         var result = await service.SendInvoiceAsync(fixture.Invoice.Id);
@@ -541,7 +746,9 @@ public sealed class ArInvoicePostingMigrationTests
 
     private static (InvoiceService Service, Mock<ISubledgerPostingService> SubledgerPostingMock) CreateService(
         ApplicationDbContext db,
-        Guid tenantId)
+        Guid tenantId,
+        Mock<IWorkflowIntegrationService>? workflow = null,
+        ITaxCalculationEngine? taxEngine = null)
     {
         var currentUser = CreateCurrentUser(tenantId);
         var auditService = new FinanceAuditService(
@@ -557,18 +764,235 @@ public sealed class ArInvoicePostingMigrationTests
             Mock.Of<ILogger<FinancePostingEngine>>(),
             auditService);
         var subledgerPostingMock = new Mock<ISubledgerPostingService>();
+        var numbering = new Mock<IDocumentNumberingService>();
+        numbering.Setup(service => service.GenerateAsync(
+                DocumentNumberingModules.Finance,
+                FinanceDocumentTypes.ARInvoice,
+                tenantId,
+                It.IsAny<DateTime?>(),
+                nameof(Invoice),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => $"INV-TEST-{Guid.NewGuid():N}");
 
         var service = new InvoiceService(
             new UnitOfWork(db),
             currentUser.Object,
-            Mock.Of<ITaxCalculationEngine>(),
+            taxEngine ?? Mock.Of<ITaxCalculationEngine>(),
             Mock.Of<IInventoryValuationService>(),
             Mock.Of<ILogger<InvoiceService>>(),
-            Mock.Of<IDocumentNumberingService>(),
+            numbering.Object,
             postingEngine,
-            auditService);
+            auditService,
+            workflowIntegration: (workflow ?? DirectWorkflow()).Object);
 
         return (service, subledgerPostingMock);
+    }
+
+    private static Mock<IWorkflowIntegrationService> DirectWorkflow()
+    {
+        var workflow = new Mock<IWorkflowIntegrationService>();
+        workflow.Setup(x => x.SubmitAsync("Invoice", It.IsAny<Guid>())).ReturnsAsync(new WorkflowIntegrationResult(
+            new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed }, WorkflowOutcome.Approved, false));
+        return workflow;
+    }
+
+    private static async Task SeedCompletedInvoiceWorkflowAsync(ApplicationDbContext db, Invoice invoice)
+    {
+        var type = new WorkflowEntityType { Id = Guid.NewGuid(), TenantId = invoice.TenantId,
+            Name = "Customer Invoice", Code = "INVOICE" };
+        var instance = new WorkflowInstance { Id = Guid.NewGuid(), TenantId = invoice.TenantId,
+            EntityId = invoice.Id, EntityTypeId = type.Id, EntityType = type, WorkflowDefinitionId = Guid.NewGuid(),
+            InitiatedById = Guid.NewGuid(), Status = WorkflowInstanceStatus.Completed, CompletedDate = DateTime.UtcNow };
+        db.Add(instance);
+        await db.SaveChangesAsync();
+    }
+
+    [Fact]
+    public async Task OptionalArSubmission_PreparesWithoutPostingOrIncreasingCustomerDebt()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var balance = fixture.Customer.OutstandingBalance;
+        var (service, _) = CreateService(db, tenantId);
+        var result = await service.SubmitAsync(fixture.Invoice.Id, new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice));
+        result.Status.Should().Be("ReadyToPost");
+        result.ApprovalRequired.Should().BeFalse();
+        result.WorkflowInstanceId.Should().BeNull();
+        result.JournalEntryId.Should().BeNull();
+        fixture.Customer.OutstandingBalance.Should().Be(balance);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.WorkflowInstances.CountAsync()).Should().Be(0);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task OptionalArSubmission_ActiveDefinitionOrRetainedInstanceKeepsPending(bool retainedInstance)
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var workflow = DirectWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalInstanceAsync("Invoice", fixture.Invoice.Id)).ReturnsAsync(retainedInstance);
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("Invoice")).ReturnsAsync(!retainedInstance);
+        var instanceId = Guid.NewGuid();
+        workflow.Setup(x => x.SubmitAsync("Invoice", fixture.Invoice.Id)).ReturnsAsync(new WorkflowIntegrationResult(
+            new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = instanceId }, WorkflowOutcome.Pending));
+        var (service, _) = CreateService(db, tenantId, workflow);
+        var result = await service.SubmitAsync(fixture.Invoice.Id, new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice));
+        result.Status.Should().Be("PendingApproval");
+        result.ApprovalRequired.Should().BeTrue();
+        result.WorkflowInstanceId.Should().Be(instanceId);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptionalArPost_UsesCanonicalReleaseAndIsIdempotent()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => { invoice.Status = InvoiceStatus.ReadyToPost; invoice.ApprovalRequired = false; });
+        var balance = fixture.Customer.OutstandingBalance ?? 0m;
+        var (service, _) = CreateService(db, tenantId);
+        var first = await service.PostAsync(fixture.Invoice.Id);
+        var second = await service.PostAsync(fixture.Invoice.Id);
+        second.JournalEntryId.Should().Be(first.JournalEntryId);
+        second.Status.Should().Be("Sent");
+        fixture.Customer.OutstandingBalance.Should().Be(balance + fixture.Invoice.BaseCurrencyAmount);
+        (await db.JournalEntries.CountAsync()).Should().Be(1);
+    }
+
+    [Fact]
+    public async Task OptionalArPost_DoesNotTreatReadyStatusAloneAsDirectApproval()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.ReadyToPost);
+        var (service, _) = CreateService(db, tenantId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.PostAsync(fixture.Invoice.Id));
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptionalArRelease_RetiredWorkflowCannotReleaseAnUnapprovedPendingInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.PendingApproval);
+        var (service, _) = CreateService(db, tenantId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SendInvoiceAsync(fixture.Invoice.Id));
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptionalArInternalProducer_CannotBypassAnActiveInvoiceProcess()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var workflow = DirectWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("Invoice")).ReturnsAsync(true);
+        var (service, _) = CreateService(db, tenantId, workflow);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SendInvoiceAsync(fixture.Invoice.Id));
+        workflow.Verify(x => x.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptionalArSubmission_ConfigurationLookupFailureDoesNotFinalize()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var workflow = DirectWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("Invoice")).ThrowsAsync(new InvalidOperationException("Unavailable"));
+        var (service, _) = CreateService(db, tenantId, workflow);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SubmitAsync(fixture.Invoice.Id,
+            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice)));
+        workflow.Verify(x => x.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptionalArSubmission_RejectsModeDriftAndDoesNotPost()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var workflow = DirectWorkflow();
+        workflow.Setup(x => x.SubmitAsync("Invoice", fixture.Invoice.Id)).ReturnsAsync(new WorkflowIntegrationResult(
+            new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.InProgress, WorkflowInstanceId = Guid.NewGuid() }, WorkflowOutcome.Pending));
+        var (service, _) = CreateService(db, tenantId, workflow);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SubmitAsync(fixture.Invoice.Id,
+            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice)));
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptionalArSubmission_RejectsForeignTenantTrackedInvoice()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var workflow = DirectWorkflow();
+        var (service, _) = CreateService(db, Guid.NewGuid(), workflow);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.SubmitAsync(fixture.Invoice.Id,
+            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice)));
+        workflow.Verify(x => x.SubmitAsync(It.IsAny<string>(), It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task OptionalArPost_ClosedPeriodStillBlocksPosting()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId,
+            invoice => { invoice.Status = InvoiceStatus.ReadyToPost; invoice.ApprovalRequired = false; },
+            periodIsOpen: false, periodIsClosed: true);
+        var (service, _) = CreateService(db, tenantId);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.PostAsync(fixture.Invoice.Id));
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptionalArSubmission_CompletedActiveProcessRequiresProofAndWaitsForExplicitPost()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        await SeedCompletedInvoiceWorkflowAsync(db, fixture.Invoice);
+        var instance = await db.WorkflowInstances.SingleAsync();
+        var workflow = DirectWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("Invoice")).ReturnsAsync(true);
+        workflow.Setup(x => x.SubmitAsync("Invoice", fixture.Invoice.Id)).ReturnsAsync(new WorkflowIntegrationResult(
+            new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed, WorkflowInstanceId = instance.Id }, WorkflowOutcome.Approved));
+        var (service, _) = CreateService(db, tenantId, workflow);
+        var result = await service.SubmitAsync(fixture.Invoice.Id, new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice));
+        result.Status.Should().Be("Approved");
+        result.ApprovalRequired.Should().BeTrue();
+        result.JournalEntryId.Should().BeNull();
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        var posted = await service.PostAsync(fixture.Invoice.Id);
+        posted.Status.Should().Be("Sent");
+        posted.JournalEntryId.Should().NotBeNull();
+    }
+
+    [Fact]
+    public async Task OptionalArSubmission_CompletedResultWithoutSavedWorkflowProofIsRejected()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        var fixture = await SeedSentArInvoiceAsync(db, tenantId, invoice => invoice.Status = InvoiceStatus.Draft);
+        var workflow = DirectWorkflow();
+        workflow.Setup(x => x.HasActiveApprovalWorkflowAsync("Invoice")).ReturnsAsync(true);
+        workflow.Setup(x => x.SubmitAsync("Invoice", fixture.Invoice.Id)).ReturnsAsync(new WorkflowIntegrationResult(
+            new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed, WorkflowInstanceId = Guid.NewGuid() }, WorkflowOutcome.Approved));
+        var (service, _) = CreateService(db, tenantId, workflow);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SubmitAsync(fixture.Invoice.Id,
+            new FinancePostingProducerContext(FinanceDimensionRouteId.FinanceArCustomerInvoice)));
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
     }
 
     private static Mock<ICurrentUserService> CreateCurrentUser(Guid tenantId)
@@ -671,6 +1095,13 @@ public sealed class ArInvoicePostingMigrationTests
             Status = TenantStatus.Active,
             BaseCurrency = "GHS"
         });
+        db.AccountingBooks.Add(new AccountingBook
+        {
+            Id = Guid.NewGuid(), TenantId = tenantId, Code = "IFRS", Name = "IFRS Primary",
+            Purpose = "Primary", BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active, FunctionalCurrencyCode = "GHS",
+            IsDefault = true, IsActive = true, AllowsPosting = true
+        });
     }
 
     private static FiscalPeriod SeedOpenPeriod(
@@ -698,6 +1129,7 @@ public sealed class ArInvoicePostingMigrationTests
         };
 
         db.FiscalPeriods.Add(period);
+        FinancePostingAuthorityFixture.SeedExactBookPeriod(db, tenantId, period);
         return period;
     }
 
@@ -725,6 +1157,8 @@ public sealed class ArInvoicePostingMigrationTests
         };
 
         db.Accounts.Add(account);
+        var book = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.Code == "IFRS");
+        FinancePostingAuthorityFixture.SeedEnabledBookMappings(db, tenantId, book, account);
         return account;
     }
 

@@ -107,6 +107,17 @@ public class WorkflowEntityDisplayService : IWorkflowEntityDisplayService
                 return info;
             }
 
+            if (key == Normalize("PurchaseReturn") || key == Normalize("INVENTORY_SUPPLIER_RETURN"))
+            {
+                var purchaseReturn = await _unitOfWork.Repository<PurchaseReturn>()
+                    .FirstOrDefaultAsync(value => value.Id == entityId && !value.IsDeleted);
+                info.EntityType = "PurchaseReturn";
+                info.EntityNumber = purchaseReturn?.ReturnNumber;
+                info.EntityName = purchaseReturn?.SupplierName;
+                info.ActionUrl = "/inventory/supplier-returns";
+                return info;
+            }
+
             if (key == Normalize("InventoryRequisition") || key == Normalize("INVENTORY_REQUISITION"))
             {
                 var req = await _inventoryRequisitionRepository.GetByIdAsync(entityId);

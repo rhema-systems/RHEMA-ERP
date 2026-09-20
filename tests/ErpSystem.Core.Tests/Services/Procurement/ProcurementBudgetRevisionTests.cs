@@ -24,7 +24,7 @@ public sealed class ProcurementBudgetRevisionTests
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly Mock<IWorkflowIntegrationService> _workflow = new();
     private readonly IWorkflowStatusAdapterRegistry _adapters = new WorkflowStatusAdapterRegistry(
-        new IWorkflowStatusAdapter[] { new ProcurementBudgetRevisionWorkflowStatusAdapter() });
+        new IWorkflowStatusAdapter[] { new ProcurementBudgetRevisionWorkflowStatusAdapter(), new ProcurementBudgetWorkflowStatusAdapter() });
 
     public ProcurementBudgetRevisionTests()
     {
@@ -41,6 +41,30 @@ public sealed class ProcurementBudgetRevisionTests
         _revisions.Setup(value => value.GetNextRevisionNumberAsync(It.IsAny<Guid>())).ReturnsAsync(1);
         _revisions.Setup(value => value.AddAsync(It.IsAny<ProcurementBudgetRevision>()))
             .ReturnsAsync((ProcurementBudgetRevision revision) => revision);
+        _workflow.Setup(value => value.HasActiveApprovalWorkflowAsync("ProcurementBudgetRevision"))
+            .ReturnsAsync(true);
+    }
+
+    [Fact]
+    public async Task InitialBudgetDirectSubmissionCapturesPolicyWithoutHumanApproval()
+    {
+        var budget = ApprovedBudget(100_000m);
+        budget.Status = "Draft";
+        _budgets.Setup(value => value.GetByIdAsync(budget.Id)).ReturnsAsync(budget);
+        _budgets.Setup(value => value.GetWithFullDetailsAsync(budget.Id)).ReturnsAsync(budget);
+        _workflow.Setup(value => value.SubmitAsync("ProcurementBudget", budget.Id))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed },
+                WorkflowOutcome.Approved, approvalRequired: false));
+
+        var result = await CreateService(_makerId).SubmitForApprovalAsync(budget.Id);
+
+        result.Status.Should().Be("Approved");
+        result.ApprovalRequired.Should().BeFalse();
+        budget.ApprovalRequired.Should().BeFalse();
+        budget.ApprovedById.Should().BeNull();
+        budget.ApprovedDate.Should().BeNull();
+        budget.AllocatedAmount.Should().Be(100_000m);
     }
 
     [Fact]
@@ -66,22 +90,73 @@ public sealed class ProcurementBudgetRevisionTests
     }
 
     [Fact]
-    public async Task DisabledWorkflowAppliesValidRevisionImmediately()
+    public async Task NoActiveWorkflowAppliesRevisionWithoutClaimingHumanApproval()
     {
         var budget = ApprovedBudget(100_000m);
         _budgets.Setup(value => value.GetByIdAsync(budget.Id)).ReturnsAsync(budget);
         _workflow.Setup(value => value.SubmitAsync("ProcurementBudgetRevision", It.IsAny<Guid>()))
             .ReturnsAsync(new WorkflowIntegrationResult(
                 new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed },
-                WorkflowOutcome.Approved,
-                approvalRequired: false));
+                WorkflowOutcome.Approved, approvalRequired: false));
 
         var result = await CreateService(_makerId).CreateRevisionAsync(budget.Id, Revision(125_000m));
 
+        result.ApprovalRequired.Should().BeFalse();
         result.Status.Should().Be("Approved");
+        result.ApprovedByName.Should().BeNull();
+        result.ApprovedDate.Should().BeNull();
+        result.RequestedById.Should().Be(_makerId);
         budget.AllocatedAmount.Should().Be(125_000m);
-        budget.RemainingAmount.Should().Be(125_000m);
+        _revisions.Verify(value => value.UpdateAsync(It.Is<ProcurementBudgetRevision>(revision =>
+            !revision.ApprovalRequired && revision.ApprovedById == null && revision.ApprovedDate == null)), Times.Once);
         _budgets.Verify(value => value.UpdateAsync(budget), Times.Once);
+    }
+
+    [Fact]
+    public async Task ImmediatelyCompletedActiveWorkflowCannotApplyRevision()
+    {
+        var transactionActive = false;
+        _unitOfWork.SetupGet(value => value.HasActiveTransaction).Returns(() => transactionActive);
+        _unitOfWork.Setup(value => value.BeginTransactionAsync(System.Data.IsolationLevel.Serializable, It.IsAny<CancellationToken>()))
+            .Callback(() => transactionActive = true).Returns(Task.CompletedTask);
+        _unitOfWork.Setup(value => value.ExecuteInStrategyAsync(
+                It.IsAny<Func<Task<ProcurementBudgetRevisionDto>>>(), It.IsAny<CancellationToken>()))
+            .Returns((Func<Task<ProcurementBudgetRevisionDto>> operation, CancellationToken _) => operation());
+        _unitOfWork.Setup(value => value.RollbackAsync(It.IsAny<CancellationToken>()))
+            .Callback(() => transactionActive = false).Returns(Task.CompletedTask);
+        var budget = ApprovedBudget(100_000m);
+        _budgets.Setup(value => value.GetByIdAsync(budget.Id)).ReturnsAsync(budget);
+        _workflow.Setup(value => value.SubmitAsync("ProcurementBudgetRevision", It.IsAny<Guid>()))
+            .ReturnsAsync(new WorkflowIntegrationResult(
+                new WorkflowExecutionResult { Success = true, Status = WorkflowInstanceStatus.Completed },
+                WorkflowOutcome.Approved,
+                approvalRequired: true));
+
+        var action = () => CreateService(_makerId).CreateRevisionAsync(budget.Id, Revision(125_000m));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*must wait for independent approval*approved budget has not changed*");
+        budget.AllocatedAmount.Should().Be(100_000m);
+        budget.RemainingAmount.Should().Be(100_000m);
+        _budgets.Verify(value => value.UpdateAsync(It.IsAny<ProcurementBudget>()), Times.Never);
+        _revisions.Verify(value => value.UpdateAsync(It.IsAny<ProcurementBudgetRevision>()), Times.Never);
+        _unitOfWork.Verify(value => value.RollbackAsync(It.IsAny<CancellationToken>()), Times.Once);
+        _unitOfWork.Verify(value => value.CommitAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PendingRevisionPreventsASecondRequest()
+    {
+        var budget = ApprovedBudget(100_000m);
+        _budgets.Setup(value => value.GetByIdAsync(budget.Id)).ReturnsAsync(budget);
+        _revisions.Setup(value => value.GetByBudgetIdAsync(budget.Id))
+            .ReturnsAsync(new[] { PendingRevision(budget, _makerId, 125_000m) });
+
+        var action = () => CreateService(_makerId).CreateRevisionAsync(budget.Id, Revision(130_000m));
+
+        await action.Should().ThrowAsync<InvalidOperationException>().WithMessage("*still pending*");
+        _revisions.Verify(value => value.AddAsync(It.IsAny<ProcurementBudgetRevision>()), Times.Never);
+        budget.AllocatedAmount.Should().Be(100_000m);
     }
 
     [Fact]

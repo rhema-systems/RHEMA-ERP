@@ -1,5 +1,6 @@
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.Finance;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.DTOs.Procurement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Procurement;
@@ -321,11 +322,8 @@ public class TenderBidService : ITenderBidService
             await _exceptionalSourcingControlService.EnsureBidSupplierAllowedAsync(tender.Id, businessPartner.Id);
 
             // Validate supplier eligibility for this tender
-            var validationResult = await _supplierValidationService.ValidateForTenderAsync(
-                businessPartner.Id,
-                tender.RequiresPrequalification,
-                tender.MinimumPerformanceRating
-            );
+            var validationResult = await _supplierValidationService.ValidateForTenderBidAsync(
+                businessPartner.Id, tender.Id);
 
             if (!validationResult.IsValid)
             {
@@ -783,6 +781,15 @@ public class TenderBidService : ITenderBidService
             var tender = await _tenderRepository.GetByIdAsync(bid.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
 
+            // A draft is not an eligibility approval: re-check current registration,
+            // blacklist, published requirements and authoritative method at submission.
+            var eligibility = await _supplierValidationService.ValidateForTenderBidAsync(
+                bid.BusinessPartnerId, tender.Id);
+            if (!eligibility.IsValid)
+                throw new TenderBidInitiationValidationException(
+                    eligibility.ValidationCode,
+                    $"Supplier is not eligible to submit this bid: {string.Join("; ", eligibility.Errors)}");
+
             var submittedAtUtc = DateTime.UtcNow;
             var assignments = (await _assignmentRepository.GetByTenderAndBusinessPartnerAsync(
                 tender.Id, bid.BusinessPartnerId)).ToList();
@@ -959,6 +966,7 @@ public class TenderBidService : ITenderBidService
             var tender = bid.Tender ?? await _tenderRepository.GetByIdAsync(bid.TenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {bid.TenderId} not found");
             EnsureLegacyOpeningReady(tender, DateTime.UtcNow);
+            await _tenderControlService.EnsureStandardOpeningReadyAsync(tender.Id);
 
             if (bid.Status != "Submitted")
             {
@@ -1016,6 +1024,7 @@ public class TenderBidService : ITenderBidService
             var tender = await _tenderRepository.GetByIdAsync(tenderId)
                 ?? throw new InvalidOperationException($"Tender with ID {tenderId} not found");
             EnsureLegacyOpeningReady(tender, DateTime.UtcNow);
+            await _tenderControlService.EnsureStandardOpeningReadyAsync(tender.Id);
             var bids = await _bidRepository.GetByTenderIdAsync(tenderId);
             var submittedBids = bids.Where(b => b.Status == "Submitted").ToList();
 
@@ -1106,10 +1115,16 @@ public class TenderBidService : ITenderBidService
                     TotalBidAmount = bid.TotalBidAmount,
                     Currency = bid.Currency
                 };
-                if (await ShouldConcealFinancialProposalAsync(tenderId, bid.Id))
+                item.IsSealed = !bid.OpenedDate.HasValue;
+                if (item.IsSealed || await ShouldConcealFinancialProposalAsync(tenderId, bid.Id))
                 {
                     item.TotalBidAmount = 0m;
                     item.Currency = null;
+                    if (item.IsSealed)
+                    {
+                        item.BusinessPartnerName = string.Empty;
+                        item.BusinessPartnerCode = string.Empty;
+                    }
                 }
                 result.Add(item);
             }
@@ -1340,8 +1355,13 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            var documents = await _bidDocumentRepository.GetByBidIdAsync(bidId);
-            return documents.Select(MapBidDocumentToDto);
+            var bid = await _bidRepository.GetByIdAsync(bidId);
+            if (bid is null || (!_currentUserProvider.IsExternalUser && !bid.OpenedDate.HasValue))
+                return Array.Empty<TenderBidDocumentDto>();
+            var documents = (await _bidDocumentRepository.GetByBidIdAsync(bidId)).Select(MapBidDocumentToDto);
+            return await ShouldConcealFinancialProposalAsync(bid.TenderId, bidId)
+                ? documents.Where(IsExplicitTechnicalProposalDocument).ToList()
+                : documents.ToList();
         }
         catch (Exception ex)
         {
@@ -1755,17 +1775,29 @@ public class TenderBidService : ITenderBidService
 
     private async Task<TenderBidSummaryDto> ProtectFinancialProposalAsync(TenderBidSummaryDto value)
     {
+        if (_currentUserProvider.IsExternalUser)
+        {
+            value.IsSealed = false;
+            return value;
+        }
+        if (value.IsSealed) return ProcurementBidDisclosure.Seal(value);
         if (!await ShouldConcealFinancialProposalAsync(value.TenderId, value.Id)) return value;
+        value.IsFinancialProposalSealed = true;
         value.TotalBidAmount = 0m;
         value.Currency = null;
         value.FinancialScore = null;
         value.CombinedScore = null;
+        value.TotalScore = null;
+        value.Rank = null;
         return value;
     }
 
     private async Task<TenderBidDetailDto> ProtectFinancialProposalAsync(TenderBidDetailDto value)
     {
+        if (!_currentUserProvider.IsExternalUser && !value.OpenedDate.HasValue)
+            return ProcurementBidDisclosure.Seal(value);
         if (!await ShouldConcealFinancialProposalAsync(value.TenderId, value.Id)) return value;
+        value.IsFinancialProposalSealed = true;
         value.TotalBidAmount = 0m;
         value.Currency = null;
         value.PaymentTerms = null;
@@ -1773,12 +1805,15 @@ public class TenderBidService : ITenderBidService
         value.PriceScore = null;
         value.FinancialScore = null;
         value.CombinedScore = null;
+        value.TotalScore = null;
+        value.Rank = null;
         value.Evaluations.Clear();
         foreach (var item in value.Items)
         {
             item.UnitPrice = 0m;
             item.TotalPrice = 0m;
         }
+        value.BidLots = value.BidLots.Select(ProcurementBidDisclosure.HideFinancials).ToList();
         value.Documents = value.Documents.Where(IsExplicitTechnicalProposalDocument).ToList();
         return value;
     }
@@ -1859,6 +1894,7 @@ public class TenderBidService : ITenderBidService
     {
         return new TenderBidSummaryDto
         {
+            IsSealed = !bid.OpenedDate.HasValue,
             Id = bid.Id,
             BidNumber = bid.BidNumber,
             TenderId = bid.TenderId,
@@ -2063,13 +2099,27 @@ public class TenderBidService : ITenderBidService
                 "TENDER_FEE_FOREIGN_CURRENCY_NOT_SUPPORTED",
                 "Tender fee payments must use the tenant functional currency until a controlled exchange-rate snapshot is provided.");
 
+        string accountingBookCode;
+        try
+        {
+            accountingBookCode = FinanceAccountingBookCodeResolver.ResolveLegacySingleBook(
+                settings?.SubledgerPostingMode, settings is not null);
+        }
+        catch (ArgumentException exception)
+        {
+            throw new TenderBidInitiationValidationException(
+                "TENDER_FEE_ACCOUNTING_BOOK_REQUIRED",
+                exception.Message);
+        }
+
         return new TenderFeePostingAccounts(
             receivingAccount.Id,
             revenueAccount.Id,
-            functionalCurrency);
+            functionalCurrency,
+            accountingBookCode);
     }
 
-    private static FinancePostingRequestDto BuildTenderFeePostingRequest(
+    private static FinancePostingRequestV2Dto BuildTenderFeePostingRequest(
         TenderBid bid,
         TenderFee fee,
         TenderPayment payment,
@@ -2078,7 +2128,9 @@ public class TenderBidService : ITenderBidService
     {
         var reference = payment.PaymentReference.Trim();
         var description = $"Tender fee {fee.FeeType} for bid {bid.BidNumber}";
-        return new FinancePostingRequestDto
+        // Procurement emits one concrete book to Finance's leaf executor. Finance, not this
+        // tender workflow, owns any future multi-book applicability or event orchestration.
+        return new FinancePostingRequestV2Dto
         {
             SourceModule = "Procurement",
             OriginModuleCode = "PROC",
@@ -2091,7 +2143,8 @@ public class TenderBidService : ITenderBidService
             Description = description,
             JournalType = "System Generated",
             FunctionalCurrencyCode = accounts.FunctionalCurrencyCode,
-            IdempotencyKey = $"PROCUREMENT|TENDER-FEE|{payment.Id:N}|POST",
+            AccountingBookCode = accounts.AccountingBookCode,
+            IdempotencyKey = $"PROCUREMENT|TENDER-FEE|{payment.Id:N}|{accounts.AccountingBookCode}|POST",
             ReturnExistingOnDuplicate = true,
             Lines =
             [
@@ -2124,7 +2177,8 @@ public class TenderBidService : ITenderBidService
     private sealed record TenderFeePostingAccounts(
         Guid ReceivingAccountId,
         Guid RevenueAccountId,
-        string FunctionalCurrencyCode);
+        string FunctionalCurrencyCode,
+        string AccountingBookCode);
 
     private static TenderPaymentDto MapPaymentToDto(TenderPayment payment)
     {
@@ -2434,8 +2488,13 @@ public class TenderBidService : ITenderBidService
     {
         try
         {
-            var bidLots = await _bidLotRepository.GetByBidIdAsync(bidId);
-            return bidLots.Select(MapToBidLotDto);
+            var bid = await _bidRepository.GetByIdAsync(bidId);
+            if (bid is null || (!_currentUserProvider.IsExternalUser && !bid.OpenedDate.HasValue))
+                return Array.Empty<TenderBidLotDto>();
+            var bidLots = (await _bidLotRepository.GetByBidIdAsync(bidId)).Select(MapToBidLotDto);
+            return await ShouldConcealFinancialProposalAsync(bid.TenderId, bidId)
+                ? bidLots.Select(ProcurementBidDisclosure.HideFinancials).ToList()
+                : bidLots.ToList();
         }
         catch (Exception ex)
         {
@@ -2449,7 +2508,12 @@ public class TenderBidService : ITenderBidService
         try
         {
             var bidLot = await _bidLotRepository.GetByIdWithItemsAsync(bidLotId);
-            return bidLot != null ? MapToBidLotDto(bidLot) : null;
+            if (bidLot is null) return null;
+            var bid = await _bidRepository.GetByIdAsync(bidLot.TenderBidId);
+            if (bid is null || (!_currentUserProvider.IsExternalUser && !bid.OpenedDate.HasValue)) return null;
+            var result = MapToBidLotDto(bidLot);
+            return await ShouldConcealFinancialProposalAsync(bid.TenderId, bid.Id)
+                ? ProcurementBidDisclosure.HideFinancials(result) : result;
         }
         catch (Exception ex)
         {

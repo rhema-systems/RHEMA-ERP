@@ -31,6 +31,7 @@ import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-ac
 import { useAuth } from '@/hooks/use-auth';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
 import { getTenderEvaluationRoute } from '@/lib/procurement-tender-evaluation-route';
+import { getTenderEvaluationConfigurationError } from '@/lib/tender-evaluation-configuration';
 
 // Interface for storing criteria scores
 interface CriteriaScore {
@@ -109,9 +110,10 @@ export default function EvaluationFormPage() {
       }
 
       // Load evaluation template if assigned
-      if (bidData.evaluationTemplateId) {
+      setTemplate(null);
+      if (tenderData?.evaluationTemplateId) {
         try {
-          const templateData = await evaluationTemplateService.getById(bidData.evaluationTemplateId);
+          const templateData = await evaluationTemplateService.getById(tenderData.evaluationTemplateId);
           setTemplate(templateData);
 
           // Initialize scores from existing evaluation data or default to 0
@@ -168,7 +170,7 @@ export default function EvaluationFormPage() {
       return 0;
     }
 
-    if (template.scoringMethod === 'WeightedAverage') {
+    if (template.scoringMethod === 'WeightedAverage' || template.scoringMethod === 'QCBS') {
       let totalWeightedScore = 0;
       let totalWeight = 0;
 
@@ -192,7 +194,7 @@ export default function EvaluationFormPage() {
       });
 
       return count > 0 ? totalScore / count : 0;
-    } else {
+    } else if (template.scoringMethod === 'PassFail') {
       let allPass = true;
       template.criteria.forEach(criterion => {
         if (criterion.isMandatory) {
@@ -204,6 +206,7 @@ export default function EvaluationFormPage() {
       });
       return allPass ? 100 : 0;
     }
+    return 0;
   };
 
   const buildEvaluationCriteriaJson = (): string => {
@@ -320,6 +323,29 @@ export default function EvaluationFormPage() {
   const evaluationRoute = sourceTender
     ? getTenderEvaluationRoute(sourceTender, bid.id)
     : undefined;
+
+  const configurationError = sourceTender
+    ? getTenderEvaluationConfigurationError(sourceTender, template)
+    : undefined;
+
+  if (configurationError && evaluationRoute?.mode !== 'controlled') {
+    return (
+      <div className="container mx-auto py-6">
+        <Alert variant="destructive">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Evaluation configuration needs correction</AlertTitle>
+          <AlertDescription className="space-y-3">
+            <p>{configurationError}</p>
+            <p>No scores can be saved or submitted until this is resolved.</p>
+            <Button variant="outline" onClick={() => router.push(`/procurement/tenders/${sourceTender?.id}`)}>
+              Return to tender
+            </Button>
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+  }
+
 
   if (evaluationRoute?.mode === 'controlled') {
     return (

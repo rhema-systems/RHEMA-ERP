@@ -702,6 +702,9 @@ public sealed class InventoryTrackingControlService : IInventoryTrackingControlS
         InventoryTrackingDirection.Receipt => "procurement.inventory.receive",
         InventoryTrackingDirection.Issue or InventoryTrackingDirection.Return => "procurement.inventory.issue",
         InventoryTrackingDirection.TransferOut or InventoryTrackingDirection.TransferIn => "procurement.inventory.transfer",
+        // Adjustment traces are staged only by the approved adjustment's post/reverse
+        // owner. Requiring its maker permission here would break reviewer separation.
+        InventoryTrackingDirection.AdjustmentIn or InventoryTrackingDirection.AdjustmentOut => "procurement.inventory.adjust.approve",
         _ => "procurement.inventory.adjust.request"
     };
 

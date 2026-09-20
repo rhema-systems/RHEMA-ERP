@@ -42,7 +42,7 @@ export default function PurchaseOrdersPage() {
         }
     };
 
-    const getStatusBadge = (status: any) => {
+    const getStatusBadge = (status: any, approvalRequired?: boolean) => {
         const statusStr = typeof status === 'number' ? 
             (status === 1 ? 'Draft' : status === 2 ? 'Approved' : status === 3 ? 'PartiallyReceived' : status === 4 ? 'Received' : status === 5 ? 'PartiallyInvoiced' : status === 6 ? 'Invoiced' : status === 9 ? 'PendingApproval' : status === 10 ? 'Rejected' : 'Unknown') : 
             String(status);
@@ -51,7 +51,7 @@ export default function PurchaseOrdersPage() {
             case 'Draft': return <Badge variant="secondary">Draft</Badge>;
             case 'PendingApproval':
             case 'Pending Approval': return <Badge className="bg-amber-600">Pending Approval</Badge>;
-            case 'Approved': return <Badge className="bg-blue-600">Approved</Badge>;
+            case 'Approved': return <Badge className="bg-blue-600">{approvalRequired === false ? 'Ready for receiving' : 'Approved'}</Badge>;
             case 'PartiallyReceived': return <Badge className="bg-indigo-600">Partially Received</Badge>;
             case 'Received': return <Badge className="bg-green-600">Received</Badge>;
             case 'PartiallyInvoiced': return <Badge className="bg-orange-500">Partially Invoiced</Badge>;
@@ -107,7 +107,7 @@ export default function PurchaseOrdersPage() {
                                             <td className="p-3 font-medium">{po.orderNumber}</td>
                                             <td className="p-3">{new Date(po.orderDate).toLocaleDateString()}</td>
                                             <td className="p-3">{formatCurrency(po.totalAmount, po.currencyCode || 'GHS')}</td>
-                                            <td className="p-3">{getStatusBadge(po.status)}</td>
+                                            <td className="p-3">{getStatusBadge(po.status, po.approvalRequired)}</td>
                                             <td className="p-3 space-x-2">
                                                 <Button variant="ghost" size="sm" onClick={() => router.push(`/finance/ap/purchase-orders/${po.id}`)}>
                                                     <Eye className="h-4 w-4 mr-1" /> View

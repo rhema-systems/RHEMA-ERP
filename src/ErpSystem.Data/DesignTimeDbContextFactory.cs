@@ -22,13 +22,21 @@ public class DesignTimeDbContextFactory : IDesignTimeDbContextFactory<Applicatio
             AppContext.BaseDirectory,
             Path.GetDirectoryName(typeof(DesignTimeDbContextFactory).Assembly.Location)
         });
-        var config = new ConfigurationBuilder()
+        var configBuilder = new ConfigurationBuilder()
             .SetBasePath(apiDirectory)
             .AddJsonFile("appsettings.json", optional: true)
-            .AddJsonFile("appsettings.Development.json", optional: true)
-            .AddUserSecrets(
+            .AddJsonFile("appsettings.Development.json", optional: true);
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("TdcSkipUserSecrets"),
+                "true",
+                StringComparison.OrdinalIgnoreCase))
+        {
+            configBuilder.AddUserSecrets(
                 typeof(DesignTimeDbContextFactory).Assembly,
-                optional: true)
+                optional: true);
+        }
+
+        var config = configBuilder
             .AddEnvironmentVariables()
             .Build();
         var connectionString = config.GetConnectionString("DefaultConnection");

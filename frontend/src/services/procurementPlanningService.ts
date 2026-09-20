@@ -19,10 +19,16 @@ const readProblemMessage = async (response: Response, fallback: string) => {
   if (!payload.trim()) return fallback;
 
   try {
-    const parsed = JSON.parse(payload) as string | { detail?: string; message?: string; title?: string; code?: string };
+    const parsed = JSON.parse(payload) as string | {
+      detail?: string; message?: string; title?: string; code?: string;
+      errors?: Record<string, string[]>;
+    };
     if (typeof parsed === 'string') return parsed.trim() || fallback;
     const problem = parsed;
-    const message = problem.detail || problem.message || fallback;
+    const validationMessage = problem.errors
+      ? Object.values(problem.errors).flat().filter(value => typeof value === 'string').join(' ')
+      : '';
+    const message = problem.detail || problem.message || validationMessage || problem.title || fallback;
     return problem.code ? `${message} (${problem.code})` : message;
   } catch {
     return payload.trim() || fallback;
@@ -68,12 +74,15 @@ export interface DepartmentDto {
 // ============================================================================
 
 export interface ProcurementPlanDto {
+  approvalRequired?: boolean;
   id: string;
   planNumber: string;
   title: string;
   description?: string;
-  departmentId: string;
+  departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   fiscalYear: number;
   planningCycle: string;
   planningQuarter?: string;
@@ -129,7 +138,7 @@ export interface ProcurementPlanDetailDto extends ProcurementPlanDto {
 export interface CreateProcurementPlanDto {
   title: string;
   description?: string;
-  departmentId: string;
+  organizationUnitId: string;
   fiscalYear: number;
   planningCycle?: string;
   planningQuarter?: string;
@@ -146,7 +155,7 @@ export interface CreateProcurementPlanDto {
 export interface UpdateProcurementPlanDto {
   title: string;
   description?: string;
-  departmentId: string;
+  organizationUnitId: string;
   fiscalYear: number;
   planningCycle?: string;
   planningQuarter?: string;
@@ -189,8 +198,10 @@ export interface ProcurementPlanConsolidationItemDto {
   planId: string;
   planNumber: string;
   planItemId: string;
-  departmentId: string;
+  departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   itemDescription: string;
   quantity: number;
   estimatedTotalCost: number;
@@ -220,7 +231,7 @@ export interface ProcurementPlanConsolidationOpportunityDto {
 }
 
 export interface ProcurementPlanningDepartmentSummaryDto {
-  departmentId: string;
+  organizationUnitId: string;
   departmentName: string;
   planCount: number;
   itemCount: number;
@@ -509,12 +520,15 @@ export interface UpdateProcurementPlanItemDto extends CreateProcurementPlanItemD
 // ============================================================================
 
 export interface ProcurementBudgetDto {
+  approvalRequired?: boolean;
   id: string;
   budgetCode: string;
   title: string;
   description?: string;
-  departmentId: string;
+  departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   procurementPlanId?: string;
   fiscalYear: number;
   allocatedAmount: number;
@@ -543,7 +557,7 @@ export interface ProcurementBudgetDetailDto extends ProcurementBudgetDto {
 export interface CreateProcurementBudgetDto {
   title: string;
   description?: string;
-  departmentId: string;
+  organizationUnitId: string;
   procurementPlanId?: string;
   fiscalYear: number;
   allocatedAmount: number;
@@ -576,6 +590,7 @@ export interface CreateProcurementBudgetAllocationDto {
 }
 
 export interface ProcurementBudgetRevisionDto {
+  approvalRequired?: boolean;
   id: string;
   procurementBudgetId: string;
   revisionNumber: number;
@@ -612,6 +627,8 @@ export interface ProcurementScheduleDto {
   procurementPlanItemId?: string;
   departmentId?: string;
   departmentName?: string;
+  organizationUnitId?: string;
+  organizationUnitName?: string;
   scheduleType: string;
   plannedStartDate: string;
   plannedEndDate: string;
@@ -645,6 +662,7 @@ export interface CreateProcurementScheduleDto {
   procurementPlanId?: string;
   procurementPlanItemId?: string;
   departmentId?: string;
+  organizationUnitId?: string;
   scheduleType?: string;
   plannedStartDate: string;
   plannedEndDate: string;
@@ -1093,7 +1111,7 @@ export const procurementPlanService = {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
-    if (!response.ok) throw new Error('Failed to delete procurement plan');
+    if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to delete procurement plan'));
   },
 
   async submitForApproval(id: string, data: SubmitProcurementPlanDto): Promise<ProcurementPlanDetailDto> {
@@ -1211,7 +1229,7 @@ export const procurementPlanService = {
     const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/${planId}/items`, {
       method: 'POST',
       headers: getAuthHeaders(),
-      body: JSON.stringify(data),
+      body: JSON.stringify({ ...data, requiredDate: data.requiredDate?.trim() || null }),
     });
     if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to add item'));
     return response.json();
@@ -1229,7 +1247,7 @@ export const procurementPlanService = {
     const response = await fetch(`${API_BASE_URL}/procurement/procurementplans/items/${itemId}`, {
       method: 'PUT',
       headers: getAuthHeaders(),
-      body: JSON.stringify(dto),
+      body: JSON.stringify({ ...dto, requiredDate: dto.requiredDate?.trim() || null }),
     });
     if (!response.ok) throw new Error(await readProblemMessage(response, 'Failed to update item'));
     return response.json();

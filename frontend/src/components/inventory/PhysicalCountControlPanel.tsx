@@ -115,7 +115,7 @@ export function PhysicalCountControlPanel({ warehouses, onCountsChanged }: Props
             <ShieldCheck className="mt-0.5 h-5 w-5 text-blue-700" />
             <div>
               <p className="font-semibold">Controlled cycle-count lifecycle</p>
-              <p className="text-sm text-muted-foreground">ABC calendar scheduling, exact-location freeze, blind count, independent recount, Stores and Finance approval, Internal Audit attestation, and Finance-backed posting.</p>
+              <p className="text-sm text-muted-foreground">Schedule counts, review variances, and post the completed count. Configured approvals apply before posting.</p>
             </div>
           </div>
           <Button variant="outline" onClick={() => setOpen(true)}><CalendarClock className="mr-2 h-4 w-4" />ABC schedules</Button>
@@ -138,8 +138,6 @@ export function PhysicalCountControlPanel({ warehouses, onCountsChanged }: Props
                 <div className="col-span-2 space-y-1"><Label>Next due</Label><Input type="datetime-local" value={form.nextDueAtUtc} onChange={event => setForm(previous => ({ ...previous, nextDueAtUtc: event.target.value }))} /></div>
                 <div className="col-span-2 space-y-1"><Label>Cycle Count occurrence</Label><Select value={form.calendarOccurrenceId} onValueChange={value => setForm(previous => ({ ...previous, calendarOccurrenceId: value }))}><SelectTrigger><SelectValue placeholder="Shared calendar occurrence" /></SelectTrigger><SelectContent>{cycleOccurrences.map(item => <SelectItem key={item.id} value={item.id}>{item.title} · {new Date(item.dueAtUtc).toLocaleDateString()}</SelectItem>)}</SelectContent></Select></div>
                 <div className="col-span-2 space-y-1"><Label>Year End Close cut-off</Label><Select value={form.cutoffOccurrenceId} onValueChange={value => setForm(previous => ({ ...previous, cutoffOccurrenceId: value }))}><SelectTrigger><SelectValue placeholder="Shared cut-off occurrence" /></SelectTrigger><SelectContent>{cutoffOccurrences.map(item => <SelectItem key={item.id} value={item.id}>{item.title} · {new Date(item.dueAtUtc).toLocaleDateString()}</SelectItem>)}</SelectContent></Select></div>
-                <div className="space-y-1"><Label>Recount quantity</Label><Input type="number" min={0} value={form.recountQuantityThreshold} onChange={event => setForm(previous => ({ ...previous, recountQuantityThreshold: Number(event.target.value) }))} /></div>
-                <div className="space-y-1"><Label>Recount value</Label><Input type="number" min={0} value={form.recountValueThreshold} onChange={event => setForm(previous => ({ ...previous, recountValueThreshold: Number(event.target.value) }))} /></div>
               </div>
               <Textarea placeholder="Schedule notes" value={form.notes} onChange={event => setForm(previous => ({ ...previous, notes: event.target.value }))} />
               <div className="flex items-center justify-between"><div className="flex gap-2"><Badge>Freeze required</Badge><Badge>Blind required</Badge></div><Button onClick={save} disabled={loading}>Save schedule</Button></div>

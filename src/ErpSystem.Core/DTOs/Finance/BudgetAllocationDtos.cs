@@ -245,7 +245,8 @@ public record AllocationRunBatchDto(
     string? PostedByName,
     string? RejectionReason,
     DateTime CreatedAt,
-    List<AllocationRunBatchLineDto> Lines
+    List<AllocationRunBatchLineDto> Lines,
+    bool ApprovalRequired = true
 );
 
 /// <summary>

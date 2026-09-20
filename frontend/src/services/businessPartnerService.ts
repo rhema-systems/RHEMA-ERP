@@ -2,21 +2,63 @@
  * Business Partner Service
  * Main API service for Business Partner (Supplier/Contractor/Customer) management
  */
+import type { Account } from '@/types/finance';
+import type { BankAccount } from '@/types/cash-management';
+import type { TaxGroup } from '@/types/tax';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 // Helper function to get auth headers
 const getAuthHeaders = () => {
-  const token = localStorage.getItem('token') || localStorage.getItem('authToken');
+  const token =
+    localStorage.getItem('token') || localStorage.getItem('authToken');
   return {
     'Content-Type': 'application/json',
-    ...(token && { 'Authorization': `Bearer ${token}` })
+    ...(token && { Authorization: `Bearer ${token}` }),
   };
 };
 
 // ============================================================================
 // BUSINESS PARTNER INTERFACES
 // ============================================================================
+
+export interface BusinessPartnerPostingDefaults {
+  subjectToWithholdingDeduction: boolean;
+  withholdingTaxRate: number;
+  defaultWithholdingTaxId?: string | null;
+  defaultTaxGroupId?: string | null;
+  defaultBankAccountId?: string | null;
+  cashAccountSource: 'Chequebook' | 'BusinessPartner';
+  defaultCashAccountId?: string | null;
+  defaultApAccountId?: string | null;
+  defaultExpenseAccountId?: string | null;
+  defaultTermsDiscountsAvailableAccountId?: string | null;
+  defaultTermsDiscountsTakenAccountId?: string | null;
+  defaultFinanceChargesAccountId?: string | null;
+  defaultTradeDiscountAccountId?: string | null;
+  defaultMiscellaneousAccountId?: string | null;
+  defaultFreightAccountId?: string | null;
+  defaultTaxAccountId?: string | null;
+  defaultWriteoffAccountId?: string | null;
+  defaultAccruedPurchasesAccountId?: string | null;
+  defaultPurchasePriceVarianceAccountId?: string | null;
+}
+
+export interface BusinessPartnerPostingOptions {
+  accounts: Account[];
+  bankAccounts: BankAccount[];
+  taxGroups: TaxGroup[];
+  withholdingTaxes?: BusinessPartnerWithholdingTaxOption[];
+}
+
+export interface BusinessPartnerWithholdingTaxOption {
+  id: string;
+  code: string;
+  name: string;
+  rate: number;
+  effectiveFrom?: string;
+  taxPayableAccountId?: string | null;
+}
 
 export interface BusinessPartnerDto {
   id: string;
@@ -38,6 +80,7 @@ export interface BusinessPartnerDto {
   status: string; // Active, Inactive, Suspended, Pending
   approvalStatus?: string; // Pending, Approved, Rejected
   isPreferred: boolean;
+  isActive?: boolean;
   isBlacklisted: boolean;
   currency?: string;
   paymentTermId?: string;
@@ -59,6 +102,7 @@ export interface BusinessPartnerDto {
 }
 
 export interface BusinessPartnerDetailDto extends BusinessPartnerDto {
+  postingDefaults?: BusinessPartnerPostingDefaults;
   parentId?: string;
   parentName?: string;
   legalName?: string;
@@ -144,6 +188,7 @@ export interface BusinessPartnerBankAccountDto {
 }
 
 export interface BusinessPartnerContactDto {
+  isActive?: boolean;
   id: string;
   businessPartnerId?: string;
   partnerId?: string; // Alias
@@ -260,6 +305,7 @@ export interface LicenseTypeDto {
 }
 
 export interface CreateBusinessPartnerDto {
+  postingDefaults?: BusinessPartnerPostingDefaults;
   partnerType: string;
   partnerName: string;
   companyName?: string; // Alias for partnerName
@@ -301,6 +347,8 @@ export interface CreateBusinessPartnerDto {
 }
 
 export interface UpdateBusinessPartnerDto {
+  postingDefaults?: BusinessPartnerPostingDefaults;
+  creditLimit?: number | null;
   partnerName: string;
   tradingName?: string;
   registrationNumber?: string;
@@ -333,7 +381,8 @@ export interface PagedResult<T> {
 }
 
 const BUSINESS_PARTNER_DROPDOWN_PAGE_SIZE = 100;
-const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const GUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 const normalizeOptionalGuid = (
   value: string | null | undefined,
@@ -345,13 +394,82 @@ const normalizeOptionalGuid = (
   }
 
   if (!GUID_PATTERN.test(normalized)) {
-    throw new Error(`${fieldLabel} must be selected from the available options.`);
+    throw new Error(
+      `${fieldLabel} must be selected from the available options.`
+    );
   }
 
   return normalized;
 };
 
-const getBusinessPartnerDropdownItems = (result: unknown): BusinessPartnerDto[] => {
+const normalizePostingDefaults = (
+  defaults?: BusinessPartnerPostingDefaults
+): BusinessPartnerPostingDefaults | undefined => {
+  if (!defaults) return undefined;
+  if (
+    !Number.isFinite(defaults.withholdingTaxRate) ||
+    defaults.withholdingTaxRate < 0 ||
+    defaults.withholdingTaxRate > 100
+  ) {
+    throw new Error('WHT Rate must be between 0 and 100.');
+  }
+  if (
+    defaults.subjectToWithholdingDeduction &&
+    defaults.withholdingTaxRate <= 0
+  )
+    throw new Error(
+      'Enter a WHT Rate greater than zero when withholding deduction is selected.'
+    );
+  const normalized = {
+    ...defaults,
+    withholdingTaxRate: defaults.subjectToWithholdingDeduction
+      ? defaults.withholdingTaxRate
+      : 0,
+  };
+  for (const key of Object.keys(
+    normalized
+  ) as (keyof BusinessPartnerPostingDefaults)[]) {
+    if (key.endsWith('Id')) {
+      // Explicit null clears a saved mapping; an unavailable catalogue must never clear it implicitly.
+      const value = normalizeOptionalGuid(
+        normalized[key] as string | null | undefined,
+        key
+      );
+      Object.assign(normalized, { [key]: value ?? null });
+    }
+  }
+  return normalized;
+};
+
+const partnerSaveError = async (
+  response: Response,
+  fallback: string
+): Promise<Error> => {
+  try {
+    const problem = (await response.json()) as {
+      detail?: string;
+      message?: string;
+      title?: string;
+      code?: string;
+      errors?: Record<string, string[]>;
+    };
+    const message =
+      problem.detail ||
+      problem.message ||
+      Object.values(problem.errors || {})
+        .flat()
+        .join(' ') ||
+      problem.title ||
+      fallback;
+    return new Error(problem.code ? `${message} (${problem.code})` : message);
+  } catch {
+    return new Error(fallback);
+  }
+};
+
+const getBusinessPartnerDropdownItems = (
+  result: unknown
+): BusinessPartnerDto[] => {
   if (Array.isArray(result)) {
     return result as BusinessPartnerDto[];
   }
@@ -386,28 +504,50 @@ const getBusinessPartnerDropdownTotalPages = (result: unknown): number => {
 // ============================================================================
 
 export const businessPartnerService = {
+  async getPostingOptions(
+    partnerType = 'Supplier'
+  ): Promise<BusinessPartnerPostingOptions> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/posting-options?partnerType=${encodeURIComponent(partnerType || 'Supplier')}`,
+      { headers: getAuthHeaders() }
+    );
+    if (!response.ok)
+      throw await partnerSaveError(
+        response,
+        'Failed to load business partner posting options'
+      );
+    return response.json();
+  },
   // Get all partners with filtering and pagination
-  async getPartners(params: {
-    page?: number;
-    pageSize?: number;
-    search?: string;
-    partnerType?: string;
-    status?: string;
-    approvalStatus?: string;
-    categoryId?: string;
-  } = {}): Promise<PagedResult<BusinessPartnerDto>> {
+  async getPartners(
+    params: {
+      page?: number;
+      pageSize?: number;
+      search?: string;
+      partnerType?: string;
+      status?: string;
+      approvalStatus?: string;
+      categoryId?: string;
+    } = {}
+  ): Promise<PagedResult<BusinessPartnerDto>> {
     const queryParams = new URLSearchParams();
     if (params.page) queryParams.append('page', params.page.toString());
-    if (params.pageSize) queryParams.append('pageSize', params.pageSize.toString());
+    if (params.pageSize)
+      queryParams.append('pageSize', params.pageSize.toString());
     if (params.search) queryParams.append('search', params.search);
-    if (params.partnerType) queryParams.append('partnerType', params.partnerType);
+    if (params.partnerType)
+      queryParams.append('partnerType', params.partnerType);
     if (params.status) queryParams.append('status', params.status);
-    if (params.approvalStatus) queryParams.append('approvalStatus', params.approvalStatus);
+    if (params.approvalStatus)
+      queryParams.append('approvalStatus', params.approvalStatus);
     if (params.categoryId) queryParams.append('categoryId', params.categoryId);
 
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners?${queryParams}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners?${queryParams}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch business partners');
     return response.json();
@@ -415,9 +555,12 @@ export const businessPartnerService = {
 
   // Get partner by ID
   async getPartnerById(id: string): Promise<BusinessPartnerDetailDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch business partner');
     return response.json();
@@ -430,20 +573,27 @@ export const businessPartnerService = {
 
   // Get partner by user ID
   async getPartnerByUserId(userId: string): Promise<BusinessPartnerDetailDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/user/${userId}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/user/${userId}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to fetch business partner by user ID');
+    if (!response.ok)
+      throw new Error('Failed to fetch business partner by user ID');
     return response.json();
   },
 
   // Get active partners
   async getActivePartners(partnerType?: string): Promise<BusinessPartnerDto[]> {
     const queryParams = partnerType ? `?partnerType=${partnerType}` : '';
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/active${queryParams}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/active${queryParams}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch active partners');
     return response.json();
@@ -455,7 +605,7 @@ export const businessPartnerService = {
       `${API_BASE_URL}/procurement/business-partners?page=${page}&pageSize=${BUSINESS_PARTNER_DROPDOWN_PAGE_SIZE}`;
 
     const response = await fetch(buildUrl(1), {
-      headers: getAuthHeaders()
+      headers: getAuthHeaders(),
     });
 
     if (!response.ok) throw new Error('Failed to fetch partners for dropdown');
@@ -470,7 +620,7 @@ export const businessPartnerService = {
     const remainingPages = await Promise.all(
       Array.from({ length: totalPages - 1 }, async (_, index) => {
         const pageResponse = await fetch(buildUrl(index + 2), {
-          headers: getAuthHeaders()
+          headers: getAuthHeaders(),
         });
 
         if (!pageResponse.ok) {
@@ -483,7 +633,9 @@ export const businessPartnerService = {
 
     const allPartners = [
       ...firstPageItems,
-      ...remainingPages.flatMap((pageResult) => getBusinessPartnerDropdownItems(pageResult)),
+      ...remainingPages.flatMap((pageResult) =>
+        getBusinessPartnerDropdownItems(pageResult)
+      ),
     ];
 
     return Array.from(
@@ -492,85 +644,135 @@ export const businessPartnerService = {
   },
 
   // Get preferred partners
-  async getPreferredPartners(partnerType?: string): Promise<BusinessPartnerDto[]> {
+  async getPreferredPartners(
+    partnerType?: string
+  ): Promise<BusinessPartnerDto[]> {
     const queryParams = partnerType ? `?partnerType=${partnerType}` : '';
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/preferred${queryParams}`, {
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/preferred${queryParams}`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch preferred partners');
     return response.json();
   },
 
   // Create new partner
-  async createPartner(data: CreateBusinessPartnerDto): Promise<BusinessPartnerDetailDto> {
+  async createPartner(
+    data: CreateBusinessPartnerDto
+  ): Promise<BusinessPartnerDetailDto> {
+    if (
+      data.creditLimit !== undefined &&
+      (!Number.isFinite(data.creditLimit) || data.creditLimit < 0)
+    )
+      throw new Error('Credit Limit must be zero or greater.');
     // ASP.NET nullable Guid properties accept a Guid or null, but not an empty string.
     const cleanedData = {
       ...data,
       parentId: normalizeOptionalGuid(data.parentId, 'Parent business partner'),
       paymentTermId: normalizeOptionalGuid(data.paymentTermId, 'Payment term'),
-      salesRepresentativeId: normalizeOptionalGuid(data.salesRepresentativeId, 'Sales representative'),
+      salesRepresentativeId: normalizeOptionalGuid(
+        data.salesRepresentativeId,
+        'Sales representative'
+      ),
+      postingDefaults: normalizePostingDefaults(data.postingDefaults),
     };
-    
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(cleanedData)
-    });
 
-    if (!response.ok) throw new Error('Failed to create business partner');
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(cleanedData),
+      }
+    );
+
+    if (!response.ok)
+      throw await partnerSaveError(
+        response,
+        'Failed to create business partner'
+      );
     return response.json();
   },
 
   // Update partner
-  async updatePartner(id: string, data: UpdateBusinessPartnerDto): Promise<BusinessPartnerDetailDto> {
+  async updatePartner(
+    id: string,
+    data: UpdateBusinessPartnerDto
+  ): Promise<BusinessPartnerDetailDto> {
+    if (
+      data.creditLimit != null &&
+      (!Number.isFinite(data.creditLimit) || data.creditLimit < 0)
+    )
+      throw new Error('Credit Limit must be zero or greater.');
     // Keep nullable Guid fields out of JSON when the corresponding optional select is blank.
     const cleanedData = {
       ...data,
       parentId: normalizeOptionalGuid(data.parentId, 'Parent business partner'),
       paymentTermId: normalizeOptionalGuid(data.paymentTermId, 'Payment term'),
+      postingDefaults: normalizePostingDefaults(data.postingDefaults),
     };
-    
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(cleanedData)
-    });
 
-    if (!response.ok) throw new Error('Failed to update business partner');
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(cleanedData),
+      }
+    );
+
+    if (!response.ok)
+      throw await partnerSaveError(
+        response,
+        'Failed to update business partner'
+      );
     return response.json();
   },
 
   // Delete partner
   async deletePartner(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to delete business partner');
   },
 
   // Approve partner
   async submitPartnerForApproval(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/submit`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}/submit`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
-      throw new Error(error || 'Failed to submit business partner for approval');
+      throw new Error(
+        error || 'Failed to submit business partner for approval'
+      );
     }
   },
 
   // Approve partner (workflow)
   async approvePartner(id: string, notes?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/approve`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ notes: notes || undefined })
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}/approve`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ notes: notes || undefined }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -580,11 +782,14 @@ export const businessPartnerService = {
 
   // Reject partner
   async rejectPartner(id: string, reason: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/reject`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ rejectionReason: reason })
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}/reject`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ rejectionReason: reason }),
+      }
+    );
 
     if (!response.ok) {
       const error = await response.text();
@@ -594,111 +799,168 @@ export const businessPartnerService = {
 
   // Suspend partner
   async suspendPartner(id: string, reason?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/suspend`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({ suspensionReason: reason })
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}/suspend`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ suspensionReason: reason }),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to suspend business partner');
   },
 
   // Activate partner
   async activatePartner(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${id}/activate`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${id}/activate`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to activate business partner');
   },
 
   // Blacklist partner
-  async blacklistPartner(id: string, reason: string, blacklistUntil?: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/blacklist`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify({
-        reason,
-        blacklistUntil: blacklistUntil || null
-      })
-    });
+  async blacklistPartner(
+    id: string,
+    reason: string,
+    blacklistUntil?: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/blacklist`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({
+          reason,
+          blacklistUntil: blacklistUntil || null,
+        }),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to blacklist business partner');
   },
 
   // Remove from blacklist
   async removeFromBlacklist(id: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/remove-from-blacklist`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/partner-blacklist/partners/${id}/remove-from-blacklist`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
-    if (!response.ok) throw new Error('Failed to remove business partner from blacklist');
+    if (!response.ok)
+      throw new Error('Failed to remove business partner from blacklist');
   },
 
   // Get partner contacts
-  async getPartnerContacts(partnerId: string): Promise<BusinessPartnerContactDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`, {
-      headers: getAuthHeaders()
-    });
+  async getPartnerContacts(
+    partnerId: string
+  ): Promise<BusinessPartnerContactDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch partner contacts');
     return response.json();
   },
 
-  async createPartnerContact(partnerId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`, {
-      method: 'POST',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data)
-    });
+  async createPartnerContact(
+    partnerId: string,
+    data: CreateBusinessPartnerContactDto
+  ): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to create partner contact');
     return response.json();
   },
 
-  async updatePartnerContact(partnerId: string, contactId: string, data: CreateBusinessPartnerContactDto): Promise<BusinessPartnerContactDto> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
-      method: 'PUT',
-      headers: getAuthHeaders(),
-      body: JSON.stringify(data)
-    });
+  async updatePartnerContact(
+    partnerId: string,
+    contactId: string,
+    data: CreateBusinessPartnerContactDto
+  ): Promise<BusinessPartnerContactDto> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`,
+      {
+        method: 'PUT',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(data),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to update partner contact');
     return response.json();
   },
 
-  async deletePartnerContact(partnerId: string, contactId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders()
-    });
+  async deletePartnerContact(
+    partnerId: string,
+    contactId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}`,
+      {
+        method: 'DELETE',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to delete partner contact');
   },
 
-  async setPrimaryPartnerContact(partnerId: string, contactId: string): Promise<void> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}/set-primary`, {
-      method: 'POST',
-      headers: getAuthHeaders()
-    });
+  async setPrimaryPartnerContact(
+    partnerId: string,
+    contactId: string
+  ): Promise<void> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${partnerId}/contacts/${contactId}/set-primary`,
+      {
+        method: 'POST',
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to set primary partner contact');
   },
 
   // Get partner licenses
-  async getPartnerLicenses(partnerId: string): Promise<BusinessPartnerLicenseDto[]> {
-    const response = await fetch(`${API_BASE_URL}/procurement/business-partners/${partnerId}/licenses`, {
-      headers: getAuthHeaders()
-    });
+  async getPartnerLicenses(
+    partnerId: string
+  ): Promise<BusinessPartnerLicenseDto[]> {
+    const response = await fetch(
+      `${API_BASE_URL}/procurement/business-partners/${partnerId}/licenses`,
+      {
+        headers: getAuthHeaders(),
+      }
+    );
 
     if (!response.ok) throw new Error('Failed to fetch partner licenses');
     return response.json();
-  }
+  },
 };
 
 // Export individual methods for easier import
-export const getPartnerByUserId = businessPartnerService.getPartnerByUserId.bind(businessPartnerService);
-export const getPartnerById = businessPartnerService.getPartnerById.bind(businessPartnerService);
-export const getPartners = businessPartnerService.getPartners.bind(businessPartnerService);
+export const getPartnerByUserId =
+  businessPartnerService.getPartnerByUserId.bind(businessPartnerService);
+export const getPartnerById = businessPartnerService.getPartnerById.bind(
+  businessPartnerService
+);
+export const getPartners = businessPartnerService.getPartners.bind(
+  businessPartnerService
+);

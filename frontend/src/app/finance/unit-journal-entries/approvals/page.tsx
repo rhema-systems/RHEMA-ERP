@@ -4,9 +4,14 @@ import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Calendar as CalendarIcon, CheckCircle, ClipboardCheck, Eye, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
+import { getProcurementProblemMessage as getApiProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { Badge } from '@/components/ui/badge';
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb';
 import { Button } from '@/components/ui/button';
+import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { useAuth } from '@/hooks/use-auth';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import {
     Table,
@@ -28,17 +33,20 @@ function formatDate(dateString: string) {
 }
 
 export default function UnitJournalEntriesApprovalPage() {
+    const { hasPermission } = useAuth();
     const [entries, setEntries] = useState<UnitJournalEntry[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [workingId, setWorkingId] = useState<string | null>(null);
+    const [rejectId, setRejectId] = useState<string | null>(null);
+    const [reason, setReason] = useState('');
 
     const loadEntries = useCallback(async () => {
         try {
             setIsLoading(true);
             const data = await unitAccountsDataService.getPendingUnitJournalApprovals();
-            setEntries(data);
+            setEntries(data.filter(entry => entry.approvalRequired !== false && entry.status === 'PendingApproval'));
         } catch (error: any) {
-            toast.error(error?.message || 'Failed to load pending unit journal approvals.');
+            toast.error(getApiProblemMessage(error, 'Failed to load pending unit journal approvals.'));
         } finally {
             setIsLoading(false);
         }
@@ -55,23 +63,24 @@ export default function UnitJournalEntriesApprovalPage() {
             toast.success('Unit journal entry approved.');
             await loadEntries();
         } catch (error: any) {
-            toast.error(error?.message || 'Failed to approve unit journal entry.');
+            toast.error(getApiProblemMessage(error, 'Failed to approve unit journal entry.'));
         } finally {
             setWorkingId(null);
         }
     };
 
     const handleReject = async (id: string) => {
-        const reason = window.prompt('Enter rejection reason:');
-        if (!reason?.trim()) return;
+        if (!reason.trim()) return false;
 
         try {
             setWorkingId(id);
             await unitAccountsDataService.rejectUnitJournalEntry(id, reason.trim());
             toast.success('Unit journal entry rejected.');
             await loadEntries();
+            return true;
         } catch (error: any) {
-            toast.error(error?.message || 'Failed to reject unit journal entry.');
+            toast.error(getApiProblemMessage(error, 'Failed to reject unit journal entry.'));
+            return false;
         } finally {
             setWorkingId(null);
         }
@@ -169,7 +178,7 @@ export default function UnitJournalEntriesApprovalPage() {
                                                     size="sm"
                                                     className="text-green-600 hover:text-green-700"
                                                     onClick={() => handleApprove(entry.id)}
-                                                    disabled={workingId === entry.id}
+                                                    disabled={workingId === entry.id || !hasPermission('Finance.JournalEntries.Approve')}
                                                     title="Approve"
                                                 >
                                                     <CheckCircle className="h-4 w-4" />
@@ -178,8 +187,8 @@ export default function UnitJournalEntriesApprovalPage() {
                                                     variant="ghost"
                                                     size="sm"
                                                     className="text-destructive hover:text-destructive"
-                                                    onClick={() => handleReject(entry.id)}
-                                                    disabled={workingId === entry.id}
+                                                    onClick={() => { setRejectId(entry.id); setReason(''); }}
+                                                    disabled={workingId === entry.id || !hasPermission('Finance.JournalEntries.Approve')}
                                                     title="Reject"
                                                 >
                                                     <XCircle className="h-4 w-4" />
@@ -193,6 +202,14 @@ export default function UnitJournalEntriesApprovalPage() {
                     )}
                 </CardContent>
             </Card>
+            <ConfirmationDialog open={rejectId !== null} onOpenChange={open => { if (!open) setRejectId(null); }}
+                title="Reject unit journal entry" description="Enter a reason for rejection."
+                confirmText="Reject" variant="destructive" isLoading={workingId !== null}
+                confirmDisabled={!reason.trim() || !hasPermission('Finance.JournalEntries.Approve')}
+                onConfirm={() => rejectId ? handleReject(rejectId) : false}>
+                <div className="space-y-2"><Label htmlFor="unit-journal-rejection">Reason</Label>
+                    <Textarea id="unit-journal-rejection" value={reason} onChange={event => setReason(event.target.value)} maxLength={500} /></div>
+            </ConfirmationDialog>
         </div>
     );
 }

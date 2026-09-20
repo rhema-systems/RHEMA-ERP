@@ -20,7 +20,7 @@ public class LandedCostServiceTests
     private readonly Mock<ILandedCostAllocationRepository> _landedCostAllocationRepository = new();
     private readonly Mock<IGoodsReceiptNoteRepository> _grnRepository = new();
     private readonly Mock<IPurchaseOrderLandedCostPlanRepository> _poPlanRepository = new();
-    private readonly Mock<ISupplierRepository> _supplierRepository = new();
+    private readonly Mock<IBusinessPartnerRepository> _supplierRepository = new();
     private readonly Mock<IUnitOfWork> _unitOfWork = new();
     private readonly Mock<ILogger<LandedCostService>> _logger = new();
 
@@ -32,6 +32,7 @@ public class LandedCostServiceTests
             _landedCostAllocationRepository.Object,
             _grnRepository.Object,
             _poPlanRepository.Object,
+            Mock.Of<IPurchaseOrderReceiptRepository>(),
             _supplierRepository.Object,
             _unitOfWork.Object,
             _logger.Object);
@@ -263,6 +264,76 @@ public class LandedCostServiceTests
             service.SetManualAllocationsAsync(landedCostId, costItemId, dto, Guid.NewGuid()));
     }
 
+    [Fact]
+    public async Task AllocateCostsAsync_MixedScopes_DoNotSpreadLineCostToAnotherPoLine()
+    {
+        var sharedInventoryId = Guid.NewGuid();
+        var lineA = new GoodsReceiptNoteItem { PurchaseOrderItemId = Guid.NewGuid(), InventoryItemId = sharedInventoryId, AcceptedQuantity = 10, UnitCost = 10 };
+        var lineB = new GoodsReceiptNoteItem { PurchaseOrderItemId = Guid.NewGuid(), InventoryItemId = sharedInventoryId, AcceptedQuantity = 10, UnitCost = 10 };
+        var grn = new GoodsReceiptNote { Items = new List<GoodsReceiptNoteItem> { lineA, lineB } };
+        var landedCost = new LandedCost { GoodsReceiptNoteId = grn.Id, Status = "Draft" };
+        var shared = new LandedCostItem { LandedCostId = landedCost.Id, AmountInBaseCurrency = 100, AllocationMethod = "Equal" };
+        var targeted = new LandedCostItem { LandedCostId = landedCost.Id, AmountInBaseCurrency = 30,
+            AllocationMethod = "ByQuantity", PurchaseOrderItemId = lineA.PurchaseOrderItemId };
+        var costs = new List<LandedCostItem> { shared, targeted };
+        var allocations = new List<LandedCostAllocation>();
+        landedCost.Items = costs; landedCost.Allocations = allocations;
+        SetupAllocationHarness(landedCost, grn, costs, allocations);
+        await CreateService().AllocateCostsAsync(landedCost.Id, Guid.NewGuid());
+        Assert.Equal(80, allocations.Where(a => a.GoodsReceiptNoteItemId == lineA.Id).Sum(a => a.AllocatedAmount));
+        Assert.Equal(50, allocations.Where(a => a.GoodsReceiptNoteItemId == lineB.Id).Sum(a => a.AllocatedAmount));
+        Assert.Single(allocations.Where(a => a.LandedCostItemId == targeted.Id));
+    }
+
+    [Fact]
+    public async Task ManualAllocations_CannotMoveTargetedCostToAnotherPoLine()
+    {
+        var line = new GoodsReceiptNoteItem { PurchaseOrderItemId = Guid.NewGuid(), AcceptedQuantity = 10 };
+        var grn = new GoodsReceiptNote { Items = new List<GoodsReceiptNoteItem> { line } };
+        var landedCost = new LandedCost { GoodsReceiptNoteId = grn.Id, Status = "Draft" };
+        var targeted = new LandedCostItem { LandedCostId = landedCost.Id, AmountInBaseCurrency = 30,
+            PurchaseOrderItemId = Guid.NewGuid(), AllocationMethod = "ByQuantity" };
+        var costs = new List<LandedCostItem> { targeted };
+        var allocations = new List<LandedCostAllocation>();
+        landedCost.Items = costs; landedCost.Allocations = allocations;
+        SetupAllocationHarness(landedCost, grn, costs, allocations);
+        await Assert.ThrowsAsync<ArgumentException>(() => CreateService().SetManualAllocationsAsync(landedCost.Id, targeted.Id,
+            new SetManualLandedCostAllocationsDto { Allocations = new() {
+                new() { GoodsReceiptNoteItemId = line.Id, AllocatedAmount = 30 } } }, Guid.NewGuid()));
+        Assert.Empty(allocations);
+        Assert.Equal("ByQuantity", targeted.AllocationMethod);
+    }
+
+    [Fact]
+    public async Task InitializeFromPlan_ProrationKeepsScopeAndSkipsUnreceivedLine()
+    {
+        var poId = Guid.NewGuid();
+        var line = new GoodsReceiptNoteItem { PurchaseOrderItemId = Guid.NewGuid(),
+            OrderedQuantity = 20, AcceptedQuantity = 10, ReceivedQuantity = 10 };
+        var grn = new GoodsReceiptNote { PurchaseOrderId = poId, Items = new List<GoodsReceiptNoteItem> { line } };
+        var landedCost = new LandedCost { GoodsReceiptNoteId = grn.Id, Status = "Draft", Currency = "GHS" };
+        var costs = new List<LandedCostItem>();
+        var allocations = new List<LandedCostAllocation>();
+        landedCost.Items = costs; landedCost.Allocations = allocations;
+        SetupAllocationHarness(landedCost, grn, costs, allocations);
+        // Initial copying creates a new draft; re-copying must not overwrite entered receipt charges.
+        _landedCostRepository.Setup(r => r.GetByGRNAsync(grn.Id)).ReturnsAsync(Array.Empty<LandedCost>());
+        _landedCostItemRepository.Setup(r => r.GetByLandedCostAsync(It.IsAny<Guid>())).ReturnsAsync(Array.Empty<LandedCostItem>());
+        _landedCostAllocationRepository.Setup(r => r.GetByLandedCostAsync(It.IsAny<Guid>())).ReturnsAsync(Array.Empty<LandedCostAllocation>());
+        _poPlanRepository.Setup(r => r.GetWithItemsByPurchaseOrderIdAsync(poId)).ReturnsAsync(
+            new PurchaseOrderLandedCostPlan { PurchaseOrderId = poId, Currency = "GHS", Items = new List<PurchaseOrderLandedCostPlanItem> {
+                new() { Amount = 100, AmountInPlanCurrency = 100, ExchangeRate = 1, AllocationMethod = "ByValue" },
+                new() { Amount = 50, AmountInPlanCurrency = 50, ExchangeRate = 1, AllocationMethod = "ByQuantity", PurchaseOrderItemId = line.PurchaseOrderItemId },
+                new() { Amount = 999, AmountInPlanCurrency = 999, ExchangeRate = 1, AllocationMethod = "ByQuantity", PurchaseOrderItemId = Guid.NewGuid() }
+            } });
+        _landedCostItemRepository.Setup(r => r.AddAsync(It.IsAny<LandedCostItem>()))
+            .ReturnsAsync((LandedCostItem item) => { costs.Add(item); return item; });
+        await CreateService().InitializeFromPurchaseOrderPlanAsync(grn.Id, Guid.NewGuid());
+        Assert.Equal(2, costs.Count);
+        Assert.Equal(100, costs.Single(c => c.PurchaseOrderItemId == null).AmountInBaseCurrency);
+        Assert.Equal(25, costs.Single(c => c.PurchaseOrderItemId == line.PurchaseOrderItemId).AmountInBaseCurrency);
+    }
+
     private void SetupAllocationHarness(
         LandedCost landedCost,
         GoodsReceiptNote grn,
@@ -299,7 +370,6 @@ public class LandedCostServiceTests
                 return entity;
             });
 
-        _unitOfWork.Setup(u => u.SaveChangesAsync()).ReturnsAsync(1);
+        _unitOfWork.Setup(u => u.SaveChangesAsync(It.IsAny<CancellationToken>())).ReturnsAsync(1);
     }
 }
-

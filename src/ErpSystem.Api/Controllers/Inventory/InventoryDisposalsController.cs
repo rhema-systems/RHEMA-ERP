@@ -48,6 +48,14 @@ public sealed class InventoryDisposalsController : ControllerBase
     public Task<ActionResult<InventoryDisposalDto>> Verify(Guid id, [FromBody] VerifyInventoryDisposalRequest request,
         CancellationToken cancellationToken) => ExecuteMutationAsync(id, request, _service.VerifyAsync, cancellationToken);
 
+    [HttpPut("{id:guid}")]
+    public Task<ActionResult<InventoryDisposalDto>> Update(Guid id, [FromBody] UpdateInventoryDisposalRequest request,
+        CancellationToken cancellationToken) => ExecuteMutationAsync(id, request, _service.UpdateAsync, cancellationToken);
+
+    [HttpPost("{id:guid}/cancel")]
+    public Task<ActionResult<InventoryDisposalDto>> Cancel(Guid id, [FromBody] CancelInventoryDisposalRequest request,
+        CancellationToken cancellationToken) => ExecuteMutationAsync(id, request, _service.CancelAsync, cancellationToken);
+
     [HttpPost("{id:guid}/committee/schedule")]
     public Task<ActionResult<InventoryDisposalDto>> Schedule(Guid id, [FromBody] ScheduleInventoryDisposalCommitteeRequest request,
         CancellationToken cancellationToken) => ExecuteMutationAsync(id, request, _service.ScheduleCommitteeAsync, cancellationToken);
@@ -105,6 +113,18 @@ public sealed class InventoryDisposalsController : ControllerBase
                          exception.Code.Contains("STATE", StringComparison.OrdinalIgnoreCase)
                 ? StatusCodes.Status409Conflict : StatusCodes.Status422UnprocessableEntity;
             return StatusCode(status, Problem(exception.Code, exception.Message));
+        }
+        catch (InventoryTrackingControlException exception)
+        {
+            return UnprocessableEntity(Problem(exception.Code, exception.Message));
+        }
+        catch (InventoryNegativeStockControlException exception)
+        {
+            return UnprocessableEntity(Problem(exception.Code, exception.Message));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnprocessableEntity(Problem("INV_DISPOSAL_ACTION_BLOCKED", exception.Message));
         }
         catch (Exception exception)
         {

@@ -297,4 +297,12 @@ describe('procurement tender-document API client', () => {
       }
     );
   });
+
+  it('sends an unpublished paired schedule request through the shared governed change endpoint', async () => {
+    const request = { sourceType: 'Tender' as const, sourceId: 'tender-1', changeType: 'UnpublishedScheduleReschedule' as const,
+      newValueUtc: '2030-09-06T17:00:00Z', newOpeningScheduledAtUtc: '2030-09-06T17:05:00Z', requiresAcknowledgement: false,
+      workflowDefinitionId: 'workflow-1', reason: 'New approved UAT schedule', evidenceReference: 'EVIDENCE-1', registerRowVersion: 'AQID' };
+    await service.createChange(request);
+    expect(api.post).toHaveBeenCalledWith('/procurement/tender-document-register/changes', request);
+  });
 });

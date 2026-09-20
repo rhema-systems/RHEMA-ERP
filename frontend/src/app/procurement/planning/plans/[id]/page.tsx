@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 import { useParams, useRouter } from 'next/navigation';
 import {
   Card,
@@ -1471,7 +1472,7 @@ export default function ProcurementPlanDetailPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-gray-500">
-              Department
+              Organization Unit
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -1501,7 +1502,7 @@ export default function ProcurementPlanDetailPage() {
             <History className="h-4 w-4 mr-2" />
             Versions
           </TabsTrigger>
-          <WorkflowTabTrigger />
+          <WorkflowTabTrigger {...workflow.tabProps} />
         </TabsList>
 
         <TabsContent value="details" className="space-y-4">
@@ -1518,9 +1519,9 @@ export default function ProcurementPlanDetailPage() {
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-500">
-                  Department
+                  Organization Unit
                 </label>
-                <p className="mt-1">{plan.departmentName || '-'}</p>
+                <p className="mt-1">{plan.organizationUnitName || plan.departmentName || '-'}</p>
               </div>
               <div>
                 <label className="text-sm font-medium text-gray-500">
@@ -1610,14 +1611,16 @@ export default function ProcurementPlanDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Linked Procurement Budget</CardTitle>
-              <CardDescription>
+          <ProcurementControlAccordion
+        title="Linked Procurement Budget"
+        summary={linkedBudget ? `${linkedBudget.budgetCode} · ${formatCurrency(linkedBudget.remainingAmount, linkedBudget.currency)} remaining` : 'No budget linked'}
+        status={linkedBudget && getStatusBadge(linkedBudget.status)}
+        notice={!linkedBudget && 'Select an approved budget before adding further funding exposure.'}
+      >
+        <p className="mb-4 text-sm text-muted-foreground">
                 Approved budget controlling this plan&apos;s funding and
                 currency
-              </CardDescription>
-            </CardHeader>
+              </p>
             <CardContent>
               {linkedBudget ? (
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1709,13 +1712,13 @@ export default function ProcurementPlanDetailPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </ProcurementControlAccordion>
 
           {plan.reviewComments && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Review Information</CardTitle>
-              </CardHeader>
+            <ProcurementControlAccordion
+        title="Review Information"
+        summary={plan.reviewedByName ? `Reviewed by ${plan.reviewedByName}` : 'Retained review details'}
+      >
               <CardContent className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-sm font-medium text-gray-500">
@@ -1736,7 +1739,7 @@ export default function ProcurementPlanDetailPage() {
                   <p className="mt-1">{plan.reviewComments}</p>
                 </div>
               </CardContent>
-            </Card>
+            </ProcurementControlAccordion>
           )}
         </TabsContent>
 

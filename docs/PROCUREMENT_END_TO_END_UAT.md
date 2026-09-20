@@ -157,6 +157,14 @@ Expected:
 - A revision does not silently overwrite the approved version or existing commitments.
 - Approved, committed, spent and available amounts remain distinguishable.
 
+### Budget revision approval configuration
+
+Procurement budget revisions require an active, Published workflow for `ProcurementBudgetRevision`, with a pending independent approval step. Missing, disabled, Draft-only or immediately auto-completing routes must block submission without changing the approved amount. This revision-specific requirement does not change optional-workflow behavior in other modules.
+
+For the DEFAULT UAT tenant, the user approved the same authority as the initial budget: `TDC_FINANCE_REVIEWER`. Configure that existing role in shared Workflow Administration, enable initiator/self-approval prevention, and retain the submitted/review/completed history. Do not grant the maker an approval role or hardcode a role into procurement service code. Other environments must configure their authorized independent reviewer before revision testing; deploying the code does not publish a workflow automatically.
+
+Retest missing-workflow rejection before publication, then pending-value retention, maker denial, independent approval and replay protection after publication. Preserve prior failed revision history; use a new independently approved corrective revision when restoring a test budget amount.
+
 ## UAT-PRC-003: Procurement plan and plan items
 
 1. Create a procurement plan for the current fiscal year and test department.

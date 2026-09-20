@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiService } from './api.service';
 import { accountsPayableService } from './accountsPayableService';
+import { readFileSync } from 'node:fs';
 
 vi.mock('./api.service', () => ({
   apiService: {
@@ -26,5 +27,69 @@ describe('accounts payable supplier identity client', () => {
       response
     );
     expect(apiService.get).toHaveBeenCalledWith('/ap/invoices/suppliers');
+  });
+
+  it('loads unified invoice-entry options without changing the canonical report lookup', async () => {
+    const response = [
+      {
+        id: 'canonical-id',
+        supplierId: 'canonical-id',
+        businessPartnerId: 'procurement-id',
+        code: 'SUP-001',
+        name: 'Linked supplier',
+        currency: 'GHS',
+      },
+      {
+        id: 'business-partner-id',
+        businessPartnerId: 'business-partner-id',
+        supplierId: null,
+        code: 'SUP260001',
+        name: 'USD Supplier',
+        currency: 'USD',
+      },
+    ];
+    vi.mocked(apiService.get).mockResolvedValueOnce(response);
+
+    await expect(
+      accountsPayableService.getInvoiceSupplierEntryOptions()
+    ).resolves.toEqual(response);
+    expect(apiService.get).toHaveBeenCalledWith(
+      '/ap/invoices/entry-suppliers'
+    );
+  });
+
+  it('resolves supplier withholding for the selected invoice date and PO without saving anything', async () => {
+    await accountsPayableService.getInvoiceSupplierDefaults(
+      'supplier/id',
+      'po/id',
+      '2026-09-13'
+    );
+    expect(apiService.get).toHaveBeenCalledWith(
+      '/ap/invoices/supplier-defaults?supplierId=supplier%2Fid&purchaseOrderId=po%2Fid&invoiceDate=2026-09-13'
+    );
+  });
+
+  it('loads the saved invoice distribution through the AP read endpoint', async () => {
+    await accountsPayableService.getInvoiceDistribution('invoice');
+    expect(apiService.get).toHaveBeenCalledWith(
+      '/ap/invoices/invoice/distribution'
+    );
+  });
+
+  it('keeps the reusable create/edit form on entry options and preserves the Procurement identity', () => {
+    const source = readFileSync(
+      'src/app/finance/ap/invoices/create/page.tsx',
+      'utf8'
+    );
+    expect(source).toContain(
+      'accountsPayableService.getInvoiceSupplierEntryOptions()'
+    );
+    expect(source).toContain(
+      'supplierId: selectedSupplier.businessPartnerId || selectedSupplier.id'
+    );
+    expect(source).toContain('suppressPurchaseOrderHydrationRef.current');
+    expect(source).not.toContain(
+      'accountsPayableService.getInvoiceSuppliers()'
+    );
   });
 });

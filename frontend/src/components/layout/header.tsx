@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { 
   Search, 
@@ -21,9 +21,11 @@ import { hasAnyAccessibleSettings } from '../settings/settings-access';
 
 interface HeaderProps {
   className?: string;
+  accountSidebarContainer?: HTMLElement | null;
 }
 
-export function Header({ className }: HeaderProps) {
+export function Header({ className, accountSidebarContainer }: HeaderProps) {
+  const accountButtonRef = useRef<HTMLButtonElement>(null);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -45,13 +47,21 @@ export function Header({ className }: HeaderProps) {
     setMounted(true);
   }, []);
 
+  const closeAccountSidebar = useCallback(() => {
+    setIsUserMenuOpen(false);
+    accountButtonRef.current?.focus();
+  }, []);
+
   const handleLogout = () => {
     logout();
-    setIsUserMenuOpen(false);
+    closeAccountSidebar();
   };
 
-  const userDisplayName = [user?.firstName, user?.lastName].filter(Boolean).join(' ').trim() || user?.username || 'User';
-  const canOpenSettings = hasAnyAccessibleSettings(settingsNavigationItems, {
+  // Local storage and a warm query cache are unavailable to the server. Keep
+  // the first browser render identical, then reveal the authenticated header.
+  const visibleUser = mounted ? user : undefined;
+  const userDisplayName = [visibleUser?.firstName, visibleUser?.lastName].filter(Boolean).join(' ').trim() || visibleUser?.username || 'User';
+  const canOpenSettings = mounted && hasAnyAccessibleSettings(settingsNavigationItems, {
     hasAnyRole,
     hasAnyPermission,
   });
@@ -210,25 +220,26 @@ export function Header({ className }: HeaderProps) {
           {/* User Menu */}
           <div className="relative">
             <Button
+              ref={accountButtonRef}
               variant="ghost"
               size="sm"
-              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              onClick={() => isUserMenuOpen ? closeAccountSidebar() : setIsUserMenuOpen(true)}
               aria-label="Open account sidebar"
               aria-expanded={isUserMenuOpen}
-              aria-controls="account-sidebar-title"
+              aria-controls={isUserMenuOpen ? 'account-sidebar' : undefined}
               className="flex h-9 items-center space-x-2 rounded-xl bg-slate-50 px-3 hover:bg-slate-100 dark:bg-neutral-800 dark:hover:bg-neutral-700"
             >
               {/* Avatar */}
               <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-r from-blue-600 to-indigo-600 text-xs font-semibold text-white">
-                {getInitials(userDisplayName) || user?.username?.[0]?.toUpperCase() || 'U'}
+                {getInitials(userDisplayName) || visibleUser?.username?.[0]?.toUpperCase() || 'U'}
               </div>
               
               {/* User Info */}
               <div className="hidden sm:block text-left">
                 <div className="text-sm font-medium text-slate-900 dark:text-white">
-                  {user?.firstName && user?.lastName 
-                    ? `${user.firstName} ${user.lastName}` 
-                    : user?.username || 'User'}
+                  {visibleUser?.firstName && visibleUser?.lastName
+                    ? `${visibleUser.firstName} ${visibleUser.lastName}`
+                    : visibleUser?.username || 'User'}
                 </div>
               </div>
 
@@ -255,11 +266,12 @@ export function Header({ className }: HeaderProps) {
     </header>
     <AccountSidebar
       open={isUserMenuOpen}
+      container={accountSidebarContainer}
       user={user}
       currentTenant={currentTenant}
       isLoggingOut={isLoggingOut}
       showSettingsLink={canOpenSettings}
-      onClose={() => setIsUserMenuOpen(false)}
+      onClose={closeAccountSidebar}
       onLogout={handleLogout}
     />
     </>

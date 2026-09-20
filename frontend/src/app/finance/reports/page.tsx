@@ -11,10 +11,32 @@ import {
     Banknote,
     Globe,
     ListTree,
-    ArrowRight
+    ListFilter,
+    ArrowRight,
+    type LucideIcon,
 } from 'lucide-react';
+import { useAuth } from '@/hooks/use-auth';
 
-const REPORTS = [
+interface FinanceReportLink {
+    id: string;
+    title: string;
+    description: string;
+    href: string;
+    icon: LucideIcon;
+    color: string;
+    permission?: string;
+}
+
+const REPORTS: FinanceReportLink[] = [
+    {
+        id: 'ad-hoc-report-builder',
+        title: 'Ad Hoc Report Builder',
+        description: 'Build governed custom analyses from GL lines and other authorised Finance datasets',
+        href: '/reports/financial/ad-hoc',
+        icon: ListFilter,
+        color: 'bg-indigo-600',
+        permission: 'Finance.Reports.AdHoc.Build',
+    },
     {
         id: 'trial-balance',
         title: 'Trial Balance',
@@ -66,6 +88,11 @@ const REPORTS = [
 ];
 
 export default function FinanceReportsPage() {
+    const { hasPermission } = useAuth();
+    const visibleReports = REPORTS.filter(
+        (report) => !report.permission || hasPermission(report.permission)
+    );
+
     return (
         <div className="space-y-6">
             {/* Page Header */}
@@ -95,7 +122,7 @@ export default function FinanceReportsPage() {
 
             {/* Reports Grid */}
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {REPORTS.map((report) => {
+                {visibleReports.map((report) => {
                     const Icon = report.icon;
                     return (
                         <Link key={report.id} href={report.href}>

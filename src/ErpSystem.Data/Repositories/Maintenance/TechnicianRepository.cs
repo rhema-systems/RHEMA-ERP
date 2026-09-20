@@ -17,7 +17,7 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public override async Task<Employee?> GetByIdAsync(Guid id)
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
             .FirstOrDefaultAsync(e => e.Id == id && !e.IsDeleted);
@@ -26,10 +26,10 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetTechniciansAsync()
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
+            .Where(e => e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("Maintenance") &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
@@ -39,10 +39,10 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetActiveTechniciansAsync()
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
+            .Where(e => e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("Maintenance") &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
@@ -57,11 +57,11 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetByDepartmentAsync(string department)
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
-            .Where(e => e.Department != null && e.Department.Name == department &&
-                       e.Department.Name.Contains("Maintenance") &&
+            .Where(e => e.OrganizationUnit != null && e.OrganizationUnit.Name == department &&
+                       e.OrganizationUnit.Name.Contains("Maintenance") &&
                        !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
@@ -71,11 +71,11 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetBySpecializationAsync(string specialization)
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
             .Where(e => e.Specialization == specialization &&
-                       e.Department != null && e.Department.Name.Contains("Maintenance") &&
+                       e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("Maintenance") &&
                        !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ThenBy(e => e.LastName)
@@ -86,10 +86,10 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     {
         // Basic implementation - in a real system this would check scheduling/availability
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
+            .Where(e => e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("Maintenance") &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
             .ToListAsync();
@@ -105,7 +105,7 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
         return await _context.TechnicianSkillAssignments
             .Where(tsa => tsa.SkillId == skillId && !tsa.IsDeleted)
             .Select(tsa => tsa.Technician)
-            .Where(e => e != null && e.Department != null && e.Department.Name.Contains("Maintenance"))
+            .Where(e => e != null && e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("Maintenance"))
             .Cast<Employee>()
             .ToListAsync();
     }
@@ -113,11 +113,11 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<Employee?> GetTechnicianWithSkillsAsync(Guid technicianId)
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
-            .Where(e => e.Id == technicianId && e.Department != null &&
-                       e.Department.Name.Contains("Maintenance") && !e.IsDeleted)
+            .Where(e => e.Id == technicianId && e.OrganizationUnit != null &&
+                       e.OrganizationUnit.Name.Contains("Maintenance") && !e.IsDeleted)
             .FirstOrDefaultAsync();
     }
 
@@ -150,10 +150,10 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<IEnumerable<Employee>> GetTechniciansByLocationAsync(Guid locationId)
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
-            .Where(e => e.Department != null && e.Department.Name.Contains("Maintenance") &&
+            .Where(e => e.OrganizationUnit != null && e.OrganizationUnit.Name.Contains("Maintenance") &&
                        e.LocationId == locationId &&
                        e.IsActive && !e.IsDeleted)
             .OrderBy(e => e.FirstName)
@@ -164,11 +164,11 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
     public async Task<Employee?> GetByEmployeeIdAsync(Guid employeeId)
     {
         return await _context.Employees
-            .Include(e => e.Department)
+            .Include(e => e.OrganizationUnit)
             .Include(e => e.Position)
             .Include(e => e.Location)
-            .Where(e => e.Id == employeeId && e.Department != null &&
-                       e.Department.Name.Contains("Maintenance") && !e.IsDeleted)
+            .Where(e => e.Id == employeeId && e.OrganizationUnit != null &&
+                       e.OrganizationUnit.Name.Contains("Maintenance") && !e.IsDeleted)
             .FirstOrDefaultAsync();
     }
 
@@ -194,7 +194,7 @@ public class TechnicianRepository : GenericRepository<Employee>, ITechnicianRepo
                 existingEmployee.LastName = hrEmployee.LastName;
                 existingEmployee.EmailAddress = hrEmployee.EmailAddress;
                 existingEmployee.MobileNumber = hrEmployee.MobileNumber;
-                existingEmployee.DepartmentId = hrEmployee.DepartmentId;
+                existingEmployee.OrganizationUnitId = hrEmployee.OrganizationUnitId;
                 existingEmployee.PositionId = hrEmployee.PositionId;
                 existingEmployee.IsActive = hrEmployee.IsActive;
                 existingEmployee.UpdatedAt = DateTime.UtcNow;

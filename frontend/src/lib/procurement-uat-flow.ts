@@ -167,11 +167,12 @@ export function getProcurementUatStageContext(
 
 export function procurementUatProgress(
   flow: readonly ProcurementUatFlowStage[]
-): { completed: number; total: number } {
+): { completed: number; total: number; unverified: number } {
   return {
     completed: flow.filter(({ state }) =>
       ['complete', 'skipped'].includes(state.status)
     ).length,
     total: flow.length,
+    unverified: flow.filter(({ state }) => state.status === 'unknown').length,
   };
 }

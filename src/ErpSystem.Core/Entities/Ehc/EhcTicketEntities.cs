@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Sales;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Entities.Ehc;
@@ -163,11 +164,17 @@ public class EhcWorkflowRoutingRule : TenantEntity
 
     [ForeignKey(nameof(AssignedDepartmentId))]
     public virtual Department? AssignedDepartment { get; set; }
+
 }
 
 [Table("EhcTickets")]
 public class EhcTicket : TenantEntity
 {
+    [Column(TypeName = "nvarchar(max)")]
+    public string? PropertyListingContextJson { get; set; }
+
+    public Guid? ExternalSubmissionId { get; set; }
+
     [Required]
     [StringLength(30)]
     public string TicketNumber { get; set; } = string.Empty;
@@ -217,6 +224,41 @@ public class EhcTicket : TenantEntity
     [ForeignKey(nameof(AssignedDepartmentId))]
     public virtual Department? AssignedDepartment { get; set; }
 
+    /// <summary>
+    /// Current assignment owner from HR's Structure → Level → Unit model. AssignedDepartmentId
+    /// remains only to display historic assignments made before the organization-unit port.
+    /// </summary>
+    public Guid? AssignedOrganizationUnitId { get; set; }
+
+    [ForeignKey(nameof(AssignedOrganizationUnitId))]
+    public virtual OrganizationUnit? AssignedOrganizationUnit { get; set; }
+
+
+    /// <summary>
+    /// CRM records created when a public property enquiry is accepted by Sales.
+    /// They remain empty while Helpdesk owns the initial triage.
+    /// </summary>
+    public Guid? CrmLeadId { get; set; }
+
+    [ForeignKey(nameof(CrmLeadId))]
+    public virtual Lead? CrmLead { get; set; }
+
+    public Guid? CrmOpportunityId { get; set; }
+
+    [ForeignKey(nameof(CrmOpportunityId))]
+    public virtual Opportunity? CrmOpportunity { get; set; }
+
+    /// <summary>
+    /// Estate procedure case created after Sales closes the linked property-enquiry opportunity as won.
+    /// Kept as a durable cross-module reference so retries do not create a second Estate application.
+    /// </summary>
+    public Guid? EstateListingApplicationCaseId { get; set; }
+
+    [StringLength(80)]
+    public string? EstateListingApplicationReference { get; set; }
+
+    public DateTime? EstateListingApplicationHandedOffAt { get; set; }
+
     [Required]
     public EhcTicketStatus Status { get; set; } = EhcTicketStatus.New;
 
@@ -261,6 +303,7 @@ public class EhcTicket : TenantEntity
     public virtual ICollection<EhcTicketFeedback> Feedbacks { get; set; } = new List<EhcTicketFeedback>();
     public virtual ICollection<EhcTicketWatcher> Watchers { get; set; } = new List<EhcTicketWatcher>();
     public virtual ICollection<EhcTicketLink> Links { get; set; } = new List<EhcTicketLink>();
+    public virtual ICollection<EhcCrmEngagementLink> CrmEngagementLinks { get; set; } = new List<EhcCrmEngagementLink>();
 }
 
 [Table("EhcTicketMessages")]
@@ -320,6 +363,33 @@ public class EhcTicketAttachment : TenantEntity
     /// Internal-only attachments should not be visible/downloadable by external users.
     /// </summary>
     public bool IsInternal { get; set; } = false;
+}
+
+/// <summary>
+/// Idempotency and traceability link between an EHC property enquiry event and its CRM activity.
+/// </summary>
+[Table("EhcCrmEngagementLinks")]
+public class EhcCrmEngagementLink : TenantEntity
+{
+    [Required]
+    public Guid TicketId { get; set; }
+
+    [ForeignKey(nameof(TicketId))]
+    public virtual EhcTicket Ticket { get; set; } = null!;
+
+    [Required]
+    public Guid CrmActivityId { get; set; }
+
+    [ForeignKey(nameof(CrmActivityId))]
+    public virtual Activity CrmActivity { get; set; } = null!;
+
+    [Required]
+    [StringLength(200)]
+    public string SourceKey { get; set; } = string.Empty;
+
+    [Required]
+    [StringLength(50)]
+    public string EngagementType { get; set; } = string.Empty;
 }
 
 [Table("EhcTicketStatusHistory")]
