@@ -2,6 +2,8 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffTravel;
+using ErpSystem.Core.Entities.HR.Awards;
+using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Services.HR.Finance;
@@ -176,6 +178,212 @@ public static class HrFinancePostingCommandFactory
                 new HrFinancePostingLine(HrFinanceAccountRole.StaffAdvancesReceivable, true, amount, $"Travel advance {reference} — receivable from employee"),
                 new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, false, amount, $"Travel advance {reference} — disbursed")
             ]
+        };
+    }
+
+    // ── Leave (slice 2) ──────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// One journal: the encashment is recognised and, on the direct route, settled. Payroll route
+    /// leaves the credit on the payable for the run to clear.
+    /// </summary>
+    public static HrFinancePostingCommand LeaveEncashmentProcessed(LeaveEncashment encashment)
+    {
+        var amount = encashment.AmountPaid;
+        var reference = $"ENC-{encashment.Year}-{encashment.Id.ToString("N")[..8].ToUpperInvariant()}";
+        var narration = $"Leave encashment {reference} — {encashment.DaysEncashed:0.##} day(s)";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.LeaveEncashmentProcessed,
+            SourceDocumentId = encashment.Id,
+            SourceReference = reference,
+            EmployeeId = encashment.EmployeeId,
+            SourceDate = encashment.ProcessedDate,
+            Description = $"Leave encashment {reference} processed" +
+                          (string.IsNullOrWhiteSpace(encashment.PaymentReference) ? string.Empty : $" ref {encashment.PaymentReference}"),
+            SkipReason = amount <= 0m ? "The encashment amount is zero; there is nothing to recognise." : null,
+            Lines = [],
+            RouteDirectLines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.LeaveEncashmentExpense, true, amount, narration),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, false, amount, $"{narration} — paid")
+            ],
+            RoutePayrollLines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.LeaveEncashmentExpense, true, amount, narration),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffClaimsPayable, false, amount, $"{narration} — payable, cleared by payroll")
+            ]
+        };
+    }
+
+    // ── Awards (slice 2) ─────────────────────────────────────────────────────────────────────
+
+    public static HrFinancePostingCommand AwardConferred(EmployeeAward award)
+    {
+        var amount = award.MonetaryAmount ?? 0m;
+        var reference = award.AwardNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.AwardConferred,
+            SourceDocumentId = award.Id,
+            SourceReference = reference,
+            EmployeeId = award.EmployeeId,
+            SourceDate = award.AwardDate,
+            Description = $"Award {reference} conferred",
+            SkipReason = amount <= 0m ? "The award carries no monetary value; there is nothing to recognise." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.AwardsExpense, true, amount, $"Award {reference} — expense"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffClaimsPayable, false, amount, $"Award {reference} — payable to employee")
+            ]
+        };
+    }
+
+    /// <summary>
+    /// Settles the conferred value; a payment that differs from it adjusts the expense so the
+    /// payable is cleared exactly and the difference is visible where it belongs.
+    /// </summary>
+    /// <param name="award">The paid award.</param>
+    /// <param name="conferralPosted">
+    /// Whether <c>AWARD_CONFERRED</c> reached Finance for this award. When it did not (an award
+    /// priced after conferral, or conferred while the rule was off) there is no payable to clear,
+    /// so the payment recognises the expense and settles it in one journal — and on the payroll
+    /// route recognises it against the payable for the run to clear.
+    /// </param>
+    public static HrFinancePostingCommand AwardPaid(EmployeeAward award, bool conferralPosted = true)
+    {
+        var conferred = award.MonetaryAmount ?? 0m;
+        var paid = award.AmountPaid ?? conferred;
+        var reference = award.AwardNumber;
+        var lines = new List<HrFinancePostingLine>();
+        var payrollLines = new List<HrFinancePostingLine>();
+        if (!conferralPosted)
+        {
+            if (paid > 0m)
+            {
+                lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.AwardsExpense, true, paid, $"Award {reference} — expense (recognised at payment)"));
+                lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, false, paid, $"Award {reference} — paid"));
+                payrollLines.Add(new HrFinancePostingLine(HrFinanceAccountRole.AwardsExpense, true, paid, $"Award {reference} — expense (recognised at payment)"));
+                payrollLines.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffClaimsPayable, false, paid, $"Award {reference} — payable, cleared by payroll"));
+            }
+        }
+        else
+        {
+            if (conferred > 0m)
+                lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffClaimsPayable, true, conferred, $"Award {reference} — payable settled"));
+            if (paid > 0m)
+                lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, false, paid, $"Award {reference} — paid"));
+            var difference = paid - conferred;
+            if (difference > 0m)
+                lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.AwardsExpense, true, difference, $"Award {reference} — paid above conferred value"));
+            else if (difference < 0m)
+                lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.AwardsExpense, false, -difference, $"Award {reference} — paid below conferred value"));
+        }
+
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.AwardPaid,
+            SourceDocumentId = award.Id,
+            SourceReference = reference,
+            EmployeeId = award.EmployeeId,
+            SourceDate = award.PaymentDate,
+            Description = $"Award {reference} paid" +
+                          (string.IsNullOrWhiteSpace(award.PaymentReference) ? string.Empty : $" ref {award.PaymentReference}"),
+            SkipReason = conferred <= 0m && paid <= 0m ? "Nothing was owed or paid; there is nothing to settle." : null,
+            Lines = [],
+            RouteDirectLines = lines,
+            RoutePayrollLines = payrollLines,
+            RoutePayrollSkipReason = "Settled through payroll: payroll's own journal clears the staff claims payable; HR posts nothing."
+        };
+    }
+
+    public static HrFinancePostingCommand LongServiceAwardProcessed(LongServiceAward award)
+    {
+        var amount = award.MonetaryAmount ?? 0m;
+        var reference = $"LSA-{award.YearsOfService}Y-{award.Id.ToString("N")[..8].ToUpperInvariant()}";
+        var narration = $"Long-service award {reference} ({award.YearsOfService} years)";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.LongServiceAwardProcessed,
+            SourceDocumentId = award.Id,
+            SourceReference = reference,
+            EmployeeId = award.EmployeeId,
+            SourceDate = award.ProcessedDate,
+            Description = $"{narration} processed",
+            SkipReason = amount <= 0m
+                ? "The long-service rung carries no monetary value (unpriced ladder or leave-only award); there is nothing to recognise."
+                : null,
+            Lines = [],
+            RouteDirectLines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.AwardsExpense, true, amount, narration),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, false, amount, $"{narration} — paid")
+            ],
+            RoutePayrollLines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.AwardsExpense, true, amount, narration),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffClaimsPayable, false, amount, $"{narration} — payable, cleared by payroll")
+            ]
+        };
+    }
+
+    // ── Benefits (slice 2) ───────────────────────────────────────────────────────────────────
+
+    public static HrFinancePostingCommand BenefitUtilizationApproved(BenefitUtilization claim, EmployeeBenefitEnrollment enrollment)
+    {
+        var amount = claim.Amount;
+        var reference = string.IsNullOrWhiteSpace(claim.ReferenceNumber)
+            ? $"BEN-{claim.Id.ToString("N")[..8].ToUpperInvariant()}"
+            : claim.ReferenceNumber!;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.BenefitUtilizationApproved,
+            SourceDocumentId = claim.Id,
+            SourceReference = reference,
+            EmployeeId = enrollment.EmployeeId,
+            SourceDate = claim.ApprovedDate ?? claim.ClaimDate.ToDateTime(TimeOnly.MinValue),
+            TransactionCurrencyCode = enrollment.Currency,
+            Description = $"Benefit claim {reference} approved" +
+                          (string.IsNullOrWhiteSpace(claim.Description) ? string.Empty : $" — {claim.Description}"),
+            SkipReason = amount <= 0m
+                ? "The claim amount is zero; there is nothing to recognise."
+                : claim.Type == BenefitUtilizationType.Reversal
+                    ? "A reversal utilisation adjusts the balance only; it is not a payable."
+                    : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.BenefitsExpense, true, amount, $"Benefit claim {reference} — expense"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffClaimsPayable, false, amount, $"Benefit claim {reference} — payable to employee")
+            ]
+        };
+    }
+
+    public static HrFinancePostingCommand BenefitUtilizationPaid(BenefitUtilization claim, EmployeeBenefitEnrollment enrollment)
+    {
+        var amount = claim.Amount;
+        var reference = string.IsNullOrWhiteSpace(claim.ReferenceNumber)
+            ? $"BEN-{claim.Id.ToString("N")[..8].ToUpperInvariant()}"
+            : claim.ReferenceNumber!;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.BenefitUtilizationPaid,
+            SourceDocumentId = claim.Id,
+            SourceReference = reference,
+            EmployeeId = enrollment.EmployeeId,
+            SourceDate = claim.ApprovedDate,
+            TransactionCurrencyCode = enrollment.Currency,
+            Description = $"Benefit claim {reference} paid",
+            SkipReason = amount <= 0m || claim.Type == BenefitUtilizationType.Reversal
+                ? "Nothing is owed on this utilisation; there is nothing to settle."
+                : null,
+            Lines = [],
+            RouteDirectLines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffClaimsPayable, true, amount, $"Benefit claim {reference} — payable settled"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, false, amount, $"Benefit claim {reference} — paid")
+            ],
+            RoutePayrollLines = [],
+            RoutePayrollSkipReason = "Settled through payroll: payroll's own journal clears the staff claims payable; HR posts nothing."
         };
     }
 }

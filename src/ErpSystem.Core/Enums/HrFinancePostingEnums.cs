@@ -37,7 +37,37 @@ public enum HrFinanceAccountRole
 
     /// <summary>Expense: staff travel — per diems, accommodation, transport, incidentals.</summary>
     [Description("Travel expense")]
-    TravelExpense = 5
+    TravelExpense = 5,
+
+    /// <summary>Expense: leave days paid out instead of taken (slice 2).</summary>
+    [Description("Leave encashment expense")]
+    LeaveEncashmentExpense = 6,
+
+    /// <summary>Expense: cash awards, long-service awards (slice 2).</summary>
+    [Description("Awards expense")]
+    AwardsExpense = 7,
+
+    /// <summary>Expense: benefit utilisations reimbursed to employees (slice 2).</summary>
+    [Description("Benefits expense")]
+    BenefitsExpense = 8
+}
+
+/// <summary>
+/// How an event that has no payment method on its own document settles the employee. TDC's
+/// "payroll or direct payment" answer is this toggle, per event, in HR Settings → Finance posting.
+/// </summary>
+public enum HrFinanceSettlementRoute
+{
+    /// <summary>HR's action IS the payment: the journal credits the staff payments clearing account.</summary>
+    [Description("Direct payment")]
+    Direct = 1,
+
+    /// <summary>
+    /// HR recognises the liability only (Cr staff claims payable); payroll's own journal clears it
+    /// when the allowance component is mapped to the same account.
+    /// </summary>
+    [Description("Through payroll")]
+    Payroll = 2
 }
 
 /// <summary>Where an HR money event stands with Finance.</summary>

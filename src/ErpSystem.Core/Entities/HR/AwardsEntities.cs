@@ -689,6 +689,13 @@ public class EmployeeAward : TenantEntity
     [MaxLength(100)]
     public string? PaymentReference { get; set; }
 
+    /// <summary>
+    /// What was actually paid, when it differs from <see cref="MonetaryAmount"/> (lane 8 slice 2).
+    /// Stored so the Finance posting can be rebuilt from the award on a retry; before this the
+    /// figure lived only in the request that paid it.
+    /// </summary>
+    public decimal? AmountPaid { get; set; }
+
     public bool LeaveProcessed { get; set; }
     
     public DateTime? LeaveProcessedDate { get; set; }

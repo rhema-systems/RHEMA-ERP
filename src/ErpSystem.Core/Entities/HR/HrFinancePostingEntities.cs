@@ -57,6 +57,14 @@ public class HrFinancePostingRule : TenantEntity
     /// </summary>
     public bool PostOnActionDate { get; set; } = true;
 
+    /// <summary>
+    /// For events whose document carries no payment method (leave encashment, award payment,
+    /// long-service award, benefit payment): whether HR's action settles the employee directly
+    /// or the liability is left for payroll to clear. Null = the catalogue's default for the event.
+    /// Ignored by events whose document names the method (travel claims, medical claims).
+    /// </summary>
+    public HrFinanceSettlementRoute? SettlementRoute { get; set; }
+
     [MaxLength(500)]
     public string? Notes { get; set; }
 }

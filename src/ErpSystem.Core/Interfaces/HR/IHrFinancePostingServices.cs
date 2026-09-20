@@ -83,6 +83,13 @@ public interface IHrFinancePostingAdapter
 
     /// <summary>True when the event's rule is enabled for the tenant (used by screens to decide what to promise).</summary>
     Task<bool> IsEnabledAsync(string eventCode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// True when this event has a Posted row for the source document. Lets a settlement builder
+    /// know whether the recognition it settles ever reached Finance (an award priced after it was
+    /// conferred, a claim approved while the rule was off).
+    /// </summary>
+    Task<bool> IsPostedAsync(string eventCode, Guid sourceDocumentId, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

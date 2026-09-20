@@ -49,6 +49,18 @@ public sealed class HrFinancePostingCommand
     /// payroll). The adapter records a <see cref="HrFinancePostingStatus.Skipped"/> row and stops.
     /// </summary>
     public string? SkipReason { get; init; }
+
+    /// <summary>
+    /// For events whose document names no payment method, the lines to post when the rule's
+    /// settlement route is <see cref="HrFinanceSettlementRoute.Direct"/>. Null means the command is
+    /// route-independent and <see cref="Lines"/> always applies.
+    /// </summary>
+    public IReadOnlyList<HrFinancePostingLine>? RouteDirectLines { get; init; }
+
+    /// <summary>Lines when the route is <see cref="HrFinanceSettlementRoute.Payroll"/>; empty = skip with <see cref="RoutePayrollSkipReason"/>.</summary>
+    public IReadOnlyList<HrFinancePostingLine> RoutePayrollLines { get; init; } = Array.Empty<HrFinancePostingLine>();
+
+    public string? RoutePayrollSkipReason { get; init; }
 }
 
 /// <summary>What the adapter hands back to the HR area after an event ran.</summary>
@@ -106,6 +118,11 @@ public sealed class HrFinancePostingRuleDto
     public IReadOnlyList<HrFinanceAccountRole> CreditRoles { get; set; } = Array.Empty<HrFinanceAccountRole>();
     public bool IsEnabled { get; set; }
     public bool PostOnActionDate { get; set; } = true;
+    /// <summary>Whether this event's settlement is decided by the rule (true) or by the document's own payment method (false).</summary>
+    public bool SupportsSettlementRoute { get; set; }
+    /// <summary>The effective route: the saved one, else the catalogue default.</summary>
+    public HrFinanceSettlementRoute? SettlementRoute { get; set; }
+    public HrFinanceSettlementRoute? DefaultSettlementRoute { get; set; }
     public string? Notes { get; set; }
     /// <summary>True when every role the event uses is mapped to an active account of the right type.</summary>
     public bool IsReady { get; set; }
@@ -123,6 +140,9 @@ public sealed class UpsertHrFinancePostingRuleDto
 
     public bool IsEnabled { get; set; }
     public bool PostOnActionDate { get; set; } = true;
+
+    /// <summary>Only honoured for events that support a settlement route; null keeps the catalogue default.</summary>
+    public HrFinanceSettlementRoute? SettlementRoute { get; set; }
 
     [MaxLength(500)]
     public string? Notes { get; set; }

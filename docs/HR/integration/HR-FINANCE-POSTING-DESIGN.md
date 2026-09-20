@@ -79,6 +79,29 @@ payroll owner's; it is in the hand-off.
 | `TRAVEL_CLAIM_PAID` | `StaffTravelExpenseClaim` / `Pay` | Dr payable `TotalApproved`; Cr receivable `AdvanceDeducted`; Cr clearing `NetPayable` | `POST …/{id}/pay` — built **after** the advance settlement arithmetic |
 | `TRAVEL_ADVANCE_DISBURSED` | `StaffTravelAdvance` / `Disburse` | Dr receivable, Cr clearing — `ApprovedAmount` | `POST …/advances/{id}/disburse` |
 
+### 3.1b The six events in slice 2 — employee payables (built 2026-09-20)
+
+| Event | Source type / action | Lines | Route |
+|---|---|---|---|
+| `LEAVE_ENCASHMENT_PROCESSED` | `LeaveEncashment` / `Process` | Dr Leave encashment expense / Cr clearing (direct) or Cr payable (payroll) — `AmountPaid` | rule; default **payroll** |
+| `AWARD_CONFERRED` | `EmployeeAward` / `Confer` | Dr Awards expense / Cr payable — `MonetaryAmount`; no money → Skipped | — |
+| `AWARD_PAID` | `EmployeeAward` / `Pay` | Dr payable (conferred) / Cr clearing (`AmountPaid`, new column) ± Awards expense for the difference. If the conferral never posted (priced later, or rule off then), the payment recognises and settles in one journal | rule; default **direct**; payroll → Skipped (or Dr expense / Cr payable when nothing was recognised) |
+| `LONG_SERVICE_AWARD_PROCESSED` | `LongServiceAward` / `Process` | Dr Awards expense / Cr clearing or payable — `MonetaryAmount`; unpriced rung → Skipped | rule; default **payroll** |
+| `BENEFIT_UTILIZATION_APPROVED` | `BenefitUtilization` / `Approve` | Dr Benefits expense / Cr payable — `Amount` in the enrolment's currency | — |
+| `BENEFIT_UTILIZATION_PAID` | `BenefitUtilization` / `Pay` | Dr payable / Cr clearing | rule; default **direct**; payroll → Skipped |
+
+**The settlement route is a per-event toggle** (HR Settings → Finance Posting → Events → "Settled")
+for every event whose document names no payment method. TDC's "payroll or direct payment" answer is
+that toggle, not a code change. Events whose document does name the method (travel, medical) keep
+taking it from the document.
+
+Behaviour the slice changed on the way: processing a long-service award is now once (it had no
+state check) and, for a priced rung, writes `PaymentProcessed`/`PaymentDate` (columns nothing wrote
+before); an award's `AmountPaid` is now stored; a benefit claim must be Approved before it can be
+Paid and cannot leave Approved/Paid while its posting stands; award and long-service edits/deletes
+are guarded like claims. New account roles: leave encashment expense, awards expense, benefits
+expense.
+
 ⚠ **Finance de-duplicates on (source type, source id, posting action)**, not only on the
 idempotency key. Two events on one claim therefore carry different actions, and a re-post after a
 reversal carries a generation suffix (`Approve#2`), or Finance would hand back the reversed
@@ -153,11 +176,20 @@ recovery, each journal read back from Finance with the expected lines; reversal 
 reversal journal; a second approval is a duplicate; posted sources refuse edits; rule off → Unposted
 → retry posts.
 
+**Verified live 2026-09-20 (slice 2) on `ErpSystemDB_UAT`:** `run-slice2.mjs`, 56 assertions —
+an encashment credits the payable on the payroll route and clearing on the direct route (the
+toggle proven in both positions); an award conferred at 2,000 and paid 1,800 clears the payable
+in full and credits 200 back to expense; a payroll-route award payment is Skipped and says so; an
+unpriced long-service rung is Skipped; a benefit claim is refused Pending→Paid and refused back to
+Pending once posted. Benefit utilisations have no list screen in the frontend (only the enrolment
+rollup), so their posting is visible in the register and the API but not on a claim page — a UI
+gap noted, not built here.
+
 ## 6. Decisions taken here, and what they wait on
 
 | # | Decision | Taken as | Waits on |
 |---|---|---|---|
-| D-1 | Payroll vs direct payment for reimbursements | **Both, chosen per payment.** Direct → HR posts the settlement to clearing; payroll offset / salary deduction → HR posts only the advance recovery and payroll clears the payable | TDC may narrow it to one; the code needs no change, only the payment-method options |
+| D-1 | Payroll vs direct payment for reimbursements | **Both.** Documents that name a payment method decide per payment; events without one carry a per-event settlement-route toggle in HR Settings (slice 2) | TDC's answer is a toggle per event; no code change |
 | D-2 | Bank leg | HR never credits a bank account. Clearing is HR's edge; the bank is Finance's Cash module | Finance owner to confirm the clearing account (or one per method) — hand-off Q2 |
 | D-3 | Employee receivable for advances | A GL receivable on a shared role account, not a named AR customer; the register + `StaffTravelAdvance` are the sub-ledger | Decision #2 of the entity sweep still open for loans and surcharges |
 | D-4 | FX evidence on the journal | Not sent; HR values through the bridge and keeps the original on its row | Finance owner — whether HR may pass `ExchangeRateId` and under which rate policy (hand-off Q3) |
@@ -175,8 +207,9 @@ expense line is needed, and a contract test.
 
 | Register row | Event(s) | Roles | Note |
 |---|---|---|---|
-| 2.1 Leave encashment paid | `LEAVE_ENCASHMENT_PROCESSED` (recognise + settle in one, since `Processed` is the only status that moves a balance) | new role Leave expense; payable; clearing | **Do not build before L-D8** (whether in-service encashment exists at all) |
-| 14 Award paid | `AWARD_CONFERRED` (recognise), `AWARD_PAID` (settle) | new role Awards expense | budget figures stay the awards desk's bookkeeping |
+| ~~2.1 Leave encashment~~ | **built, slice 2** — L-D8 is the existing `AllowInServiceEncashment` flag; the posting only follows the event | | |
+| ~~14 Awards~~ | **built, slice 2** (conferred, paid, long-service processed) | | budget figures stay the awards desk's bookkeeping |
+| ~~Benefit utilisations~~ | **built, slice 2** (approved, paid) | | |
 | 9b Separation settlement released | `SEPARATION_SETTLEMENT_RELEASED` | per line category → expense roles; payable; recoverables → receivable | post on **release after audit**, never on finalise |
 | 16.1–16.4 Asset surcharge | `SURCHARGE_APPROVED` (Dr receivable / Cr recovery income or asset), `SURCHARGE_RECOVERED`, `SURCHARGE_WAIVED` | receivable; new role Surcharge recoveries | payroll deduction route = Skipped + payroll projection, as travel |
 | 3.4 Discipline fine | as surcharge | | |

@@ -35,6 +35,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { leaveEncashmentService } from '@/services/hr/leave.service';
 import type { LeaveEncashment } from '@/types/hr/leave-request';
 
@@ -160,6 +161,7 @@ export default function LeaveEncashmentsPage() {
                   <TableHead>How it was worked out</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Payment ref</TableHead>
+                  <TableHead>Finance</TableHead>
                   <TableHead className="w-[60px]" />
                 </TableRow>
               </TableHeader>
@@ -176,7 +178,7 @@ export default function LeaveEncashmentsPage() {
                   ))
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9}>
+                    <TableCell colSpan={10}>
                       <EmptyState
                         icon={Banknote}
                         title="No encashments"
@@ -215,6 +217,9 @@ export default function LeaveEncashmentsPage() {
                       </TableCell>
                       <TableCell className="text-muted-foreground">
                         {e.paymentReference || '—'}
+                      </TableCell>
+                      <TableCell>
+                        <FinancePostingInlineStatus sourceDocumentId={e.id} />
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

@@ -118,6 +118,11 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                 CreditRoles = definition.CreditRoles,
                 IsEnabled = rule?.IsEnabled ?? false,
                 PostOnActionDate = rule?.PostOnActionDate ?? true,
+                SupportsSettlementRoute = definition.SupportsSettlementRoute,
+                SettlementRoute = definition.SupportsSettlementRoute
+                    ? HrFinancePostingAdapter.ResolveSettlementRoute(definition, rule)
+                    : null,
+                DefaultSettlementRoute = definition.SupportsSettlementRoute ? definition.DefaultSettlementRoute : null,
                 Notes = rule?.Notes,
                 IsReady = missing.Count == 0 && context.AccountingBookCode is not null,
                 MissingRoles = missing,
@@ -243,6 +248,7 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                 EventCode = definition.Code,
                 IsEnabled = dto.IsEnabled,
                 PostOnActionDate = dto.PostOnActionDate,
+                SettlementRoute = definition.SupportsSettlementRoute ? dto.SettlementRoute : null,
                 Notes = dto.Notes?.Trim(),
                 CreatedById = userId,
                 CreatedBy = userId.ToString()
@@ -252,6 +258,7 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         {
             existing.IsEnabled = dto.IsEnabled;
             existing.PostOnActionDate = dto.PostOnActionDate;
+            existing.SettlementRoute = definition.SupportsSettlementRoute ? dto.SettlementRoute : null;
             existing.Notes = dto.Notes?.Trim();
             existing.UpdatedAt = DateTime.UtcNow;
             existing.UpdatedBy = userId.ToString();
@@ -449,6 +456,61 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                 if (advance.Status is TravelAdvanceStatus.Requested or TravelAdvanceStatus.Approved)
                     throw new InvalidOperationException($"Travel advance {advance.AdvanceNumber} has not been disbursed; there is nothing to post.");
                 return HrFinancePostingCommandFactory.TravelAdvanceDisbursed(advance);
+            }
+            case HrFinancePostingEventCatalog.LeaveEncashmentProcessed:
+            {
+                var encashment = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.StaffLeave.LeaveEncashment>()
+                    .GetQueryable(e => e.TenantId == tenantId && e.Id == record.SourceDocumentId && !e.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Leave encashment {record.SourceReference} no longer exists; nothing to post.");
+                if (encashment.Status != LeaveEncashmentStatus.Processed)
+                    throw new InvalidOperationException($"Leave encashment {record.SourceReference} is {encashment.Status}; only a processed encashment posts.");
+                return HrFinancePostingCommandFactory.LeaveEncashmentProcessed(encashment);
+            }
+            case HrFinancePostingEventCatalog.AwardConferred:
+            case HrFinancePostingEventCatalog.AwardPaid:
+            {
+                var award = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Awards.EmployeeAward>()
+                    .GetQueryable(a => a.TenantId == tenantId && a.Id == record.SourceDocumentId && !a.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Award {record.SourceReference} no longer exists; nothing to post.");
+                if (record.EventCode == HrFinancePostingEventCatalog.AwardConferred)
+                    return HrFinancePostingCommandFactory.AwardConferred(award);
+                if (!award.PaymentProcessed)
+                    throw new InvalidOperationException($"Award {award.AwardNumber} has not been paid; there is no settlement to post.");
+                var conferralPosted = await _adapter.IsPostedAsync(HrFinancePostingEventCatalog.AwardConferred, award.Id, cancellationToken);
+                return HrFinancePostingCommandFactory.AwardPaid(award, conferralPosted);
+            }
+            case HrFinancePostingEventCatalog.LongServiceAwardProcessed:
+            {
+                var award = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.Awards.LongServiceAward>()
+                    .GetQueryable(a => a.TenantId == tenantId && a.Id == record.SourceDocumentId && !a.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Long-service award {record.SourceReference} no longer exists; nothing to post.");
+                if (!award.IsProcessed)
+                    throw new InvalidOperationException($"Long-service award {record.SourceReference} has not been processed; there is nothing to post.");
+                return HrFinancePostingCommandFactory.LongServiceAwardProcessed(award);
+            }
+            case HrFinancePostingEventCatalog.BenefitUtilizationApproved:
+            case HrFinancePostingEventCatalog.BenefitUtilizationPaid:
+            {
+                var claim = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.BenefitUtilization>()
+                    .GetQueryable(c => c.TenantId == tenantId && c.Id == record.SourceDocumentId && !c.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Benefit claim {record.SourceReference} no longer exists; nothing to post.");
+                var enrollment = await _unitOfWork.Repository<ErpSystem.Core.Entities.HR.EmployeeBenefitEnrollment>()
+                    .GetQueryable(e => e.TenantId == tenantId && e.Id == claim.EnrollmentId && !e.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"The enrolment behind benefit claim {record.SourceReference} no longer exists.");
+                if (record.EventCode == HrFinancePostingEventCatalog.BenefitUtilizationApproved)
+                {
+                    if (claim.Status is not (BenefitClaimStatus.Approved or BenefitClaimStatus.Paid))
+                        throw new InvalidOperationException($"Benefit claim {record.SourceReference} is {claim.Status}; only an approved claim's recognition posts.");
+                    return HrFinancePostingCommandFactory.BenefitUtilizationApproved(claim, enrollment);
+                }
+                if (claim.Status != BenefitClaimStatus.Paid)
+                    throw new InvalidOperationException($"Benefit claim {record.SourceReference} is not paid; there is no settlement to post.");
+                return HrFinancePostingCommandFactory.BenefitUtilizationPaid(claim, enrollment);
             }
             default:
                 throw new InvalidOperationException($"No retry builder exists for event '{record.EventCode}'.");

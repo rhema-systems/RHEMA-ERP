@@ -7,6 +7,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Shared;
 using ErpSystem.Core.Interfaces.Common;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -29,6 +30,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
     private readonly IGenericRepository<LeaveType> _leaveTypeRepository;
     private readonly IDateTimeProvider _clock;
     private readonly ICompanyHrPolicyProvider _policyProvider;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     public LeaveEncashmentService(
         IGenericRepository<LeaveEncashment> encashmentRepository,
@@ -43,7 +45,8 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         IEmolumentService emolumentService,
         IGenericRepository<LeaveType> leaveTypeRepository,
         IDateTimeProvider clock,
-        ICompanyHrPolicyProvider policyProvider)
+        ICompanyHrPolicyProvider policyProvider,
+        IHrFinancePostingAdapter financePosting)
     {
         _encashmentRepository = encashmentRepository;
         _leaveRepository = leaveRepository;
@@ -58,6 +61,7 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         _leaveTypeRepository = leaveTypeRepository;
         _clock = clock;
         _policyProvider = policyProvider;
+        _financePosting = financePosting;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -299,15 +303,20 @@ public class LeaveEncashmentService : ILeaveEncashmentService
         entity.ProcessedByEmployeeId = processedBy;
         entity.PaymentReference = dto.PaymentReference;
 
-        // Mark processed and recalculate the balance in one transaction. The balance's
-        // EncashedDays is derived from processed encashments by the recalculation service —
-        // the single source of truth — so we never mutate UsedDays directly here.
-        await _unitOfWork.ExecuteInTransactionAsync(async ct =>
+        // Mark processed, recalculate the balance AND post to Finance in one transaction (HR
+        // finish plan lane 8, slice 2). The balance's EncashedDays is derived from processed
+        // encashments by the recalculation service — the single source of truth — so we never
+        // mutate UsedDays directly here. Whether in-service encashment exists at all is the policy
+        // flag AllowInServiceEncashment, checked long before this point; the posting only follows
+        // the event. The adapter owns the transaction that this method used to open itself.
+        var actedBy = Guid.TryParse(_currentUserService.UserId, out var actorUserId) ? actorUserId : Guid.Empty;
+        await _financePosting.RunAsync(async ct =>
         {
             await _encashmentRepository.UpdateAsync(entity);
             await _unitOfWork.SaveChangesAsync(ct);
             await _recalculationService.RecalculateAsync(entity.EmployeeId, entity.LeaveTypeId, entity.Year);
-        });
+            return HrFinancePostingCommandFactory.LeaveEncashmentProcessed(entity);
+        }, actedBy);
 
         _logger.LogInformation("Leave encashment {id} marked as processed with reference {ref}",
             id, dto.PaymentReference);

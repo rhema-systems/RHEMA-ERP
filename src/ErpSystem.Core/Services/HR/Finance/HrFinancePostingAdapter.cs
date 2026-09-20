@@ -161,6 +161,12 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         return rule?.IsEnabled == true;
     }
 
+    public async Task<bool> IsPostedAsync(string eventCode, Guid sourceDocumentId, CancellationToken cancellationToken = default)
+    {
+        var record = await _store.FindRecordAsync(GetTenantId(), eventCode, sourceDocumentId, cancellationToken);
+        return record?.Status == HrFinancePostingStatus.Posted;
+    }
+
     // ─────────────────────────────────────────────────────────────────────────────────────────
     //  The posting itself — always inside the transaction
     // ─────────────────────────────────────────────────────────────────────────────────────────
@@ -224,6 +230,12 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
 
         var rule = await _store.GetRuleAsync(tenantId, command.EventCode, cancellationToken);
         var context = await _store.GetTenantContextAsync(tenantId, cancellationToken);
+
+        // Settlement route: for single-step events the rule (or the catalogue default) decides
+        // whether HR's action settles directly or leaves the payable for payroll. Resolved BEFORE
+        // the disabled/skip branches so an Unposted row shows the amount that would have posted.
+        var (effectiveLines, routeSkip) = ResolveRouteLines(definition, rule, command);
+        var skipReason = command.SkipReason ?? routeSkip;
         record.CurrencyCode = context.FunctionalCurrencyCode;
         record.AccountingBookCode = context.AccountingBookCode;
         record.PostingDate = ResolvePostingDate(rule, command, now);
@@ -233,7 +245,7 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         // ── Not configured: proceed, but say so ──────────────────────────────────────────────
         if (rule is null || !rule.IsEnabled)
         {
-            record.Amount = SumDebits(command.Lines);
+            record.Amount = SumDebits(effectiveLines);
             record.LinesSnapshot = null;
             return await FinishAsync(record, isNew, HrFinancePostingStatus.Unposted,
                 rule is null
@@ -243,11 +255,11 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         }
 
         // ── Nothing to post for this instance ────────────────────────────────────────────────
-        if (!string.IsNullOrWhiteSpace(command.SkipReason))
+        if (!string.IsNullOrWhiteSpace(skipReason))
         {
             record.Amount = 0m;
             record.LinesSnapshot = null;
-            return await FinishAsync(record, isNew, HrFinancePostingStatus.Skipped, command.SkipReason, cancellationToken);
+            return await FinishAsync(record, isNew, HrFinancePostingStatus.Skipped, skipReason, cancellationToken);
         }
 
         // ── From here on the rule is live: any problem refuses the HR action ─────────────────
@@ -257,12 +269,12 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
                 throw new InvalidOperationException(
                     $"Finance's accounting book is not configured: {context.AccountingBookProblem} Ask Finance to set the subledger posting book.");
 
-            if (command.Lines.Count == 0)
+            if (effectiveLines.Count == 0)
                 throw new InvalidOperationException($"'{definition.Name}' produced no posting lines.");
-            if (command.Lines.Any(l => l.Amount <= 0m))
+            if (effectiveLines.Any(l => l.Amount <= 0m))
                 throw new InvalidOperationException($"'{definition.Name}' produced a non-positive posting line.");
 
-            var mappings = await ResolveAccountsAsync(tenantId, definition, command, cancellationToken);
+            var mappings = await ResolveAccountsAsync(tenantId, definition, effectiveLines, cancellationToken);
 
             // Functional-currency conversion for a foreign source, through Finance's own rate.
             var rate = 1m;
@@ -274,13 +286,13 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
             {
                 rate = await _currency.GetRateToBaseAsync(sourceCurrency!, DateOnly.FromDateTime(record.PostingDate), cancellationToken);
                 record.TransactionCurrencyCode = sourceCurrency;
-                record.TransactionAmount = SumDebits(command.Lines);
+                record.TransactionAmount = SumDebits(effectiveLines);
             }
 
-            var lines = new List<FinancePostingLineDto>(command.Lines.Count);
-            var snapshot = new List<HrFinancePostingLineSnapshotDto>(command.Lines.Count);
+            var lines = new List<FinancePostingLineDto>(effectiveLines.Count);
+            var snapshot = new List<HrFinancePostingLineSnapshotDto>(effectiveLines.Count);
             var lineNumber = 0;
-            foreach (var line in command.Lines)
+            foreach (var line in effectiveLines)
             {
                 var account = mappings[line.Role];
                 var amount = isForeign ? decimal.Round(line.Amount * rate, 2, MidpointRounding.AwayFromZero) : decimal.Round(line.Amount, 2, MidpointRounding.AwayFromZero);
@@ -436,13 +448,35 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
     //  Helpers
     // ─────────────────────────────────────────────────────────────────────────────────────────
 
+    /// <summary>
+    /// Picks the lines for the effective settlement route. Route-independent commands (approvals,
+    /// documents that name their own payment method) return <c>Lines</c> unchanged.
+    /// </summary>
+    public static (IReadOnlyList<HrFinancePostingLine> Lines, string? SkipReason) ResolveRouteLines(
+        HrFinancePostingEventDefinition definition,
+        HrFinancePostingRule? rule,
+        HrFinancePostingCommand command)
+    {
+        if (command.RouteDirectLines is null) return (command.Lines, null);
+        var route = ResolveSettlementRoute(definition, rule);
+        if (route == HrFinanceSettlementRoute.Direct) return (command.RouteDirectLines, null);
+        if (command.RoutePayrollLines.Count > 0) return (command.RoutePayrollLines, null);
+        return (Array.Empty<HrFinancePostingLine>(),
+            command.RoutePayrollSkipReason ?? "Settled through payroll: payroll's own journal clears the staff claims payable; HR posts nothing.");
+    }
+
+    public static HrFinanceSettlementRoute ResolveSettlementRoute(HrFinancePostingEventDefinition definition, HrFinancePostingRule? rule)
+        => definition.SupportsSettlementRoute
+            ? rule?.SettlementRoute ?? definition.DefaultSettlementRoute
+            : HrFinanceSettlementRoute.Direct;
+
     private async Task<IReadOnlyDictionary<HrFinanceAccountRole, HrFinanceAccountSnapshot>> ResolveAccountsAsync(
         Guid tenantId,
         HrFinancePostingEventDefinition definition,
-        HrFinancePostingCommand command,
+        IReadOnlyList<HrFinancePostingLine> effectiveLines,
         CancellationToken cancellationToken)
     {
-        var rolesUsed = command.Lines.Select(l => l.Role).Distinct().ToList();
+        var rolesUsed = effectiveLines.Select(l => l.Role).Distinct().ToList();
         var outsideCatalogue = rolesUsed.Where(r => !definition.AllRoles.Contains(r)).ToList();
         if (outsideCatalogue.Count > 0)
             throw new InvalidOperationException(
@@ -505,15 +539,7 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
 
     public static string ResolvePostingAction(HrFinancePostingEventDefinition definition, int generation)
     {
-        var action = definition.Code switch
-        {
-            HrFinancePostingEventCatalog.MedicalClaimApproved => "Approve",
-            HrFinancePostingEventCatalog.TravelClaimApproved => "Approve",
-            HrFinancePostingEventCatalog.MedicalClaimPaid => "Pay",
-            HrFinancePostingEventCatalog.TravelClaimPaid => "Pay",
-            HrFinancePostingEventCatalog.TravelAdvanceDisbursed => "Disburse",
-            _ => "Post"
-        };
+        var action = string.IsNullOrWhiteSpace(definition.PostingAction) ? "Post" : definition.PostingAction;
         return generation > 1 ? $"{action}#{generation}" : action;
     }
 
@@ -555,6 +581,9 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.StaffPaymentsClearing => "Staff payments clearing",
         HrFinanceAccountRole.MedicalExpense => "Medical expense",
         HrFinanceAccountRole.TravelExpense => "Travel expense",
+        HrFinanceAccountRole.LeaveEncashmentExpense => "Leave encashment expense",
+        HrFinanceAccountRole.AwardsExpense => "Awards expense",
+        HrFinanceAccountRole.BenefitsExpense => "Benefits expense",
         _ => role.ToString()
     };
 
@@ -565,6 +594,9 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.StaffPaymentsClearing => "Asset (clearing). Where HR's 'paid' lands until Finance's Cash module clears it against the bank — the same shape as the payroll clearing account.",
         HrFinanceAccountRole.MedicalExpense => "Expense. Medical reimbursements to employees and their dependants.",
         HrFinanceAccountRole.TravelExpense => "Expense. Staff travel — per diems, accommodation, transport and incidentals.",
+        HrFinanceAccountRole.LeaveEncashmentExpense => "Expense. Leave days paid out instead of taken — in service where policy allows it, and on exit.",
+        HrFinanceAccountRole.AwardsExpense => "Expense. Cash awards and long-service awards conferred on employees.",
+        HrFinanceAccountRole.BenefitsExpense => "Expense. Benefit utilisations reimbursed to employees under their enrolments.",
         _ => string.Empty
     };
 }

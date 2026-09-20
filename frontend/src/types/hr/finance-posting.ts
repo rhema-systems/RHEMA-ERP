@@ -10,9 +10,15 @@ export type HrFinanceAccountRole =
   | 'StaffAdvancesReceivable'
   | 'StaffPaymentsClearing'
   | 'MedicalExpense'
-  | 'TravelExpense';
+  | 'TravelExpense'
+  | 'LeaveEncashmentExpense'
+  | 'AwardsExpense'
+  | 'BenefitsExpense';
 
 export type HrFinancePostingStatus = 'Posted' | 'Failed' | 'Unposted' | 'Skipped' | 'Reversed';
+
+/** For events whose document names no payment method: HR settles directly, or payroll clears the payable. */
+export type HrFinanceSettlementRoute = 'Direct' | 'Payroll';
 
 export interface HrFinanceAccountMapping {
   role: HrFinanceAccountRole;
@@ -39,6 +45,10 @@ export interface HrFinancePostingRule {
   creditRoles: HrFinanceAccountRole[];
   isEnabled: boolean;
   postOnActionDate: boolean;
+  /** True when the rule (not the document) decides payroll vs direct settlement. */
+  supportsSettlementRoute: boolean;
+  settlementRoute: HrFinanceSettlementRoute | null;
+  defaultSettlementRoute: HrFinanceSettlementRoute | null;
   notes: string | null;
   /** Every role mapped to an active account of the right type, and Finance's book resolvable. */
   isReady: boolean;
@@ -66,6 +76,7 @@ export interface UpsertHrFinancePostingRule {
   eventCode: string;
   isEnabled: boolean;
   postOnActionDate: boolean;
+  settlementRoute?: HrFinanceSettlementRoute | null;
   notes?: string | null;
 }
 

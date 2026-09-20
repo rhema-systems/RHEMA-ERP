@@ -47,6 +47,7 @@ import {
   type HrFinancePostingRecord,
   type HrFinancePostingRule,
   type HrFinancePostingStatus,
+  type HrFinanceSettlementRoute,
 } from '@/types/hr/finance-posting';
 
 const SETTINGS_KEY = ['hr', 'finance-posting', 'settings'] as const;
@@ -78,14 +79,15 @@ export default function HrFinancePostingSettingsPage() {
     onError: onError('Could not remove the mapping'),
   });
   const upsertRule = useMutation({
-    mutationFn: (rule: HrFinancePostingRule & { isEnabled: boolean }) =>
+    mutationFn: (rule: HrFinancePostingRule) =>
       financePostingService.upsertRule({
         eventCode: rule.eventCode,
         isEnabled: rule.isEnabled,
         postOnActionDate: rule.postOnActionDate,
+        settlementRoute: rule.supportsSettlementRoute ? rule.settlementRoute : null,
         notes: rule.notes,
       }),
-    onSuccess: async (_, v) => { toast({ title: v.isEnabled ? 'Event enabled' : 'Event disabled' }); await invalidateAll(); },
+    onSuccess: async () => { toast({ title: 'Rule saved' }); await invalidateAll(); },
     onError: onError('Could not change the rule'),
   });
 
@@ -196,6 +198,25 @@ export default function HrFinancePostingSettingsPage() {
                     <p className="text-xs text-muted-foreground">
                       Debits {rule.debitRoles.join(', ')} · credits {rule.creditRoles.join(', ')} · Finance source type {rule.sourceDocumentType}
                     </p>
+                    {rule.supportsSettlementRoute && (
+                      <div className="flex flex-wrap items-center gap-3">
+                        <Label htmlFor={`route-${rule.eventCode}`} className="text-xs">Settled</Label>
+                        <Select
+                          value={rule.settlementRoute ?? rule.defaultSettlementRoute ?? 'Direct'}
+                          disabled={!canAdmin || upsertRule.isPending}
+                          onValueChange={(v) => upsertRule.mutate({ ...rule, settlementRoute: v as HrFinanceSettlementRoute })}
+                        >
+                          <SelectTrigger id={`route-${rule.eventCode}`} className="w-56"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="Direct">Directly — HR's action is the payment</SelectItem>
+                            <SelectItem value="Payroll">Through payroll — payroll clears the payable</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <span className="text-xs text-muted-foreground">
+                          TDC's "payroll or direct payment" answer is this toggle; default {rule.defaultSettlementRoute}.
+                        </span>
+                      </div>
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {rule.postedCount} posted · {rule.pendingCount} waiting (unposted or failed)
                       {rule.pendingCount > 0 && !rule.isEnabled && ' — enable the event, then post them from the register'}

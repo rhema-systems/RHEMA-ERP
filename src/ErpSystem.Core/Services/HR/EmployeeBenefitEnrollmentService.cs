@@ -4,6 +4,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Benefits;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -30,6 +31,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<EmployeeBenefitEnrollmentService> _logger;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     public EmployeeBenefitEnrollmentService(
         IGenericRepository<EmployeeBenefitEnrollment> enrollmentRepository,
@@ -45,7 +47,8 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         IPositionNamedSetService namedSets,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        ILogger<EmployeeBenefitEnrollmentService> logger)
+        ILogger<EmployeeBenefitEnrollmentService> logger,
+        IHrFinancePostingAdapter financePosting)
     {
         _enrollmentRepository = enrollmentRepository ?? throw new ArgumentNullException(nameof(enrollmentRepository));
         _benefitPolicyRepository = benefitPolicyRepository ?? throw new ArgumentNullException(nameof(benefitPolicyRepository));
@@ -61,6 +64,7 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
         _currentUserProvider = currentUserProvider ?? throw new ArgumentNullException(nameof(currentUserProvider));
         _unitOfWork = unitOfWork ?? throw new ArgumentNullException(nameof(unitOfWork));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _financePosting = financePosting ?? throw new ArgumentNullException(nameof(financePosting));
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -577,28 +581,55 @@ public class EmployeeBenefitEnrollmentService : IEmployeeBenefitEnrollmentServic
 
         // Apply the transition on the tracked claim instance from the enrollment graph.
         var tracked = enrollment.Utilizations.First(u => u.Id == claim.Id);
-        tracked.Status = dto.Status;
+        var previous = tracked.Status;
 
-        if (dto.Status is BenefitClaimStatus.Approved or BenefitClaimStatus.Paid)
+        // Lane 8 slice 2: this one method is approve, pay, reject and cancel. Two rules keep the
+        // accounting truthful. (1) Paid only follows Approved — recognition before settlement, as
+        // on a medical claim; a Pending→Paid jump would need two postings in one action. (2) A
+        // claim whose recognition or settlement is in Finance's ledger cannot be moved back to
+        // Pending, Approved, Rejected or Cancelled until the posting is reversed.
+        if (dto.Status == BenefitClaimStatus.Paid && previous != BenefitClaimStatus.Approved)
+            throw new InvalidOperationException(
+                previous == BenefitClaimStatus.Paid
+                    ? "This claim is already paid."
+                    : $"A claim must be Approved before it can be Paid; this one is {previous}.");
+        if (previous is BenefitClaimStatus.Approved or BenefitClaimStatus.Paid
+            && !(previous == BenefitClaimStatus.Approved && dto.Status is BenefitClaimStatus.Approved or BenefitClaimStatus.Paid))
+            await _financePosting.EnsureNotPostedAsync(
+                HrFinancePostingEventCatalog.SourceBenefitUtilization, tracked.Id, "Changing the status of this claim");
+
+        await _financePosting.RunAsync(async ct =>
         {
-            tracked.ApprovedDate ??= DateTime.UtcNow;
+            tracked.Status = dto.Status;
 
-            // Block if approving/paying this claim would push the period total past the coverage limit.
-            var (limit, used, _, _, _) = await ApplyPeriodAndRecomputeAsync(enrollment, persist: false);
-            if (used > limit)
+            if (dto.Status is BenefitClaimStatus.Approved or BenefitClaimStatus.Paid)
             {
-                throw new InvalidOperationException(
-                    $"Claim exceeds the remaining benefit balance (limit {limit:N2}, would be used {used:N2}).");
-            }
-        }
-        else if (dto.Status is BenefitClaimStatus.Rejected or BenefitClaimStatus.Cancelled)
-        {
-            tracked.RejectionReason = dto.Reason;
-        }
+                tracked.ApprovedDate ??= DateTime.UtcNow;
 
-        // Refresh denormalized caches to reflect the new claim state, then persist.
-        await ApplyPeriodAndRecomputeAsync(enrollment, persist: true);
-        await _unitOfWork.SaveChangesAsync();
+                // Block if approving/paying this claim would push the period total past the coverage limit.
+                var (limit, used, _, _, _) = await ApplyPeriodAndRecomputeAsync(enrollment, persist: false);
+                if (used > limit)
+                {
+                    throw new InvalidOperationException(
+                        $"Claim exceeds the remaining benefit balance (limit {limit:N2}, would be used {used:N2}).");
+                }
+            }
+            else if (dto.Status is BenefitClaimStatus.Rejected or BenefitClaimStatus.Cancelled)
+            {
+                tracked.RejectionReason = dto.Reason;
+            }
+
+            // Refresh denormalized caches to reflect the new claim state, then persist.
+            await ApplyPeriodAndRecomputeAsync(enrollment, persist: true);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return dto.Status switch
+            {
+                BenefitClaimStatus.Approved => HrFinancePostingCommandFactory.BenefitUtilizationApproved(tracked, enrollment),
+                BenefitClaimStatus.Paid => HrFinancePostingCommandFactory.BenefitUtilizationPaid(tracked, enrollment),
+                _ => null
+            };
+        }, _currentUserProvider.UserId);
 
         return ToUtilizationDto(tracked);
     }

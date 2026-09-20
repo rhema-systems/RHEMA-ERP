@@ -6,6 +6,7 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Finance;
 
 namespace ErpSystem.Core.Services.HR;
 
@@ -592,6 +593,7 @@ public class EmployeeAwardService : IEmployeeAwardService
     private readonly IAwardTypeRepository _awardTypeRepo;
     private readonly IAwardBudgetRepository _budgetRepo;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     public EmployeeAwardService(
         IEmployeeAwardRepository awardRepo,
@@ -599,7 +601,8 @@ public class EmployeeAwardService : IEmployeeAwardService
         ICurrentUserProvider currentUserProvider,
         IAwardTypeRepository awardTypeRepo,
         IAwardBudgetRepository budgetRepo,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IHrFinancePostingAdapter financePosting)
     {
         _awardRepo = awardRepo;
         _nominationRepo = nominationRepo;
@@ -607,6 +610,37 @@ public class EmployeeAwardService : IEmployeeAwardService
         _awardTypeRepo = awardTypeRepo;
         _budgetRepo = budgetRepo;
         _unitOfWork = unitOfWork;
+        _financePosting = financePosting;
+    }
+
+    /// <summary>
+    /// Runs an award mutation and its Finance posting as one unit (HR finish plan lane 8, slice 2).
+    /// A Finance refusal is surfaced as the awards workflow's own 422 carrying Finance's reason.
+    /// </summary>
+    private async Task RunWithFinanceAsync(
+        Func<CancellationToken, Task<HrFinancePostingCommand?>> mutate, Guid actedByUserId)
+    {
+        try
+        {
+            await _financePosting.RunAsync(mutate, actedByUserId);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw AwardsWorkflowException.InvalidState(ex.Message);
+        }
+    }
+
+    /// <summary>An award whose conferral or payment is in Finance's ledger is not edited or deleted into a different number; reverse first.</summary>
+    private async Task GuardNotPostedAsync(Guid awardId, string action)
+    {
+        try
+        {
+            await _financePosting.EnsureNotPostedAsync(HrFinancePostingEventCatalog.SourceEmployeeAward, awardId, action);
+        }
+        catch (InvalidOperationException ex) when (ex is not HrFinancePostingException)
+        {
+            throw AwardsWorkflowException.InvalidState(ex.Message);
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -840,11 +874,19 @@ public class EmployeeAwardService : IEmployeeAwardService
         var awardNumber = $"AWD-{DateTime.UtcNow:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
         var entity = dto.ToEntity(tenantId, userId, awardNumber);
         entity.AwardCycleId = dto.AwardCycleId;
-        await _awardRepo.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
 
-        await ReserveAgainstBudgetAsync(entity, userId);
-        await _unitOfWork.SaveChangesAsync();
+        // Conferral commits money: the award, its budget reservation and Finance's recognition of
+        // the liability commit together (lane 8, slice 2). Awards without a monetary value post
+        // nothing and are recorded Skipped.
+        await RunWithFinanceAsync(async ct =>
+        {
+            await _awardRepo.AddAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            await ReserveAgainstBudgetAsync(entity, userId);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return HrFinancePostingCommandFactory.AwardConferred(entity);
+        }, userId);
 
         var created = await _awardRepo.GetWithDetailsAsync(entity.Id);
         return created!.ToDto();
@@ -897,22 +939,28 @@ public class EmployeeAwardService : IEmployeeAwardService
         var entity = dto.ToEntity(nomination, tenantId, userId, awardNumber);
         entity.AwardCycleId = nomination.AwardCycleId;
 
-        await _awardRepo.AddAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
+        // Conferral, the nomination's closure, the budget reservation and Finance's recognition
+        // commit together (lane 8, slice 2).
+        await RunWithFinanceAsync(async ct =>
+        {
+            await _awardRepo.AddAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
 
-        // 4. Close the loop in BOTH directions. EF treats these as two independent one-way
-        //    relationships - [ForeignKey] is declared on each side - so nothing in the model stops a
-        //    nomination pointing at one award while that award points at a different nomination.
-        //    Slice 1 recorded that and left it for this slice to hold together by hand.
-        nomination.EmployeeAwardId = entity.Id;
-        nomination.Status = AwardNominationStatus.Approved;
-        nomination.OutcomeDate = DateTime.UtcNow;
-        nomination.UpdatedAt = DateTime.UtcNow;
-        nomination.UpdatedBy = userId.ToString();
-        await _nominationRepo.UpdateAsync(nomination);
+            // 4. Close the loop in BOTH directions. EF treats these as two independent one-way
+            //    relationships - [ForeignKey] is declared on each side - so nothing in the model stops a
+            //    nomination pointing at one award while that award points at a different nomination.
+            //    Slice 1 recorded that and left it for this slice to hold together by hand.
+            nomination.EmployeeAwardId = entity.Id;
+            nomination.Status = AwardNominationStatus.Approved;
+            nomination.OutcomeDate = DateTime.UtcNow;
+            nomination.UpdatedAt = DateTime.UtcNow;
+            nomination.UpdatedBy = userId.ToString();
+            await _nominationRepo.UpdateAsync(nomination);
 
-        await ReserveAgainstBudgetAsync(entity, userId);
-        await _unitOfWork.SaveChangesAsync();
+            await ReserveAgainstBudgetAsync(entity, userId);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return HrFinancePostingCommandFactory.AwardConferred(entity);
+        }, userId);
 
         var created = await _awardRepo.GetWithDetailsAsync(entity.Id);
         return created!.ToDto();
@@ -921,6 +969,7 @@ public class EmployeeAwardService : IEmployeeAwardService
     public async Task<EmployeeAwardDto> UpdateAsync(Guid id, Guid userId, UpdateEmployeeAwardDto dto)
     {
         var entity = await GetOwnedAsync(id);
+        await GuardNotPostedAsync(id, "Editing this award");
         entity.UpdateEntity(dto, userId);
         await _awardRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -932,6 +981,7 @@ public class EmployeeAwardService : IEmployeeAwardService
     public async Task DeleteAsync(Guid id)
     {
         await GetOwnedAsync(id);
+        await GuardNotPostedAsync(id, "Deleting this award");
         await _awardRepo.DeleteAsync(id);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -977,15 +1027,25 @@ public class EmployeeAwardService : IEmployeeAwardService
 
         var paid = dto.AmountPaid ?? entity.MonetaryAmount ?? 0m;
 
-        entity.PaymentProcessed = true;
-        entity.PaymentDate = DateTime.UtcNow;
-        entity.PaymentReference = dto.PaymentReference;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        // Payment, the budget spend and Finance's settlement commit together (lane 8, slice 2).
+        // AmountPaid is now kept on the award so a retry can rebuild the same journal. An award
+        // whose conferral never reached Finance (priced after conferral, or conferred with the rule
+        // off) has no payable to clear, so its payment recognises and settles in one journal.
+        var conferralPosted = await _financePosting.IsPostedAsync(HrFinancePostingEventCatalog.AwardConferred, entity.Id);
+        await RunWithFinanceAsync(async ct =>
+        {
+            entity.PaymentProcessed = true;
+            entity.PaymentDate = DateTime.UtcNow;
+            entity.PaymentReference = dto.PaymentReference;
+            entity.AmountPaid = paid;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = userId.ToString();
 
-        await _awardRepo.UpdateAsync(entity);
-        await SpendAgainstBudgetAsync(entity, paid, userId);
-        await _unitOfWork.SaveChangesAsync();
+            await _awardRepo.UpdateAsync(entity);
+            await SpendAgainstBudgetAsync(entity, paid, userId);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return HrFinancePostingCommandFactory.AwardPaid(entity, conferralPosted);
+        }, userId);
     }
 
     public async Task ProcessLeaveAsync(Guid id, Guid userId)
@@ -2178,15 +2238,30 @@ public class LongServiceAwardService : ILongServiceAwardService
     private readonly ILongServiceAwardRepository _lsaRepo;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     public LongServiceAwardService(
         ILongServiceAwardRepository lsaRepo,
         ICurrentUserProvider currentUserProvider,
-        IUnitOfWork unitOfWork)
+        IUnitOfWork unitOfWork,
+        IHrFinancePostingAdapter financePosting)
     {
         _lsaRepo = lsaRepo;
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
+        _financePosting = financePosting;
+    }
+
+    private async Task GuardNotPostedAsync(Guid awardId, string action)
+    {
+        try
+        {
+            await _financePosting.EnsureNotPostedAsync(HrFinancePostingEventCatalog.SourceLongServiceAward, awardId, action);
+        }
+        catch (InvalidOperationException ex) when (ex is not HrFinancePostingException)
+        {
+            throw AwardsWorkflowException.InvalidState(ex.Message);
+        }
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -2296,6 +2371,7 @@ public class LongServiceAwardService : ILongServiceAwardService
     public async Task<LongServiceAwardDto> UpdateAsync(Guid id, Guid userId, UpdateLongServiceAwardDto dto)
     {
         var entity = await GetOwnedAsync(id);
+        await GuardNotPostedAsync(id, "Editing this long-service award");
         entity.UpdateEntity(dto, userId);
         await _lsaRepo.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync();
@@ -2307,6 +2383,7 @@ public class LongServiceAwardService : ILongServiceAwardService
     public async Task DeleteAsync(Guid id)
     {
         await GetOwnedAsync(id);
+        await GuardNotPostedAsync(id, "Deleting this long-service award");
         await _lsaRepo.DeleteAsync(id);
         await _unitOfWork.SaveChangesAsync();
     }
@@ -2315,15 +2392,40 @@ public class LongServiceAwardService : ILongServiceAwardService
     {
         var entity = await GetOwnedAsync(dto.AwardId);
 
-        entity.IsProcessed = true;
-        entity.ProcessedDate = DateTime.UtcNow;
-        entity.PresentationDate = dto.PresentationDate;
-        entity.PresentationNotes = dto.PresentationNotes;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        // Processing is once. This method had no state check at all, and re-processing would
+        // overwrite the presentation record and re-run the money event.
+        if (entity.IsProcessed)
+            throw AwardsWorkflowException.Conflict(
+                $"This long-service award was already processed on {entity.ProcessedDate:yyyy-MM-dd}.");
 
-        await _lsaRepo.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
+        // Processing a priced rung IS the payment: the columns PaymentProcessed/PaymentDate had no
+        // writer anywhere before lane 8 slice 2. An unpriced rung (null amount — TDC has not valued
+        // the ladder) is processed without money and the posting is recorded Skipped.
+        try
+        {
+            await _financePosting.RunAsync(async ct =>
+            {
+                entity.IsProcessed = true;
+                entity.ProcessedDate = DateTime.UtcNow;
+                entity.PresentationDate = dto.PresentationDate;
+                entity.PresentationNotes = dto.PresentationNotes;
+                if (entity.MonetaryAmount is > 0m)
+                {
+                    entity.PaymentProcessed = true;
+                    entity.PaymentDate = DateTime.UtcNow;
+                }
+                entity.UpdatedAt = DateTime.UtcNow;
+                entity.UpdatedBy = userId.ToString();
+
+                await _lsaRepo.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return HrFinancePostingCommandFactory.LongServiceAwardProcessed(entity);
+            }, userId);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw AwardsWorkflowException.InvalidState(ex.Message);
+        }
     }
 }
 
