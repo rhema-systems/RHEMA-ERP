@@ -16,8 +16,9 @@ import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { AccountingBook, AccountingBookLifecycleStatus, AccountingBookType, SaveAccountingBook } from '@/types/finance';
+import type { AccountingBook, AccountingBookActivationReadiness, AccountingBookInitialization, AccountingBookLifecycleStatus, AccountingBookPeriod, AccountingBookType, SaveAccountingBook } from '@/types/finance';
 import { getAccountingBookAccess, isIndependentChecker } from '@/components/finance/accounting-books/accounting-book-access';
+import { InitializationEvidencePack } from '@/components/finance/accounting-books/initialization-evidence-pack';
 import { SearchableOptionPicker } from '@/components/finance/accounting-books/searchable-option-picker';
 import type { Currency } from '@/types/finance';
 
@@ -54,6 +55,58 @@ const typeOf = (book: AccountingBook): AccountingBookType =>
 const dateValue = (value?: string | null) => value ? value.slice(0, 10) : '';
 const utcDate = (value: string) => value ? `${value}T00:00:00.000Z` : null;
 
+type LifecycleEvidence = {
+    loading: boolean;
+    error: string | null;
+    initialization: AccountingBookInitialization | null;
+    readiness: AccountingBookActivationReadiness | null;
+    periods: AccountingBookPeriod[];
+};
+
+const emptyLifecycleEvidence = (): LifecycleEvidence => ({
+    loading: false,
+    error: null,
+    initialization: null,
+    readiness: null,
+    periods: [],
+});
+
+function LifecycleTransitionEvidence({ book, target, evidence, retry }: {
+    book: AccountingBook;
+    target: AccountingBookLifecycleStatus;
+    evidence: LifecycleEvidence;
+    retry: () => void;
+}) {
+    const current = statusOf(book);
+    return <div className="space-y-4 rounded-md border p-4">
+        <div>
+            <p className="font-medium">Lifecycle decision evidence</p>
+            <p className="text-sm text-muted-foreground">Review the governed configuration and readiness supporting this {current} → {target} request.</p>
+        </div>
+        <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+            <div><span className="text-muted-foreground">Book</span><p className="font-medium">{book.code} — {book.name}</p></div>
+            <div><span className="text-muted-foreground">Transition</span><p>{current} → {target}</p></div>
+            <div><span className="text-muted-foreground">Type</span><p>{typeOf(book)}</p></div>
+            <div><span className="text-muted-foreground">Purpose</span><p>{book.purpose}</p></div>
+            <div><span className="text-muted-foreground">Currency</span><p>{book.functionalCurrencyCode || 'Inherited from base'}</p></div>
+            <div><span className="text-muted-foreground">Base book</span><p>{book.baseAccountingBookCode || 'None'}</p></div>
+            <div><span className="text-muted-foreground">Effective from</span><p>{dateValue(book.effectiveFromUtc) || 'Not set'}</p></div>
+            <div><span className="text-muted-foreground">Request submitted</span><p>{book.transitionRequestedAtUtc ? new Date(book.transitionRequestedAtUtc).toLocaleString() : 'Not yet submitted'}</p></div>
+            <div className="sm:col-span-2 lg:col-span-4"><span className="text-muted-foreground">Transition reason</span><p>{book.pendingTransitionReason || 'The maker will provide a reason when submitting this request.'}</p></div>
+        </div>
+
+        {target === 'Initializing' && <Alert><ShieldAlert className="h-4 w-4" /><AlertTitle>What this approval authorizes</AlertTitle><AlertDescription>Initialization evidence does not exist yet. This decision authorizes the book to enter Initializing so its exact-book periods and opening evidence can be prepared and independently approved.</AlertDescription></Alert>}
+
+        {target === 'Active' && (evidence.loading ? <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"><Loader2 className="h-4 w-4 animate-spin" />Loading approved initialization and period evidence…</div>
+            : evidence.error ? <Alert variant="destructive"><AlertTitle>Activation evidence unavailable</AlertTitle><AlertDescription>{evidence.error} <Button type="button" variant="link" className="h-auto p-0" onClick={retry}>Retry</Button></AlertDescription></Alert>
+                : <div className="space-y-4">
+                    <Alert className={evidence.readiness?.isReady ? 'border-emerald-300 bg-emerald-50' : 'border-amber-300 bg-amber-50'}><ShieldAlert className="h-4 w-4" /><AlertTitle>{evidence.readiness?.isReady ? 'Activation readiness confirmed' : 'Activation is not ready'}</AlertTitle><AlertDescription>{evidence.readiness?.isReady ? `Approved initialization and ${evidence.readiness.readyPeriodCount} required open period(s) are current.` : evidence.readiness?.blockers.join(' ') || 'Readiness could not be confirmed.'}</AlertDescription></Alert>
+                    <div className="rounded-md border p-3 text-sm"><p className="font-medium">Required exact-book periods</p>{evidence.periods.length === 0 ? <p className="mt-1 text-muted-foreground">No exact-book periods are configured.</p> : <div className="mt-2 flex flex-wrap gap-2">{evidence.periods.map(period => <Badge key={period.id} variant={period.status === 'Open' ? 'default' : 'outline'}>{period.fiscalPeriodCode}: {period.status}</Badge>)}</div>}</div>
+                    {evidence.initialization ? <InitializationEvidencePack initialization={evidence.initialization} /> : <Alert variant="destructive"><AlertTitle>Initialization evidence missing</AlertTitle><AlertDescription>No initialization record is available for this activation decision.</AlertDescription></Alert>}
+                </div>)}
+    </div>;
+}
+
 export default function AccountingBooksSettingsPage() {
     const { user, hasPermission, isLoading: authLoading, error: authError } = useAuth();
     const access = getAccountingBookAccess(hasPermission);
@@ -74,6 +127,7 @@ export default function AccountingBooksSettingsPage() {
     const [transitionReason, setTransitionReason] = useState('');
     const [decision, setDecision] = useState<{ book: AccountingBook; action: 'approve' | 'reject' } | null>(null);
     const [decisionReason, setDecisionReason] = useState('');
+    const [lifecycleEvidence, setLifecycleEvidence] = useState<LifecycleEvidence>(emptyLifecycleEvidence);
     const [saving, setSaving] = useState(false);
 
     const load = useCallback(async () => {
@@ -167,12 +221,42 @@ export default function AccountingBooksSettingsPage() {
         } finally { setSaving(false); }
     };
 
+    const loadLifecycleEvidence = useCallback(async (book: AccountingBook, target: AccountingBookLifecycleStatus) => {
+        if (target !== 'Active') {
+            setLifecycleEvidence(emptyLifecycleEvidence());
+            return;
+        }
+        setLifecycleEvidence({ ...emptyLifecycleEvidence(), loading: true });
+        try {
+            const [initialization, readiness, periods] = await Promise.all([
+                financeDataService.getAccountingBookInitialization(book.id),
+                financeDataService.getAccountingBookActivationReadiness(book.id),
+                financeDataService.getAccountingBookPeriods(book.id),
+            ]);
+            setLifecycleEvidence({ loading: false, error: null, initialization, readiness, periods });
+        } catch (reason) {
+            setLifecycleEvidence({ ...emptyLifecycleEvidence(), error: reason instanceof Error ? reason.message : 'Activation evidence could not be loaded.' });
+        }
+    }, []);
+
     const openTransition = (book: AccountingBook) => {
         const firstTarget = lifecycleTargets[statusOf(book)][0];
         if (!firstTarget) return;
         setTransitioning(book);
         setTargetStatus(firstTarget);
         setTransitionReason('');
+        void loadLifecycleEvidence(book, firstTarget);
+    };
+
+    const selectTargetStatus = (value: AccountingBookLifecycleStatus) => {
+        setTargetStatus(value);
+        if (transitioning) void loadLifecycleEvidence(transitioning, value);
+    };
+
+    const openDecision = (book: AccountingBook, action: 'approve' | 'reject') => {
+        setDecision({ book, action });
+        setDecisionReason('');
+        if (book.pendingLifecycleStatus) void loadLifecycleEvidence(book, book.pendingLifecycleStatus);
     };
 
     const requestTransition = async () => {
@@ -226,7 +310,12 @@ export default function AccountingBooksSettingsPage() {
         || editing.pendingLifecycleStatus
         || ['Initializing', 'Active', 'Suspended', 'Retired'].includes(statusOf(editing))
     ));
-    const targetIsBlockedActivation = targetStatus === 'Active' && !transitioning?.activationReady;
+    const targetIsBlockedActivation = targetStatus === 'Active' && (!transitioning?.activationReady
+        || lifecycleEvidence.loading || Boolean(lifecycleEvidence.error) || !lifecycleEvidence.readiness?.isReady
+        || !lifecycleEvidence.initialization);
+    const decisionIsBlockedActivation = decision?.action === 'approve' && decision.book.pendingLifecycleStatus === 'Active'
+        && (lifecycleEvidence.loading || Boolean(lifecycleEvidence.error) || !lifecycleEvidence.readiness?.isReady
+            || !lifecycleEvidence.initialization);
 
     return <div className="space-y-6 p-6">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -255,7 +344,7 @@ export default function AccountingBooksSettingsPage() {
                         <CardContent className="space-y-3 text-sm">
                             <div className="grid grid-cols-2 gap-2"><span><span className="text-muted-foreground">Type:</span> {typeOf(book)}</span><span><span className="text-muted-foreground">Currency:</span> {book.functionalCurrencyCode || 'Inherited from base'}</span><span><span className="text-muted-foreground">Effective:</span> {dateValue(book.effectiveFromUtc) || 'Not set'}</span><span><span className="text-muted-foreground">Base:</span> {book.baseAccountingBookCode || 'None'}</span></div>
                             {book.pendingLifecycleStatus && <Alert className={book.pendingLifecycleStatus === 'Active' && !book.activationReady ? 'border-amber-300 bg-amber-50' : undefined}><AlertTitle>Pending {book.pendingLifecycleStatus}</AlertTitle><AlertDescription>{book.pendingTransitionReason || 'Awaiting independent review.'}{book.pendingLifecycleStatus === 'Active' && !book.activationReady ? ` ${book.readinessMessage || 'Approved initialization and an open first exact-book period are required.'}` : ''}</AlertDescription></Alert>}
-                            <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void openDetail(book)}>View details</Button><Button asChild variant="outline" size="sm"><Link href={`/finance/settings/accounting-books/${book.id}/readiness`}>Periods &amp; initialization</Link></Button>{access.canManage && status !== 'Retired' && <Button variant="outline" size="sm" disabled={Boolean(book.pendingLifecycleStatus)} onClick={() => openEditor(book)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</Button>}{access.canRequestTransition && !book.pendingLifecycleStatus && lifecycleTargets[status].length > 0 && (status === 'Initializing' && !book.activationReady ? <Button asChild size="sm"><Link href={`/finance/settings/accounting-books/${book.id}/readiness`}>Complete activation readiness</Link></Button> : <Button size="sm" onClick={() => openTransition(book)}>{lifecycleTargets[status].length === 1 ? `Request ${lifecycleTargets[status][0]}` : 'Request lifecycle change'}</Button>)}{canDecide && <><Button size="sm" disabled={book.pendingLifecycleStatus === 'Active' && !book.activationReady} onClick={() => { setDecision({ book, action: 'approve' }); setDecisionReason(''); }}>Approve</Button><Button size="sm" variant="destructive" onClick={() => { setDecision({ book, action: 'reject' }); setDecisionReason(''); }}>Reject</Button></>}{isRequester && <span className="self-center text-xs text-muted-foreground">Awaiting a different authorized checker.</span>}</div>
+                            <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" onClick={() => void openDetail(book)}>View details</Button><Button asChild variant="outline" size="sm"><Link href={`/finance/settings/accounting-books/${book.id}/readiness`}>Periods &amp; initialization</Link></Button>{access.canManage && status !== 'Retired' && <Button variant="outline" size="sm" disabled={Boolean(book.pendingLifecycleStatus)} onClick={() => openEditor(book)}><Pencil className="mr-2 h-3.5 w-3.5" />Edit</Button>}{access.canRequestTransition && !book.pendingLifecycleStatus && lifecycleTargets[status].length > 0 && (status === 'Initializing' && !book.activationReady ? <Button asChild size="sm"><Link href={`/finance/settings/accounting-books/${book.id}/readiness`}>Complete activation readiness</Link></Button> : <Button size="sm" onClick={() => openTransition(book)}>{lifecycleTargets[status].length === 1 ? `Request ${lifecycleTargets[status][0]}` : 'Request lifecycle change'}</Button>)}{canDecide && <><Button size="sm" disabled={book.pendingLifecycleStatus === 'Active' && !book.activationReady} onClick={() => openDecision(book, 'approve')}>Review &amp; approve</Button><Button size="sm" variant="destructive" onClick={() => openDecision(book, 'reject')}>Review &amp; reject</Button></>}{isRequester && <span className="self-center text-xs text-muted-foreground">Awaiting a different authorized checker.</span>}</div>
                         </CardContent>
                     </Card>;
                 })}</div>}
@@ -278,8 +367,8 @@ export default function AccountingBooksSettingsPage() {
 
         <Dialog open={detail !== null} onOpenChange={open => { if (!open) setDetail(null); }}><DialogContent><DialogHeader><DialogTitle>{detail?.code} accounting-book details</DialogTitle><DialogDescription>Governed structure and lifecycle evidence for this tenant-owned book.</DialogDescription></DialogHeader>{detailLoading ? <Loader2 className="mx-auto my-8 h-6 w-6 animate-spin" aria-label="Loading book detail" /> : detailError ? <Alert variant="destructive"><AlertTitle>Could not load book detail</AlertTitle><AlertDescription>{detailError} <Button variant="link" className="h-auto p-0" onClick={() => detail && void openDetail(detail)}>Retry</Button></AlertDescription></Alert> : detail && <div className="grid gap-3 text-sm sm:grid-cols-2"><div><span className="text-muted-foreground">Lifecycle</span><p>{statusOf(detail)}</p></div><div><span className="text-muted-foreground">Type</span><p>{typeOf(detail)}</p></div><div><span className="text-muted-foreground">Purpose</span><p>{detail.purpose}</p></div><div><span className="text-muted-foreground">Functional currency</span><p>{detail.functionalCurrencyCode || 'Inherited from base'}</p></div><div><span className="text-muted-foreground">Accounting use</span><p>{detail.hasAccountingUse ? 'Yes — structure locked' : 'No'}</p></div><div><span className="text-muted-foreground">Activation readiness</span><p>{detail.activationReady ? 'Ready' : 'Not ready'}</p></div><div className="sm:col-span-2"><span className="text-muted-foreground">Readiness evidence</span><p>{detail.readinessMessage || 'Approved initialization and an open first exact-book period are required.'}</p></div></div>}</DialogContent></Dialog>
 
-        <Dialog open={transitioning !== null} onOpenChange={open => { if (!open) setTransitioning(null); }}><DialogContent><DialogHeader><DialogTitle>Request lifecycle transition</DialogTitle><DialogDescription>This audited request requires a different authorized checker to approve it.</DialogDescription></DialogHeader><div className="space-y-4"><div><Label>Target lifecycle state</Label><Select value={targetStatus} onValueChange={value => setTargetStatus(value as AccountingBookLifecycleStatus)}><SelectTrigger aria-label="Target lifecycle state"><SelectValue /></SelectTrigger><SelectContent>{transitioning && lifecycleTargets[statusOf(transitioning)].map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>{targetStatus === 'Active' && <Alert className="border-amber-300 bg-amber-50"><ShieldAlert className="h-4 w-4" /><AlertTitle>Activation readiness required</AlertTitle><AlertDescription>{transitioning?.readinessMessage || 'Approved initialization and an open first exact-book period are required before activation.'}</AlertDescription></Alert>}<div><Label htmlFor="transition-reason">Reason</Label><Textarea id="transition-reason" value={transitionReason} onChange={event => setTransitionReason(event.target.value)} placeholder="Explain the governed lifecycle change" /></div></div><DialogFooter><Button variant="outline" onClick={() => setTransitioning(null)}>Cancel</Button><Button disabled={saving || !transitionReason.trim() || targetIsBlockedActivation} onClick={() => void requestTransition()}>Submit for approval</Button></DialogFooter></DialogContent></Dialog>
+        <Dialog open={transitioning !== null} onOpenChange={open => { if (!open) setTransitioning(null); }}><DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto"><DialogHeader><DialogTitle>Request lifecycle transition</DialogTitle><DialogDescription>This audited request requires a different authorized checker to approve it.</DialogDescription></DialogHeader><div className="space-y-4"><div><Label>Target lifecycle state</Label><Select value={targetStatus} onValueChange={value => selectTargetStatus(value as AccountingBookLifecycleStatus)}><SelectTrigger aria-label="Target lifecycle state"><SelectValue /></SelectTrigger><SelectContent>{transitioning && lifecycleTargets[statusOf(transitioning)].map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}</SelectContent></Select></div>{transitioning && <LifecycleTransitionEvidence book={transitioning} target={targetStatus} evidence={lifecycleEvidence} retry={() => void loadLifecycleEvidence(transitioning, targetStatus)} />}<div><Label htmlFor="transition-reason">Reason</Label><Textarea id="transition-reason" value={transitionReason} onChange={event => setTransitionReason(event.target.value)} placeholder="Explain the governed lifecycle change" /></div></div><DialogFooter><Button variant="outline" onClick={() => setTransitioning(null)}>Cancel</Button><Button disabled={saving || !transitionReason.trim() || targetIsBlockedActivation} onClick={() => void requestTransition()}>Submit for approval</Button></DialogFooter></DialogContent></Dialog>
 
-        <Dialog open={decision !== null} onOpenChange={open => { if (!open) setDecision(null); }}><DialogContent><DialogHeader><DialogTitle>{decision?.action === 'approve' ? 'Approve' : 'Reject'} pending transition</DialogTitle><DialogDescription>Maker-checker separation and current readiness are revalidated by Finance before the decision is committed.</DialogDescription></DialogHeader><div><Label htmlFor="decision-reason">Checker reason</Label><Textarea id="decision-reason" value={decisionReason} onChange={event => setDecisionReason(event.target.value)} /></div><DialogFooter><Button variant="outline" onClick={() => setDecision(null)}>Cancel</Button><Button variant={decision?.action === 'reject' ? 'destructive' : 'default'} disabled={saving || !decisionReason.trim()} onClick={() => void decideTransition()}>{decision?.action === 'approve' ? 'Approve transition' : 'Reject transition'}</Button></DialogFooter></DialogContent></Dialog>
+        <Dialog open={decision !== null} onOpenChange={open => { if (!open) setDecision(null); }}><DialogContent className="max-h-[90vh] max-w-5xl overflow-y-auto"><DialogHeader><DialogTitle>{decision?.action === 'approve' ? 'Approve' : 'Reject'} pending transition</DialogTitle><DialogDescription>Review the evidence below. Maker-checker separation and current readiness are revalidated by Finance before the decision is committed.</DialogDescription></DialogHeader><div className="space-y-4">{decision?.book.pendingLifecycleStatus && <LifecycleTransitionEvidence book={decision.book} target={decision.book.pendingLifecycleStatus} evidence={lifecycleEvidence} retry={() => { const target = decision.book.pendingLifecycleStatus; if (target) void loadLifecycleEvidence(decision.book, target); }} />}<div><Label htmlFor="decision-reason">Checker reason</Label><Textarea id="decision-reason" value={decisionReason} onChange={event => setDecisionReason(event.target.value)} placeholder="Summarize the configuration and readiness evidence reviewed" /><p className="mt-1 text-xs text-muted-foreground">Record what you checked; avoid generic reasons such as “Approved”.</p></div></div><DialogFooter><Button variant="outline" onClick={() => setDecision(null)}>Cancel</Button><Button variant={decision?.action === 'reject' ? 'destructive' : 'default'} disabled={saving || !decisionReason.trim() || Boolean(decisionIsBlockedActivation)} onClick={() => void decideTransition()}>{decision?.action === 'approve' ? 'Approve transition' : 'Reject transition'}</Button></DialogFooter></DialogContent></Dialog>
     </div>;
 }

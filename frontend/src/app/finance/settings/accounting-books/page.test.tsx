@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import AccountingBooksSettingsPage from './page';
 import { financeDataService } from '@/services/finance/finance-data.service';
-import type { AccountingBook } from '@/types/finance';
+import type { AccountingBook, AccountingBookInitialization } from '@/types/finance';
 
 let permissions = new Set<string>();
 let authLoading = false;
@@ -31,6 +31,9 @@ vi.mock('@/services/finance/finance-data.service', () => ({
         requestAccountingBookTransition: vi.fn(),
         approveAccountingBookTransition: vi.fn(),
         rejectAccountingBookTransition: vi.fn(),
+        getAccountingBookInitialization: vi.fn(),
+        getAccountingBookActivationReadiness: vi.fn(),
+        getAccountingBookPeriods: vi.fn(),
     },
 }));
 
@@ -49,6 +52,21 @@ const initializingBook: AccountingBook = {
     allowsPosting: false, isSystemDefined: false, hasAccountingUse: false, rowVersion: 'BAUG',
 };
 
+const approvedInitialization: AccountingBookInitialization = {
+    id: 'init-1', accountingBookId: 'book-local', version: 1, accountingBookCode: 'LOCAL_STATUTORY',
+    mode: 'BaseBookCopyAtCutoff', status: 'Approved', cutoffDate: '2025-12-31T00:00:00Z',
+    cutoffFiscalPeriodId: 'period-2025-12', cutoffFiscalPeriodCode: '2025-12',
+    sourceAccountingBookId: 'book-primary', sourceAccountingBookCode: 'IFRS', idempotencyKey: 'LOCAL-INIT-2025-12-31-V1',
+    reason: 'Initialize the statutory book for FY2026.', totalDebits: 0, totalCredits: 0,
+    requiredAccountCount: 1, coveredAccountCount: 1, isBalanced: true, isCoverageComplete: true,
+    evidenceFingerprint: 'A'.repeat(64), reconciliationFingerprint: 'B'.repeat(64),
+    preparedByUserId: 'maker-id', preparedByName: 'System Administrator', preparedAtUtc: '2026-09-19T10:00:00Z',
+    approvedByUserId: 'checker-id', approvedByName: 'Abena Dapaah', approvedAtUtc: '2026-09-19T11:00:00Z',
+    decidedByUserId: 'checker-id', decidedByName: 'Abena Dapaah', decidedAtUtc: '2026-09-19T11:00:00Z',
+    decisionReason: 'Reconciliation evidence reviewed.', rowVersion: 'AQID',
+    lines: [{ accountId: 'account-1000', accountNumber: 'DEFAULT-1000', accountName: 'Cash and Cash Equivalents', accountType: 'Asset', currencyCode: 'GHS', openingDebit: 0, openingCredit: 0, baseBookSignedBalance: 0, openingAdjustment: 0 }],
+};
+
 describe('accounting book settings', () => {
     beforeEach(() => {
         vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} });
@@ -61,6 +79,9 @@ describe('accounting book settings', () => {
         vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([primaryBook]);
         vi.mocked(financeDataService.getCurrencies).mockResolvedValue([{ currencyCode: 'GHS', currencyName: 'Ghanaian Cedi', isActive: true }, { currencyCode: 'USD', currencyName: 'US Dollar', isActive: true }] as never);
         vi.mocked(financeDataService.getAccountingBook).mockResolvedValue(primaryBook);
+        vi.mocked(financeDataService.getAccountingBookInitialization).mockResolvedValue(approvedInitialization);
+        vi.mocked(financeDataService.getAccountingBookActivationReadiness).mockResolvedValue({ isReady: true, blockers: [], initializationFingerprint: 'A'.repeat(64), requiredPeriodCount: 1, readyPeriodCount: 1 });
+        vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([{ id: 'book-period-1', accountingBookId: 'book-local', accountingBookCode: 'LOCAL_STATUTORY', fiscalPeriodId: 'period-2026-01', fiscalPeriodCode: '2026-01', startDate: '2026-01-01', endDate: '2026-01-31', status: 'Open', rowVersion: 'AQID' }]);
     });
 
     it('shows auth loading and permission-denied states without issuing a data request', () => {
@@ -125,6 +146,7 @@ describe('accounting book settings', () => {
 
         render(<AccountingBooksSettingsPage />);
         fireEvent.click(await screen.findByRole('button', { name: 'Request Active' }));
+        expect(await screen.findByText('Activation readiness confirmed')).toBeInTheDocument();
         expect(screen.getByRole('combobox', { name: 'Target lifecycle state' })).toHaveTextContent('Active');
         expect(screen.getByRole('button', { name: 'Submit for approval' })).toBeDisabled();
     });
@@ -238,18 +260,66 @@ describe('accounting book settings', () => {
         render(<AccountingBooksSettingsPage />);
         expect(await screen.findByText('Pending Suspended')).toBeInTheDocument();
         expect(screen.getByText('Pause configuration for review')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Approve' })).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Reject' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Review & approve' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Review & reject' })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: 'Edit' })).toBeDisabled();
         expect(screen.queryByRole('button', { name: 'Request Active' })).not.toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Review & approve' }));
+        expect(screen.getByText('Lifecycle decision evidence')).toBeInTheDocument();
+        expect(screen.getByText('Initializing → Suspended')).toBeInTheDocument();
         fireEvent.change(screen.getByLabelText('Checker reason'), { target: { value: 'Independent evidence reviewed' } });
         fireEvent.click(screen.getByRole('button', { name: 'Approve transition' }));
         await waitFor(() => expect(financeDataService.approveAccountingBookTransition).toHaveBeenCalledWith('book-local', {
             reason: 'Independent evidence reviewed',
             rowVersion: 'BAUG',
         }));
+    });
+
+    it('explains the structural evidence and scope of an Initializing decision', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Approve');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            lifecycleStatus: 'Configuring',
+            pendingLifecycleStatus: 'Initializing',
+            pendingTransitionReason: 'Begin controlled opening preparation',
+            transitionRequestedByUserId: 'maker-id',
+            transitionRequestedAtUtc: '2026-09-19T09:00:00Z',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Review & approve' }));
+
+        expect(screen.getByText('Configuring → Initializing')).toBeInTheDocument();
+        expect(screen.getAllByText('Begin controlled opening preparation')).toHaveLength(2);
+        expect(screen.getByText('What this approval authorizes')).toBeInTheDocument();
+        expect(screen.getByText(/Initialization evidence does not exist yet/)).toBeInTheDocument();
+        expect(financeDataService.getAccountingBookInitialization).not.toHaveBeenCalled();
+    });
+
+    it('reuses approved initialization and period evidence for an Active decision', async () => {
+        permissions.add('Finance.AccountingBooks.Transitions.Approve');
+        vi.mocked(financeDataService.getAccountingBooks).mockResolvedValue([{
+            ...initializingBook,
+            activationReady: true,
+            readinessMessage: 'Ready for activation.',
+            pendingLifecycleStatus: 'Active',
+            pendingTransitionReason: 'Activate the statutory book',
+            transitionRequestedByUserId: 'maker-id',
+            transitionRequestedAtUtc: '2026-09-19T12:00:00Z',
+        }]);
+
+        render(<AccountingBooksSettingsPage />);
+        fireEvent.click(await screen.findByRole('button', { name: 'Review & approve' }));
+
+        expect(await screen.findByText('Activation readiness confirmed')).toBeInTheDocument();
+        expect(screen.getByText('2026-01: Open')).toBeInTheDocument();
+        expect(screen.getByText('Account-level reconciliation')).toBeInTheDocument();
+        expect(screen.getByText(/Reason: Reconciliation evidence reviewed/)).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Approve transition' })).toBeDisabled();
+
+        fireEvent.change(screen.getByLabelText('Checker reason'), { target: { value: 'Approved initialization and open-period evidence reviewed.' } });
+        expect(screen.getByRole('button', { name: 'Approve transition' })).toBeEnabled();
     });
 
     it('hides approval actions from the requester even when that user has approval permission', async () => {
@@ -263,8 +333,8 @@ describe('accounting book settings', () => {
 
         render(<AccountingBooksSettingsPage />);
         expect(await screen.findByText('Awaiting a different authorized checker.')).toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
-        expect(screen.queryByRole('button', { name: 'Reject' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Review & approve' })).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Review & reject' })).not.toBeInTheDocument();
         expect(financeDataService.approveAccountingBookTransition).not.toHaveBeenCalled();
     });
 
@@ -280,8 +350,8 @@ describe('accounting book settings', () => {
 
         render(<AccountingBooksSettingsPage />);
         expect(await screen.findByText(/C4 readiness is unavailable/)).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Approve' })).toBeDisabled();
-        expect(screen.getByRole('button', { name: 'Reject' })).toBeEnabled();
+        expect(screen.getByRole('button', { name: 'Review & approve' })).toBeDisabled();
+        expect(screen.getByRole('button', { name: 'Review & reject' })).toBeEnabled();
     });
 
     it('does not treat an action permission as a substitute for Finance.Read', () => {
