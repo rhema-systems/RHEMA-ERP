@@ -57,6 +57,7 @@ public class TdcOrganogramSeeder
         if (existingStructure is not null)
         {
             await EnsureSalesDepartmentUnitAsync(tenantId, existingStructure.Id);
+            await EnsureMarketingUnitAsync(tenantId, existingStructure.Id);
             await BackfillProcedureCaseOrganizationScopesAsync(tenantId);
             _logger.LogInformation("TDC organisation structure already seeded for the DEFAULT tenant. Repair pass complete.");
             return;
@@ -643,6 +644,114 @@ public class TdcOrganogramSeeder
 
         await _context.SaveChangesAsync();
         _logger.LogInformation("Added Sales Department to the TDC organisation structure.");
+    }
+
+    private async Task EnsureMarketingUnitAsync(Guid tenantId, Guid structureId)
+    {
+        const string by = "TdcOrganogramSeeder";
+        var now = DateTime.UtcNow;
+
+        var departmentLevel = await _context.Set<OrganizationLevel>()
+            .FirstOrDefaultAsync(level =>
+                level.TenantId == tenantId &&
+                level.StructureId == structureId &&
+                level.Code == "DEPT");
+
+        var operationsDirectorate = await _context.Set<OrganizationUnit>()
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId &&
+                unit.Code == "DIR-OPS");
+
+        if (departmentLevel is null || operationsDirectorate is null)
+        {
+            _logger.LogWarning(
+                "Cannot ensure Marketing Unit because the TDC department level or Operations Directorate is missing.");
+            return;
+        }
+
+        var marketingUnit = await _context.Set<OrganizationUnit>()
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId &&
+                unit.Code == "UNIT-MKT");
+
+        if (marketingUnit is not null)
+        {
+            var changed = false;
+
+            if (marketingUnit.Name != "Marketing Unit")
+            {
+                marketingUnit.Name = "Marketing Unit";
+                changed = true;
+            }
+
+            if (marketingUnit.Description != "Business unit")
+            {
+                marketingUnit.Description = "Business unit";
+                changed = true;
+            }
+
+            if (marketingUnit.OrganizationLevelId != departmentLevel.Id)
+            {
+                marketingUnit.OrganizationLevelId = departmentLevel.Id;
+                changed = true;
+            }
+
+            if (marketingUnit.ParentUnitId != operationsDirectorate.Id)
+            {
+                marketingUnit.ParentUnitId = operationsDirectorate.Id;
+                changed = true;
+            }
+
+            if (!marketingUnit.IsActive)
+            {
+                marketingUnit.IsActive = true;
+                changed = true;
+            }
+
+            if (marketingUnit.IsDeleted)
+            {
+                marketingUnit.IsDeleted = false;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                _logger.LogInformation("Marketing Unit already exists in the TDC organisation structure.");
+                return;
+            }
+
+            marketingUnit.UpdatedAt = now;
+            marketingUnit.UpdatedBy = by;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Updated Marketing Unit in the TDC organisation structure.");
+            return;
+        }
+
+        var nextSequence = await _context.Set<OrganizationUnit>()
+            .Where(unit =>
+                unit.TenantId == tenantId &&
+                unit.ParentUnitId == operationsDirectorate.Id)
+            .Select(unit => (int?)unit.Sequence)
+            .MaxAsync() ?? 0;
+
+        _context.Add(new OrganizationUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            OrganizationLevelId = departmentLevel.Id,
+            ParentUnitId = operationsDirectorate.Id,
+            Name = "Marketing Unit",
+            Code = "UNIT-MKT",
+            Description = "Business unit",
+            Sequence = nextSequence + 1,
+            Path = string.Empty,
+            IsActive = true,
+            CreatedAt = now,
+            CreatedBy = by
+        });
+
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("Added Marketing Unit to the TDC organisation structure.");
     }
 
     private async Task BackfillProcedureCaseOrganizationScopesAsync(Guid tenantId)

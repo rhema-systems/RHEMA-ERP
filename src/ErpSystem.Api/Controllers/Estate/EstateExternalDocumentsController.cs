@@ -44,6 +44,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     private readonly IOpportunityService _opportunityService;
     private readonly IEhcTicketService _ticketService;
     private readonly ICaptchaVerificationService _captchaService;
+    private readonly ILogger<EstateExternalDocumentsController> _logger;
 
     public EstateExternalDocumentsController(
         ApplicationDbContext db,
@@ -54,7 +55,8 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         INotificationService notificationService,
         IOpportunityService opportunityService,
         IEhcTicketService ticketService,
-        ICaptchaVerificationService captchaService)
+        ICaptchaVerificationService captchaService,
+        ILogger<EstateExternalDocumentsController> logger)
     {
         _db = db;
         _currentUserService = currentUserService;
@@ -65,6 +67,7 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         _opportunityService = opportunityService;
         _ticketService = ticketService;
         _captchaService = captchaService;
+        _logger = logger;
     }
 
     [HttpGet("/api/estate/external/customer-profiles")]
@@ -2326,62 +2329,72 @@ public sealed class EstateExternalDocumentsController : ControllerBase
     public async Task<IActionResult> CreateListingEnquiry(Guid listingId,
         [FromBody] CreatePropertyListingEnquiryRequest request, CancellationToken cancellationToken)
     {
-        if (request.SubmissionId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Trim().Length > 4000)
+        if (request is null || request.SubmissionId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Trim().Length > 4000)
             return BadRequest(new { success = false, message = "Enter an enquiry message of up to 4,000 characters and a submission identifier." });
-        var tenantId = _currentUserService.TenantId ?? Guid.Empty;
-        var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
-            .FirstOrDefaultAsync(item => item.Id == listingId
-                && item.TenantId == tenantId
-                && (item.AssetType == EstateManagedAssetType.Land
-                    || item.AssetType == EstateManagedAssetType.Property
-                    || item.AssetType == EstateManagedAssetType.Facility), cancellationToken);
-        var demarcationListing = asset is null
-            ? await _db.EstateLandDemarcations
-                .AsNoTracking()
-                .Include(item => item.EstateManagedAsset)
-                .FirstOrDefaultAsync(item => item.Id == listingId
-                    && item.TenantId == tenantId
-                    && !item.IsDeleted
-                    && item.IsPublishedToExternalPortal
-                    && item.ExternalListingStatus == "Published"
-                    && item.BoundaryVerified
-                    && item.EstateManagedAsset.TenantId == tenantId
-                    && !item.EstateManagedAsset.IsDeleted
-                    && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
-                    && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
-                    && !item.EstateManagedAsset.ProjectId.HasValue
-                    && !item.EstateManagedAsset.IsPublishedToExternalPortal,
-                    cancellationToken)
-            : null;
-        asset ??= demarcationListing?.EstateManagedAsset;
-
-        if (asset == null)
-        {
-            return NotFound(new { success = false, message = "Listing was not found or is not available." });
-        }
-
-
-        var userId = GetUserId();
-        if (userId is null || tenantId == Guid.Empty) return Unauthorized();
-        var partners = PortalEnquiryPartners(tenantId, userId.Value);
-        var partner = request.BusinessPartnerId.HasValue
-            ? await partners.FirstOrDefaultAsync(p => p.Id == request.BusinessPartnerId, cancellationToken)
-            : await partners.OrderBy(p => p.PartnerName).FirstOrDefaultAsync(cancellationToken);
-        if (request.BusinessPartnerId.HasValue && partner is null)
-            return BadRequest(new { success = false, message = "The selected business partner is not linked to your portal account." });
-        var reference = demarcationListing is null ? asset.AssetCode
-            : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
-        var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
-        var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
-        var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
-        var price = type == "Rent"
-            ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
-            : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
-        var category = await _db.EhcTicketCategories.AsNoTracking().FirstOrDefaultAsync(c =>
-            c.TenantId == tenantId && !c.IsDeleted && c.Code == "PROPERTY-LISTING", cancellationToken);
-        if (category is null) return Problem(statusCode: 503, detail: "Property enquiry routing has not been configured for this tenant.");
         try
         {
+            var tenantId = _currentUserService.TenantId ?? Guid.Empty;
+            var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
+                .FirstOrDefaultAsync(item => item.Id == listingId
+                    && item.TenantId == tenantId
+                    && (item.AssetType == EstateManagedAssetType.Land
+                        || item.AssetType == EstateManagedAssetType.Property
+                        || item.AssetType == EstateManagedAssetType.Facility), cancellationToken);
+            var demarcationListing = asset is null
+                ? await _db.EstateLandDemarcations
+                    .AsNoTracking()
+                    .Include(item => item.EstateManagedAsset)
+                    .FirstOrDefaultAsync(item => item.Id == listingId
+                        && item.TenantId == tenantId
+                        && !item.IsDeleted
+                        && item.IsPublishedToExternalPortal
+                        && item.ExternalListingStatus == "Published"
+                        && item.BoundaryVerified
+                        && item.EstateManagedAsset.TenantId == tenantId
+                        && !item.EstateManagedAsset.IsDeleted
+                        && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                        && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                        && !item.EstateManagedAsset.ProjectId.HasValue
+                        && !item.EstateManagedAsset.IsPublishedToExternalPortal,
+                        cancellationToken)
+                : null;
+            asset ??= demarcationListing?.EstateManagedAsset;
+
+            if (asset == null)
+            {
+                return NotFound(new { success = false, message = "Listing was not found or is not available." });
+            }
+
+            var userId = GetUserId();
+            if (userId is null || tenantId == Guid.Empty) return Unauthorized();
+            var partners = PortalEnquiryPartners(tenantId, userId.Value);
+            var partner = request.BusinessPartnerId.HasValue
+                ? await partners.FirstOrDefaultAsync(p => p.Id == request.BusinessPartnerId, cancellationToken)
+                : await partners.OrderBy(p => p.PartnerName).FirstOrDefaultAsync(cancellationToken);
+            if (request.BusinessPartnerId.HasValue && partner is null)
+                return BadRequest(new { success = false, message = "The selected business partner is not linked to your portal account." });
+            var reference = demarcationListing is null ? asset.AssetCode
+                : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
+            var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+            var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
+            var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
+            var price = type == "Rent"
+                ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
+                : type == "Lease"
+                    ? demarcationListing?.ExternalMonthlyRent ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalMonthlyRent ?? asset.ExternalListingPrice
+                    : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
+            var category = await _db.EhcTicketCategories.AsNoTracking().FirstOrDefaultAsync(c =>
+                c.TenantId == tenantId && !c.IsDeleted && c.Code == "PROPERTY-LISTING", cancellationToken);
+            if (category is null)
+            {
+                _logger.LogError(
+                    "Property enquiry routing category PROPERTY-LISTING is missing for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
+                    tenantId,
+                    listingId,
+                    HttpContext.TraceIdentifier);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
+            }
+
             var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
             await _captchaService.EnsureCaptchaValidAsync(tenantId, request.CaptchaToken,
                 string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Host : forwardedHost,
@@ -2399,8 +2412,45 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             return Ok(new { success = true, data = ticket });
         }
         catch (CaptchaVerificationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
-        catch (ArgumentException ex) { return BadRequest(new { success = false, message = ex.Message }); }
-        catch (InvalidOperationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
+        catch (ArgumentException ex)
+        {
+            _logger.LogError(ex,
+                "Property enquiry validation/setup failed for listing {ListingId}; submission {SubmissionId}; trace {TraceId}",
+                listingId,
+                request.SubmissionId,
+                HttpContext.TraceIdentifier);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "The enquiry could not be sent right now. Please try again later."
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex,
+                "Property enquiry could not be completed for listing {ListingId}; submission {SubmissionId}; trace {TraceId}",
+                listingId,
+                request.SubmissionId,
+                HttpContext.TraceIdentifier);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "The enquiry could not be sent right now. Please try again later."
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to create external property enquiry for listing {ListingId}; submission {SubmissionId}; trace {TraceId}",
+                listingId,
+                request.SubmissionId,
+                HttpContext.TraceIdentifier);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "The enquiry could not be sent right now. Please try again later."
+            });
+        }
     }
 
     private IQueryable<BusinessPartner> PortalEnquiryPartners(Guid tenantId, Guid userId)
@@ -2715,9 +2765,9 @@ public sealed class EstateExternalDocumentsController : ControllerBase
             demarcation.ExternalSalePrice,
             demarcation.ExternalMonthlyRent,
             demarcation.ExternalLeaseTermMonths,
-            asset.GroundRentPayable,
-            asset.GroundRentRatePerAcre,
-            asset.GroundRentComputed,
+            demarcation.GroundRentPayable,
+            demarcation.GroundRentRatePerAcre,
+            demarcation.GroundRentComputed,
             demarcation.ExternalListingCurrency,
             demarcation.ExternalListingNotes,
             demarcation.ExternalPublishedAt,
