@@ -20,6 +20,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { FinancePostingCard } from '@/components/hr/common/FinancePostingCard';
 import { DocumentUploadField } from '@/components/hr/common/DocumentUploadField';
 import { Input } from '@/components/ui/input';
 import {
@@ -586,6 +587,9 @@ export default function SeparationDetailPage({ params }: { params: Promise<{ id:
                   <Field label="Review">{settlement.reviewOutcomeName}</Field>
                 </CardContent>
               </Card>
+
+              {/* What Finance holds for this settlement: posted when Internal Audit releases it (lane 8, slice 3). */}
+              <FinancePostingCard sourceDocumentId={settlement.id} invalidateKeys={[['separation-settlement', id]]} />
 
               {/*
                 ⚠ The most important warning on this screen. A statement with unvalued lines has a

@@ -77,6 +77,89 @@ public sealed class HrFinancePostingCatalogueTests
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.LongServiceAwardProcessed), HrFinancePostingCommandFactory.LongServiceAwardProcessed(lsa));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.BenefitUtilizationApproved), HrFinancePostingCommandFactory.BenefitUtilizationApproved(benefit, enrollment));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.BenefitUtilizationPaid), HrFinancePostingCommandFactory.BenefitUtilizationPaid(benefit, enrollment));
+
+        // slice 3 — separation
+        var (settlement, settlementLines) = SampleSettlement(unpaidSalary: 3000m, notice: 6000m, encashment: 900m, loan: 250m, tax: 400m, property: 150m);
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.SeparationSettlementReleased),
+            HrFinancePostingCommandFactory.SeparationSettlementReleased(settlement, settlementLines, "SEP-2026-0001", Guid.NewGuid()));
+    }
+
+    private static (SeparationSettlement Settlement, List<SeparationSettlementLine> Lines) SampleSettlement(
+        decimal unpaidSalary, decimal notice, decimal encashment, decimal loan, decimal tax, decimal property)
+    {
+        var settlement = new SeparationSettlement
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, SeparationId = Guid.NewGuid(), CurrencyCode = "GHS",
+            FinalisedOn = DateTime.UtcNow, ReviewOutcome = SettlementReviewOutcome.Approved, ReviewedOn = DateTime.UtcNow
+        };
+        SeparationSettlementLine L(SettlementLineCategory c, bool deduction, decimal amount, int order) => new()
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, SettlementId = settlement.Id, Category = c, IsDeduction = deduction,
+            Description = c.ToString(), Amount = amount, Computation = SettlementLineComputation.Computed, SortOrder = order
+        };
+        var lines = new List<SeparationSettlementLine>
+        {
+            L(SettlementLineCategory.UnpaidSalary, false, unpaidSalary, 1),
+            L(SettlementLineCategory.NoticePay, false, notice, 2),
+            L(SettlementLineCategory.LeaveEncashment, false, encashment, 3),
+            L(SettlementLineCategory.LoanRepayment, true, loan, 4),
+            L(SettlementLineCategory.TaxDeduction, true, tax, 5),
+            L(SettlementLineCategory.PropertyRecovery, true, property, 6),
+        };
+        return (settlement, lines);
+    }
+
+    [Fact]
+    public void SeparationSettlement_PostsALegPerLine_AndCarriesTheNetWhereTheRouteSays()
+    {
+        var (settlement, lines) = SampleSettlement(unpaidSalary: 3000m, notice: 6000m, encashment: 900m, loan: 250m, tax: 400m, property: 150m);
+        var definition = HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.SeparationSettlementReleased);
+        var command = HrFinancePostingCommandFactory.SeparationSettlementReleased(settlement, lines, "SEP-1", Guid.NewGuid());
+        command.TransactionCurrencyCode.Should().Be("GHS");
+
+        // payroll (default): the net sits on the payable for the final run
+        var (payroll, _) = HrFinancePostingAdapter.ResolveRouteLines(definition, null, command);
+        payroll.Where(l => l.IsDebit && l.Role == HrFinanceAccountRole.SeparationExpense).Sum(l => l.Amount).Should().Be(9000m);
+        payroll.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.LeaveEncashmentExpense && l.Amount == 900m);
+        payroll.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.StaffAdvancesReceivable && l.Amount == 250m);
+        payroll.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.StatutoryDeductionsPayable && l.Amount == 400m);
+        payroll.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.EmployeeRecoveriesIncome && l.Amount == 150m);
+        payroll.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.StaffClaimsPayable && l.Amount == 9100m);
+        payroll.Should().NotContain(l => l.Role == HrFinanceAccountRole.StaffPaymentsClearing);
+
+        // direct: the same net goes to clearing
+        var (direct, _) = HrFinancePostingAdapter.ResolveRouteLines(definition, new HrFinancePostingRule { SettlementRoute = HrFinanceSettlementRoute.Direct }, command);
+        direct.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.StaffPaymentsClearing && l.Amount == 9100m);
+        direct.Should().NotContain(l => l.Role == HrFinanceAccountRole.StaffClaimsPayable);
+
+        // a leaver who owes more than they are due is a receivable, never a negative payable
+        var (owing, owingLines) = SampleSettlement(unpaidSalary: 100m, notice: 0m, encashment: 0m, loan: 700m, tax: 0m, property: 0m);
+        var owingCommand = HrFinancePostingCommandFactory.SeparationSettlementReleased(owing, owingLines, "SEP-2", Guid.NewGuid());
+        var (owingPayroll, _) = HrFinancePostingAdapter.ResolveRouteLines(definition, null, owingCommand);
+        owingPayroll.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffAdvancesReceivable && l.Amount == 600m);
+        owingPayroll.Should().NotContain(l => l.Role == HrFinanceAccountRole.StaffClaimsPayable);
+        owingPayroll.Where(l => l.IsDebit).Sum(l => l.Amount).Should().Be(owingPayroll.Where(l => !l.IsDebit).Sum(l => l.Amount));
+
+        // lines that could not be computed carry no amount and are ignored, not posted as zero
+        var (blank, blankLines) = SampleSettlement(0m, 0m, 0m, 0m, 0m, 0m);
+        HrFinancePostingCommandFactory.SeparationSettlementReleased(blank, blankLines, "SEP-3", Guid.NewGuid()).SkipReason.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void SeparationService_PostsOnAuditApprovalOnly_AndGuardsTheLines()
+    {
+        var root = FindRepositoryRoot();
+        var source = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "SeparationService.cs"));
+
+        Between(source, "public async Task<SeparationSettlementDto> ApproveSettlementReviewAsync(", "public async Task<SeparationSettlementDto> ReturnSettlementAsync(")
+            .Should().Contain("_financePosting.RunAsync").And.Contain("HrFinancePostingCommandFactory.SeparationSettlementReleased(");
+        Between(source, "public async Task<SeparationSettlementDto> FinaliseSettlementAsync(", "public async Task<SeparationSettlementDto> ApproveSettlementReviewAsync(")
+            .Should().NotContain("_financePosting.RunAsync", "the register says: the accounting event is the release, not the finalisation");
+        Between(source, "public async Task<SeparationSettlementDto> ReturnSettlementAsync(", "private async Task<(EmployeeSeparation Separation, SeparationSettlement Settlement)>")
+            .Should().Contain("EnsureNotPostedAsync");
+        source.Should().Contain("\"Adding a settlement line\"");
+        source.Split("\"Changing a settlement line\"").Length.Should().Be(3, "both the line update and the line delete are guarded");
+        source.Should().NotContain("IJournalEntryService");
     }
 
     [Fact]

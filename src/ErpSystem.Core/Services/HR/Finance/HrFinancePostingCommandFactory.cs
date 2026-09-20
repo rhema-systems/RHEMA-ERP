@@ -386,4 +386,85 @@ public static class HrFinancePostingCommandFactory
             RoutePayrollSkipReason = "Settled through payroll: payroll's own journal clears the staff claims payable; HR posts nothing."
         };
     }
+
+    // ── Separation (slice 3) ─────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The final settlement, released by Internal Audit's approval. Earnings debit the expense the
+    /// category belongs to; deductions credit the receivable they recover (loans, advances), the
+    /// recovery income (property, other) or the statutory payable (tax). The net goes to clearing
+    /// (direct) or the payable (payroll's final run); a leaver who owes more than they are due is
+    /// carried as a receivable, never as a negative payable.
+    /// </summary>
+    public static HrFinancePostingCommand SeparationSettlementReleased(
+        SeparationSettlement settlement,
+        IReadOnlyList<SeparationSettlementLine> lines,
+        string separationNumber,
+        Guid employeeId)
+    {
+        var reference = string.IsNullOrWhiteSpace(separationNumber) ? $"SEP-{settlement.Id.ToString("N")[..8].ToUpperInvariant()}" : separationNumber;
+        var earnings = new List<HrFinancePostingLine>();
+        var deductions = new List<HrFinancePostingLine>();
+        decimal totalEarnings = 0m, totalDeductions = 0m;
+
+        foreach (var line in lines.Where(l => !l.IsDeleted && l.Amount is > 0m))
+        {
+            var amount = line.Amount!.Value;
+            var text = $"Settlement {reference} — {line.Category}: {line.Description}";
+            if (line.IsDeduction)
+            {
+                totalDeductions += amount;
+                deductions.Add(new HrFinancePostingLine(DeductionRole(line.Category), false, amount, text));
+            }
+            else
+            {
+                totalEarnings += amount;
+                earnings.Add(new HrFinancePostingLine(EarningRole(line.Category), true, amount, text));
+            }
+        }
+
+        var net = totalEarnings - totalDeductions;
+        List<HrFinancePostingLine> Compose(HrFinanceAccountRole netCreditRole, string netText)
+        {
+            var all = new List<HrFinancePostingLine>();
+            all.AddRange(earnings);
+            all.AddRange(deductions);
+            if (net > 0m) all.Add(new HrFinancePostingLine(netCreditRole, false, net, netText));
+            else if (net < 0m) all.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffAdvancesReceivable, true, -net, $"Settlement {reference} — leaver owes the balance"));
+            return all;
+        }
+
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.SeparationSettlementReleased,
+            SourceDocumentId = settlement.Id,
+            SourceReference = reference,
+            EmployeeId = employeeId,
+            SourceDate = settlement.ReviewedOn ?? settlement.FinalisedOn,
+            TransactionCurrencyCode = settlement.CurrencyCode,
+            Description = $"Final settlement {reference} released by Internal Audit (earnings {totalEarnings:N2}, deductions {totalDeductions:N2})",
+            SkipReason = totalEarnings <= 0m && totalDeductions <= 0m
+                ? "The settlement has no computed amounts; there is nothing to post."
+                : null,
+            Lines = [],
+            RouteDirectLines = Compose(HrFinanceAccountRole.StaffPaymentsClearing, $"Settlement {reference} — net paid to leaver"),
+            RoutePayrollLines = Compose(HrFinanceAccountRole.StaffClaimsPayable, $"Settlement {reference} — net payable, cleared by the final payroll run")
+        };
+    }
+
+    private static HrFinanceAccountRole EarningRole(SettlementLineCategory category) => category switch
+    {
+        SettlementLineCategory.LeaveEncashment => HrFinanceAccountRole.LeaveEncashmentExpense,
+        SettlementLineCategory.BenefitPayment => HrFinanceAccountRole.BenefitsExpense,
+        _ => HrFinanceAccountRole.SeparationExpense
+    };
+
+    private static HrFinanceAccountRole DeductionRole(SettlementLineCategory category) => category switch
+    {
+        SettlementLineCategory.LoanRepayment => HrFinanceAccountRole.StaffAdvancesReceivable,
+        SettlementLineCategory.SalaryAdvanceRecovery => HrFinanceAccountRole.StaffAdvancesReceivable,
+        SettlementLineCategory.TravelAdvanceRecovery => HrFinanceAccountRole.StaffAdvancesReceivable,
+        SettlementLineCategory.TaxDeduction => HrFinanceAccountRole.StatutoryDeductionsPayable,
+        _ => HrFinanceAccountRole.EmployeeRecoveriesIncome
+    };
 }

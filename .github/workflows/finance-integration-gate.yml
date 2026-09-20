@@ -216,7 +216,7 @@ jobs:
             fi
           }
 
-          assert_trx_count "artifacts/finance-test-results/finance-consumer-contracts.trx" 63 "Finance consumer gate"
+          assert_trx_count "artifacts/finance-test-results/finance-consumer-contracts.trx" 65 "Finance consumer gate"
           assert_trx_count "artifacts/finance-test-results/finance-procurement-contracts.trx" 3 "Procurement-to-Finance gate"
           assert_trx_count "artifacts/finance-test-results/finance-inventory-contract.trx" 1 "Inventory-to-Finance gate"
           assert_trx_count "artifacts/finance-test-results/finance-sql-server-contracts.trx" 5 "SQL Server Finance gate"

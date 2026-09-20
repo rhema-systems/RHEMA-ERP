@@ -102,6 +102,21 @@ Paid and cannot leave Approved/Paid while its posting stands; award and long-ser
 are guarded like claims. New account roles: leave encashment expense, awards expense, benefits
 expense.
 
+### 3.1c Slice 3 — the separation final settlement (built 2026-09-20)
+
+| Event | Source type / action | Lines | Route |
+|---|---|---|---|
+| `SEPARATION_SETTLEMENT_RELEASED` | `SeparationSettlement` / `Release` | one journal, a leg per settlement line: earnings Dr Separation expense (unpaid salary, notice, gratuity, pension, other), Dr Leave encashment expense, Dr Benefits expense; deductions Cr Staff advances receivable (loans, salary and travel advances), Cr Employee recoveries income (property, other), Cr Statutory deductions payable (tax); the net Cr clearing (direct) or Cr Staff claims payable (payroll's final run); a leaver who owes more than they are due is Dr Staff advances receivable | rule; default **payroll** |
+
+**The authorising event is Internal Audit's approval** (FR-HR-185), which the service already
+called "payment may be released": there is no later pay step and no payment fact on the
+settlement. Finalising posts nothing — the register said so and the test holds it. Once released,
+returning the settlement or changing a line refuses until the posting is reversed. Lines Finance
+could not value (`CannotCompute`, null amount) cannot survive finalisation, so they never reach the
+journal. The settlement's own currency (HR default validated against Finance) is the command's
+transaction currency; a foreign settlement is valued through the bridge like an advance. Three new
+roles: separation expense, employee recoveries income (Revenue), statutory deductions payable.
+
 ⚠ **Finance de-duplicates on (source type, source id, posting action)**, not only on the
 idempotency key. Two events on one claim therefore carry different actions, and a re-post after a
 reversal carries a generation suffix (`Approve#2`), or Finance would hand back the reversed
@@ -185,6 +200,12 @@ Pending once posted. Benefit utilisations have no list screen in the frontend (o
 rollup), so their posting is visible in the register and the API but not on a claim page — a UI
 gap noted, not built here.
 
+**Verified live 2026-09-20 (slice 3) on `ErpSystemDB_UAT`:** `run-slice3.mjs`, 23 assertions — two
+separations taken through clearance (one loan left owing), settlement, finalisation (posts nothing)
+and Internal Audit approval; the journal's expense legs equal the statement's earnings, the loan
+credits the advances receivable, the net lands on the payable (payroll) or clearing (direct), and a
+released settlement refuses return and line edits.
+
 ## 6. Decisions taken here, and what they wait on
 
 | # | Decision | Taken as | Waits on |
@@ -210,7 +231,7 @@ expense line is needed, and a contract test.
 | ~~2.1 Leave encashment~~ | **built, slice 2** — L-D8 is the existing `AllowInServiceEncashment` flag; the posting only follows the event | | |
 | ~~14 Awards~~ | **built, slice 2** (conferred, paid, long-service processed) | | budget figures stay the awards desk's bookkeeping |
 | ~~Benefit utilisations~~ | **built, slice 2** (approved, paid) | | |
-| 9b Separation settlement released | `SEPARATION_SETTLEMENT_RELEASED` | per line category → expense roles; payable; recoverables → receivable | post on **release after audit**, never on finalise |
+| ~~9b Separation settlement~~ | **built, slice 3** — posts on Internal Audit's approval, never on finalise | | |
 | 16.1–16.4 Asset surcharge | `SURCHARGE_APPROVED` (Dr receivable / Cr recovery income or asset), `SURCHARGE_RECOVERED`, `SURCHARGE_WAIVED` | receivable; new role Surcharge recoveries | payroll deduction route = Skipped + payroll projection, as travel |
 | 3.4 Discipline fine | as surcharge | | |
 | 13 Succession development actual cost | `DEVELOPMENT_ACTIVITY_COMPLETED` | Training expense role | only after the three-way training decision |

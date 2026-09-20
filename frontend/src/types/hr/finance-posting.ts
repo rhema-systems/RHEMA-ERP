@@ -13,7 +13,10 @@ export type HrFinanceAccountRole =
   | 'TravelExpense'
   | 'LeaveEncashmentExpense'
   | 'AwardsExpense'
-  | 'BenefitsExpense';
+  | 'BenefitsExpense'
+  | 'SeparationExpense'
+  | 'EmployeeRecoveriesIncome'
+  | 'StatutoryDeductionsPayable';
 
 export type HrFinancePostingStatus = 'Posted' | 'Failed' | 'Unposted' | 'Skipped' | 'Reversed';
 

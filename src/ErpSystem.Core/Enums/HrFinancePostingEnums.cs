@@ -49,7 +49,19 @@ public enum HrFinanceAccountRole
 
     /// <summary>Expense: benefit utilisations reimbursed to employees (slice 2).</summary>
     [Description("Benefits expense")]
-    BenefitsExpense = 8
+    BenefitsExpense = 8,
+
+    /// <summary>Expense: final pay on exit — unpaid salary, notice pay, gratuity, pension-related and other earnings (slice 3).</summary>
+    [Description("Separation expense")]
+    SeparationExpense = 9,
+
+    /// <summary>Revenue: amounts recovered from employees for property, penalties and other deductions (slice 3).</summary>
+    [Description("Employee recoveries income")]
+    EmployeeRecoveriesIncome = 10,
+
+    /// <summary>Liability: tax and other statutory amounts withheld from a settlement, owed to the authority (slice 3).</summary>
+    [Description("Statutory deductions payable")]
+    StatutoryDeductionsPayable = 11
 }
 
 /// <summary>

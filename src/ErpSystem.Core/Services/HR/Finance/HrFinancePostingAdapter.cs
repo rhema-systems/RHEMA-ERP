@@ -584,6 +584,9 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.LeaveEncashmentExpense => "Leave encashment expense",
         HrFinanceAccountRole.AwardsExpense => "Awards expense",
         HrFinanceAccountRole.BenefitsExpense => "Benefits expense",
+        HrFinanceAccountRole.SeparationExpense => "Separation expense",
+        HrFinanceAccountRole.EmployeeRecoveriesIncome => "Employee recoveries income",
+        HrFinanceAccountRole.StatutoryDeductionsPayable => "Statutory deductions payable",
         _ => role.ToString()
     };
 
@@ -597,6 +600,9 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.LeaveEncashmentExpense => "Expense. Leave days paid out instead of taken — in service where policy allows it, and on exit.",
         HrFinanceAccountRole.AwardsExpense => "Expense. Cash awards and long-service awards conferred on employees.",
         HrFinanceAccountRole.BenefitsExpense => "Expense. Benefit utilisations reimbursed to employees under their enrolments.",
+        HrFinanceAccountRole.SeparationExpense => "Expense. Final pay on exit — unpaid salary, notice pay, gratuity or end-of-service, pension-related and other earnings on a settlement.",
+        HrFinanceAccountRole.EmployeeRecoveriesIncome => "Revenue. What the company recovers from an employee on exit for unreturned property and other deductions (loans and advances clear the receivable instead).",
+        HrFinanceAccountRole.StatutoryDeductionsPayable => "Liability. Tax and other statutory amounts withheld from a settlement and owed to the authority.",
         _ => string.Empty
     };
 }

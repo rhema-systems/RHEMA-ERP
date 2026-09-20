@@ -10,6 +10,7 @@
     "src/app/administration/hr/settings/page.tsx",
     "src/app/hr/medical/claims/[id]/page.tsx",
     "src/app/hr/travel/claims/[id]/page.tsx",
+    "src/app/hr/separations/[id]/page.tsx",
     "src/config/hr-setup-nav.ts"
   ]
 }

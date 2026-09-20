@@ -10,6 +10,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.Finance;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR.Assets;
+using ErpSystem.Core.Services.HR.Finance;
 using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -54,6 +55,7 @@ public class SeparationService : ISeparationService
     /// why the query lives over there rather than being restated here.
     /// </remarks>
     private readonly AssetCustodyClearanceBridge _assetCustody;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     private readonly ILogger<SeparationService> _logger;
 
@@ -74,7 +76,8 @@ public class SeparationService : ISeparationService
         IWorkflowIntegrationService workflow,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         AssetCustodyClearanceBridge assetCustody,
-        ILogger<SeparationService> logger)
+        ILogger<SeparationService> logger,
+        IHrFinancePostingAdapter financePosting)
     {
         _payrollMembership = payrollMembership;
         _unitOfWork = unitOfWork;
@@ -86,6 +89,7 @@ public class SeparationService : ISeparationService
         _workflowAdapters = workflowAdapters;
         _assetCustody = assetCustody;
         _logger = logger;
+        _financePosting = financePosting;
     }
 
     private Guid GetTenantId()
@@ -2375,6 +2379,8 @@ public class SeparationService : ISeparationService
         ArgumentNullException.ThrowIfNull(dto);
         var tenantId = GetTenantId();
         var settlement = await RequireEditableSettlementAsync(tenantId, separationId, cancellationToken);
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Adding a settlement line", cancellationToken);
 
         if (string.IsNullOrWhiteSpace(dto.Description))
             throw new InvalidOperationException("Describe what the line is for.");
@@ -2432,6 +2438,8 @@ public class SeparationService : ISeparationService
         var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
             .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
             ?? throw new ArgumentException("The settlement this line belongs to was not found.");
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Changing a settlement line", cancellationToken);
 
         RequireEditable(await RequireAsync(tenantId, settlement.SeparationId, cancellationToken));
 
@@ -2487,6 +2495,8 @@ public class SeparationService : ISeparationService
         var settlement = await _unitOfWork.Repository<SeparationSettlement>().GetQueryable()
             .FirstOrDefaultAsync(s => s.Id == line.SettlementId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
             ?? throw new ArgumentException("The settlement this line belongs to was not found.");
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Changing a settlement line", cancellationToken);
 
         RequireEditable(await RequireAsync(tenantId, settlement.SeparationId, cancellationToken));
 
@@ -2591,16 +2601,32 @@ public class SeparationService : ISeparationService
         var tenantId = GetTenantId();
         var (separation, settlement) = await RequireSettlementUnderReviewAsync(tenantId, separationId, cancellationToken);
 
-        settlement.ReviewOutcome = SettlementReviewOutcome.Approved;
-        settlement.ReviewedById = actorEmployeeId;
-        settlement.ReviewedOn = DateTime.UtcNow;
-        settlement.ReviewNotes = string.IsNullOrWhiteSpace(dto?.Notes) ? null : dto!.Notes.Trim();
+        // Internal Audit's approval IS the release (FR-HR-185): there is no later pay step. The
+        // approval and Finance's journal commit together (HR finish plan lane 8, slice 3) — a
+        // settlement Finance refuses is not released. Finalising alone posts nothing: the register
+        // said "do not post on finalise", and it does not.
+        var lines = await _unitOfWork.Repository<SeparationSettlementLine>().GetQueryable()
+            .Where(l => l.TenantId == tenantId && l.SettlementId == settlement.Id && !l.IsDeleted)
+            .OrderBy(l => l.SortOrder)
+            .AsNoTracking()
+            .ToListAsync(cancellationToken);
 
-        separation.Status = SeparationStatus.SettlementApproved;
+        await _financePosting.RunAsync(async ct =>
+        {
+            settlement.ReviewOutcome = SettlementReviewOutcome.Approved;
+            settlement.ReviewedById = actorEmployeeId;
+            settlement.ReviewedOn = DateTime.UtcNow;
+            settlement.ReviewNotes = string.IsNullOrWhiteSpace(dto?.Notes) ? null : dto!.Notes.Trim();
 
-        await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
-        await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            separation.Status = SeparationStatus.SettlementApproved;
+
+            await _unitOfWork.Repository<SeparationSettlement>().UpdateAsync(settlement);
+            await _unitOfWork.Repository<EmployeeSeparation>().UpdateAsync(separation);
+            await _unitOfWork.SaveChangesAsync(ct);
+
+            return HrFinancePostingCommandFactory.SeparationSettlementReleased(
+                settlement, lines, separation.SeparationNumber, separation.EmployeeId);
+        }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation(
             "Settlement for separation {Number} reviewed and approved by Internal Audit; payment may be released",
@@ -2623,6 +2649,8 @@ public class SeparationService : ISeparationService
 
         var tenantId = GetTenantId();
         var (separation, settlement) = await RequireSettlementUnderReviewAsync(tenantId, separationId, cancellationToken);
+        await _financePosting.EnsureNotPostedAsync(
+            HrFinancePostingEventCatalog.SourceSeparationSettlement, settlement.Id, "Returning this settlement", cancellationToken);
 
         settlement.ReviewOutcome = SettlementReviewOutcome.Returned;
         settlement.ReviewedById = actorEmployeeId;

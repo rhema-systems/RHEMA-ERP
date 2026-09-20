@@ -65,6 +65,8 @@ public static class HrFinancePostingEventCatalog
     public const string LongServiceAwardProcessed = "LONG_SERVICE_AWARD_PROCESSED";
     public const string BenefitUtilizationApproved = "BENEFIT_UTILIZATION_APPROVED";
     public const string BenefitUtilizationPaid = "BENEFIT_UTILIZATION_PAID";
+    // slice 3 — separation
+    public const string SeparationSettlementReleased = "SEPARATION_SETTLEMENT_RELEASED";
 
     public const string SourceMedicalExpenseClaim = "MedicalExpenseClaim";
     public const string SourceStaffTravelExpenseClaim = "StaffTravelExpenseClaim";
@@ -73,6 +75,7 @@ public static class HrFinancePostingEventCatalog
     public const string SourceEmployeeAward = "EmployeeAward";
     public const string SourceLongServiceAward = "LongServiceAward";
     public const string SourceBenefitUtilization = "BenefitUtilization";
+    public const string SourceSeparationSettlement = "SeparationSettlement";
 
     public static IReadOnlyList<HrFinancePostingEventDefinition> Events { get; } =
     [
@@ -146,7 +149,15 @@ public static class HrFinancePostingEventCatalog
             "Dr Staff claims payable / Cr Staff payments clearing. Route payroll: nothing posts; payroll clears the payable.",
             [HrFinanceAccountRole.StaffClaimsPayable],
             [HrFinanceAccountRole.StaffPaymentsClearing],
-            SupportsSettlementRoute: true, DefaultSettlementRoute: HrFinanceSettlementRoute.Direct)
+            SupportsSettlementRoute: true, DefaultSettlementRoute: HrFinanceSettlementRoute.Direct),
+
+        // ── slice 3 — separation final settlement ────────────────────────────────────────────
+        new(SeparationSettlementReleased, "Separation settlement released", "Separation", SourceSeparationSettlement, "Release",
+            "Internal Audit approves the finalised settlement (POST hr/separations/{id}/settlement/review/approve) — FR-HR-185's release. Finalising alone posts nothing.",
+            "One journal, a leg per line: earnings Dr Separation expense (salary, notice, gratuity, pension, other), Dr Leave encashment expense, Dr Benefits expense; deductions Cr Staff advances receivable (loans, salary and travel advances), Cr Employee recoveries income (property, other), Cr Statutory deductions payable (tax). The net: Cr Staff payments clearing (direct) or Cr Staff claims payable (payroll's final run); a leaver who owes more than they are due is Dr Staff advances receivable.",
+            [HrFinanceAccountRole.SeparationExpense, HrFinanceAccountRole.LeaveEncashmentExpense, HrFinanceAccountRole.BenefitsExpense, HrFinanceAccountRole.StaffAdvancesReceivable],
+            [HrFinanceAccountRole.StaffClaimsPayable, HrFinanceAccountRole.StaffPaymentsClearing, HrFinanceAccountRole.StaffAdvancesReceivable, HrFinanceAccountRole.EmployeeRecoveriesIncome, HrFinanceAccountRole.StatutoryDeductionsPayable],
+            SupportsSettlementRoute: true, DefaultSettlementRoute: HrFinanceSettlementRoute.Payroll)
     ];
 
     private static readonly IReadOnlyDictionary<string, HrFinancePostingEventDefinition> ByCode =
@@ -174,6 +185,9 @@ public static class HrFinancePostingEventCatalog
         HrFinanceAccountRole.LeaveEncashmentExpense => AccountType.Expense,
         HrFinanceAccountRole.AwardsExpense => AccountType.Expense,
         HrFinanceAccountRole.BenefitsExpense => AccountType.Expense,
+        HrFinanceAccountRole.SeparationExpense => AccountType.Expense,
+        HrFinanceAccountRole.EmployeeRecoveriesIncome => AccountType.Revenue,
+        HrFinanceAccountRole.StatutoryDeductionsPayable => AccountType.Liability,
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Unknown HR Finance account role.")
     };
 }

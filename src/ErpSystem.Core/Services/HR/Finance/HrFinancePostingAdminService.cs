@@ -512,6 +512,23 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                     throw new InvalidOperationException($"Benefit claim {record.SourceReference} is not paid; there is no settlement to post.");
                 return HrFinancePostingCommandFactory.BenefitUtilizationPaid(claim, enrollment);
             }
+            case HrFinancePostingEventCatalog.SeparationSettlementReleased:
+            {
+                var settlement = await _unitOfWork.Repository<SeparationSettlement>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Settlement {record.SourceReference} no longer exists; nothing to post.");
+                if (settlement.ReviewOutcome != SettlementReviewOutcome.Approved)
+                    throw new InvalidOperationException($"Settlement {record.SourceReference} has not been approved by Internal Audit; there is nothing to release.");
+                var separation = await _unitOfWork.Repository<EmployeeSeparation>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == settlement.SeparationId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"The separation behind settlement {record.SourceReference} no longer exists.");
+                var lines = await _unitOfWork.Repository<SeparationSettlementLine>()
+                    .GetQueryable(l => l.TenantId == tenantId && l.SettlementId == settlement.Id && !l.IsDeleted)
+                    .AsNoTracking().OrderBy(l => l.SortOrder).ToListAsync(cancellationToken);
+                return HrFinancePostingCommandFactory.SeparationSettlementReleased(settlement, lines, separation.SeparationNumber, separation.EmployeeId);
+            }
             default:
                 throw new InvalidOperationException($"No retry builder exists for event '{record.EventCode}'.");
         }
