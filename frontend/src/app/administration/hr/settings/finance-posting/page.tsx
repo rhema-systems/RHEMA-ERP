@@ -39,7 +39,7 @@ import { useAuth } from '@/hooks/use-auth';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { FinanceAccountPicker } from '@/components/hr/common/FinanceAccountPicker';
 import { HR_ADMIN_ROLES } from '@/components/hr/common/PermissionGate';
-import { FinancePostingStatusBadge, fmtPostingMoney } from '@/components/hr/common/FinancePostingCard';
+import { FinancePostingStatusBadge, financePostingReference, fmtPostingMoney } from '@/components/hr/common/FinancePostingCard';
 import { financePostingService } from '@/services/hr/finance-posting.service';
 import {
   HR_FINANCE_POSTING_STATUSES,
@@ -175,6 +175,8 @@ export default function HrFinancePostingSettingsPage() {
                         <Landmark className="h-4 w-4" aria-hidden />
                         {rule.name}
                         <Badge variant="outline">{rule.area}</Badge>
+                        {/* The event hands Finance an AP vendor invoice to approve and pay, not a GL journal. */}
+                        {rule.kind === 'VendorInvoice' && <Badge variant="secondary">AP invoice</Badge>}
                       </span>
                       <span className="flex items-center gap-3">
                         {rule.isReady ? (
@@ -257,10 +259,22 @@ function Register({ canAdmin }: { canAdmin: boolean }) {
   const retry = useMutation({
     mutationFn: (id: string) => financePostingService.retry(id),
     onSuccess: async (r) => {
-      toast({ title: r.status === 'Posted' ? `Posted as ${r.journalEntryNumber}` : `Recorded as ${r.status}`, description: r.statusReason ?? undefined });
+      toast({
+        title: r.status === 'Posted' ? `Posted as ${financePostingReference(r) ?? 'a Finance document'}` : `Recorded as ${r.status}`,
+        description: r.statusReason ?? undefined,
+      });
       await refresh();
     },
     onError: (e: Error) => toast({ variant: 'destructive', title: 'Finance did not accept the posting', description: e.message }),
+  });
+  /** AP hand-off rows: pull Finance's invoice status onto the row. Read-level, not administration. */
+  const refreshStatus = useMutation({
+    mutationFn: (id: string) => financePostingService.refresh(id),
+    onSuccess: async (r) => {
+      toast({ title: `Finance says ${r.externalStatus ?? 'nothing yet'}` });
+      await refresh();
+    },
+    onError: (e: Error) => toast({ variant: 'destructive', title: 'Could not read Finance', description: e.message }),
   });
   const reverse = useMutation({
     mutationFn: ({ id, why }: { id: string; why: string }) => financePostingService.reverse(id, why),
@@ -340,20 +354,23 @@ function Register({ canAdmin }: { canAdmin: boolean }) {
                     {r.status === 'Reversed' ? `${r.reversalJournalEntryNumber ?? ''} ${r.reversalReason ?? ''}` : r.statusReason ?? r.description}
                   </TableCell>
                   <TableCell>
-                    {canAdmin && (
-                      <div className="flex gap-1">
-                        {r.canRetry && (
-                          <Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(r.id)}>
-                            <RefreshCw className="mr-1 h-3 w-3" /> Post
-                          </Button>
-                        )}
-                        {r.canReverse && (
-                          <Button size="sm" variant="ghost" onClick={() => setReversing(r)}>
-                            <Undo2 className="mr-1 h-3 w-3" /> Reverse
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                    <div className="flex gap-1">
+                      {canAdmin && r.canRetry && (
+                        <Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(r.id)}>
+                          <RefreshCw className="mr-1 h-3 w-3" /> Post
+                        </Button>
+                      )}
+                      {r.canRefresh && (
+                        <Button size="sm" variant="outline" disabled={refreshStatus.isPending} onClick={() => refreshStatus.mutate(r.id)}>
+                          <RefreshCw className="mr-1 h-3 w-3" /> Refresh
+                        </Button>
+                      )}
+                      {canAdmin && r.canReverse && (
+                        <Button size="sm" variant="ghost" onClick={() => setReversing(r)}>
+                          <Undo2 className="mr-1 h-3 w-3" /> Reverse
+                        </Button>
+                      )}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))}
@@ -372,11 +389,18 @@ function Register({ canAdmin }: { canAdmin: boolean }) {
       <Dialog open={!!reversing} onOpenChange={(o) => !o && setReversing(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reverse {reversing?.journalEntryNumber} in Finance</DialogTitle>
+            <DialogTitle>Reverse {reversing ? financePostingReference(reversing) : ''} in Finance</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Finance posts an exact reversal of {reversing?.eventName.toLowerCase()} for {reversing?.sourceReference}. The source document is not changed.
-          </p>
+          {reversing?.kind === 'VendorInvoice' ? (
+            <p className="text-sm text-muted-foreground">
+              HR can only withdraw a DRAFT invoice for {reversing?.eventName.toLowerCase()} on {reversing?.sourceReference}. Once Finance holds it,
+              Accounts Payable must reject or void the invoice and the row is then refreshed.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Finance posts an exact reversal of {reversing?.eventName.toLowerCase()} for {reversing?.sourceReference}. The source document is not changed.
+            </p>
+          )}
           <div className="space-y-2">
             <Label htmlFor="register-reversal-reason">Reason</Label>
             <Textarea id="register-reversal-reason" value={reason} onChange={(e) => setReason(e.target.value)} placeholder="At least five characters" />

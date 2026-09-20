@@ -120,6 +120,12 @@ public class HrFinancePostingController : ControllerBase
         => Ok(await _service.RetryAsync(id, cancellationToken));
 
     /// <summary>Finance's exact reversal of a Posted row, with a reason. The source document is not changed.</summary>
+    /// <summary>Pull Finance's status (and the payment voucher, once paid) onto an AP hand-off row.</summary>
+    [HttpPost("records/{id:guid}/refresh")]
+    [Authorize(Policy = HrPermissions.CompanyReadPolicy)]
+    public async Task<ActionResult<HrFinancePostingRecordDto>> Refresh(Guid id, CancellationToken cancellationToken)
+        => Ok(await _service.RefreshAsync(id, cancellationToken));
+
     [HttpPost("records/{id:guid}/reverse")]
     [Authorize(Policy = HrPermissions.CompanyAdminPolicy)]
     [ProducesResponseType(typeof(HrFinancePostingRecordDto), StatusCodes.Status200OK)]

@@ -55,11 +55,24 @@ export function fmtPostingMoney(amount: number, currency: string) {
 
 const fmtDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : '—');
 
+/**
+ * What Finance holds the row under: a GL journal number, or — when the event raises an Accounts
+ * Payable vendor invoice instead — the invoice number with Finance's own status in brackets.
+ */
+export function financePostingReference(record: HrFinancePostingRecord): string | null {
+  if (record.kind === 'VendorInvoice') {
+    if (!record.vendorInvoiceNumber) return null;
+    return `AP invoice ${record.vendorInvoiceNumber}${record.externalStatus ? ` (${record.externalStatus})` : ''}`;
+  }
+  return record.journalEntryNumber;
+}
+
 export function FinancePostingStatusBadge({ record }: { record: HrFinancePostingRecord }) {
+  const reference = financePostingReference(record);
   return (
     <Badge variant={STATUS_VARIANT[record.status] ?? 'outline'} title={record.statusReason ?? undefined}>
       {record.status}
-      {record.journalEntryNumber ? ` · ${record.journalEntryNumber}` : ''}
+      {reference ? ` · ${reference}` : ''}
     </Badge>
   );
 }
@@ -110,12 +123,22 @@ export function FinancePostingCard({ sourceDocumentId, invalidateKeys = [], clas
     mutationFn: (id: string) => financePostingService.retry(id),
     onSuccess: async (r) => {
       toast({
-        title: r.status === 'Posted' ? `Posted as ${r.journalEntryNumber}` : `Recorded as ${r.status}`,
+        title: r.status === 'Posted' ? `Posted as ${financePostingReference(r) ?? 'a Finance document'}` : `Recorded as ${r.status}`,
         description: r.statusReason ?? undefined,
       });
       await refresh();
     },
     onError: (e: Error) => toast({ variant: 'destructive', title: 'Finance did not accept the posting', description: e.message }),
+  });
+
+  /** AP rows only: pull Finance's invoice status onto the row. Read-level — the HR desk may ask. */
+  const refreshStatus = useMutation({
+    mutationFn: (id: string) => financePostingService.refresh(id),
+    onSuccess: async (r) => {
+      toast({ title: `Finance says ${r.externalStatus ?? 'nothing yet'}` });
+      await refresh();
+    },
+    onError: (e: Error) => toast({ variant: 'destructive', title: 'Could not read Finance', description: e.message }),
   });
 
   const reverse = useMutation({
@@ -175,14 +198,19 @@ export function FinancePostingCard({ sourceDocumentId, invalidateKeys = [], clas
                 ))}
               </ul>
             )}
-            {isAdmin && (r.canRetry || r.canReverse) && (
+            {(r.canRefresh || (isAdmin && (r.canRetry || r.canReverse))) && (
               <div className="mt-2 flex gap-2">
-                {r.canRetry && (
+                {isAdmin && r.canRetry && (
                   <Button size="sm" variant="outline" disabled={retry.isPending} onClick={() => retry.mutate(r.id)}>
                     <RefreshCw className="mr-1 h-3 w-3" /> Post now
                   </Button>
                 )}
-                {r.canReverse && (
+                {r.canRefresh && (
+                  <Button size="sm" variant="outline" disabled={refreshStatus.isPending} onClick={() => refreshStatus.mutate(r.id)}>
+                    <RefreshCw className="mr-1 h-3 w-3" /> Refresh
+                  </Button>
+                )}
+                {isAdmin && r.canReverse && (
                   <Button size="sm" variant="ghost" onClick={() => setReversing(r)}>
                     <Undo2 className="mr-1 h-3 w-3" /> Reverse
                   </Button>
@@ -196,12 +224,19 @@ export function FinancePostingCard({ sourceDocumentId, invalidateKeys = [], clas
       <Dialog open={!!reversing} onOpenChange={(o) => !o && setReversing(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reverse {reversing?.journalEntryNumber} in Finance</DialogTitle>
+            <DialogTitle>Reverse {reversing ? financePostingReference(reversing) : ''} in Finance</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-muted-foreground">
-            Finance posts an exact reversal of {reversing?.eventName.toLowerCase()} for {reversing?.sourceReference}.
-            The claim itself is not changed; its edit locks lift once the row is no longer posted.
-          </p>
+          {reversing?.kind === 'VendorInvoice' ? (
+            <p className="text-sm text-muted-foreground">
+              HR can only withdraw a DRAFT invoice for {reversing?.eventName.toLowerCase()} on {reversing?.sourceReference}.
+              Once Finance holds it, Accounts Payable must reject or void the invoice and the row is then refreshed.
+            </p>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              Finance posts an exact reversal of {reversing?.eventName.toLowerCase()} for {reversing?.sourceReference}.
+              The claim itself is not changed; its edit locks lift once the row is no longer posted.
+            </p>
+          )}
           <div className="space-y-2">
             <Label htmlFor="reversal-reason">Reason</Label>
             <Textarea

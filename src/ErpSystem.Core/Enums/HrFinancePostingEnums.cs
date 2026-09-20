@@ -72,7 +72,28 @@ public enum HrFinanceAccountRole
 
     /// <summary>Expense: a staff receivable forgiven — a waived surcharge, fine or bond (slice 4).</summary>
     [Description("Staff receivable write-off")]
-    StaffReceivableWriteOff = 13
+    StaffReceivableWriteOff = 13,
+
+    /// <summary>Expense: the cost of filling a post — adverts, agency fees, assessments (slice 5). The line on the AP invoice.</summary>
+    [Description("Recruitment expense")]
+    RecruitmentExpense = 14,
+
+    /// <summary>Revenue: what an insurer or the NHIS pays the company back — medical, NHIS and incident claims (slice 5).</summary>
+    [Description("Insurance recoveries income")]
+    InsuranceRecoveriesIncome = 15
+}
+
+/// <summary>
+/// What an event produces in Finance. A journal is the general case; a vendor invoice is the AP
+/// hand-off for a third-party payee — Finance approves and pays it, HR reads the status back.
+/// </summary>
+public enum HrFinancePostingKind
+{
+    [Description("General ledger journal")]
+    Journal = 1,
+
+    [Description("Accounts payable vendor invoice")]
+    VendorInvoice = 2
 }
 
 /// <summary>

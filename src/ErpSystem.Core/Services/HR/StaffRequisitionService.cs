@@ -12,6 +12,7 @@ using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR;
 using ErpSystem.Core.Services.HR.Recruitment;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -37,6 +38,7 @@ public class StaffRequisitionService : IStaffRequisitionService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly IUnitOfWork _unitOfWork;
     private readonly HrCurrencyBridge _currency;
+    private readonly IHrFinancePostingAdapter _financePosting;
     private readonly ILogger<StaffRequisitionService> _logger;
 
     /// <summary>
@@ -59,9 +61,11 @@ public class StaffRequisitionService : IStaffRequisitionService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         IUnitOfWork unitOfWork,
         HrCurrencyBridge currency,
+        IHrFinancePostingAdapter financePosting,
         ILogger<StaffRequisitionService> logger)
     {
         _currency = currency;
+        _financePosting = financePosting;
         _requisitionRepository = requisitionRepository;
         _costRepository = costRepository;
         _attachmentRepository = attachmentRepository;
@@ -849,13 +853,22 @@ public class StaffRequisitionService : IStaffRequisitionService
                 $"Approving this cost would take {env.BudgetNumber}'s recruitment spend to {env.Approved + entity.AmountBaseCurrency:N2} against an envelope of {env.Envelope:N2} " +
                 $"({env.Approved:N2} already approved). Budget enforcement is set to Block: revise the budget's recruitment envelope, or reject the cost.");
 
-        entity.Status = approve ? StaffRequisitionCostStatus.Approved : StaffRequisitionCostStatus.Rejected;
-        entity.ApprovedById = actorEmployeeId;
-        entity.ApprovedOn = DateTime.UtcNow;
-        entity.ApprovalNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
-        entity.UpdatedAt = DateTime.UtcNow;
-        await _costRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // HR's approval of the cost is the event that hands it to Finance (lane 8, slice 5, the R8
+        // AP hand-off): the approval and the vendor invoice commit together, or neither does. A
+        // cost paid to a person rather than a supplier is recorded Skipped and stays HR-side.
+        var requisitionNumber = await _unitOfWork.Repository<StaffRequisition>().GetQueryable().AsNoTracking()
+            .Where(r => r.Id == entity.RequisitionId).Select(r => r.RequisitionNumber).FirstOrDefaultAsync(cancellationToken) ?? "REQ";
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.Status = approve ? StaffRequisitionCostStatus.Approved : StaffRequisitionCostStatus.Rejected;
+            entity.ApprovedById = actorEmployeeId;
+            entity.ApprovedOn = DateTime.UtcNow;
+            entity.ApprovalNote = string.IsNullOrWhiteSpace(note) ? null : note.Trim();
+            entity.UpdatedAt = DateTime.UtcNow;
+            await _costRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return approve ? HrFinancePostingCommandFactory.RequisitionCostApproved(entity, requisitionNumber) : null;
+        }, _currentUserProvider.UserId, cancellationToken);
         var dto = (await ReloadCostAsync(entity.Id, cancellationToken)).ToDto();
         if (!approve) return dto;
         // After the save the cost is Approved, so "others" excludes it and the projection is exact.
@@ -938,6 +951,8 @@ public class StaffRequisitionService : IStaffRequisitionService
     public async Task<bool> DeleteCostAsync(Guid costId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedCostAsync(costId);
+        // A cost Finance already holds as an invoice is not deleted from HR; withdraw it through the register first.
+        await _financePosting.EnsureNotPostedAsync(HrFinancePostingEventCatalog.SourceStaffRequisitionCost, entity.Id, "delete", cancellationToken);
 
         await _costRepository.DeleteAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);

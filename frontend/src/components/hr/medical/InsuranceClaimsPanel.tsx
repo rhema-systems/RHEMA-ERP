@@ -16,6 +16,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { FieldRow, NumberField, SelectField, TextareaField, TextField } from '@/components/hr/employee/tabs/fields';
 import { useToast } from '@/hooks/use-toast';
 import { medicalInsuranceService } from '@/services/hr/medical-reference.service';
@@ -267,6 +268,8 @@ export function InsuranceClaimsPanel({
               </div>
             ),
           },
+          // The posting source is the INSURANCE CLAIM: the recovery Finance books when the insurer pays.
+          { header: 'Finance', cell: (c) => <FinancePostingInlineStatus sourceDocumentId={c.id} /> },
         ]}
         schema={schema}
         emptyForm={empty}

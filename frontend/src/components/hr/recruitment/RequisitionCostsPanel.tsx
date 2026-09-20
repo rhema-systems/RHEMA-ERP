@@ -28,6 +28,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
 import { SupplierPicker } from '@/components/hr/common/SupplierPicker';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatMoney, humanizeEnum } from '@/lib/hr/attendance-format';
 import { hrCurrencyService } from '@/services/hr/hr-currency.service';
@@ -263,6 +264,7 @@ export function RequisitionCostsPanel({
                 <TableHead className="text-right">In base currency</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Voucher</TableHead>
+                <TableHead className="w-32">Finance</TableHead>
                 <TableHead>Recorded</TableHead>
                 {canManage && <TableHead className="w-32" />}
               </TableRow>
@@ -289,6 +291,9 @@ export function RequisitionCostsPanel({
                     {c.approvalNote && <div className="text-xs text-muted-foreground">{c.approvalNote}</div>}
                   </TableCell>
                   <TableCell>{c.paymentVoucherNumber || '—'}</TableCell>
+                  {/* The posting source is the COST, not the requisition: an approved cost hands
+                      Finance the recruitment expense (an AP invoice where the payee is a supplier). */}
+                  <TableCell><FinancePostingInlineStatus sourceDocumentId={c.id} /></TableCell>
                   <TableCell className="text-sm text-muted-foreground">
                     {formatDate(c.recordedDate)} · {c.recordedByName}
                   </TableCell>

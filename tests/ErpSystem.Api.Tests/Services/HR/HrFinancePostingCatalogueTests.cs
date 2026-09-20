@@ -3,6 +3,8 @@ using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Entities.HR.Medical;
+using ErpSystem.Core.Entities.HR.Requisition;
+using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Entities.HR.StaffLeave;
@@ -117,6 +119,101 @@ public sealed class HrFinancePostingCatalogueTests
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TrainingBondBreached), HrFinancePostingCommandFactory.TrainingBondBreached(bond));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TrainingBondSettled), HrFinancePostingCommandFactory.TrainingBondSettled(bond, breachPosted: true));
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TrainingBondWaived), HrFinancePostingCommandFactory.TrainingBondWaived(bond, breachPosted: true));
+
+        // slice 5 — third-party payees
+        var cost = new StaffRequisitionCost
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, RequisitionId = Guid.NewGuid(), Category = StaffRequisitionCostCategory.JobAdvertising,
+            Purpose = "Sunday advert", Amount = 500m, Currency = "GHS", CostDate = new DateOnly(2026, 9, 1), SupplierId = Guid.NewGuid(),
+            PayeeName = "Graphic Communications", Status = StaffRequisitionCostStatus.Approved
+        };
+        var premium = new MedicalInsurancePremiumRecord
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, ProviderId = Guid.NewGuid(), PlanId = Guid.NewGuid(),
+            BillingPeriodStart = new DateOnly(2026, 7, 1), BillingPeriodEnd = new DateOnly(2026, 9, 30),
+            TotalPremiumAmount = 18000m, EmployerContribution = 14000m, EmployeeContribution = 4000m,
+            Status = MedicalInsurancePremiumPaymentStatus.Paid, PaymentDate = DateTime.UtcNow
+        };
+        var insurerClaim = new MedicalInsuranceClaim
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, PolicyId = Guid.NewGuid(), MedicalExpenseClaimId = Guid.NewGuid(),
+            InsuranceClaimNumber = "INS-1", ClaimedAmount = 1200m, ApprovedAmount = 1000m, PaidAmount = 1000m,
+            Status = MedicalInsuranceClaimStatus.Paid, PaymentDate = DateTime.UtcNow, PaymentReference = "RMT-1"
+        };
+        var nhis = new NHISClaim
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, ClaimNumber = "NHIS-1", EmployeeId = Guid.NewGuid(), FacilityId = Guid.NewGuid(),
+            TotalCost = 80m, ApprovedAmount = 60m, Status = NHISClaimStatus.Paid, PaymentDate = DateTime.UtcNow
+        };
+        var incident = new SafetyIncident
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, IncidentNumber = "INC-2026-00001", InsuranceClaimFiled = true,
+            ClaimReferenceNumber = "CLM-1", ClaimAmount = 5000m, ClaimApproved = true, AmountPaid = 4500m, ClaimFiledDate = DateTime.UtcNow
+        };
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.RequisitionCostApproved), HrFinancePostingCommandFactory.RequisitionCostApproved(cost, "REQ-2026-0001"));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.MedicalPremiumPaid), HrFinancePostingCommandFactory.MedicalPremiumPaid(premium, "Acme Health"));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.MedicalInsurerRecoveryReceived), HrFinancePostingCommandFactory.MedicalInsurerRecoveryReceived(insurerClaim));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.NhisClaimReimbursed), HrFinancePostingCommandFactory.NhisClaimReimbursed(nhis));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.SheInsuranceClaimReceived), HrFinancePostingCommandFactory.SheInsuranceClaimReceived(incident));
+    }
+
+    [Fact]
+    public void ThirdPartyPayees_InvoiceSuppliersThroughAp_AndBookInsurerMoneyAsIncome()
+    {
+        // An approved cost with a supplier becomes ONE expense line for an AP invoice — the credit
+        // side is Finance's AP control, never an HR role.
+        var supplierCost = new StaffRequisitionCost { Id = Guid.NewGuid(), Category = StaffRequisitionCostCategory.RecruitmentAgencyFee, Purpose = "Search fee", Amount = 2500m, Currency = "USD", CostDate = new DateOnly(2026, 9, 1), SupplierId = Guid.NewGuid(), PayeeName = "Headhunters Ltd" };
+        var ap = HrFinancePostingCommandFactory.RequisitionCostApproved(supplierCost, "REQ-9");
+        HrFinancePostingEventCatalog.GetRequired(ap.EventCode).Kind.Should().Be(HrFinancePostingKind.VendorInvoice);
+        ap.PayeeSupplierId.Should().Be(supplierCost.SupplierId);
+        ap.TransactionCurrencyCode.Should().Be("USD");
+        ap.Lines.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.RecruitmentExpense && l.Amount == 2500m);
+
+        // A cost paid to a person is not invoiced: there is no AP path for a non-supplier.
+        var personCost = new StaffRequisitionCost { Id = Guid.NewGuid(), Category = StaffRequisitionCostCategory.JobAdvertising, Purpose = "Candidate travel", Amount = 100m, Currency = "GHS", PayeeName = "A. Candidate" };
+        HrFinancePostingCommandFactory.RequisitionCostApproved(personCost, "REQ-9").SkipReason.Should().Contain("not a Procurement supplier");
+
+        // A premium splits into the employer's expense and the employees' receivable, and leaves through clearing.
+        var premium = new MedicalInsurancePremiumRecord { Id = Guid.NewGuid(), BillingPeriodStart = new DateOnly(2026, 7, 1), BillingPeriodEnd = new DateOnly(2026, 9, 30), TotalPremiumAmount = 18000m, EmployerContribution = 14000m, EmployeeContribution = 4000m };
+        var paid = HrFinancePostingCommandFactory.MedicalPremiumPaid(premium, "Acme");
+        paid.Lines.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.MedicalExpense && l.Amount == 14000m);
+        paid.Lines.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivables && l.Amount == 4000m);
+        paid.Lines.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.StaffPaymentsClearing && l.Amount == 18000m);
+
+        // Insurer, NHIS and incident proceeds are the same shape: cash in, recoveries income.
+        HrFinancePostingCommandFactory.NhisClaimReimbursed(new NHISClaim { Id = Guid.NewGuid(), ClaimNumber = "N", TotalCost = 80m, NHISCoveredAmount = 70m })
+            .Lines.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.InsuranceRecoveriesIncome && l.Amount == 70m, "the covered amount stands in when nothing was approved");
+        HrFinancePostingCommandFactory.SheInsuranceClaimReceived(new SafetyIncident { Id = Guid.NewGuid(), IncidentNumber = "INC", InsuranceClaimFiled = true, ClaimApproved = true, ClaimAmount = 5000m })
+            .SkipReason.Should().Contain("No amount has been paid", "an approved but unpaid claim is not income yet");
+        HrFinancePostingCommandFactory.MedicalInsurerRecoveryReceived(new MedicalInsuranceClaim { Id = Guid.NewGuid(), InsuranceClaimNumber = "I", PaidAmount = 0m })
+            .SkipReason.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void Slice5Services_RouteTheirMoneyEventsThroughTheAdapter()
+    {
+        var root = FindRepositoryRoot();
+        var requisition = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "StaffRequisitionService.cs"));
+        var medical = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "MedicalServices.cs"));
+        var safety = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "StaffSafetyServices.cs"));
+
+        Between(requisition, "public async Task<StaffRequisitionCostDto> DecideCostAsync(", "public async Task<IEnumerable<StaffRequisitionCostDto>> GetCostsAsync(")
+            .Should().Contain("_financePosting.RunAsync").And.Contain("HrFinancePostingCommandFactory.RequisitionCostApproved(entity, requisitionNumber)");
+        Between(requisition, "public async Task<bool> DeleteCostAsync(", "\n    public ").Should().Contain("EnsureNotPostedAsync");
+
+        Between(medical, "public async Task<MedicalInsurancePremiumRecordDto> RecordPremiumPaymentAsync(", "\n    public ")
+            .Should().Contain("HrFinancePostingCommandFactory.MedicalPremiumPaid(entity, providerName)").And.Contain("already recorded as paid");
+        Between(medical, "public async Task<MedicalInsuranceClaimDto> RecordInsuranceClaimPaymentAsync(", "\n    public ")
+            .Should().Contain("HrFinancePostingCommandFactory.MedicalInsurerRecoveryReceived(entity)");
+        Between(medical, "public async Task<bool> RecordClaimPaymentAsync(RecordNHISClaimPaymentDto", "\n    public ")
+            .Should().Contain("HrFinancePostingCommandFactory.NhisClaimReimbursed(entity)");
+
+        Between(safety, "public async Task<bool> FileClaimAsync(", "\n    public ")
+            .Should().Contain("HrFinancePostingCommandFactory.SheInsuranceClaimReceived(entity)").And.Contain("EnsureNotPostedAsync");
+
+        // Nothing in HR writes a Finance journal or vendor invoice outside the adapter.
+        foreach (var source in new[] { requisition, medical, safety })
+            source.Should().NotContain("IJournalEntryService").And.NotContain("IVendorInvoiceService");
     }
 
     [Fact]
@@ -314,6 +411,16 @@ public sealed class HrFinancePostingCatalogueTests
             (command.RouteDirectLines is not null).Should().Be(definition.SupportsSettlementRoute,
                 $"{definition.Code}: a command carries route-dependent lines exactly when its event supports a settlement route");
 
+            if (definition.Kind == HrFinancePostingKind.VendorInvoice)
+            {
+                // An AP hand-off carries exactly one expense leg; the credit is Finance's AP control.
+                definition.CreditRoles.Should().BeEmpty($"{definition.Code}: HR never names the payable side of a vendor invoice");
+                command.Lines.Should().ContainSingle(l => l.IsDebit && l.Amount > 0m, $"{definition.Code}");
+                command.Lines.Select(l => l.Role).Should().BeSubsetOf(definition.DebitRoles, $"{definition.Code} debit roles");
+                command.PayeeSupplierId.Should().NotBeNull($"{definition.Code}: the sample names a supplier");
+                continue;
+            }
+
             // Every route that has lines must balance inside the declared roles.
             foreach (var route in new[] { HrFinanceSettlementRoute.Direct, HrFinanceSettlementRoute.Payroll })
             {
@@ -411,7 +518,9 @@ public sealed class HrFinancePostingCatalogueTests
         events.Should().OnlyContain(e =>
             !string.IsNullOrWhiteSpace(e.Name) && !string.IsNullOrWhiteSpace(e.SourceDocumentType)
             && !string.IsNullOrWhiteSpace(e.Trigger) && !string.IsNullOrWhiteSpace(e.Treatment)
-            && e.DebitRoles.Count > 0 && e.CreditRoles.Count > 0);
+            && e.DebitRoles.Count > 0
+            // A journal names both sides; an AP invoice names only its expense line — the payable is Finance's.
+            && (e.Kind == HrFinancePostingKind.VendorInvoice ? e.CreditRoles.Count == 0 : e.CreditRoles.Count > 0));
 
         // Two events on one source document type must never share a posting action — Finance
         // de-duplicates on (type, id, action).

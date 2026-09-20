@@ -14,7 +14,9 @@ public sealed record HrFinanceAccountSnapshot(
     string AccountNumber,
     string AccountName,
     AccountType AccountType,
-    bool IsActive);
+    bool IsActive,
+    // Finance budget control on the account: an AP expense line on it needs a Finance budget cell before submission (FIN-INT-016).
+    bool BudgetTrackingEnabled = false);
 
 /// <summary>Finance's tenant-level facts an HR posting depends on.</summary>
 /// <param name="FunctionalCurrencyCode">Finance's base currency; every HR journal is stated in it.</param>
@@ -92,7 +94,7 @@ public sealed class HrFinancePostingStore : IHrFinancePostingStore
             .GetQueryable(a => a.TenantId == tenantId && ids.Contains(a.Id) && !a.IsDeleted)
             .AsNoTracking()
             .Select(a => new HrFinanceAccountSnapshot(
-                a.Id, a.AccountCode, a.AccountNumber, a.AccountName, a.AccountType, a.Status == AccountStatus.Active))
+                a.Id, a.AccountCode, a.AccountNumber, a.AccountName, a.AccountType, a.Status == AccountStatus.Active, a.BudgetTrackingEnabled))
             .ToListAsync(cancellationToken);
         return accounts.ToDictionary(a => a.Id);
     }

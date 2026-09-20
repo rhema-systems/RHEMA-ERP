@@ -54,6 +54,9 @@ public partial class ApplicationDbContext
             entity.Property(x => x.SourceReference).HasMaxLength(100);
             entity.Property(x => x.IdempotencyKey).HasMaxLength(200);
             entity.Property(x => x.PostingAction).HasMaxLength(50);
+            entity.Property(x => x.VendorInvoiceNumber).HasMaxLength(50);
+            entity.Property(x => x.ExternalStatus).HasMaxLength(50);
+            entity.HasIndex(x => x.VendorInvoiceId);
 
             // One row per event per source document; a retry updates it.
             entity.HasIndex(x => new { x.TenantId, x.EventCode, x.SourceDocumentId })

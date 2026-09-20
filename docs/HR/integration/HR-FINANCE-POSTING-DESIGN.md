@@ -159,6 +159,50 @@ Back-fill: surcharges approved, fines imposed and bonds breached before this sli
 row; their later recovery/settlement finds no Posted recognition and is recorded Skipped with the
 reason. Retry from the register rebuilds each command from the live source document.
 
+### 3.1e Slice 5 — third-party payees (built 2026-09-20)
+
+Two shapes, because the money goes two ways.
+
+**Money HR owes a third party goes to Accounts Payable, not to a journal.** A new *kind* on the
+catalogue entry, `HrFinancePostingKind.VendorInvoice`: the adapter raises a Finance vendor invoice
+to the Procurement supplier with one expense line, submits it into AP approval, and records the
+invoice id, number and Finance's status on the register row. Finance approves, posts and pays it
+under its own controls; HR never journals a third party's payable. Status comes back by **pull**
+(`POST records/{id}/refresh`, HR.Company.Read): the row carries Finance's status; Rejected or
+Voided in Finance marks the row Reversed so HR's guards lift; once Paid, the payment numbers are
+written onto the source (`StaffRequisitionCost.PaymentVoucherNumber`, which used to be typed). HR
+can withdraw an AP row only while Finance still holds it as a draft — after that the register
+refuses and names Accounts Payable. **On a budget-controlled expense account the invoice is left as
+a Draft** rather than submitted: Finance's AP refuses to submit an expense line on such an account
+without an adopted Finance budget cell (FIN-INT-016), HR does not reserve Finance budget (D-8), so
+Accounts Payable attaches the cell and submits; the row's note says exactly that. The first live
+run found this rule. This is the R8 hand-off, built as the hand-off document
+proposed (route-less `CreateAsync`, as Estate and Quantity Survey do; `HR-{event}:{sourceId}` as
+the reference). Finance's answers to that document's questions change one line each; **the rule
+ships disabled**, so nothing reaches AP until an administrator turns it on.
+
+**Money a third party pays HR is income through clearing.** One new Revenue role, *Insurance
+recoveries income*, for insurer, NHIS and incident-insurance proceeds alike.
+
+| Event | Kind | Source type / action | Lines / effect |
+|---|---|---|---|
+| `REQUISITION_COST_APPROVED` | **AP invoice** | `StaffRequisitionCost` / `Approve` (HR's approval of the cost) | one line Dr Recruitment expense to the cost's supplier, in the cost's currency, submitted for AP approval. Payee a person (no supplier) → Skipped, stays HR-side (backlog decision #1) |
+| `MEDICAL_PREMIUM_PAID` | journal | `MedicalInsurancePremiumRecord` / `Pay` | Dr Medical expense (employer share) + Dr Staff receivables (employees' share, payroll recovers it) / Cr Staff payments clearing (the bill) |
+| `MEDICAL_INSURER_RECOVERY_RECEIVED` | journal | `MedicalInsuranceClaim` / `Receive` | Dr clearing / Cr Insurance recoveries income, the amount the insurer paid |
+| `NHIS_CLAIM_REIMBURSED` | journal | `NHISClaim` / `Receive` | Dr clearing / Cr Insurance recoveries income, the approved amount (else the covered amount) |
+| `SHE_INSURANCE_CLAIM_RECEIVED` | journal | `SafetyIncident` / `Receive` | Dr clearing / Cr Insurance recoveries income, the amount paid; filed-but-unpaid is Skipped; the claim form stays re-submittable but its money is fixed once posted |
+
+Two new roles: Recruitment expense (Expense), Insurance recoveries income (Revenue). Three payment
+paths that silently overwrote a payment (premium, insurer claim, NHIS claim) now refuse a second
+payment. Register columns added: `VendorInvoiceId`, `VendorInvoiceNumber`, `ExternalStatus`,
+`ExternalStatusAt` (migration `AddHrFinancePostingSlice5`).
+
+**Deliberately not posted: training budget transactions.** A `TrainingBudgetTransaction` is HR's
+memo of a spend whose `Reference` is an invoice or PO number — that is, a Finance document that
+already exists and already posted. Journaling it again would double the expense; the right
+integration is the budget *read* (slice 6, with the manpower actuals). The same reasoning keeps the
+awards and travel budget figures out of the ledger.
+
 ### 3.2 Identity
 
 - `SourceModule = "HR"`, `OriginModuleCode = "HR"` — Finance's module-lock catalogue already knows HR, so a Finance administrator can lock HR out of a period without touching payroll.
@@ -257,6 +301,23 @@ accounts; a live tenant creates *Staff receivables* and *Staff receivable write-
 ⚠ Waiving a bond needs `HR.Training.Admin` **and** an employee-linked user: on the UAT seed only
 TenantAdmin holds it and `admin` is not linked, so the harness mints a TenantAdmin actor.
 
+**Verified live 2026-09-20 (slice 5) on `ErpSystemDB_UAT`:** `run-slice5.mjs`, 68 assertions, green
+twice. The AP hand-off in both shapes: on a budget-controlled expense account (every UAT expense
+account but depreciation) HR's approval raises a Draft invoice for the cost amount to the supplier,
+the row says why, HR can withdraw it (Finance no longer serves it) and post it again as a fresh
+invoice; on a plain expense account the invoice goes straight into AP approval, Finance's three
+seeded tiers (Accounts Officer, then Finance Manager, then Financial Controller) approve it, the
+register's refresh pulls "Approved", and HR can no longer withdraw it. A cost paid to a person is
+Skipped; a handed-off cost cannot be deleted. Premium paid: Dr 6020 (employer) + Dr 1100 (employees)
+/ Cr 1010; insurer, NHIS and incident proceeds: Dr 1010 / Cr 4900; second payments refused; an
+incident claim re-filed with the same money stays one row, with a different amount is refused.
+Three live lessons, each now in the code: AP refuses to submit an expense line on a
+budget-controlled account without a Finance budget cell (HR leaves a Draft); AP approves only an
+invoice with dimension provenance recorded under a producer route (HR uses the manual-AP route
+until Finance grants one); a withdrawn row must be re-postable from the register (Retry now
+accepts Reversed). Finance answers 500, not 404, for a deleted invoice id: recorded for the Finance
+owner, not fixed.
+
 ## 6. Decisions taken here, and what they wait on
 
 | # | Decision | Taken as | Waits on |
@@ -267,7 +328,8 @@ TenantAdmin holds it and `admin` is not linked, so the harness mints a TenantAdm
 | D-4 | FX evidence on the journal | Not sent; HR values through the bridge and keeps the original on its row | Finance owner — whether HR may pass `ExchangeRateId` and under which rate policy (hand-off Q3) |
 | D-5 | Dimensions | None sent | TDC's cost-attribution answer; then a Finance route with dimension rules |
 | D-6 | Posting date | The HR action date by default; per event switchable to the document date | — |
-| D-7 | Routes | Route-less FIN-INT-001 overload, as Procurement's tender fee | Finance to add HR routes (hand-off Q1); switch is one line per event |
+| D-7 | Routes | Journals: route-less FIN-INT-001 overload, as Procurement's tender fee. **AP invoices: the manual-AP dimension route** (`FinanceApVendorInvoice`, the one Finance's own AP screen uses), because Finance approves an invoice only when it carries dimension provenance recorded under a producer route, and the route-less overload records none — the first live run proved an HR invoice could never be approved | Finance to add HR routes (hand-off Q1); switch is one line per event / one enum value for AP |
+| D-8 | The AP hand-off before Finance answered | **Built behind a rule that ships OFF** (slice 5), on the route-less `IVendorInvoiceService.CreateAsync` the Estate and QS producers already use; HR's approval submits the invoice into AP approval; a non-supplier payee is Skipped; one expense role, not one per category; no `BudgetEntryId` (HR enforces its own envelope). | The recruitment-cost hand-off's five questions. Each answer is one line or a toggle: a producer route (D-7), "receive as Draft" (one call), per-category accounts (roles), budget reservation (one field). Turning the rule on is the tenant's decision, made once Finance has confirmed. |
 
 ---
 
@@ -286,6 +348,10 @@ expense line is needed, and a contract test.
 | ~~16.1–16.5 Asset surcharge~~ | **built, slice 4** (approved, recovered per row, waived; settlement recovery credits the receivable) | | |
 | ~~3.4 Discipline fine~~ | **built, slice 4** (imposed, settled on close with paid/forgiven split) | | |
 | ~~7 Training service bond~~ | **built, slice 4** (breached, settled, waived) | | |
+| ~~6 Recruitment cost (R8)~~ | **built, slice 5** — AP vendor invoice on HR's approval; rule ships OFF until Finance confirms | | |
+| ~~11 Medical premium, insurer recovery, NHIS recovery~~ | **built, slice 5** | | |
+| ~~10 SHE incident insurance proceeds~~ | **built, slice 5** | | |
+| ~~7 Training budget transactions~~ | **not posted, by decision** (§ 3.1e) — a memo of a Finance document; the budget read is slice 6 | | |
 | 13 Succession development actual cost | `DEVELOPMENT_ACTIVITY_COMPLETED` | Training expense role | only after the three-way training decision |
 | Budget surfaces (manpower, training, awards, travel) | none — reads of Finance actuals | | FIN-INT-015 shape needs a Planned conversation; not wired unilaterally |
 
@@ -294,5 +360,5 @@ expense line is needed, and a contract test.
 ## 8. Verification
 
 - `HrFinancePostingAdapterTests` (21) — contract helper on every request; retry returns the original without a second Finance call; refusal rolls back and logs Failed; disabled/missing rule logs Unposted; unmapped, wrong-type, inactive and cross-tenant accounts refuse; travel settlement legs; payroll-offset skip; foreign advance evidence; reversed-row generation; edit guard.
-- `HrFinancePostingCatalogueTests` (12) — every event (20) has a balanced builder inside its roles; distinct actions per source type; zero amounts skip; the settlement route toggle in both positions; receivables raised once, cleared by what was collected and written off for the rest; a settlement line recovering a posted surcharge credits the receivable; every wired area service routes through the adapter and never touches `IJournalEntryService`.
+- `HrFinancePostingCatalogueTests` (14) — every event (25) has a balanced builder inside its roles (an AP event: exactly one expense leg and a supplier); distinct actions per source type; zero amounts skip; the settlement route toggle in both positions; receivables raised once, cleared by what was collected and written off for the rest; a settlement line recovering a posted surcharge credits the receivable; every wired area service routes through the adapter and never touches `IJournalEntryService`.
 - Live: `D:\Rhema\TDC ERPS\dev-harness\hr-finance\run-slice1.mjs` (outside the repo, see its README) — maps the roles, enables the events, walks medical approve → pay and travel advance → claim → pay, reads the journals back from Finance, asserts idempotency, reversal and the edit guard. Requires the baseline database (§ 5).

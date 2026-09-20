@@ -113,4 +113,11 @@ public interface IHrFinancePostingAdminService
 
     /// <summary>Finance's exact reversal of a Posted row; the row becomes Reversed and keeps both identities.</summary>
     Task<HrFinancePostingRecordDto> ReverseAsync(Guid recordId, ReverseHrFinancePostingDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Pulls Finance's current state onto an AP row (slice 5): the invoice status, Reversed when
+    /// Finance rejected or voided it, and the payment voucher back onto the source once paid. A
+    /// journal row is returned unchanged.
+    /// </summary>
+    Task<HrFinancePostingRecordDto> RefreshAsync(Guid recordId, CancellationToken cancellationToken = default);
 }

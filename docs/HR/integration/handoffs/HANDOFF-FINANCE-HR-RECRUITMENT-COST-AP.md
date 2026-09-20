@@ -3,8 +3,9 @@
 **Raised by:** HR module work, 2026-09-10 (demo feedback round 2b, lane R7/R8).
 **Severity:** not a defect — an integration request. Nothing is broken; a demo-stated requirement
 cannot be met without a contract from Finance.
-**Status:** open. HR builds its own half now (R7) and waits for the answers in § 5 before building
-the adapter (R8).
+**Status:** open for the answers in § 5; **the adapter is built (2026-09-20, HR finish plan lane 8
+slice 5) and ships with its posting rule OFF.** See § 7 — nothing reaches Accounts Payable until
+the rule is enabled, and each of the five answers changes one line or a setting.
 
 This is a self-contained note — nothing in it requires reading HR's plans or code. The design it
 describes is also in `docs/HR/programme/HR-DEMO-FEEDBACK-ROUND-2B-RECRUITMENT-PLAN.md` § 4 (R8), and the
@@ -134,3 +135,41 @@ pattern, not a one-off.
 - Governance: `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md:38-88` (the 2026-08-31 message and the
   coordination gate), `docs/Finance/finance-integration-adapter-checklist.md`,
   `docs/Finance/finance-integration-contract-catalogue.md` § FIN-INT-016.
+
+---
+
+## 7. What HR built on 2026-09-20, and how each answer lands
+
+The HR ↔ Finance sweep (lane 8) reached the third-party payees and built the adapter in § 4 as
+proposed, inside HR's posting register rather than as a one-off (`HrFinancePostingAdapter`,
+kind `VendorInvoice`; design `docs/HR/integration/HR-FINANCE-POSTING-DESIGN.md` § 3.1e):
+
+- **Trigger:** HR's approval of the cost (`POST StaffRequisitions/costs/{id}/approve`) — the
+  approval and the invoice commit together, or neither does.
+- **Call:** the route-less `IVendorInvoiceService.CreateAsync` (the Estate / QS precedent), one
+  `Expense` line on the account mapped to the HR role *Recruitment expense*, `Reference =
+  "HR-REQUISITION_COST_APPROVED:{costId:N}"`, then `SubmitForApprovalAsync`. `ExchangeRate` is
+  Finance's rate through `HrCurrencyBridge`; no `ExchangeRateId` is sent (D-4).
+- **Back-references:** on HR's register row (`VendorInvoiceId/Number`, `ExternalStatus/At`), not
+  on the cost; `PaymentVoucherNumber` is written from `VendorPayment.PaymentNumber` on refresh.
+- **Status sync is pull** (`POST api/hr/finance-posting/records/{id}/refresh`). Rejected/Voided in
+  Finance → the HR row is Reversed and the cost can be re-handed after correction.
+- **Withdrawal:** HR deletes only a Draft invoice; anything Finance has taken into approval is
+  Finance's to reject or void.
+- **Non-supplier payee:** Skipped with the reason; stays HR-side.
+- **Gate:** `HrFinancePostingCatalogueTests` (AP event = one expense leg + a supplier, source guards)
+  in the Finance consumer gate; live `dev-harness/hr-finance/run-slice5.mjs`.
+
+| § 5 question | Built as | Your answer changes |
+|---|---|---|
+| 1 producer route | **the manual-AP route** (`FinanceDimensionRouteId.FinanceApVendorInvoice`) — your AP screen approves only an invoice with dimension provenance recorded under a producer route, and the route-less overload records none, so an HR invoice raised route-less could never be approved (seen live 2026-09-20); under the manual route it is, to AP, an invoice on their desk | one enum value → HR's own route |
+| 2 catalogue row | none (Finance's to add) | — |
+| 3 authorising event | HR approval creates AND submits | one line: stop at Draft |
+| 4 non-supplier payee | Skipped, HR-side | a factory branch, if an AP path exists |
+| 5 expense account | one role, *Recruitment expense* | one role per category (settings only) |
+| 6 budget control | no `BudgetEntryId`; on a budget-controlled expense account the invoice is **left as a Draft** for AP to attach the cell and submit (your submit rule refuses it otherwise — seen live on the UAT chart, where every expense account but depreciation is budget-controlled) | one field, if HR should pick the cell itself |
+
+**The rule is disabled by default.** The tenant enables `REQUISITION_COST_APPROVED` under HR
+Settings → Finance posting once you confirm; until then approving a cost writes an *Unposted* row
+and nothing else.
+

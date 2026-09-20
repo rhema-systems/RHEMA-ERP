@@ -160,6 +160,16 @@ public class HrFinancePostingRecord : TenantEntity
 
     public DateTime? PostedAt { get; set; }
 
+    /// <summary>For a vendor-invoice event: the AP invoice Finance holds (slice 5). Null on journal rows.</summary>
+    public Guid? VendorInvoiceId { get; set; }
+
+    public string? VendorInvoiceNumber { get; set; }
+
+    /// <summary>Finance's invoice status as last pulled by the register's refresh.</summary>
+    public string? ExternalStatus { get; set; }
+
+    public DateTime? ExternalStatusAt { get; set; }
+
     // ── Failure / skip evidence ──────────────────────────────────────────────────────────────
     [MaxLength(2000)]
     public string? StatusReason { get; set; }

@@ -490,6 +490,7 @@ public class MedicalInsuranceService : IMedicalInsuranceService
     private readonly IMedicalInsurancePremiumRecordRepository _premiumRecordRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IHrFinancePostingAdapter _financePosting;
     private readonly ILogger<MedicalInsuranceService> _logger;
 
     public MedicalInsuranceService(
@@ -503,8 +504,10 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         IMedicalInsurancePremiumRecordRepository premiumRecordRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IHrFinancePostingAdapter financePosting,
         ILogger<MedicalInsuranceService> logger)
     {
+        _financePosting = financePosting;
         _providerRepository = providerRepository;
         _planRepository = planRepository;
         _policyRepository = policyRepository;
@@ -945,10 +948,25 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Medical insurance claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity, updatedByUserId);
+        if (entity.Status == MedicalInsuranceClaimStatus.Paid)
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.InvalidState,
+                $"The insurer's payment on claim {entity.InsuranceClaimNumber} is already recorded ({entity.PaidAmount:N2}).");
 
-        await _insuranceClaimRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // The insurer's money and Finance's record of it commit together (lane 8, slice 5).
+        try
+        {
+            await _financePosting.RunAsync(async ct =>
+            {
+                paymentDto.ApplyTo(entity, updatedByUserId);
+                await _insuranceClaimRepository.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return HrFinancePostingCommandFactory.MedicalInsurerRecoveryReceived(entity);
+            }, updatedByUserId, cancellationToken);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.InvalidState, ex.Message, ex);
+        }
 
         _logger.LogInformation("Medical insurance claim payment recorded: {InsuranceClaimNumber}", entity.InsuranceClaimNumber);
 
@@ -1077,10 +1095,26 @@ public class MedicalInsuranceService : IMedicalInsuranceService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"Premium record with ID '{paymentDto.PremiumRecordId}' not found.");
 
-        paymentDto.ApplyTo(entity, updatedByUserId);
+        if (entity.Status == MedicalInsurancePremiumPaymentStatus.Paid)
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.InvalidState, "This premium is already recorded as paid.");
 
-        await _premiumRecordRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // The premium leaves through clearing; the employer's share is expense and the employees'
+        // share a receivable payroll recovers (lane 8, slice 5). Payment and journal commit together.
+        var providerName = (await _providerRepository.GetByIdAsync(entity.ProviderId))?.Name ?? "the insurer";
+        try
+        {
+            await _financePosting.RunAsync(async ct =>
+            {
+                paymentDto.ApplyTo(entity, updatedByUserId);
+                await _premiumRecordRepository.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return HrFinancePostingCommandFactory.MedicalPremiumPaid(entity, providerName);
+            }, updatedByUserId, cancellationToken);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.InvalidState, ex.Message, ex);
+        }
 
         _logger.LogInformation("Premium payment recorded for record: {PremiumRecordId}", entity.Id);
 
@@ -2116,6 +2150,7 @@ public class NHISService : INHISService
     private readonly INHISClaimDocumentRepository _claimDocumentRepository;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ICurrentUserProvider _currentUserProvider;
+    private readonly IHrFinancePostingAdapter _financePosting;
     private readonly ILogger<NHISService> _logger;
 
     public NHISService(
@@ -2123,8 +2158,10 @@ public class NHISService : INHISService
         INHISClaimDocumentRepository claimDocumentRepository,
         IUnitOfWork unitOfWork,
         ICurrentUserProvider currentUserProvider,
+        IHrFinancePostingAdapter financePosting,
         ILogger<NHISService> logger)
     {
+        _financePosting = financePosting;
         _claimRepository = claimRepository;
         _claimDocumentRepository = claimDocumentRepository;
         _unitOfWork = unitOfWork;
@@ -2293,10 +2330,24 @@ public class NHISService : INHISService
         if (entity == null || entity.TenantId != GetTenantId())
             throw new MedicalWorkflowException(MedicalWorkflowFailureReason.NotFound, $"NHIS claim with ID '{paymentDto.ClaimId}' not found.");
 
-        paymentDto.ApplyTo(entity, updatedByUserId);
+        if (entity.Status == NHISClaimStatus.Paid)
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.InvalidState, $"The NHIS payment on claim {entity.ClaimNumber} is already recorded.");
 
-        await _claimRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // The NHIS money and Finance's record of it commit together (lane 8, slice 5).
+        try
+        {
+            await _financePosting.RunAsync(async ct =>
+            {
+                paymentDto.ApplyTo(entity, updatedByUserId);
+                await _claimRepository.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return HrFinancePostingCommandFactory.NhisClaimReimbursed(entity);
+            }, updatedByUserId, cancellationToken);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw new MedicalWorkflowException(MedicalWorkflowFailureReason.InvalidState, ex.Message, ex);
+        }
 
         _logger.LogInformation("NHIS claim payment recorded: {ClaimNumber}", entity.ClaimNumber);
 

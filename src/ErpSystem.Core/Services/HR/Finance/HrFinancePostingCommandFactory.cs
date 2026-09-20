@@ -7,6 +7,8 @@ using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.Training;
+using ErpSystem.Core.Entities.HR.Requisition;
+using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Services.HR.Finance;
@@ -700,6 +702,127 @@ public static class HrFinancePostingCommandFactory
             [
                 new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivableWriteOff, true, amount, $"Bond {reference} — repayment forgiven"),
                 new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, false, amount, $"Bond {reference} — receivable written off")
+            ]
+        };
+    }
+
+    // ── Third-party payees (slice 5) ─────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The AP hand-off: one expense line to the cost's supplier. A cost paid to a person (a
+    /// candidate's travel, a named payee with no supplier record) has no AP path and is Skipped —
+    /// it stays HR-side, per backlog decision #1.
+    /// </summary>
+    public static HrFinancePostingCommand RequisitionCostApproved(StaffRequisitionCost cost, string requisitionNumber)
+    {
+        var reference = $"{requisitionNumber}/C{cost.Id.ToString("N")[..4].ToUpperInvariant()}";
+        var payee = cost.SupplierId.HasValue ? cost.PayeeName ?? "supplier" : cost.PayeeName ?? "a named payee";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.RequisitionCostApproved,
+            SourceDocumentId = cost.Id,
+            SourceReference = reference,
+            SourceDate = cost.CostDate.ToDateTime(TimeOnly.MinValue),
+            TransactionCurrencyCode = cost.Currency,
+            PayeeSupplierId = cost.SupplierId,
+            PayeeName = cost.PayeeName,
+            Description = $"Recruitment cost {reference} — {cost.Category}: {cost.Purpose} ({payee})",
+            SkipReason = cost.Amount <= 0m ? "The cost is zero; there is nothing to invoice."
+                : !cost.SupplierId.HasValue ? $"Paid to {payee}, who is not a Procurement supplier: there is no AP path for a person, so the cost stays HR-side (backlog decision #1)."
+                : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.RecruitmentExpense, true, cost.Amount, $"{cost.Category}: {cost.Purpose} — {reference}")
+            ]
+        };
+    }
+
+    /// <summary>
+    /// A premium paid to the insurer: the employer's share is medical expense, the employees' share
+    /// a receivable payroll recovers, the whole bill leaves through clearing.
+    /// </summary>
+    public static HrFinancePostingCommand MedicalPremiumPaid(MedicalInsurancePremiumRecord premium, string providerName)
+    {
+        var employer = Math.Max(0m, premium.EmployerContribution);
+        var employee = Math.Max(0m, premium.EmployeeContribution);
+        var total = employer + employee;
+        var reference = $"PREM-{premium.BillingPeriodStart:yyyyMM}-{premium.Id.ToString("N")[..6].ToUpperInvariant()}";
+        var lines = new List<HrFinancePostingLine>();
+        if (employer > 0m) lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.MedicalExpense, true, employer, $"Premium {reference} — employer share, {providerName}"));
+        if (employee > 0m) lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, true, employee, $"Premium {reference} — employees' share, recovered through payroll"));
+        if (total > 0m) lines.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, false, total, $"Premium {reference} — paid to {providerName}"));
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.MedicalPremiumPaid,
+            SourceDocumentId = premium.Id,
+            SourceReference = reference,
+            SourceDate = premium.PaymentDate,
+            Description = $"Medical insurance premium {reference} for {premium.BillingPeriodStart:yyyy-MM-dd} to {premium.BillingPeriodEnd:yyyy-MM-dd} paid to {providerName}"
+                          + (premium.TotalPremiumAmount != total ? $" (bill {premium.TotalPremiumAmount:N2}; contributions {total:N2})" : string.Empty),
+            SkipReason = total <= 0m ? "The premium record carries no employer or employee contribution; there is nothing to post." : null,
+            Lines = lines
+        };
+    }
+
+    public static HrFinancePostingCommand MedicalInsurerRecoveryReceived(MedicalInsuranceClaim claim)
+    {
+        var amount = claim.PaidAmount ?? 0m;
+        var reference = claim.InsuranceClaimNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.MedicalInsurerRecoveryReceived,
+            SourceDocumentId = claim.Id,
+            SourceReference = reference,
+            SourceDate = claim.PaymentDate,
+            Description = $"Insurer paid {amount:N2} on claim {reference}" + (string.IsNullOrWhiteSpace(claim.PaymentReference) ? string.Empty : $" ref {claim.PaymentReference}"),
+            SkipReason = amount <= 0m ? "The insurer paid nothing on this claim; there is nothing to post." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, amount, $"Insurer recovery {reference} — received"),
+                new HrFinancePostingLine(HrFinanceAccountRole.InsuranceRecoveriesIncome, false, amount, $"Insurer recovery {reference} — income")
+            ]
+        };
+    }
+
+    public static HrFinancePostingCommand NhisClaimReimbursed(NHISClaim claim)
+    {
+        var amount = claim.ApprovedAmount ?? claim.NHISCoveredAmount ?? 0m;
+        var reference = claim.ClaimNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.NhisClaimReimbursed,
+            SourceDocumentId = claim.Id,
+            SourceReference = reference,
+            EmployeeId = claim.EmployeeId,
+            SourceDate = claim.PaymentDate,
+            Description = $"NHIS reimbursed {amount:N2} on claim {reference}" + (string.IsNullOrWhiteSpace(claim.PaymentReference) ? string.Empty : $" ref {claim.PaymentReference}"),
+            SkipReason = amount <= 0m ? "No approved or covered amount is recorded on this NHIS claim; there is nothing to post." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, amount, $"NHIS {reference} — received"),
+                new HrFinancePostingLine(HrFinanceAccountRole.InsuranceRecoveriesIncome, false, amount, $"NHIS {reference} — income")
+            ]
+        };
+    }
+
+    public static HrFinancePostingCommand SheInsuranceClaimReceived(SafetyIncident incident)
+    {
+        var amount = incident.AmountPaid ?? 0m;
+        var reference = string.IsNullOrWhiteSpace(incident.ClaimReferenceNumber) ? incident.IncidentNumber : $"{incident.IncidentNumber}/{incident.ClaimReferenceNumber}";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.SheInsuranceClaimReceived,
+            SourceDocumentId = incident.Id,
+            SourceReference = reference,
+            SourceDate = incident.ClaimFiledDate,
+            Description = $"Insurance claim on incident {incident.IncidentNumber} paid: {amount:N2}",
+            SkipReason = !incident.InsuranceClaimFiled ? "No insurance claim is filed on this incident."
+                : !incident.ClaimApproved ? "The insurance claim has not been approved; nothing has been received."
+                : amount <= 0m ? "No amount has been paid on the claim yet; nothing to post." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, amount, $"Incident {incident.IncidentNumber} — insurance proceeds received"),
+                new HrFinancePostingLine(HrFinanceAccountRole.InsuranceRecoveriesIncome, false, amount, $"Incident {incident.IncidentNumber} — insurance recovery")
             ]
         };
     }

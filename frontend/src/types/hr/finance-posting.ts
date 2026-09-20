@@ -18,7 +18,12 @@ export type HrFinanceAccountRole =
   | 'EmployeeRecoveriesIncome'
   | 'StatutoryDeductionsPayable'
   | 'StaffReceivables'
-  | 'StaffReceivableWriteOff';
+  | 'StaffReceivableWriteOff'
+  | 'RecruitmentExpense'
+  | 'InsuranceRecoveriesIncome';
+
+/** What the event produces in Finance: a GL journal, or an AP vendor invoice Finance approves and pays. */
+export type HrFinancePostingKind = 'Journal' | 'VendorInvoice';
 
 export type HrFinancePostingStatus = 'Posted' | 'Failed' | 'Unposted' | 'Skipped' | 'Reversed';
 
@@ -52,6 +57,8 @@ export interface HrFinancePostingRule {
   postOnActionDate: boolean;
   /** True when the rule (not the document) decides payroll vs direct settlement. */
   supportsSettlementRoute: boolean;
+  kind: HrFinancePostingKind;
+  kindName: string;
   settlementRoute: HrFinanceSettlementRoute | null;
   defaultSettlementRoute: HrFinanceSettlementRoute | null;
   notes: string | null;
@@ -131,6 +138,15 @@ export interface HrFinancePostingRecord {
   createdAt: string;
   canRetry: boolean;
   canReverse: boolean;
+  kind: HrFinancePostingKind;
+  kindName: string;
+  /** AP hand-off rows: the Finance vendor invoice and its status as last pulled. */
+  vendorInvoiceId: string | null;
+  vendorInvoiceNumber: string | null;
+  externalStatus: string | null;
+  externalStatusAt: string | null;
+  /** True for a posted AP row: Finance's status (and the voucher, once paid) can be pulled. */
+  canRefresh: boolean;
 }
 
 export interface HrFinancePostingRecordQuery {

@@ -3,9 +3,12 @@ using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Finance.Integration;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
+using ErpSystem.Core.Entities.Procurement;
 using ErpSystem.Core.Interfaces.HR;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
 namespace ErpSystem.Core.Services.HR.Finance;
@@ -36,11 +39,23 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
     public const string OriginModuleCode = "HR";
     private const string JournalType = "System Generated";
 
+    /// <summary>
+    /// The dimension producer HR raises AP invoices under. ⚠ Finance's AP screen approves an invoice
+    /// only when it carries "trusted dimension provenance", which Finance records at create/submit
+    /// under a producer route — the route-less overload records none, and the first live run proved
+    /// an HR invoice could then never be approved. Finance's route catalogue has no HR AP route yet
+    /// (hand-off Q1), so HR hands its invoice over under the same manual-AP route Finance's own
+    /// clerks key invoices with: to Accounts Payable it is an invoice on their desk, no more. When
+    /// Finance grants HR its own route this is the one value that changes (D-7).
+    /// </summary>
+    private static readonly FinancePostingProducerContext ApProducer = new(FinanceDimensionRouteId.FinanceApVendorInvoice);
+
     private static readonly JsonSerializerOptions SnapshotJson = new(JsonSerializerDefaults.Web);
 
     private readonly IHrFinancePostingStore _store;
     private readonly IUnitOfWork _unitOfWork;
     private readonly IFinancePostingEngine _engine;
+    private readonly IVendorInvoiceService _vendorInvoices;
     private readonly HrCurrencyBridge _currency;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<HrFinancePostingAdapter> _logger;
@@ -49,6 +64,7 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         IHrFinancePostingStore store,
         IUnitOfWork unitOfWork,
         IFinancePostingEngine engine,
+        IVendorInvoiceService vendorInvoices,
         HrCurrencyBridge currency,
         ICurrentUserProvider currentUser,
         ILogger<HrFinancePostingAdapter> logger)
@@ -56,6 +72,7 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         _store = store;
         _unitOfWork = unitOfWork;
         _engine = engine;
+        _vendorInvoices = vendorInvoices;
         _currency = currency;
         _currentUser = currentUser;
         _logger = logger;
@@ -220,6 +237,10 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
         record.PostingEventId = null;
         record.JournalEntryId = null;
         record.JournalEntryNumber = null;
+        record.VendorInvoiceId = null;
+        record.VendorInvoiceNumber = null;
+        record.ExternalStatus = null;
+        record.ExternalStatusAt = null;
         record.PostedAt = null;
         record.AttemptCount += 1;
         record.LastAttemptAt = now;
@@ -275,6 +296,9 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
                 throw new InvalidOperationException($"'{definition.Name}' produced a non-positive posting line.");
 
             var mappings = await ResolveAccountsAsync(tenantId, definition, effectiveLines, cancellationToken);
+
+            if (definition.Kind == HrFinancePostingKind.VendorInvoice)
+                return await PostVendorInvoiceAsync(tenantId, definition, command, record, isNew, effectiveLines, mappings, now, cancellationToken);
 
             // Functional-currency conversion for a foreign source, through Finance's own rate.
             var rate = 1m;
@@ -386,6 +410,115 @@ public sealed class HrFinancePostingAdapter : IHrFinancePostingAdapter
             wrapped.Data[CommandKey] = command;
             throw wrapped;
         }
+    }
+
+    /// <summary>
+    /// The AP hand-off (slice 5): a vendor invoice to a Procurement supplier with one expense line,
+    /// submitted into Finance's AP approval. Finance approves, posts and pays it under its own
+    /// controls; HR never journals a third party's payable itself. Mirrors the Estate and Quantity
+    /// Survey producers (route-less <c>CreateAsync</c>, idempotent by the HR reference, status pulled
+    /// back by the register's refresh). No HR AP route exists in Finance's route catalogue yet — the
+    /// hand-off document asks for one; this becomes the producer-context overload when it lands.
+    /// </summary>
+    private async Task<HrFinancePostingOutcome> PostVendorInvoiceAsync(
+        Guid tenantId,
+        HrFinancePostingEventDefinition definition,
+        HrFinancePostingCommand command,
+        HrFinancePostingRecord record,
+        bool isNew,
+        IReadOnlyList<HrFinancePostingLine> effectiveLines,
+        IReadOnlyDictionary<HrFinanceAccountRole, HrFinanceAccountSnapshot> mappings,
+        DateTime now,
+        CancellationToken cancellationToken)
+    {
+        if (effectiveLines.Count != 1 || !effectiveLines[0].IsDebit)
+            throw new InvalidOperationException($"'{definition.Name}' must produce exactly one expense line for an AP invoice. HR defect.");
+        if (command.PayeeSupplierId is not { } supplierId || supplierId == Guid.Empty)
+            throw new InvalidOperationException($"'{definition.Name}' names no supplier to invoice.");
+
+        var supplier = await _unitOfWork.Repository<Supplier>().GetQueryable()
+            .AsNoTracking()
+            .FirstOrDefaultAsync(s => s.Id == supplierId && s.TenantId == tenantId && !s.IsDeleted, cancellationToken)
+            ?? throw new InvalidOperationException("The payee supplier does not exist in this tenant.");
+        if (!supplier.IsActive)
+            throw new InvalidOperationException($"Supplier {supplier.Name} is inactive; Finance cannot be invoiced for it.");
+
+        var line = effectiveLines[0];
+        var account = mappings[line.Role];
+        var functional = (await _store.GetTenantContextAsync(tenantId, cancellationToken)).FunctionalCurrencyCode;
+        var currency = string.IsNullOrWhiteSpace(command.TransactionCurrencyCode) ? functional : command.TransactionCurrencyCode.Trim().ToUpperInvariant();
+        var isForeign = !string.Equals(currency, functional, StringComparison.OrdinalIgnoreCase);
+        var rate = isForeign ? await _currency.GetRateToBaseAsync(currency, DateOnly.FromDateTime(record.PostingDate), cancellationToken) : 1m;
+        var amount = decimal.Round(line.Amount, 2, MidpointRounding.AwayFromZero);
+
+        record.TransactionCurrencyCode = isForeign ? currency : null;
+        record.TransactionAmount = isForeign ? amount : null;
+        record.Amount = isForeign ? decimal.Round(amount * rate, 2, MidpointRounding.AwayFromZero) : amount;
+        record.IdempotencyKey = BuildIdempotencyKey(command.EventCode, command.SourceDocumentId, record.AccountingBookCode ?? "?", record.Generation);
+        record.LinesSnapshot = JsonSerializer.Serialize(new List<HrFinancePostingLineSnapshotDto>
+        {
+            new()
+            {
+                Role = line.Role, RoleName = HrFinanceAccountRoleNames.Name(line.Role),
+                AccountId = account.Id, AccountCode = account.AccountNumber, AccountName = account.AccountName,
+                Debit = record.Amount, Credit = 0m,
+                Description = isForeign ? $"{line.Description} ({currency} {amount:N2} @ {rate:0.######})" : line.Description
+            }
+        }, SnapshotJson);
+
+        var reference = $"HR-{definition.Code}:{command.SourceDocumentId:N}" + (record.Generation > 1 ? $"#{record.Generation}" : string.Empty);
+        var invoiceDate = (command.SourceDate ?? now).Date;
+        var created = await _vendorInvoices.CreateAsync(new VendorInvoiceCreateDto
+        {
+            SupplierId = supplier.Id,
+            SupplierInvoiceNumber = Truncate(command.SourceReference, 50),
+            InvoiceDate = invoiceDate,
+            ReceivedDate = now,
+            CurrencyCode = currency,
+            ExchangeRate = rate,
+            ExpenseAccountId = account.Id,
+            Notes = Truncate($"Raised by HR from {definition.Name.ToLowerInvariant()} {command.SourceReference}. {command.Description}", 1000),
+            Reference = reference,
+            LineItems =
+            [
+                new VendorInvoiceLineItemCreateDto
+                {
+                    LineItemType = "Expense",
+                    GLAccountId = account.Id,
+                    Description = Truncate(line.Description, 500),
+                    Quantity = 1m,
+                    UnitPrice = amount,
+                    Unit = "Each"
+                }
+            ]
+        }, ApProducer, cancellationToken);
+
+        // Into AP approval straight away: HR's approval of the cost is the authorising event (the
+        // hand-off's question 3). If Finance wants to receive drafts instead, this is the one line.
+        //
+        // ⚠ Except on a budget-controlled expense account. Finance's AP refuses to submit an expense
+        // line on such an account without an adopted Finance budget cell (FIN-INT-016), and HR does
+        // not reserve Finance budget — it enforces its own recruitment envelope (D-8, hand-off Q6).
+        // So the invoice is left as a Draft for Accounts Payable to attach the cell and submit, and
+        // the row says so. A live run found this: the first UAT attempt failed on exactly that rule.
+        string? note = null;
+        var final = created;
+        if (account.BudgetTrackingEnabled)
+            note = $"Left as a Draft in Accounts Payable: account {account.AccountNumber} is budget-controlled, so Finance must attach its budget cell and submit the invoice (HR does not reserve Finance budget).";
+        else
+            final = await _vendorInvoices.SubmitForApprovalAsync(created.Id, ApProducer, cancellationToken);
+
+        record.VendorInvoiceId = final.Id;
+        record.VendorInvoiceNumber = Truncate(final.InvoiceNumber, 50);
+        record.ExternalStatus = final.Status.ToString();
+        record.ExternalStatusAt = now;
+        record.PostedAt = now;
+        var outcome = await FinishAsync(record, isNew, HrFinancePostingStatus.Posted, note, cancellationToken);
+
+        _logger.LogInformation(
+            "HR Finance posting {EventCode} for {SourceReference} raised AP invoice {Invoice} to {Supplier} ({Amount} {Currency})",
+            command.EventCode, command.SourceReference, final.InvoiceNumber, supplier.Name, amount, currency);
+        return outcome;
     }
 
     /// <summary>
@@ -589,6 +722,8 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.StatutoryDeductionsPayable => "Statutory deductions payable",
         HrFinanceAccountRole.StaffReceivables => "Staff receivables",
         HrFinanceAccountRole.StaffReceivableWriteOff => "Staff receivable write-off",
+        HrFinanceAccountRole.RecruitmentExpense => "Recruitment expense",
+        HrFinanceAccountRole.InsuranceRecoveriesIncome => "Insurance recoveries income",
         _ => role.ToString()
     };
 
@@ -607,6 +742,8 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.StatutoryDeductionsPayable => "Liability. Tax and other statutory amounts withheld from a settlement and owed to the authority.",
         HrFinanceAccountRole.StaffReceivables => "Asset. What employees owe the company for asset surcharges, disciplinary fines and breached training bonds — separate from advances so the two ageings do not mix.",
         HrFinanceAccountRole.StaffReceivableWriteOff => "Expense. A staff receivable forgiven: a waived surcharge, fine or bond.",
+        HrFinanceAccountRole.RecruitmentExpense => "Expense. The cost of filling a post — adverts, agency fees, assessments, medicals. The expense line on the AP invoice HR raises to the supplier.",
+        HrFinanceAccountRole.InsuranceRecoveriesIncome => "Revenue. What an insurer or the NHIS pays the company back on a medical, NHIS or incident claim.",
         _ => string.Empty
     };
 }

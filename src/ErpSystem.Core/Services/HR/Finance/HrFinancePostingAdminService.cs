@@ -1,12 +1,15 @@
 using System.Text.Json;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
+using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Entities.HR.StaffDiscipline;
 using ErpSystem.Core.Entities.HR.Training;
+using ErpSystem.Core.Entities.HR.Requisition;
+using ErpSystem.Core.Entities.HR.Safety;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -41,6 +44,8 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
     private readonly IHrFinancePostingStore _store;
     private readonly IHrFinancePostingAdapter _adapter;
     private readonly IFinancePostingEngine _engine;
+    private readonly IVendorInvoiceService _vendorInvoices;
+    private readonly IVendorPaymentService _vendorPayments;
     private readonly ICurrentUserProvider _currentUser;
     private readonly ILogger<HrFinancePostingAdminService> _logger;
 
@@ -49,6 +54,8 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         IHrFinancePostingStore store,
         IHrFinancePostingAdapter adapter,
         IFinancePostingEngine engine,
+        IVendorInvoiceService vendorInvoices,
+        IVendorPaymentService vendorPayments,
         ICurrentUserProvider currentUser,
         ILogger<HrFinancePostingAdminService> logger)
     {
@@ -56,6 +63,8 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
         _store = store;
         _adapter = adapter;
         _engine = engine;
+        _vendorInvoices = vendorInvoices;
+        _vendorPayments = vendorPayments;
         _currentUser = currentUser;
         _logger = logger;
     }
@@ -122,6 +131,7 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                 IsEnabled = rule?.IsEnabled ?? false,
                 PostOnActionDate = rule?.PostOnActionDate ?? true,
                 SupportsSettlementRoute = definition.SupportsSettlementRoute,
+                Kind = definition.Kind,
                 SettlementRoute = definition.SupportsSettlementRoute
                     ? HrFinancePostingAdapter.ResolveSettlementRoute(definition, rule)
                     : null,
@@ -354,8 +364,10 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
     public async Task<HrFinancePostingRecordDto> RetryAsync(Guid recordId, CancellationToken cancellationToken = default)
     {
         var record = await LoadRecordAsync(recordId, track: false, cancellationToken);
-        if (record.Status is not (HrFinancePostingStatus.Unposted or HrFinancePostingStatus.Failed))
-            throw new InvalidOperationException($"Only Unposted or Failed rows can be retried; this row is {record.Status}.");
+        // Reversed is retryable too: "post again" after a reversal (or a withdrawn AP draft) is the
+        // adapter's next generation — the source is unchanged, so nothing else would re-trigger it.
+        if (record.Status is not (HrFinancePostingStatus.Unposted or HrFinancePostingStatus.Failed or HrFinancePostingStatus.Reversed))
+            throw new InvalidOperationException($"Only Unposted, Failed or Reversed rows can be posted from the register; this row is {record.Status}.");
 
         var command = await BuildCommandFromSourceAsync(record, cancellationToken);
         await _adapter.PostAsync(command, _currentUser.UserId, cancellationToken);
@@ -370,11 +382,14 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
             throw new ArgumentException("A reversal needs a reason of at least five characters.");
 
         var record = await LoadRecordAsync(recordId, track: true, cancellationToken);
+        var definition = HrFinancePostingEventCatalog.GetRequired(record.EventCode);
+        if (definition.Kind == HrFinancePostingKind.VendorInvoice)
+            return await ReverseVendorInvoiceAsync(record, definition, reason, cancellationToken);
+
         if (record.Status != HrFinancePostingStatus.Posted || !record.PostingEventId.HasValue)
             throw new InvalidOperationException($"Only Posted rows can be reversed; this row is {record.Status}.");
 
         var userId = _currentUser.UserId;
-        var definition = HrFinancePostingEventCatalog.GetRequired(record.EventCode);
 
         await _unitOfWork.ExecuteInStrategyAsync(async () =>
         {
@@ -403,6 +418,99 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
 
         _logger.LogInformation("HR Finance posting {Record} ({Event} {Ref}) reversed by {User}: {Reason}",
             record.Id, record.EventCode, record.SourceReference, userId, reason);
+        return ToDto(await LoadRecordAsync(recordId, track: false, cancellationToken));
+    }
+
+    /// <summary>
+    /// Withdrawing an AP hand-off (slice 5). HR may only take back what Finance has not yet acted
+    /// on: a draft invoice is deleted. Once it is in AP approval, approved or paid, it is Finance's
+    /// document — AP rejects or voids it there, and the register's refresh sees that and marks the
+    /// row Reversed. HR never voids a Finance payable itself.
+    /// </summary>
+    private async Task<HrFinancePostingRecordDto> ReverseVendorInvoiceAsync(
+        HrFinancePostingRecord record, HrFinancePostingEventDefinition definition, string reason, CancellationToken cancellationToken)
+    {
+        if (record.Status != HrFinancePostingStatus.Posted || !record.VendorInvoiceId.HasValue)
+            throw new InvalidOperationException($"Only Posted rows can be reversed; this row is {record.Status}.");
+
+        var userId = _currentUser.UserId;
+        var invoice = await _vendorInvoices.GetByIdAsync(record.VendorInvoiceId.Value, cancellationToken);
+        if (invoice is not null && invoice.Status is not (VendorInvoiceStatus.Draft or VendorInvoiceStatus.Rejected or VendorInvoiceStatus.Voided))
+            throw new InvalidOperationException(
+                $"Finance holds invoice {invoice.InvoiceNumber} as {invoice.Status}. HR cannot withdraw it from there — ask Accounts Payable to reject or void it, then use Refresh on this row.");
+
+        if (invoice is { Status: VendorInvoiceStatus.Draft })
+            await _vendorInvoices.DeleteAsync(invoice.Id, cancellationToken);
+
+        record.Status = HrFinancePostingStatus.Reversed;
+        record.ReversedAt = DateTime.UtcNow;
+        record.ReversalReason = reason.Length > 500 ? reason[..500] : reason;
+        record.ExternalStatus = invoice?.Status.ToString() ?? "Missing";
+        record.ExternalStatusAt = DateTime.UtcNow;
+        record.LastActedByUserId = userId;
+        record.UpdatedAt = DateTime.UtcNow;
+        record.UpdatedBy = userId.ToString();
+        await _unitOfWork.Repository<HrFinancePostingRecord>().UpdateAsync(record);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("HR Finance AP hand-off {Record} ({Event} {Ref}) withdrawn by {User}: {Reason}",
+            record.Id, record.EventCode, record.SourceReference, userId, reason);
+        return ToDto(await LoadRecordAsync(record.Id, track: false, cancellationToken));
+    }
+
+    /// <inheritdoc />
+    public async Task<HrFinancePostingRecordDto> RefreshAsync(Guid recordId, CancellationToken cancellationToken = default)
+    {
+        var record = await LoadRecordAsync(recordId, track: true, cancellationToken);
+        var definition = HrFinancePostingEventCatalog.GetRequired(record.EventCode);
+        if (definition.Kind != HrFinancePostingKind.VendorInvoice || !record.VendorInvoiceId.HasValue)
+            return ToDto(record); // a journal row has nothing to pull: Finance's reversal comes through this register
+
+        var userId = _currentUser.UserId;
+        var invoice = await _vendorInvoices.GetByIdAsync(record.VendorInvoiceId.Value, cancellationToken);
+        var now = DateTime.UtcNow;
+        record.ExternalStatus = invoice?.Status.ToString() ?? "Missing";
+        record.ExternalStatusAt = now;
+
+        // Finance rejected or voided what HR raised: the hand-off is undone on their side, so the
+        // register says Reversed and the HR guards lift; a corrected cost can be re-posted.
+        if (record.Status == HrFinancePostingStatus.Posted
+            && (invoice is null || invoice.Status is VendorInvoiceStatus.Rejected or VendorInvoiceStatus.Voided))
+        {
+            record.Status = HrFinancePostingStatus.Reversed;
+            record.ReversedAt = now;
+            record.ReversalReason = invoice is null ? "The vendor invoice no longer exists in Finance." : $"Finance {invoice.Status} the vendor invoice.";
+        }
+
+        // The voucher back onto the source: a paid invoice's payment numbers are what the desk
+        // used to type into PaymentVoucherNumber by hand.
+        if (invoice is { Status: VendorInvoiceStatus.Paid or VendorInvoiceStatus.PartiallyPaid }
+            && record.EventCode == HrFinancePostingEventCatalog.RequisitionCostApproved)
+        {
+            var numbers = new List<string>();
+            foreach (var paymentId in invoice.PaymentAllocations.Select(a => a.VendorPaymentId).Distinct())
+            {
+                var payment = await _vendorPayments.GetByIdAsync(paymentId, cancellationToken);
+                if (!string.IsNullOrWhiteSpace(payment?.PaymentNumber)) numbers.Add(payment.PaymentNumber);
+            }
+            var voucher = numbers.Count > 0 ? string.Join(", ", numbers) : invoice.InvoiceNumber;
+            var cost = await _unitOfWork.Repository<StaffRequisitionCost>()
+                .GetQueryable(c => c.Id == record.SourceDocumentId && c.TenantId == record.TenantId && !c.IsDeleted)
+                .FirstOrDefaultAsync(cancellationToken);
+            if (cost is not null && !string.Equals(cost.PaymentVoucherNumber, voucher, StringComparison.Ordinal))
+            {
+                cost.PaymentVoucherNumber = voucher.Length > 100 ? voucher[..100] : voucher;
+                cost.UpdatedAt = now;
+                cost.UpdatedBy = userId.ToString();
+                await _unitOfWork.Repository<StaffRequisitionCost>().UpdateAsync(cost);
+            }
+        }
+
+        record.LastActedByUserId = userId;
+        record.UpdatedAt = now;
+        record.UpdatedBy = userId.ToString();
+        await _unitOfWork.Repository<HrFinancePostingRecord>().UpdateAsync(record);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
         return ToDto(await LoadRecordAsync(recordId, track: false, cancellationToken));
     }
 
@@ -580,6 +688,54 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                 var imposedPosted = await _adapter.IsPostedAsync(HrFinancePostingEventCatalog.DisciplineFineImposed, fine.Id, cancellationToken);
                 return HrFinancePostingCommandFactory.DisciplineFineSettled(fine, disciplinaryCase.CaseNumber, disciplinaryCase.EmployeeId, imposedPosted);
             }
+            case HrFinancePostingEventCatalog.RequisitionCostApproved:
+            {
+                var cost = await _unitOfWork.Repository<StaffRequisitionCost>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .Include(x => x.Requisition).AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Recruitment cost {record.SourceReference} no longer exists; nothing to invoice.");
+                if (cost.Status != StaffRequisitionCostStatus.Approved)
+                    throw new InvalidOperationException($"Recruitment cost {record.SourceReference} is {cost.Status}; only an approved cost is invoiced.");
+                return HrFinancePostingCommandFactory.RequisitionCostApproved(cost, cost.Requisition?.RequisitionNumber ?? "REQ");
+            }
+            case HrFinancePostingEventCatalog.MedicalPremiumPaid:
+            {
+                var premium = await _unitOfWork.Repository<MedicalInsurancePremiumRecord>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .Include(x => x.MedicalInsuranceProvider).AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Premium record {record.SourceReference} no longer exists; nothing to post.");
+                if (premium.Status != MedicalInsurancePremiumPaymentStatus.Paid)
+                    throw new InvalidOperationException($"Premium record {record.SourceReference} is {premium.Status}, not paid.");
+                return HrFinancePostingCommandFactory.MedicalPremiumPaid(premium, premium.MedicalInsuranceProvider?.Name ?? "the insurer");
+            }
+            case HrFinancePostingEventCatalog.MedicalInsurerRecoveryReceived:
+            {
+                var insurerClaim = await _unitOfWork.Repository<MedicalInsuranceClaim>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Insurance claim {record.SourceReference} no longer exists; nothing to post.");
+                if (insurerClaim.Status != MedicalInsuranceClaimStatus.Paid)
+                    throw new InvalidOperationException($"Insurance claim {record.SourceReference} is {insurerClaim.Status}; the insurer has not paid.");
+                return HrFinancePostingCommandFactory.MedicalInsurerRecoveryReceived(insurerClaim);
+            }
+            case HrFinancePostingEventCatalog.NhisClaimReimbursed:
+            {
+                var nhis = await _unitOfWork.Repository<NHISClaim>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"NHIS claim {record.SourceReference} no longer exists; nothing to post.");
+                if (nhis.Status != NHISClaimStatus.Paid)
+                    throw new InvalidOperationException($"NHIS claim {record.SourceReference} is {nhis.Status}; the NHIS has not paid.");
+                return HrFinancePostingCommandFactory.NhisClaimReimbursed(nhis);
+            }
+            case HrFinancePostingEventCatalog.SheInsuranceClaimReceived:
+            {
+                var incident = await _unitOfWork.Repository<SafetyIncident>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Incident {record.SourceReference} no longer exists; nothing to post.");
+                return HrFinancePostingCommandFactory.SheInsuranceClaimReceived(incident);
+            }
             case HrFinancePostingEventCatalog.TrainingBondBreached:
             case HrFinancePostingEventCatalog.TrainingBondSettled:
             case HrFinancePostingEventCatalog.TrainingBondWaived:
@@ -660,6 +816,11 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
             JournalEntryId = r.JournalEntryId,
             JournalEntryNumber = r.JournalEntryNumber,
             PostedAt = r.PostedAt,
+            Kind = definition?.Kind ?? HrFinancePostingKind.Journal,
+            VendorInvoiceId = r.VendorInvoiceId,
+            VendorInvoiceNumber = r.VendorInvoiceNumber,
+            ExternalStatus = r.ExternalStatus,
+            ExternalStatusAt = r.ExternalStatusAt,
             AttemptCount = r.AttemptCount,
             LastAttemptAt = r.LastAttemptAt,
             Lines = lines,

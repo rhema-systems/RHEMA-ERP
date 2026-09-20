@@ -33,6 +33,7 @@ import {
 } from '@/components/ui/table';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { FinancePostingCard, FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { useToast } from '@/hooks/use-toast';
 import { medicalClaimService, nhisClaimService } from '@/services/hr/medical-claims.service';
 import { medicalFacilityService } from '@/services/hr/medical-reference.service';
@@ -126,6 +127,7 @@ function NhisTable({
               <TableHead>Service date</TableHead>
               <TableHead className="text-right">Total cost</TableHead>
               <TableHead>Status</TableHead>
+              <TableHead className="w-32">Finance</TableHead>
               <TableHead />
             </TableRow>
           </TableHeader>
@@ -138,6 +140,10 @@ function NhisTable({
                 <TableCell className="text-right tabular-nums">{money(c.totalCost)}</TableCell>
                 <TableCell>
                   <NhisStatusBadge status={c.status} />
+                </TableCell>
+                {/* The posting source is the NHIS claim itself — what the scheme owes and then pays. */}
+                <TableCell>
+                  <FinancePostingInlineStatus sourceDocumentId={c.id} />
                 </TableCell>
                 <TableCell className="text-right">
                   {/* Submission only makes sense on a draft; settlement only once the scheme
@@ -419,11 +425,18 @@ export default function NhisClaimsPage() {
             <DialogTitle>Documents — {documentsFor?.claimNumber}</DialogTitle>
           </DialogHeader>
           {documentsFor && (
-            <NhisClaimDocumentsPanel
-              claimId={documentsFor.id}
-              canWrite={canWrite}
-              canDelete={canDelete}
-            />
+            <>
+              <NhisClaimDocumentsPanel
+                claimId={documentsFor.id}
+                canWrite={canWrite}
+                canDelete={canDelete}
+              />
+              {/* The only per-claim surface this screen has: what Finance holds for the claim. */}
+              <FinancePostingCard
+                sourceDocumentId={documentsFor.id}
+                invalidateKeys={[['hr', 'nhis-claims']]}
+              />
+            </>
           )}
         </DialogContent>
       </Dialog>

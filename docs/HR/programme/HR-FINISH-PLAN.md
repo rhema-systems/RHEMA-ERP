@@ -1240,10 +1240,12 @@ service, benefit claims — with the per-event payroll/direct route toggle), the
 settlement (posts on Internal Audit's approval), and employee receivables (asset surcharges,
 disciplinary fines, training service bonds — one receivable, cleared by what is collected and
 written off for the rest; the settlement's surcharge recovery now credits that receivable rather
-than income twice). 20 events, 13 account roles, 33 gate tests. Still to do in this lane: the
-third-party payees (requisition costs → AP, medical premiums/insurer recoveries, SHE insurance,
-training budget transactions), the manpower-budget actuals read, consulting AR, and the back-fill
-rows — design section 7.
+than income twice). **Slice 5 BUILT 2026-09-20**: the third-party payees — recruitment costs
+become an AP vendor invoice on HR's approval (the R8 hand-off, rule shipped OFF until Finance
+confirms), premiums paid, insurer / NHIS / incident-insurance proceeds; training budget
+transactions deliberately not posted (memo of a Finance document). 25 events, 15 account roles,
+35 gate tests. Still to do in this lane: the manpower and training budget actuals read, consulting
+AR, and the back-fill rows — design section 7.
 
 Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) · entity map:
 [`HR-FINANCE-ENTITY-SWEEP.md`](../integration/HR-FINANCE-ENTITY-SWEEP.md) · mechanism:

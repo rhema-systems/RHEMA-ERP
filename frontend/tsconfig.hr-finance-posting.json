@@ -15,6 +15,12 @@
     "src/app/hr/discipline/[id]/page.tsx",
     "src/components/hr/discipline/SanctionsPanel.tsx",
     "src/app/hr/service-bonds/page.tsx",
+    "src/components/hr/recruitment/RequisitionCostsPanel.tsx",
+    "src/components/hr/medical/PremiumRecordsPanel.tsx",
+    "src/components/hr/medical/InsuranceClaimsPanel.tsx",
+    "src/app/hr/medical/nhis/page.tsx",
+    "src/app/hr/safety/incidents/[id]/page.tsx",
+    "src/app/hr/recruitment/requisitions/[id]/page.tsx",
     "src/config/hr-setup-nav.ts"
   ]
 }

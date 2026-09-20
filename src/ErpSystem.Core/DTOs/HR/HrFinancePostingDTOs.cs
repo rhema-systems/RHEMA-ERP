@@ -61,6 +61,15 @@ public sealed class HrFinancePostingCommand
     public IReadOnlyList<HrFinancePostingLine> RoutePayrollLines { get; init; } = Array.Empty<HrFinancePostingLine>();
 
     public string? RoutePayrollSkipReason { get; init; }
+
+    /// <summary>
+    /// For a <see cref="HrFinancePostingKind.VendorInvoice"/> event: the Procurement supplier the
+    /// invoice is raised to. Null means the payee is not a supplier and the factory sets a skip reason.
+    /// </summary>
+    public Guid? PayeeSupplierId { get; init; }
+
+    /// <summary>The payee's name as HR recorded it, for the invoice notes and the register.</summary>
+    public string? PayeeName { get; init; }
 }
 
 /// <summary>What the adapter hands back to the HR area after an event ran.</summary>
@@ -120,6 +129,9 @@ public sealed class HrFinancePostingRuleDto
     public bool PostOnActionDate { get; set; } = true;
     /// <summary>Whether this event's settlement is decided by the rule (true) or by the document's own payment method (false).</summary>
     public bool SupportsSettlementRoute { get; set; }
+    /// <summary>Journal, or an AP vendor invoice (slice 5).</summary>
+    public HrFinancePostingKind Kind { get; set; } = HrFinancePostingKind.Journal;
+    public string KindName => Kind.ToString();
     /// <summary>The effective route: the saved one, else the catalogue default.</summary>
     public HrFinanceSettlementRoute? SettlementRoute { get; set; }
     public HrFinanceSettlementRoute? DefaultSettlementRoute { get; set; }
@@ -209,10 +221,21 @@ public sealed class HrFinancePostingRecordDto
     public DateTime? ReversedAt { get; set; }
     public string? ReversalReason { get; set; }
     public DateTime CreatedAt { get; set; }
-    /// <summary>True for Unposted and Failed rows: the register can try again.</summary>
-    public bool CanRetry => Status is HrFinancePostingStatus.Unposted or HrFinancePostingStatus.Failed;
-    /// <summary>True for Posted rows: the register can reverse through Finance.</summary>
+    /// <summary>Journal or AP vendor invoice (slice 5).</summary>
+    public HrFinancePostingKind Kind { get; set; } = HrFinancePostingKind.Journal;
+    public string KindName => Kind.ToString();
+    /// <summary>For an AP row: the Finance vendor invoice this event created.</summary>
+    public Guid? VendorInvoiceId { get; set; }
+    public string? VendorInvoiceNumber { get; set; }
+    /// <summary>For an AP row: Finance's invoice status when last read (pull sync).</summary>
+    public string? ExternalStatus { get; set; }
+    public DateTime? ExternalStatusAt { get; set; }
+    /// <summary>True for Unposted, Failed and Reversed rows: the register can post (again) — a re-post after a reversal is the next generation.</summary>
+    public bool CanRetry => Status is HrFinancePostingStatus.Unposted or HrFinancePostingStatus.Failed or HrFinancePostingStatus.Reversed;
+    /// <summary>True for Posted rows: the register can reverse through Finance (an AP invoice only while Finance still holds it as a draft).</summary>
     public bool CanReverse => Status == HrFinancePostingStatus.Posted;
+    /// <summary>True for a posted AP row: Finance's status and the payment voucher can be pulled.</summary>
+    public bool CanRefresh => Kind == HrFinancePostingKind.VendorInvoice && Status == HrFinancePostingStatus.Posted && VendorInvoiceId.HasValue;
 }
 
 public sealed class HrFinancePostingRecordQueryDto

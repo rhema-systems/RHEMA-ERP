@@ -27,7 +27,8 @@ public sealed record HrFinancePostingEventDefinition(
     IReadOnlyList<HrFinanceAccountRole> DebitRoles,
     IReadOnlyList<HrFinanceAccountRole> CreditRoles,
     bool SupportsSettlementRoute = false,
-    HrFinanceSettlementRoute DefaultSettlementRoute = HrFinanceSettlementRoute.Direct)
+    HrFinanceSettlementRoute DefaultSettlementRoute = HrFinanceSettlementRoute.Direct,
+    HrFinancePostingKind Kind = HrFinancePostingKind.Journal)
 {
     public IEnumerable<HrFinanceAccountRole> AllRoles => DebitRoles.Concat(CreditRoles).Distinct();
 }
@@ -76,6 +77,12 @@ public static class HrFinancePostingEventCatalog
     public const string TrainingBondBreached = "TRAINING_BOND_BREACHED";
     public const string TrainingBondSettled = "TRAINING_BOND_SETTLED";
     public const string TrainingBondWaived = "TRAINING_BOND_WAIVED";
+    // slice 5 — third-party payees
+    public const string RequisitionCostApproved = "REQUISITION_COST_APPROVED";
+    public const string MedicalPremiumPaid = "MEDICAL_PREMIUM_PAID";
+    public const string MedicalInsurerRecoveryReceived = "MEDICAL_INSURER_RECOVERY_RECEIVED";
+    public const string NhisClaimReimbursed = "NHIS_CLAIM_REIMBURSED";
+    public const string SheInsuranceClaimReceived = "SHE_INSURANCE_CLAIM_RECEIVED";
 
     public const string SourceMedicalExpenseClaim = "MedicalExpenseClaim";
     public const string SourceStaffTravelExpenseClaim = "StaffTravelExpenseClaim";
@@ -89,6 +96,11 @@ public static class HrFinancePostingEventCatalog
     public const string SourceAssetSurchargeRecovery = "AssetSurchargeRecovery";
     public const string SourceStaffDisciplineFine = "StaffDisciplineFine";
     public const string SourceTrainingServiceBond = "TrainingServiceBond";
+    public const string SourceStaffRequisitionCost = "StaffRequisitionCost";
+    public const string SourceMedicalInsurancePremiumRecord = "MedicalInsurancePremiumRecord";
+    public const string SourceMedicalInsuranceClaim = "MedicalInsuranceClaim";
+    public const string SourceNhisClaim = "NHISClaim";
+    public const string SourceSafetyIncident = "SafetyIncident";
 
     public static IReadOnlyList<HrFinancePostingEventDefinition> Events { get; } =
     [
@@ -221,7 +233,39 @@ public static class HrFinancePostingEventCatalog
             "A bond is waived (POST training-service-bonds/waive).",
             "Dr Staff receivable write-off / Cr Staff receivables, for the repayment due. A bond waived before any breach was posted has nothing to write off.",
             [HrFinanceAccountRole.StaffReceivableWriteOff],
-            [HrFinanceAccountRole.StaffReceivables])
+            [HrFinanceAccountRole.StaffReceivables]),
+
+        // ── slice 5 — third-party payees ─────────────────────────────────────────────────────
+        new(RequisitionCostApproved, "Recruitment cost approved (AP invoice)", "Recruitment", SourceStaffRequisitionCost, "Approve",
+            "HR approves a cost recorded against a staff requisition (POST StaffRequisitions/costs/{id}/approve) whose payee is a Procurement supplier.",
+            "An Accounts Payable vendor invoice to the supplier, one expense line on Recruitment expense, submitted into Finance's AP approval. Finance approves and pays; the register reads the status and the payment voucher back. A cost paid to a person (no supplier) stays HR-side and is recorded Skipped.",
+            [HrFinanceAccountRole.RecruitmentExpense],
+            [],
+            Kind: HrFinancePostingKind.VendorInvoice),
+
+        new(MedicalPremiumPaid, "Medical insurance premium paid", "Medical", SourceMedicalInsurancePremiumRecord, "Pay",
+            "A premium bill is recorded as paid (POST medical-insurance/premium-records/{id}/payment).",
+            "Dr Medical expense (the employer's share) and Dr Staff receivables (the employees' share, recovered through payroll) / Cr Staff payments clearing (the whole premium).",
+            [HrFinanceAccountRole.MedicalExpense, HrFinanceAccountRole.StaffReceivables],
+            [HrFinanceAccountRole.StaffPaymentsClearing]),
+
+        new(MedicalInsurerRecoveryReceived, "Insurer recovery received", "Medical", SourceMedicalInsuranceClaim, "Receive",
+            "The insurer's payment on a claim the company lodged is recorded (POST medical-insurance/insurance-claims/{id}/payment).",
+            "Dr Staff payments clearing / Cr Insurance recoveries income, for the amount the insurer paid.",
+            [HrFinanceAccountRole.StaffPaymentsClearing],
+            [HrFinanceAccountRole.InsuranceRecoveriesIncome]),
+
+        new(NhisClaimReimbursed, "NHIS reimbursement received", "Medical", SourceNhisClaim, "Receive",
+            "The NHIS payment on a claim is recorded (POST nhis-claims/{id}/payment).",
+            "Dr Staff payments clearing / Cr Insurance recoveries income, for the approved amount (else the covered amount).",
+            [HrFinanceAccountRole.StaffPaymentsClearing],
+            [HrFinanceAccountRole.InsuranceRecoveriesIncome]),
+
+        new(SheInsuranceClaimReceived, "Incident insurance claim paid", "Safety", SourceSafetyIncident, "Receive",
+            "An incident's insurance claim is recorded as approved and paid (POST safety/incidents/{id}/file-claim with an amount paid).",
+            "Dr Staff payments clearing / Cr Insurance recoveries income, for the amount paid. A claim filed but not yet paid posts nothing.",
+            [HrFinanceAccountRole.StaffPaymentsClearing],
+            [HrFinanceAccountRole.InsuranceRecoveriesIncome])
     ];
 
     private static readonly IReadOnlyDictionary<string, HrFinancePostingEventDefinition> ByCode =
@@ -254,6 +298,8 @@ public static class HrFinancePostingEventCatalog
         HrFinanceAccountRole.StatutoryDeductionsPayable => AccountType.Liability,
         HrFinanceAccountRole.StaffReceivables => AccountType.Asset,
         HrFinanceAccountRole.StaffReceivableWriteOff => AccountType.Expense,
+        HrFinanceAccountRole.RecruitmentExpense => AccountType.Expense,
+        HrFinanceAccountRole.InsuranceRecoveriesIncome => AccountType.Revenue,
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Unknown HR Finance account role.")
     };
 }

@@ -145,10 +145,13 @@ public sealed class HrFinancePostingAdapterTests
                 .ReturnsAsync(new ExchangeRateDto { Rate = 12.5m, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD" });
         }
 
+        public Mock<IVendorInvoiceService> VendorInvoices { get; } = new(MockBehavior.Strict);
+
         public HrFinancePostingAdapter Build() => new(
             Store.Object,
             UnitOfWork.Object,
             Engine.Object,
+            VendorInvoices.Object,
             new HrCurrencyBridge(Currencies.Object, Rates.Object),
             CurrentUser.Object,
             NullLogger<HrFinancePostingAdapter>.Instance);

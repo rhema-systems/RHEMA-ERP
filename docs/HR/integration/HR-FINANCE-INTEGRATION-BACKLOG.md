@@ -146,9 +146,9 @@ the sweep is a re-survey after all.
 |---|---|---|
 | 2 — Leave | leave encashment — in service and on separation | ✅ **recorded 2026-09-17**, see below |
 | 4 — Compensation | pay components, allowances, the payroll boundary | 🔲 to record |
-| 7 — Training | training budget, costs, vendor payments, `costPerCompletion` | 🔲 to record |
-| 11 — Medical | claim create → approve → **pay** - **POSTS 2026-09-20** (`MEDICAL_CLAIM_APPROVED`, `MEDICAL_CLAIM_PAID`; salary deduction is Skipped for payroll). Insurance premium, insurer recovery and NHIS recovery (entity-sweep rows 70-72) still to record - third-party payees, AP-shaped, wait on the R8 answer | ✅ employee reimbursement built; 🔲 third-party flows |
-| 10 — SHE | any compensation or remediation spend | 🔲 to record |
+| 7 — Training | service bonds **POST 2026-09-20** (slice 4: breached / settled / waived); budget transactions **deliberately not posted** (a memo of a Finance document — design § 3.1e); the budget *read* is slice 6 | ✅ bonds; budget read pending |
+| 11 — Medical | claim create → approve → **pay** - **POSTS 2026-09-20** (`MEDICAL_CLAIM_APPROVED`, `MEDICAL_CLAIM_PAID`; salary deduction is Skipped for payroll). Insurance premium, insurer recovery and NHIS recovery **POST 2026-09-20** (slice 5: `MEDICAL_PREMIUM_PAID`, `MEDICAL_INSURER_RECOVERY_RECEIVED`, `NHIS_CLAIM_REIMBURSED`) | ✅ built |
+| 10 — SHE | incident insurance proceeds **POST 2026-09-20** (slice 5: `SHE_INSURANCE_CLAIM_RECEIVED`); no other SHE money field exists to post | ✅ built |
 
 ⚠ **Area 11 is the priority back-fill** — it has a live, working claim→approve→**pay** path, so it
 is the closest analogue to travel 12.1 and the two must post the same way.
@@ -254,7 +254,7 @@ clearest case in the whole register for the sweep to own**, rather than HR inven
 | Money event | Where it lives | What it is |
 |---|---|---|
 | **Recruitment cost** | `StaffRequisitionCost` (`Amount`, `Currency`, `ExchangeRate` from Finance, `AmountBaseCurrency`, `CostDate`, `SupplierId`/`PayeeName`, `Status`, `ApprovedById/On`) | Spend on filling a requisition, paid to a Procurement supplier or a named person, approved by HR (`Recorded → Approved | Rejected`) |
-| **Payment voucher** | `StaffRequisitionCost.PaymentVoucherNumber` | ⚠ Still a **typed record**. The AP hand-off (HR-approved cost → `IVendorInvoiceService` vendor invoice → Finance approves and pays → HR reads the voucher back) is designed as lane R8 and **waits on the Finance owner's answers** (a producer route, a catalogue row, the authorising event, the non-supplier payee, the expense account). |
+| **Payment voucher** | `StaffRequisitionCost.PaymentVoucherNumber` | **Written from Finance since 2026-09-20** (lane 8 slice 5 = R8): HR's approval raises the AP vendor invoice through the posting register (`REQUISITION_COST_APPROVED`, kind VendorInvoice); the register's refresh pulls Finance's status and writes the payment numbers here once paid. The rule ships OFF until the Finance owner confirms the hand-off's § 5 answers; while off, the field is still typed. |
 
 Master data is read canonically (rule 4): currency and rate through `HrCurrencyBridge`, the
 supplier through `api/hr/suppliers`. **No HR-side payment status exists** (rule 2): `Status` is

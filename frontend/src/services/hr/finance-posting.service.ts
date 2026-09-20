@@ -65,6 +65,11 @@ class FinancePostingService {
   reverse(id: string, reason: string): Promise<HrFinancePostingRecord> {
     return apiService.post<HrFinancePostingRecord>(`${this.base}/records/${id}/reverse`, { reason });
   }
+
+  /** AP hand-off rows: pull Finance's invoice status, and the payment voucher once paid. HR.Company.Read. */
+  refresh(id: string): Promise<HrFinancePostingRecord> {
+    return apiService.post<HrFinancePostingRecord>(`${this.base}/records/${id}/refresh`, {});
+  }
 }
 
 export const financePostingService = new FinancePostingService();
