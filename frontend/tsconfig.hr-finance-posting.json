@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/finance-posting.ts",
+    "src/services/hr/finance-posting.service.ts",
+    "src/components/hr/common/FinancePostingCard.tsx",
+    "src/components/hr/travel/TravelFinancePanel.tsx",
+    "src/app/administration/hr/settings/finance-posting/page.tsx",
+    "src/app/administration/hr/settings/page.tsx",
+    "src/app/hr/medical/claims/[id]/page.tsx",
+    "src/app/hr/travel/claims/[id]/page.tsx",
+    "src/config/hr-setup-nav.ts"
+  ]
+}

@@ -124,6 +124,14 @@ export const hrSetupGroups: HrSetupGroup[] = [
         icon: Hash,
         description: 'Numbering rules per register, and the counter each one issues from.',
       },
+      {
+        // HR finish plan lane 8: which Finance accounts HR posts to, which money events post,
+        // and the register of what reached the ledger.
+        title: 'Finance Posting',
+        href: '/administration/hr/settings/finance-posting',
+        icon: Landmark,
+        description: 'Account roles, the HR money events that post to Finance, and the posting register.',
+      },
     ],
   },
   {

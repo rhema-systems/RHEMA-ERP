@@ -21,6 +21,7 @@ import { Progress } from '@/components/ui/progress';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import {
   DateField,
   FieldRow,
@@ -504,6 +505,7 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
                   <TableHead className="text-right">Outstanding</TableHead>
                   <TableHead>Settle by</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead>Finance</TableHead>
                   <TableHead className="w-40" />
                 </TableRow>
               </TableHeader>
@@ -525,6 +527,7 @@ export function TravelFinancePanel({ request }: { request: StaffTravelRequest })
                       {fmtDate(a.settlementDeadline)}
                     </TableCell>
                     <TableCell><StatusBadge status={humanize(a.statusName)} /></TableCell>
+                    <TableCell><FinancePostingInlineStatus sourceDocumentId={a.id} /></TableCell>
                     <TableCell>
                       <div className="flex gap-1">
                         {a.status === 'Requested' && (

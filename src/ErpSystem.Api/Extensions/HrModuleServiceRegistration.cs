@@ -741,6 +741,11 @@ public static class HrModuleServiceRegistration
         // Area 12's alias for the same bridge — registered separately so its existing constructor
         // injections resolve unchanged. Retire with the alias.
         services.AddScoped<StaffTravelCurrencyBridge>();
+        // HR → Finance posting (HR finish plan lane 8): the HR side of FIN-INT-001. One adapter for
+        // every HR money event; the store is split out so its contract tests need no EF provider.
+        services.AddScoped<ErpSystem.Core.Services.HR.Finance.IHrFinancePostingStore, ErpSystem.Core.Services.HR.Finance.HrFinancePostingStore>();
+        services.AddScoped<IHrFinancePostingAdapter, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdapter>();
+        services.AddScoped<IHrFinancePostingAdminService, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdminService>();
         // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
         services.AddScoped<StaffTravelPolicyGuard>();
         // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).

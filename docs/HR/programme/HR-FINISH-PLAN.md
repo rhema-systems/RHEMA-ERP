@@ -1224,6 +1224,17 @@ that does not exist. `probe-authority-gate.mjs`, 33 assertions.
 The one workstream deliberately deferred module-wide: HR does not post to GL per area; **one sweep
 does it after the whole module is built**. That condition is now met.
 
+**Slice 1 BUILT 2026-09-20.** Design: [`HR-FINANCE-POSTING-DESIGN.md`](../integration/HR-FINANCE-POSTING-DESIGN.md).
+The one treatment (recognise / settle / advance on five shared account roles), the HR-side adapter
+on FIN-INT-001, a posting register with retry and Finance reversal, the settings screen, the
+Finance card on medical and travel claims, and 26 contract tests in the Finance gate. **Medical
+claims and staff travel post.** 8a's "confirm the entry point", "decide the treatment once" and
+8c's payroll migration are closed (payroll had already moved onto the engine). Still open: the
+back-fill records for Compensation/Training/SHE, FIN-INT-011 (payroll-shaped - raise via payroll),
+the budget conversation, and the decisions listed in the design's section 6. Hand-off to Finance:
+[`HANDOFF-FINANCE-HR-POSTING-ROUTES.md`](../integration/handoffs/HANDOFF-FINANCE-HR-POSTING-ROUTES.md).
+Live posting needs the database recreated on the Finance baseline (design section 5).
+
 Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) · entity map:
 [`HR-FINANCE-ENTITY-SWEEP.md`](../integration/HR-FINANCE-ENTITY-SWEEP.md) · mechanism:
 `docs/Finance/finance-integration-contract-catalogue.md`.
@@ -1251,7 +1262,7 @@ Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGR
 
 ### 8b — The adapters
 
-- [ ] Decide the treatment **once**, then apply it across every row in the register — travel claims
+- [x] Decide the treatment **once** (2026-09-20, design section 3) — applied to medical and travel; the rest queued in design section 7: travel claims
       and advances (an outstanding advance is an **employee receivable** living only in HR, in no
       trial balance and no ageing), medical claim payments, separation final settlement, awards,
       asset surcharges, succession development spend.
@@ -1263,7 +1274,7 @@ Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGR
 
 ### 8c — Not HR's to execute
 
-- [ ] **Payroll's GL posting must migrate off `IJournalEntryService` onto `IFinancePostingEngine`.**
+- [x] ~~**Payroll's GL posting must migrate off `IJournalEntryService` onto `IFinancePostingEngine`.**~~ **Already done by the payroll owner** (found 2026-09-20: route `HrPayrollJournal`, producer context, no `IJournalEntryService` writes).
       `PostPayrollJournalAsync` creates and posts a Finance journal directly, which the Finance
       owner's 2026-08-31 message forbids in terms — so this is a **compliance fix, not an
       improvement**. ⚠ **Payroll belongs to another developer and HR integrates read-only.** Raise

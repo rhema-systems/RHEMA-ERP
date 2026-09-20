@@ -82,6 +82,12 @@ governance message."
 
 ## Key facts to carry into any HR-Finance task
 
+- **2026-09-20 — the sweep has started; read [`HR-FINANCE-POSTING-DESIGN.md`](HR-FINANCE-POSTING-DESIGN.md)
+  before the rest of this list.** Medical claims and staff travel post through
+  `IHrFinancePostingAdapter` (HR's side of FIN-INT-001). Payroll's legacy `IJournalEntryService`
+  call, described below as the top gap, was already migrated by the payroll owner. Several bullets
+  below are now history rather than open gaps; the design's sections 6 and 7 say what is still open.
+
 - **Payroll is the only HR area that posts to GL today**, and it uses the **legacy**
   `IJournalEntryService` directly — **not** the newer `IFinancePostingEngine` / FIN-INT-001. This
   is now confirmed **out of policy** per the governance rule above, not just technical debt.

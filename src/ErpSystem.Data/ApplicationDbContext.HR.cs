@@ -687,6 +687,7 @@ public partial class ApplicationDbContext
         ConfigureStaffTravelEntities(builder);
         ConfigureHrDocumentIntake(builder);
         ConfigureEmployeeImportEntities(builder);
+        ConfigureHrFinancePostingEntities(builder);   // ApplicationDbContext.HrFinancePosting.cs
     }
 
     /// <summary>The employee bulk-import session and its rows.</summary>

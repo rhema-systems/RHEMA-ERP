@@ -3,6 +3,15 @@
 **Opened 2026-08-17.** The worklist for the comprehensive Finance-integration sweep that runs
 **after the whole HR module is complete**.
 
+> **THE SWEEP HAS STARTED - 2026-09-20, lane 8 slice 1.** The one treatment is written down in
+> [`HR-FINANCE-POSTING-DESIGN.md`](HR-FINANCE-POSTING-DESIGN.md) and built for the priority pair
+> this register named: **medical claims (11) and staff travel (12.1-12.3) now post through
+> FIN-INT-001** - approve recognises, pay settles, disburse raises the receivable - with a register,
+> retry, reversal and 26 contract tests in the Finance gate. Rows below marked **POSTS** are done;
+> everything else keeps its recorded treatment in the design's section 7 and waits its slice. The
+> rules in this file still apply to every area that has not been wired: do not invent a posting
+> mechanism - there is now exactly one, `IHrFinancePostingAdapter`.
+
 ---
 
 ## Why this file exists
@@ -106,9 +115,9 @@ travel entities.
 
 | # | money event | entity | what is missing |
 |---|---|---|---|
-| 12.1 | Expense claim paid | `StaffTravelExpenseClaim` | No GL posting, no AP document. `PaymentMethod` is a travel-private enum, `PaymentReference` free text, `PaidAt` an HR timestamp. `FinanceReviewedById` is an **`Employee`** FK, so the finance review is an HR fact invisible to Finance. |
-| 12.2 | Cash advance disbursed | `StaffTravelAdvance` | No GL entry. An outstanding advance is an **employee receivable**: `UnsettledAmount` is a balance-sheet figure living only in HR, appearing in no trial balance and no ageing. |
-| 12.3 | Advance settled against a claim | `StaffTravelExpenseClaim.AdvanceDeducted` | The contra-entry that clears the receivable has no accounting counterpart. **⚠ Note: the travel-side arithmetic now EXISTS as of slice 4** — paying a claim deducts and settles the linked advance, capped at the outstanding balance. Before that, nothing wrote `AdvanceDeducted` or `SettledAmount` at all, so employees were paid in full despite holding an advance and the advance stayed outstanding for ever. The sweep therefore inherits correct travel-side numbers to post from, not a blank field. |
+| 12.1 | Expense claim paid - **POSTS 2026-09-20** (`TRAVEL_CLAIM_APPROVED` recognises on review, `TRAVEL_CLAIM_PAID` settles on pay; payroll offset posts only the advance recovery) | `StaffTravelExpenseClaim` | ~~No GL posting~~, no AP document. `PaymentMethod` is a travel-private enum, `PaymentReference` free text, `PaidAt` an HR timestamp. `FinanceReviewedById` is an **`Employee`** FK, so the finance review is an HR fact invisible to Finance. |
+| 12.2 | Cash advance disbursed - **POSTS 2026-09-20** (`TRAVEL_ADVANCE_DISBURSED`: Dr staff advances receivable / Cr clearing) | `StaffTravelAdvance` | ~~No GL entry~~. An outstanding advance is an **employee receivable**: `UnsettledAmount` is a balance-sheet figure living only in HR, appearing in no trial balance and no ageing. |
+| 12.3 | Advance settled against a claim - **POSTS 2026-09-20** (the Cr receivable leg of `TRAVEL_CLAIM_PAID`) | `StaffTravelExpenseClaim.AdvanceDeducted` | ~~The contra-entry that clears the receivable has no accounting counterpart.~~ **⚠ Note: the travel-side arithmetic now EXISTS as of slice 4** — paying a claim deducts and settles the linked advance, capped at the outstanding balance. Before that, nothing wrote `AdvanceDeducted` or `SettledAmount` at all, so employees were paid in full despite holding an advance and the advance stayed outstanding for ever. The sweep therefore inherits correct travel-side numbers to post from, not a blank field. |
 | 12.4 | Trip budget committed / consumed | `StaffTravelBudget` | Per-trip envelope (flight / accommodation / per-diem / transport / misc) with no link to `BudgetEntry`, `UnitBudget`, a GL account or a cost centre. The breakdown is legitimately travel-owned; the missing part is that it must **consume from** the department's finance budget. |
 | 12.5 | Booking cost committed | `StaffTravel{Flight,Hotel,GroundTransport,CarRental}Booking` | `EstimatedCost` / `ActualCost` per booking, no commitment accounting. |
 
@@ -138,7 +147,7 @@ the sweep is a re-survey after all.
 | 2 — Leave | leave encashment — in service and on separation | ✅ **recorded 2026-09-17**, see below |
 | 4 — Compensation | pay components, allowances, the payroll boundary | 🔲 to record |
 | 7 — Training | training budget, costs, vendor payments, `costPerCompletion` | 🔲 to record |
-| 11 — Medical | claim create → approve → **pay**; insurance utilisation; NHIS | 🔲 to record |
+| 11 — Medical | claim create → approve → **pay** - **POSTS 2026-09-20** (`MEDICAL_CLAIM_APPROVED`, `MEDICAL_CLAIM_PAID`; salary deduction is Skipped for payroll). Insurance premium, insurer recovery and NHIS recovery (entity-sweep rows 70-72) still to record - third-party payees, AP-shaped, wait on the R8 answer | ✅ employee reimbursement built; 🔲 third-party flows |
 | 10 — SHE | any compensation or remediation spend | 🔲 to record |
 
 ⚠ **Area 11 is the priority back-fill** — it has a live, working claim→approve→**pay** path, so it
@@ -387,9 +396,12 @@ work starts, not after.
 - [ ] Decide whether an approved asset surcharge is an employee receivable, a payroll deduction, or
       both in sequence (area 16.1–16.3).
 - [ ] Get TDC's answer on cost attribution (project / cost centre dimensions).
-- [ ] Confirm the Finance module's posting entry point and who owns it — Finance is not this
-      module's to modify without agreement, the same rule that governs payroll.
-- [ ] Decide the treatment **once**, then apply it across every row in the register.
+- [x] Confirm the Finance module's posting entry point and who owns it — `IFinancePostingEngine`,
+      Finance-owned; the HR adapter sits on HR's side of it.
+- [x] Decide the treatment **once**, then apply it across every row in the register — **decided
+      2026-09-20**, `HR-FINANCE-POSTING-DESIGN.md` section 3; applied to medical and travel, queued for the rest (section 7).
+- [x] ~~Migrate Payroll's GL posting~~ — **found already done by the payroll owner** (2026-09-20 survey):
+      `PostPayrollJournalAsync` posts through `IFinancePostingEngine` with the `HrPayrollJournal` route.
 
 ---
 

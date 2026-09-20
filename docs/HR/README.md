@@ -12,10 +12,12 @@ index, not a document.
    re-derived):
    - **Payroll is another developer's module.** HR reads it, never edits it. If HR needs something
      payroll doesn't expose, raise it — the `docs/HR/integration/handoffs/HANDOFF-PAYROLL-*.md` shape. → [`HR-PAYROLL-BOUNDARY.md`](integration/HR-PAYROLL-BOUNDARY.md)
-   - **HR does not post to the General Ledger per area.** Record the money event, register it in
-     `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, and leave the accounting to one comprehensive sweep
-     after the whole module. **Master data is not deferred** — read Finance's `Currency` and
-     `ExchangeRate` through `HrCurrencyBridge` now; never keep a parallel copy. → [`HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md`](integration/HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md)
+   - **HR posts to the General Ledger through ONE adapter, `IHrFinancePostingAdapter`, with one
+     treatment** (since 2026-09-20; medical and travel are wired, the rest are queued). Never write
+     a Finance journal, invent a payment-status machine or hard-code an account; add a catalogue
+     event and a factory builder. Areas not yet wired still register their money events in
+     `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`. **Master data is not deferred** — read Finance's `Currency` and
+     `ExchangeRate` through `HrCurrencyBridge`; never keep a parallel copy. → [`HR-FINANCE-POSTING-DESIGN.md`](integration/HR-FINANCE-POSTING-DESIGN.md), [`HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md`](integration/HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md)
    - **Never build a module-specific approval UI.** Plug into the workflow engine with the
      four-step recipe. The one deliberate exception is `EmployeeGoal`. → [`HR-WORKFLOW-ENGINE-INTEGRATION.md`](integration/HR-WORKFLOW-ENGINE-INTEGRATION.md)
    - **A bulk endpoint loops the real service call.** Same authorization, same workflow
@@ -143,7 +145,8 @@ demonstration workbook.
 |---|---|---|
 | [`HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md`](integration/HR-FINANCE-INTEGRATION-QUICK-REFERENCE.md) | One-page briefing: the Finance rules, the governance message, the key facts | Any task that touches money |
 | [`HR-FINANCE-ENTITY-SWEEP.md`](integration/HR-FINANCE-ENTITY-SWEEP.md) | Every HR/SHE entity that carries money (87 rows), its direction, its Finance target, and the 14 open decisions | Planning the GL sweep; adding a money field |
-| [`HR-FINANCE-INTEGRATION-BACKLOG.md`](integration/HR-FINANCE-INTEGRATION-BACKLOG.md) | The living decision register for the post-module GL sweep (opened 2026-08-17) | — |
+| [`HR-FINANCE-INTEGRATION-BACKLOG.md`](integration/HR-FINANCE-INTEGRATION-BACKLOG.md) | The living decision register for the post-module GL sweep (opened 2026-08-17; **the sweep started 2026-09-20**) | — |
+| [`HR-FINANCE-POSTING-DESIGN.md`](integration/HR-FINANCE-POSTING-DESIGN.md) | **The one accounting treatment and what is built** (lane 8 slice 1): five account roles, recognise/settle/advance, the adapter on FIN-INT-001, the register, retry, reversal, the decisions taken and the events still queued | Wiring any HR money event; reading a Finance posting row |
 | [`HR-PAYROLL-BOUNDARY.md`](integration/HR-PAYROLL-BOUNDARY.md) | Payroll is another developer's; what HR reads, the three bridges, defect #23, and which Finance-sweep items are the payroll owner's | Anything near salary, grades, pay components, `IsOnPayroll` |
 | [`HR-MODULE-INTEGRATION-MAP.md`](integration/HR-MODULE-INTEGRATION-MAP.md) | Every other module HR/SHE touches (36 rows), both directions, with a verdict per link | Adding a cross-module FK; deciding who owns a record |
 | [`HR-WORKFLOW-ENGINE-INTEGRATION.md`](integration/HR-WORKFLOW-ENGINE-INTEGRATION.md) | The four-step plug-in recipe, the traps, the engine defects, which families are on the engine | Wiring any approval |
@@ -160,6 +163,7 @@ Each is self-contained: what is broken · what was proven · what it blocks · w
 | [`HANDOFF-PAYROLL-EMPLOYEE-PROFILE-CREATE.md`](integration/handoffs/HANDOFF-PAYROLL-EMPLOYEE-PROFILE-CREATE.md) | Defect **#23** — payroll's upsert cannot create a profile. HR carries a workaround to be deleted once it is fixed. **The template for raising anything with another module's owner** | Raising anything with another owner; touching payroll membership |
 | [`HANDOFF-PAYROLL-LEAVE.md`](integration/handoffs/HANDOFF-PAYROLL-LEAVE.md) | Three leave settings HR stores correctly and only payroll can honour (2026-09-17, wave B3) | Leave settings that imply a deduction |
 | [`HANDOFF-PAYROLL-HR-SETTINGS-REGISTER.md`](integration/handoffs/HANDOFF-PAYROLL-HR-SETTINGS-REGISTER.md) | Four concepts modelled twice across HR and payroll, with no bridge. A register, not a change request — **nothing in it has been built** | Deciding which system owns a salary-shaped setting |
+| [`HANDOFF-FINANCE-HR-POSTING-ROUTES.md`](integration/handoffs/HANDOFF-FINANCE-HR-POSTING-ROUTES.md) | HR now posts through FIN-INT-001; the four things only Finance can settle — routes, the clearing account, FX evidence, a catalogue row | Anything Finance asks about HR journals |
 | [`HANDOFF-FINANCE-HR-RECRUITMENT-COST-AP.md`](integration/handoffs/HANDOFF-FINANCE-HR-RECRUITMENT-COST-AP.md) | Not a defect — an integration request: recruitment costs need Finance approval and payment. HR built its half (R7); the adapter (R8) waits on the answers in §5 | Picking up R8; anything near `StaffRequisitionCost` |
 
 ---

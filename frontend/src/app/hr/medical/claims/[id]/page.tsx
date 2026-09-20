@@ -39,6 +39,7 @@ import { HR_ADMIN_ROLES, HR_ROLES } from '@/components/hr/common/PermissionGate'
 import { InsuranceClaimsPanel } from '@/components/hr/medical/InsuranceClaimsPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { AttachmentsPanel } from '@/components/hr/common/AttachmentsPanel';
+import { FinancePostingCard } from '@/components/hr/common/FinancePostingCard';
 import { ClaimEditActions, ClaimItemActions } from '@/components/hr/medical/ClaimEditDialogs';
 import { useToast } from '@/hooks/use-toast';
 import { medicalClaimService } from '@/services/hr/medical-claims.service';
@@ -476,6 +477,9 @@ export default function MedicalClaimDetailPage({ params }: { params: Promise<{ i
           />
         </TabsContent>
       </Tabs>
+
+      {/* What Finance holds for this claim: recognition on approval, settlement on payment (lane 8). */}
+      <FinancePostingCard sourceDocumentId={id} invalidateKeys={[claimKey]} />
 
       <Dialog open={payOpen} onOpenChange={setPayOpen}>
         <DialogContent>
