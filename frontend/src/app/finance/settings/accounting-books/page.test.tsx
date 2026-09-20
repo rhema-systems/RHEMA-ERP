@@ -291,6 +291,7 @@ describe('accounting book settings', () => {
         fireEvent.click(await screen.findByRole('button', { name: 'Review & approve' }));
 
         expect(screen.getByText('Configuring → Initializing')).toBeInTheDocument();
+        expect(screen.getAllByText('Not applicable — full book')).toHaveLength(2);
         expect(screen.getAllByText('Begin controlled opening preparation')).toHaveLength(2);
         expect(screen.getByText('What this approval authorizes')).toBeInTheDocument();
         expect(screen.getByText(/Initialization evidence does not exist yet/)).toBeInTheDocument();
