@@ -393,8 +393,12 @@ work starts, not after.
 - [ ] Decide whether a manpower budget carries a currency at all, and if so which.
 - [ ] Get TDC's answer on payroll-vs-direct-payment reimbursement — it now governs **two**
       surfaces: travel claims paid *to* an employee and asset surcharges recovered *from* one.
-- [ ] Decide whether an approved asset surcharge is an employee receivable, a payroll deduction, or
-      both in sequence (area 16.1–16.3).
+- [x] Decide whether an approved asset surcharge is an employee receivable, a payroll deduction, or
+      both in sequence (area 16.1–16.3) — **both in sequence**, built 2026-09-20 (lane 8 slice 4):
+      the approval raises a GL receivable on the *Staff receivables* role; a direct recovery clears
+      it through HR's clearing; a payroll-deduction recovery is recorded Skipped for payroll's
+      journal to clear; a waiver writes the balance off. Fines and breached bonds follow the same
+      treatment. See `HR-FINANCE-POSTING-DESIGN.md` § 3.1d.
 - [ ] Get TDC's answer on cost attribution (project / cost centre dimensions).
 - [x] Confirm the Finance module's posting entry point and who owns it — `IFinancePostingEngine`,
       Finance-owned; the HR adapter sits on HR's side of it.

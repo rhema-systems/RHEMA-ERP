@@ -17,6 +17,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { FinancePostingCard } from '@/components/hr/common/FinancePostingCard';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
 import { disciplineSanctionService } from '@/services/hr/discipline.service';
@@ -297,13 +298,22 @@ export function SanctionsPanel({ detail }: { detail: DisciplinaryCase }) {
         </CardHeader>
         <CardContent>
           {detail.fine ? (
-            <div className="grid gap-4 sm:grid-cols-4">
-              <Field label="Amount" value={money(detail.fine.fineAmount)} />
-              <Field label="Paid" value={money(detail.fine.finePaidAmount)} />
-              <Field label="Due" value={fmtDate(detail.fine.fineDueDate)} />
-              <Field label="Status" value={detail.fine.finePaymentStatusName
-                ? <StatusBadge status={detail.fine.finePaymentStatusName} /> : '—'} />
-            </div>
+            <>
+              <div className="grid gap-4 sm:grid-cols-4">
+                <Field label="Amount" value={money(detail.fine.fineAmount)} />
+                <Field label="Paid" value={money(detail.fine.finePaidAmount)} />
+                <Field label="Due" value={fmtDate(detail.fine.fineDueDate)} />
+                <Field label="Status" value={detail.fine.finePaymentStatusName
+                  ? <StatusBadge status={detail.fine.finePaymentStatusName} /> : '—'} />
+              </div>
+              {/* The posting source is the FINE, not the case: the receivable when it is imposed,
+                  the settlement when it closes as fully paid or waived. */}
+              <FinancePostingCard
+                className="mt-4"
+                sourceDocumentId={detail.fine.id}
+                invalidateKeys={[['hr', 'discipline', 'case', caseId]]}
+              />
+            </>
           ) : (
             <EmptyState title="No fine" description="No fine has been imposed on this case." />
           )}

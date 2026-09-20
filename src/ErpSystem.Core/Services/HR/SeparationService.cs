@@ -2611,6 +2611,25 @@ public class SeparationService : ISeparationService
             .AsNoTracking()
             .ToListAsync(cancellationToken);
 
+        // A deduction that recovers an asset surcharge Finance already holds as a receivable must
+        // credit that receivable, not recoveries income a second time (slice 4). The line points at
+        // its clearance item, the item at the surcharge, and the register says whether it posted.
+        var recoveringPosted = new HashSet<Guid>();
+        var clearanceItemIds = lines.Where(l => l.IsDeduction && l.SourceClearanceItemId.HasValue).Select(l => l.SourceClearanceItemId!.Value).Distinct().ToList();
+        if (clearanceItemIds.Count > 0)
+        {
+            var surchargeByItem = await _unitOfWork.Repository<SeparationClearanceItem>().GetQueryable()
+                .Where(i => i.TenantId == tenantId && clearanceItemIds.Contains(i.Id) && i.SourceSurchargeId != null)
+                .AsNoTracking()
+                .Select(i => new { i.Id, SurchargeId = i.SourceSurchargeId!.Value })
+                .ToListAsync(cancellationToken);
+            foreach (var pair in surchargeByItem)
+            {
+                if (await _financePosting.IsPostedAsync(HrFinancePostingEventCatalog.AssetSurchargeApproved, pair.SurchargeId, cancellationToken))
+                    foreach (var line in lines.Where(l => l.SourceClearanceItemId == pair.Id)) recoveringPosted.Add(line.Id);
+            }
+        }
+
         await _financePosting.RunAsync(async ct =>
         {
             settlement.ReviewOutcome = SettlementReviewOutcome.Approved;
@@ -2625,7 +2644,7 @@ public class SeparationService : ISeparationService
             await _unitOfWork.SaveChangesAsync(ct);
 
             return HrFinancePostingCommandFactory.SeparationSettlementReleased(
-                settlement, lines, separation.SeparationNumber, separation.EmployeeId);
+                settlement, lines, separation.SeparationNumber, separation.EmployeeId, recoveringPosted);
         }, _currentUserProvider.UserId, cancellationToken);
 
         _logger.LogInformation(

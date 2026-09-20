@@ -122,6 +122,43 @@ idempotency key. Two events on one claim therefore carry different actions, and 
 reversal carries a generation suffix (`Approve#2`), or Finance would hand back the reversed
 original as a duplicate. `HrFinancePostingCatalogueTests` asserts the actions are distinct.
 
+### 3.1d Slice 4 — employee receivables (built 2026-09-20)
+
+What an employee comes to OWE the company is one receivable, whatever raised it. Two new roles:
+**Staff receivables** (Asset — kept apart from advances so the two ageings do not mix) and **Staff
+receivable write-off** (Expense). The income side reuses Employee recoveries income.
+
+| Event | Source type / action | Lines | Route |
+|---|---|---|---|
+| `ASSET_SURCHARGE_APPROVED` | `AssetSurcharge` / `Approve` | Dr Staff receivables / Cr Employee recoveries income, the approved amount in the surcharge's currency | rule |
+| `ASSET_SURCHARGE_RECOVERED` | `AssetSurchargeRecovery` / `Recover` — **one row per recovery** | Dr Staff payments clearing / Cr Staff receivables. Method payroll deduction → **Skipped** (payroll's journal credits the receivable); method exit settlement → **Skipped** (the settlement's release posts it) | rule; the method is on the row, so no toggle |
+| `ASSET_SURCHARGE_WAIVED` | `AssetSurcharge` / `Waive` | Dr Staff receivable write-off / Cr Staff receivables for the balance still outstanding; Skipped when the approval never posted | rule |
+| `DISCIPLINE_FINE_IMPOSED` | `StaffDisciplineFine` / `Impose` | Dr Staff receivables / Cr Employee recoveries income. Imposing IS the authorising event: the case decision was the approval and a fine has no approve step | rule |
+| `DISCIPLINE_FINE_SETTLED` | `StaffDisciplineFine` / `Settle` — when the fine reaches Fully Paid **or Waived** | Dr clearing (what was paid) and/or Dr write-off (what was forgiven) / Cr Staff receivables (the fine). Part payments accumulate and post once, at close | rule; default **direct**; payroll route posts only the write-off |
+| `TRAINING_BOND_BREACHED` | `TrainingServiceBond` / `Breach` | Dr Staff receivables / Cr Employee recoveries income for the pro-rata repayment in the bond's currency; an exit after full service posts nothing | rule |
+| `TRAINING_BOND_SETTLED` | `TrainingServiceBond` / `Settle` | Dr clearing / Cr Staff receivables | rule; default **direct** |
+| `TRAINING_BOND_WAIVED` | `TrainingServiceBond` / `Waive` | Dr write-off / Cr Staff receivables; Skipped when no breach was posted | rule |
+
+**The slice-3 correction.** A leaver's settlement carries the outstanding surcharge as a
+`PropertyRecovery` deduction (clearance item → `SourceSurchargeId`). Slice 3 credited every such
+line to recoveries income; once the surcharge's approval has posted, that is the same income twice.
+`ApproveSettlementReviewAsync` now traces each deduction line to its clearance item and, where the
+surcharge behind it has a Posted `ASSET_SURCHARGE_APPROVED` row, credits **Staff receivables**
+instead. A surcharge that never posted (rule off, raised before the sweep) still lands on income,
+which is the only place it can. `SettlementLinesRecoveringAPostedSurcharge_CreditTheReceivable_NotIncomeTwice`
+holds it — and asserts the builder's roles sit inside the catalogue entry's, per side, because the
+first live run failed exactly there: the adapter refuses a role the entry does not declare, the
+release rolled back as designed, and a unit test that only checked the lines had passed.
+
+⚠ **The fine's payment is not a payment event in HR.** `RecordPaymentAsync` accumulates
+`FinePaidAmount` and takes whatever status the desk sends; there is no receipt. Finance is told once,
+when the fine closes, with paid and forgiven split — a Waived close after a part payment posts both
+legs. A Waived fine refuses further payments (new; before this it silently re-opened).
+
+Back-fill: surcharges approved, fines imposed and bonds breached before this slice have no register
+row; their later recovery/settlement finds no Posted recognition and is recorded Skipped with the
+reason. Retry from the register rebuilds each command from the live source document.
+
 ### 3.2 Identity
 
 - `SourceModule = "HR"`, `OriginModuleCode = "HR"` — Finance's module-lock catalogue already knows HR, so a Finance administrator can lock HR out of a period without touching payroll.
@@ -206,6 +243,20 @@ and Internal Audit approval; the journal's expense legs equal the statement's ea
 credits the advances receivable, the net lands on the payable (payroll) or clearing (direct), and a
 released settlement refuses return and line edits.
 
+**Verified live 2026-09-20 (slice 4) on `ErpSystemDB_UAT`:** `run-slice4.mjs`, 86 assertions, green
+twice — a surcharge approved at 300 raises the receivable; a direct recovery of 100 clears through
+clearing, a payroll recovery of 50 is Skipped, the waiver writes off exactly 150; a charge waived
+before approval is Skipped; a leaver with a lost asset and 800 outstanding on an approved surcharge
+carries it through clearance and settlement, and the release journal credits **Staff receivables**,
+not recoveries income (the slice-3 double count, closed — its first run failed because the settlement
+entry had not declared the role, which is now a per-side assertion in the test); fines imposed, part
+paid, closed Fully Paid and closed Waived post the paid/forgiven split, and the payroll route is
+Skipped; bonds breached, settled, waived after breach, waived while active (Skipped) and settled on
+the payroll route (Skipped). Roles mapped to `1100` and `6600` on the UAT chart for want of dedicated
+accounts; a live tenant creates *Staff receivables* and *Staff receivable write-off* accounts first.
+⚠ Waiving a bond needs `HR.Training.Admin` **and** an employee-linked user: on the UAT seed only
+TenantAdmin holds it and `admin` is not linked, so the harness mints a TenantAdmin actor.
+
 ## 6. Decisions taken here, and what they wait on
 
 | # | Decision | Taken as | Waits on |
@@ -232,8 +283,9 @@ expense line is needed, and a contract test.
 | ~~14 Awards~~ | **built, slice 2** (conferred, paid, long-service processed) | | budget figures stay the awards desk's bookkeeping |
 | ~~Benefit utilisations~~ | **built, slice 2** (approved, paid) | | |
 | ~~9b Separation settlement~~ | **built, slice 3** — posts on Internal Audit's approval, never on finalise | | |
-| 16.1–16.4 Asset surcharge | `SURCHARGE_APPROVED` (Dr receivable / Cr recovery income or asset), `SURCHARGE_RECOVERED`, `SURCHARGE_WAIVED` | receivable; new role Surcharge recoveries | payroll deduction route = Skipped + payroll projection, as travel |
-| 3.4 Discipline fine | as surcharge | | |
+| ~~16.1–16.5 Asset surcharge~~ | **built, slice 4** (approved, recovered per row, waived; settlement recovery credits the receivable) | | |
+| ~~3.4 Discipline fine~~ | **built, slice 4** (imposed, settled on close with paid/forgiven split) | | |
+| ~~7 Training service bond~~ | **built, slice 4** (breached, settled, waived) | | |
 | 13 Succession development actual cost | `DEVELOPMENT_ACTIVITY_COMPLETED` | Training expense role | only after the three-way training decision |
 | Budget surfaces (manpower, training, awards, travel) | none — reads of Finance actuals | | FIN-INT-015 shape needs a Planned conversation; not wired unilaterally |
 
@@ -242,5 +294,5 @@ expense line is needed, and a contract test.
 ## 8. Verification
 
 - `HrFinancePostingAdapterTests` (21) — contract helper on every request; retry returns the original without a second Finance call; refusal rolls back and logs Failed; disabled/missing rule logs Unposted; unmapped, wrong-type, inactive and cross-tenant accounts refuse; travel settlement legs; payroll-offset skip; foreign advance evidence; reversed-row generation; edit guard.
-- `HrFinancePostingCatalogueTests` (5) — every event has a balanced builder inside its roles; distinct actions per source type; zero amounts skip; the two area services still route through the adapter and never touch `IJournalEntryService`.
+- `HrFinancePostingCatalogueTests` (12) — every event (20) has a balanced builder inside its roles; distinct actions per source type; zero amounts skip; the settlement route toggle in both positions; receivables raised once, cleared by what was collected and written off for the rest; a settlement line recovering a posted surcharge credits the receivable; every wired area service routes through the adapter and never touches `IJournalEntryService`.
 - Live: `D:\Rhema\TDC ERPS\dev-harness\hr-finance\run-slice1.mjs` (outside the repo, see its README) — maps the roles, enables the events, walks medical approve → pay and travel advance → claim → pay, reads the journals back from Finance, asserts idempotency, reversal and the edit guard. Requires the baseline database (§ 5).

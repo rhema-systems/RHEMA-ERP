@@ -61,7 +61,18 @@ public enum HrFinanceAccountRole
 
     /// <summary>Liability: tax and other statutory amounts withheld from a settlement, owed to the authority (slice 3).</summary>
     [Description("Statutory deductions payable")]
-    StatutoryDeductionsPayable = 11
+    StatutoryDeductionsPayable = 11,
+
+    /// <summary>
+    /// Asset: what employees owe the company for asset surcharges, disciplinary fines and breached
+    /// training bonds (slice 4). Kept apart from advances so the two ageings do not mix.
+    /// </summary>
+    [Description("Staff receivables")]
+    StaffReceivables = 12,
+
+    /// <summary>Expense: a staff receivable forgiven — a waived surcharge, fine or bond (slice 4).</summary>
+    [Description("Staff receivable write-off")]
+    StaffReceivableWriteOff = 13
 }
 
 /// <summary>

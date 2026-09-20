@@ -1235,6 +1235,16 @@ the budget conversation, and the decisions listed in the design's section 6. Han
 [`HANDOFF-FINANCE-HR-POSTING-ROUTES.md`](../integration/handoffs/HANDOFF-FINANCE-HR-POSTING-ROUTES.md).
 Live posting needs the database recreated on the Finance baseline (design section 5).
 
+**Slices 2–4 BUILT 2026-09-20** (same day): employee payables (leave encashment, awards, long
+service, benefit claims — with the per-event payroll/direct route toggle), the separation final
+settlement (posts on Internal Audit's approval), and employee receivables (asset surcharges,
+disciplinary fines, training service bonds — one receivable, cleared by what is collected and
+written off for the rest; the settlement's surcharge recovery now credits that receivable rather
+than income twice). 20 events, 13 account roles, 33 gate tests. Still to do in this lane: the
+third-party payees (requisition costs → AP, medical premiums/insurer recoveries, SHE insurance,
+training budget transactions), the manpower-budget actuals read, consulting AR, and the back-fill
+rows — design section 7.
+
 Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) · entity map:
 [`HR-FINANCE-ENTITY-SWEEP.md`](../integration/HR-FINANCE-ENTITY-SWEEP.md) · mechanism:
 `docs/Finance/finance-integration-contract-catalogue.md`.

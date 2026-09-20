@@ -4,6 +4,9 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffTravel;
+using ErpSystem.Core.Entities.HR.Assets;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Finance;
@@ -528,6 +531,79 @@ public sealed class HrFinancePostingAdminService : IHrFinancePostingAdminService
                     .GetQueryable(l => l.TenantId == tenantId && l.SettlementId == settlement.Id && !l.IsDeleted)
                     .AsNoTracking().OrderBy(l => l.SortOrder).ToListAsync(cancellationToken);
                 return HrFinancePostingCommandFactory.SeparationSettlementReleased(settlement, lines, separation.SeparationNumber, separation.EmployeeId);
+            }
+            case HrFinancePostingEventCatalog.AssetSurchargeApproved:
+            case HrFinancePostingEventCatalog.AssetSurchargeWaived:
+            {
+                var surcharge = await _unitOfWork.Repository<AssetSurcharge>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Surcharge {record.SourceReference} no longer exists; nothing to post.");
+                if (record.EventCode == HrFinancePostingEventCatalog.AssetSurchargeApproved)
+                {
+                    if (surcharge.ApprovalDate is null)
+                        throw new InvalidOperationException($"Surcharge {surcharge.SurchargeNumber} has not been approved; there is no receivable to recognise.");
+                    return HrFinancePostingCommandFactory.AssetSurchargeApproved(surcharge);
+                }
+                if (surcharge.Status != AssetSurchargeStatus.Waived)
+                    throw new InvalidOperationException($"Surcharge {surcharge.SurchargeNumber} is {surcharge.Status}, not waived.");
+                var approvalPosted = await _adapter.IsPostedAsync(HrFinancePostingEventCatalog.AssetSurchargeApproved, surcharge.Id, cancellationToken);
+                return HrFinancePostingCommandFactory.AssetSurchargeWaived(surcharge, approvalPosted);
+            }
+            case HrFinancePostingEventCatalog.AssetSurchargeRecovered:
+            {
+                var recovery = await _unitOfWork.Repository<AssetSurchargeRecovery>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Recovery {record.SourceReference} no longer exists; nothing to post.");
+                var surcharge = await _unitOfWork.Repository<AssetSurcharge>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == recovery.SurchargeId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"The surcharge behind recovery {record.SourceReference} no longer exists.");
+                return HrFinancePostingCommandFactory.AssetSurchargeRecovered(surcharge, recovery);
+            }
+            case HrFinancePostingEventCatalog.DisciplineFineImposed:
+            case HrFinancePostingEventCatalog.DisciplineFineSettled:
+            {
+                var fine = await _unitOfWork.Repository<StaffDisciplineFine>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Fine {record.SourceReference} no longer exists; nothing to post.");
+                var disciplinaryCase = await _unitOfWork.Repository<StaffDisciplinaryAction>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == fine.DisciplinaryActionId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"The case behind fine {record.SourceReference} no longer exists.");
+                if (record.EventCode == HrFinancePostingEventCatalog.DisciplineFineImposed)
+                    return HrFinancePostingCommandFactory.DisciplineFineImposed(fine, disciplinaryCase.CaseNumber, disciplinaryCase.EmployeeId);
+                if (fine.FinePaymentStatus is not (DisciplinaryFinePaymentStatus.FullyPaid or DisciplinaryFinePaymentStatus.Waived))
+                    throw new InvalidOperationException($"Fine {record.SourceReference} is {fine.FinePaymentStatus}; it settles when fully paid or waived.");
+                var imposedPosted = await _adapter.IsPostedAsync(HrFinancePostingEventCatalog.DisciplineFineImposed, fine.Id, cancellationToken);
+                return HrFinancePostingCommandFactory.DisciplineFineSettled(fine, disciplinaryCase.CaseNumber, disciplinaryCase.EmployeeId, imposedPosted);
+            }
+            case HrFinancePostingEventCatalog.TrainingBondBreached:
+            case HrFinancePostingEventCatalog.TrainingBondSettled:
+            case HrFinancePostingEventCatalog.TrainingBondWaived:
+            {
+                var bond = await _unitOfWork.Repository<TrainingServiceBond>()
+                    .GetQueryable(x => x.TenantId == tenantId && x.Id == record.SourceDocumentId && !x.IsDeleted)
+                    .AsNoTracking().FirstOrDefaultAsync(cancellationToken)
+                    ?? throw new InvalidOperationException($"Bond {record.SourceReference} no longer exists; nothing to post.");
+                if (record.EventCode == HrFinancePostingEventCatalog.TrainingBondBreached)
+                {
+                    if (bond.Status is not (TrainingBondStatus.Breached or TrainingBondStatus.Settled or TrainingBondStatus.Waived) || bond.ExitDate is null)
+                        throw new InvalidOperationException($"Bond {record.SourceReference} has no recorded breach; there is nothing to post.");
+                    return HrFinancePostingCommandFactory.TrainingBondBreached(bond);
+                }
+                var breachPosted = await _adapter.IsPostedAsync(HrFinancePostingEventCatalog.TrainingBondBreached, bond.Id, cancellationToken);
+                if (record.EventCode == HrFinancePostingEventCatalog.TrainingBondSettled)
+                {
+                    if (bond.Status != TrainingBondStatus.Settled)
+                        throw new InvalidOperationException($"Bond {record.SourceReference} is {bond.Status}, not settled.");
+                    return HrFinancePostingCommandFactory.TrainingBondSettled(bond, breachPosted);
+                }
+                if (bond.Status != TrainingBondStatus.Waived)
+                    throw new InvalidOperationException($"Bond {record.SourceReference} is {bond.Status}, not waived.");
+                return HrFinancePostingCommandFactory.TrainingBondWaived(bond, breachPosted);
             }
             default:
                 throw new InvalidOperationException($"No retry builder exists for event '{record.EventCode}'.");

@@ -67,6 +67,15 @@ public static class HrFinancePostingEventCatalog
     public const string BenefitUtilizationPaid = "BENEFIT_UTILIZATION_PAID";
     // slice 3 — separation
     public const string SeparationSettlementReleased = "SEPARATION_SETTLEMENT_RELEASED";
+    // slice 4 — employee receivables
+    public const string AssetSurchargeApproved = "ASSET_SURCHARGE_APPROVED";
+    public const string AssetSurchargeRecovered = "ASSET_SURCHARGE_RECOVERED";
+    public const string AssetSurchargeWaived = "ASSET_SURCHARGE_WAIVED";
+    public const string DisciplineFineImposed = "DISCIPLINE_FINE_IMPOSED";
+    public const string DisciplineFineSettled = "DISCIPLINE_FINE_SETTLED";
+    public const string TrainingBondBreached = "TRAINING_BOND_BREACHED";
+    public const string TrainingBondSettled = "TRAINING_BOND_SETTLED";
+    public const string TrainingBondWaived = "TRAINING_BOND_WAIVED";
 
     public const string SourceMedicalExpenseClaim = "MedicalExpenseClaim";
     public const string SourceStaffTravelExpenseClaim = "StaffTravelExpenseClaim";
@@ -76,6 +85,10 @@ public static class HrFinancePostingEventCatalog
     public const string SourceLongServiceAward = "LongServiceAward";
     public const string SourceBenefitUtilization = "BenefitUtilization";
     public const string SourceSeparationSettlement = "SeparationSettlement";
+    public const string SourceAssetSurcharge = "AssetSurcharge";
+    public const string SourceAssetSurchargeRecovery = "AssetSurchargeRecovery";
+    public const string SourceStaffDisciplineFine = "StaffDisciplineFine";
+    public const string SourceTrainingServiceBond = "TrainingServiceBond";
 
     public static IReadOnlyList<HrFinancePostingEventDefinition> Events { get; } =
     [
@@ -154,10 +167,61 @@ public static class HrFinancePostingEventCatalog
         // ── slice 3 — separation final settlement ────────────────────────────────────────────
         new(SeparationSettlementReleased, "Separation settlement released", "Separation", SourceSeparationSettlement, "Release",
             "Internal Audit approves the finalised settlement (POST hr/separations/{id}/settlement/review/approve) — FR-HR-185's release. Finalising alone posts nothing.",
-            "One journal, a leg per line: earnings Dr Separation expense (salary, notice, gratuity, pension, other), Dr Leave encashment expense, Dr Benefits expense; deductions Cr Staff advances receivable (loans, salary and travel advances), Cr Employee recoveries income (property, other), Cr Statutory deductions payable (tax). The net: Cr Staff payments clearing (direct) or Cr Staff claims payable (payroll's final run); a leaver who owes more than they are due is Dr Staff advances receivable.",
+            "One journal, a leg per line: earnings Dr Separation expense (salary, notice, gratuity, pension, other), Dr Leave encashment expense, Dr Benefits expense; deductions Cr Staff advances receivable (loans, salary and travel advances), Cr Employee recoveries income (property, other) — or Cr Staff receivables where the property line recovers a surcharge whose approval already posted — Cr Statutory deductions payable (tax). The net: Cr Staff payments clearing (direct) or Cr Staff claims payable (payroll's final run); a leaver who owes more than they are due is Dr Staff advances receivable.",
             [HrFinanceAccountRole.SeparationExpense, HrFinanceAccountRole.LeaveEncashmentExpense, HrFinanceAccountRole.BenefitsExpense, HrFinanceAccountRole.StaffAdvancesReceivable],
-            [HrFinanceAccountRole.StaffClaimsPayable, HrFinanceAccountRole.StaffPaymentsClearing, HrFinanceAccountRole.StaffAdvancesReceivable, HrFinanceAccountRole.EmployeeRecoveriesIncome, HrFinanceAccountRole.StatutoryDeductionsPayable],
-            SupportsSettlementRoute: true, DefaultSettlementRoute: HrFinanceSettlementRoute.Payroll)
+            [HrFinanceAccountRole.StaffClaimsPayable, HrFinanceAccountRole.StaffPaymentsClearing, HrFinanceAccountRole.StaffAdvancesReceivable, HrFinanceAccountRole.EmployeeRecoveriesIncome, HrFinanceAccountRole.StatutoryDeductionsPayable, HrFinanceAccountRole.StaffReceivables],
+            SupportsSettlementRoute: true, DefaultSettlementRoute: HrFinanceSettlementRoute.Payroll),
+
+        // ── slice 4 — employee receivables ───────────────────────────────────────────────────
+        new(AssetSurchargeApproved, "Asset surcharge approved", "Assets", SourceAssetSurcharge, "Approve",
+            "The surcharge's approval chain completes (POST Assets/surcharges/{id}/approve). The employee now owes the approved amount.",
+            "Dr Staff receivables / Cr Employee recoveries income, for the approved amount in the surcharge's currency.",
+            [HrFinanceAccountRole.StaffReceivables],
+            [HrFinanceAccountRole.EmployeeRecoveriesIncome]),
+
+        new(AssetSurchargeRecovered, "Asset surcharge recovery recorded", "Assets", SourceAssetSurchargeRecovery, "Recover",
+            "A recovery is recorded against an approved surcharge (POST Assets/surcharges/{id}/recoveries) — one posting per recovery row.",
+            "Dr Staff payments clearing / Cr Staff receivables, for the amount recovered. Method payroll deduction: nothing posts (payroll's journal credits the receivable); method exit settlement: nothing posts (the settlement's own line does).",
+            [HrFinanceAccountRole.StaffPaymentsClearing],
+            [HrFinanceAccountRole.StaffReceivables]),
+
+        new(AssetSurchargeWaived, "Asset surcharge waived", "Assets", SourceAssetSurcharge, "Waive",
+            "The outstanding balance is forgiven (POST Assets/surcharges/{id}/waive).",
+            "Dr Staff receivable write-off / Cr Staff receivables, for the balance still outstanding. A surcharge whose approval never posted has nothing to write off.",
+            [HrFinanceAccountRole.StaffReceivableWriteOff],
+            [HrFinanceAccountRole.StaffReceivables]),
+
+        new(DisciplineFineImposed, "Disciplinary fine imposed", "Discipline", SourceStaffDisciplineFine, "Impose",
+            "A fine is recorded as the case's sanction (POST discipline/cases/{caseId}/fine). There is no separate approval; the case decision was the approval.",
+            "Dr Staff receivables / Cr Employee recoveries income, for the fine.",
+            [HrFinanceAccountRole.StaffReceivables],
+            [HrFinanceAccountRole.EmployeeRecoveriesIncome]),
+
+        new(DisciplineFineSettled, "Disciplinary fine settled", "Discipline", SourceStaffDisciplineFine, "Settle",
+            "The fine reaches Fully Paid or Waived (POST discipline/cases/{caseId}/fine/payment). Partial payments accumulate on the record and post when the fine closes.",
+            "Dr Staff payments clearing (what was paid) and/or Dr Staff receivable write-off (what was forgiven) / Cr Staff receivables (the fine). Route payroll: the paid part is left for payroll's journal; only a write-off posts.",
+            [HrFinanceAccountRole.StaffPaymentsClearing, HrFinanceAccountRole.StaffReceivableWriteOff],
+            [HrFinanceAccountRole.StaffReceivables],
+            SupportsSettlementRoute: true, DefaultSettlementRoute: HrFinanceSettlementRoute.Direct),
+
+        new(TrainingBondBreached, "Training bond breached", "Training", SourceTrainingServiceBond, "Breach",
+            "An exit is recorded before the bond is served (POST training-service-bonds/record-exit) and a pro-rata repayment falls due. An exit after full service posts nothing.",
+            "Dr Staff receivables / Cr Employee recoveries income, for the repayment due in the bond's currency.",
+            [HrFinanceAccountRole.StaffReceivables],
+            [HrFinanceAccountRole.EmployeeRecoveriesIncome]),
+
+        new(TrainingBondSettled, "Training bond repaid", "Training", SourceTrainingServiceBond, "Settle",
+            "A breached bond is settled (POST training-service-bonds/settle).",
+            "Dr Staff payments clearing / Cr Staff receivables, for the repayment. Route payroll: nothing posts; payroll's journal credits the receivable.",
+            [HrFinanceAccountRole.StaffPaymentsClearing],
+            [HrFinanceAccountRole.StaffReceivables],
+            SupportsSettlementRoute: true, DefaultSettlementRoute: HrFinanceSettlementRoute.Direct),
+
+        new(TrainingBondWaived, "Training bond waived", "Training", SourceTrainingServiceBond, "Waive",
+            "A bond is waived (POST training-service-bonds/waive).",
+            "Dr Staff receivable write-off / Cr Staff receivables, for the repayment due. A bond waived before any breach was posted has nothing to write off.",
+            [HrFinanceAccountRole.StaffReceivableWriteOff],
+            [HrFinanceAccountRole.StaffReceivables])
     ];
 
     private static readonly IReadOnlyDictionary<string, HrFinancePostingEventDefinition> ByCode =
@@ -188,6 +252,8 @@ public static class HrFinancePostingEventCatalog
         HrFinanceAccountRole.SeparationExpense => AccountType.Expense,
         HrFinanceAccountRole.EmployeeRecoveriesIncome => AccountType.Revenue,
         HrFinanceAccountRole.StatutoryDeductionsPayable => AccountType.Liability,
+        HrFinanceAccountRole.StaffReceivables => AccountType.Asset,
+        HrFinanceAccountRole.StaffReceivableWriteOff => AccountType.Expense,
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Unknown HR Finance account role.")
     };
 }

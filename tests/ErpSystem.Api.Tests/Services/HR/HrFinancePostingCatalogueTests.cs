@@ -1,7 +1,10 @@
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Entities.HR.Medical;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Enums;
@@ -82,6 +85,137 @@ public sealed class HrFinancePostingCatalogueTests
         var (settlement, settlementLines) = SampleSettlement(unpaidSalary: 3000m, notice: 6000m, encashment: 900m, loan: 250m, tax: 400m, property: 150m);
         yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.SeparationSettlementReleased),
             HrFinancePostingCommandFactory.SeparationSettlementReleased(settlement, settlementLines, "SEP-2026-0001", Guid.NewGuid()));
+
+        // slice 4 — employee receivables
+        var surcharge = new AssetSurcharge
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, SurchargeNumber = "SUR-1", EmployeeId = Guid.NewGuid(), CurrencyCode = "GHS",
+            AssessedAmount = 1200m, AmountRecovered = 400m, Status = AssetSurchargeStatus.Waived, ApprovalDate = DateTime.UtcNow,
+            WaivedAt = DateTime.UtcNow, WaiverReason = "goodwill"
+        };
+        var recovery = new AssetSurchargeRecovery
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, SurchargeId = surcharge.Id, Amount = 400m,
+            RecoveredOn = new DateOnly(2026, 9, 10), Method = AssetSurchargeRecoveryMethod.DirectPayment, Reference = "RCPT-1"
+        };
+        var fine = new StaffDisciplineFine
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, DisciplinaryActionId = Guid.NewGuid(), FineAmount = 300m,
+            FinePaidAmount = 200m, FinePaymentStatus = DisciplinaryFinePaymentStatus.Waived, FinePaymentDate = DateTime.UtcNow
+        };
+        var bond = new TrainingServiceBond
+        {
+            Id = Guid.NewGuid(), TenantId = Tenant, EmployeeId = Guid.NewGuid(), Currency = "GHS", BondAmount = 5000m,
+            BondDurationMonths = 24, RepaymentAmount = 2500m, Status = TrainingBondStatus.Waived, ExitDate = DateTime.UtcNow,
+            SettledDate = DateTime.UtcNow, WaivedDate = DateTime.UtcNow, WaiverReason = "policy"
+        };
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.AssetSurchargeApproved), HrFinancePostingCommandFactory.AssetSurchargeApproved(surcharge));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.AssetSurchargeRecovered), HrFinancePostingCommandFactory.AssetSurchargeRecovered(surcharge, recovery));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.AssetSurchargeWaived), HrFinancePostingCommandFactory.AssetSurchargeWaived(surcharge, approvalPosted: true));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.DisciplineFineImposed), HrFinancePostingCommandFactory.DisciplineFineImposed(fine, "DC-1", Guid.NewGuid()));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.DisciplineFineSettled), HrFinancePostingCommandFactory.DisciplineFineSettled(fine, "DC-1", Guid.NewGuid(), imposedPosted: true));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TrainingBondBreached), HrFinancePostingCommandFactory.TrainingBondBreached(bond));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TrainingBondSettled), HrFinancePostingCommandFactory.TrainingBondSettled(bond, breachPosted: true));
+        yield return (HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.TrainingBondWaived), HrFinancePostingCommandFactory.TrainingBondWaived(bond, breachPosted: true));
+    }
+
+    [Fact]
+    public void Receivables_AreRaisedOnce_ClearedByWhatWasCollected_AndWrittenOffForTheRest()
+    {
+        var surcharge = new AssetSurcharge { Id = Guid.NewGuid(), SurchargeNumber = "SUR-2", CurrencyCode = "GHS", AssessedAmount = 1000m, AmountRecovered = 250m, ApprovalDate = DateTime.UtcNow, WaivedAt = DateTime.UtcNow, WaiverReason = "x" };
+        HrFinancePostingCommandFactory.AssetSurchargeApproved(surcharge).Lines
+            .Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivables && l.Amount == 1000m);
+
+        // A payroll-deduction recovery is payroll's journal, not HR's; an exit-settlement one is the settlement's.
+        foreach (var method in new[] { AssetSurchargeRecoveryMethod.PayrollDeduction, AssetSurchargeRecoveryMethod.ExitSettlement })
+            HrFinancePostingCommandFactory.AssetSurchargeRecovered(surcharge, new AssetSurchargeRecovery { Id = Guid.NewGuid(), Amount = 100m, Method = method, RecoveredOn = new DateOnly(2026, 9, 1) })
+                .SkipReason.Should().NotBeNullOrWhiteSpace($"{method}");
+        HrFinancePostingCommandFactory.AssetSurchargeRecovered(surcharge, new AssetSurchargeRecovery { Id = Guid.NewGuid(), Amount = 100m, Method = AssetSurchargeRecoveryMethod.DirectPayment, RecoveredOn = new DateOnly(2026, 9, 1) })
+            .Lines.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffPaymentsClearing && l.Amount == 100m);
+
+        // Waiving writes off only what is still outstanding, and only if the receivable was ever posted.
+        HrFinancePostingCommandFactory.AssetSurchargeWaived(surcharge, approvalPosted: true).Lines
+            .Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivableWriteOff && l.Amount == 750m);
+        HrFinancePostingCommandFactory.AssetSurchargeWaived(surcharge, approvalPosted: false).SkipReason.Should().NotBeNullOrWhiteSpace();
+
+        // A fine closed as Waived after a part payment: the paid part clears through clearing, the rest is written off.
+        var fine = new StaffDisciplineFine { Id = Guid.NewGuid(), FineAmount = 300m, FinePaidAmount = 200m, FinePaymentStatus = DisciplinaryFinePaymentStatus.Waived };
+        var definition = HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.DisciplineFineSettled);
+        var settled = HrFinancePostingCommandFactory.DisciplineFineSettled(fine, "DC-2", Guid.NewGuid(), imposedPosted: true);
+        var (direct, _) = HrFinancePostingAdapter.ResolveRouteLines(definition, null, settled);
+        direct.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffPaymentsClearing && l.Amount == 200m);
+        direct.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivableWriteOff && l.Amount == 100m);
+        direct.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivables && l.Amount == 300m);
+        // On the payroll route only the write-off posts; payroll's journal clears what was deducted.
+        var (payroll, _) = HrFinancePostingAdapter.ResolveRouteLines(definition, new HrFinancePostingRule { SettlementRoute = HrFinanceSettlementRoute.Payroll }, settled);
+        payroll.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivableWriteOff && l.Amount == 100m);
+        payroll.Should().NotContain(l => l.Role == HrFinanceAccountRole.StaffPaymentsClearing);
+        // A fine fully paid on the payroll route posts nothing.
+        var paidFine = new StaffDisciplineFine { Id = Guid.NewGuid(), FineAmount = 300m, FinePaidAmount = 300m, FinePaymentStatus = DisciplinaryFinePaymentStatus.FullyPaid };
+        var (payrollPaid, skip) = HrFinancePostingAdapter.ResolveRouteLines(definition, new HrFinancePostingRule { SettlementRoute = HrFinanceSettlementRoute.Payroll },
+            HrFinancePostingCommandFactory.DisciplineFineSettled(paidFine, "DC-3", Guid.NewGuid(), imposedPosted: true));
+        payrollPaid.Should().BeEmpty();
+        skip.Should().Contain("payroll");
+
+        // A bond served in full posts nothing; a breach posts the pro-rata repayment in the bond's currency.
+        HrFinancePostingCommandFactory.TrainingBondBreached(new TrainingServiceBond { Id = Guid.NewGuid(), Currency = "USD", BondAmount = 5000m, RepaymentAmount = 0m }).SkipReason.Should().NotBeNullOrWhiteSpace();
+        var breached = HrFinancePostingCommandFactory.TrainingBondBreached(new TrainingServiceBond { Id = Guid.NewGuid(), Currency = "USD", BondAmount = 5000m, RepaymentAmount = 2500m, ExitDate = DateTime.UtcNow });
+        breached.TransactionCurrencyCode.Should().Be("USD");
+        breached.Lines.Should().ContainSingle(l => l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivables && l.Amount == 2500m);
+    }
+
+    [Fact]
+    public void SettlementLinesRecoveringAPostedSurcharge_CreditTheReceivable_NotIncomeTwice()
+    {
+        var (settlement, lines) = SampleSettlement(unpaidSalary: 1000m, notice: 0m, encashment: 0m, loan: 0m, tax: 0m, property: 150m);
+        var propertyLine = lines.Single(l => l.Category == SettlementLineCategory.PropertyRecovery);
+        var definition = HrFinancePostingEventCatalog.GetRequired(HrFinancePostingEventCatalog.SeparationSettlementReleased);
+
+        var plain = HrFinancePostingCommandFactory.SeparationSettlementReleased(settlement, lines, "SEP-4", Guid.NewGuid());
+        HrFinancePostingAdapter.ResolveRouteLines(definition, null, plain).Lines
+            .Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.EmployeeRecoveriesIncome && l.Amount == 150m);
+
+        var traced = HrFinancePostingCommandFactory.SeparationSettlementReleased(settlement, lines, "SEP-4", Guid.NewGuid(), new HashSet<Guid> { propertyLine.Id });
+        var tracedLines = HrFinancePostingAdapter.ResolveRouteLines(definition, null, traced).Lines;
+        tracedLines.Should().ContainSingle(l => !l.IsDebit && l.Role == HrFinanceAccountRole.StaffReceivables && l.Amount == 150m);
+        tracedLines.Should().NotContain(l => l.Role == HrFinanceAccountRole.EmployeeRecoveriesIncome);
+        // The adapter refuses any role the catalogue entry does not declare — the live harness caught
+        // exactly this on the first run. The builder's roles must sit inside the entry's, per side.
+        tracedLines.Where(l => l.IsDebit).Select(l => l.Role).Should().BeSubsetOf(definition.DebitRoles);
+        tracedLines.Where(l => !l.IsDebit).Select(l => l.Role).Should().BeSubsetOf(definition.CreditRoles);
+    }
+
+    [Fact]
+    public void Slice4Services_RouteTheirMoneyEventsThroughTheAdapter()
+    {
+        var root = FindRepositoryRoot();
+        var assets = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "AssetSurchargeService.cs"));
+        var discipline = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "StaffDisciplineSubEntityServices.cs"));
+        var bonds = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "Training", "TrainingServiceBondService.cs"));
+        var separation = File.ReadAllText(Path.Combine(root, "src", "ErpSystem.Core", "Services", "HR", "SeparationService.cs"));
+
+        Between(assets, "public async Task ApproveAsync(", "public async Task RejectAsync(")
+            .Should().Contain("outcome == WorkflowOutcome.Approved").And.Contain("HrFinancePostingCommandFactory.AssetSurchargeApproved(entity)");
+        Between(assets, "public async Task<AssetSurchargeDto> RecordRecoveryAsync(", "public async Task<AssetSurchargeDto> WaiveAsync(")
+            .Should().Contain("HrFinancePostingCommandFactory.AssetSurchargeRecovered(entity, recovery)");
+        Between(assets, "public async Task<AssetSurchargeDto> WaiveAsync(", "public async Task<AssetSurchargeDto> CancelAsync(")
+            .Should().Contain("HrFinancePostingCommandFactory.AssetSurchargeWaived(entity, approvalPosted)");
+
+        Between(discipline, "public async Task<StaffDisciplineFineDto> RecordAsync(RecordFinePenaltyDto", "public async Task<StaffDisciplineFineDto> RecordPaymentAsync(")
+            .Should().Contain("HrFinancePostingCommandFactory.DisciplineFineImposed(");
+        Between(discipline, "public async Task<StaffDisciplineFineDto> RecordPaymentAsync(", "\n}")
+            .Should().Contain("HrFinancePostingCommandFactory.DisciplineFineSettled(").And.Contain("DisciplinaryFinePaymentStatus.FullyPaid or DisciplinaryFinePaymentStatus.Waived");
+
+        Between(bonds, "public async Task<TrainingServiceBondDto> RecordExitAsync(", "public async Task<TrainingServiceBondDto> WaiveAsync(")
+            .Should().Contain("HrFinancePostingCommandFactory.TrainingBondBreached(entity)");
+        Between(bonds, "public async Task<TrainingServiceBondDto> WaiveAsync(", "public async Task<TrainingServiceBondDto> SettleAsync(")
+            .Should().Contain("HrFinancePostingCommandFactory.TrainingBondWaived(entity, breachPosted)");
+        Between(bonds, "public async Task<TrainingServiceBondDto> SettleAsync(", "public async Task<bool> DeleteAsync(")
+            .Should().Contain("HrFinancePostingCommandFactory.TrainingBondSettled(entity, breachPosted)");
+
+        separation.Should().Contain("IsPostedAsync(HrFinancePostingEventCatalog.AssetSurchargeApproved", "a settlement must know which recoveries clear a posted receivable");
+        foreach (var source in new[] { assets, discipline, bonds })
+            source.Should().NotContain("IJournalEntryService");
     }
 
     private static (SeparationSettlement Settlement, List<SeparationSettlementLine> Lines) SampleSettlement(

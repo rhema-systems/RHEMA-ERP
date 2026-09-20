@@ -587,6 +587,8 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.SeparationExpense => "Separation expense",
         HrFinanceAccountRole.EmployeeRecoveriesIncome => "Employee recoveries income",
         HrFinanceAccountRole.StatutoryDeductionsPayable => "Statutory deductions payable",
+        HrFinanceAccountRole.StaffReceivables => "Staff receivables",
+        HrFinanceAccountRole.StaffReceivableWriteOff => "Staff receivable write-off",
         _ => role.ToString()
     };
 
@@ -603,6 +605,8 @@ public static class HrFinanceAccountRoleNames
         HrFinanceAccountRole.SeparationExpense => "Expense. Final pay on exit — unpaid salary, notice pay, gratuity or end-of-service, pension-related and other earnings on a settlement.",
         HrFinanceAccountRole.EmployeeRecoveriesIncome => "Revenue. What the company recovers from an employee on exit for unreturned property and other deductions (loans and advances clear the receivable instead).",
         HrFinanceAccountRole.StatutoryDeductionsPayable => "Liability. Tax and other statutory amounts withheld from a settlement and owed to the authority.",
+        HrFinanceAccountRole.StaffReceivables => "Asset. What employees owe the company for asset surcharges, disciplinary fines and breached training bonds — separate from advances so the two ageings do not mix.",
+        HrFinanceAccountRole.StaffReceivableWriteOff => "Expense. A staff receivable forgiven: a waived surcharge, fine or bond.",
         _ => string.Empty
     };
 }

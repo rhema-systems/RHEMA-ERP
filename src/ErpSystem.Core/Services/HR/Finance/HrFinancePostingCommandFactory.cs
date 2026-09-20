@@ -4,6 +4,9 @@ using ErpSystem.Core.Entities.HR.Medical;
 using ErpSystem.Core.Entities.HR.StaffTravel;
 using ErpSystem.Core.Entities.HR.Awards;
 using ErpSystem.Core.Entities.HR.StaffLeave;
+using ErpSystem.Core.Entities.HR.Assets;
+using ErpSystem.Core.Entities.HR.StaffDiscipline;
+using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 
 namespace ErpSystem.Core.Services.HR.Finance;
@@ -396,11 +399,21 @@ public static class HrFinancePostingCommandFactory
     /// (direct) or the payable (payroll's final run); a leaver who owes more than they are due is
     /// carried as a receivable, never as a negative payable.
     /// </summary>
+    /// <param name="settlement">The settlement being released.</param>
+    /// <param name="lines">Its lines.</param>
+    /// <param name="separationNumber">The separation's human reference.</param>
+    /// <param name="employeeId">The leaver.</param>
+    /// <param name="linesRecoveringPostedReceivables">
+    /// Ids of deduction lines that recover a receivable Finance already holds (an asset surcharge
+    /// whose approval posted, carried into the clearance form). Those credit Staff receivables
+    /// instead of recoveries income, or the recovery would be booked as income twice.
+    /// </param>
     public static HrFinancePostingCommand SeparationSettlementReleased(
         SeparationSettlement settlement,
         IReadOnlyList<SeparationSettlementLine> lines,
         string separationNumber,
-        Guid employeeId)
+        Guid employeeId,
+        IReadOnlySet<Guid>? linesRecoveringPostedReceivables = null)
     {
         var reference = string.IsNullOrWhiteSpace(separationNumber) ? $"SEP-{settlement.Id.ToString("N")[..8].ToUpperInvariant()}" : separationNumber;
         var earnings = new List<HrFinancePostingLine>();
@@ -414,7 +427,10 @@ public static class HrFinancePostingCommandFactory
             if (line.IsDeduction)
             {
                 totalDeductions += amount;
-                deductions.Add(new HrFinancePostingLine(DeductionRole(line.Category), false, amount, text));
+                var role = linesRecoveringPostedReceivables?.Contains(line.Id) == true
+                    ? HrFinanceAccountRole.StaffReceivables
+                    : DeductionRole(line.Category);
+                deductions.Add(new HrFinancePostingLine(role, false, amount, text));
             }
             else
             {
@@ -467,4 +483,224 @@ public static class HrFinancePostingCommandFactory
         SettlementLineCategory.TaxDeduction => HrFinanceAccountRole.StatutoryDeductionsPayable,
         _ => HrFinanceAccountRole.EmployeeRecoveriesIncome
     };
+
+    // ── Assets (slice 4) ─────────────────────────────────────────────────────────────────────
+
+    public static HrFinancePostingCommand AssetSurchargeApproved(AssetSurcharge surcharge)
+    {
+        var amount = surcharge.AssessedAmount;
+        var reference = surcharge.SurchargeNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.AssetSurchargeApproved,
+            SourceDocumentId = surcharge.Id,
+            SourceReference = reference,
+            EmployeeId = surcharge.EmployeeId,
+            SourceDate = surcharge.ApprovalDate,
+            TransactionCurrencyCode = surcharge.CurrencyCode,
+            Description = $"Asset surcharge {reference} approved ({surcharge.Reason})",
+            SkipReason = amount <= 0m ? "The approved surcharge is zero; there is nothing to recognise." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, true, amount, $"Surcharge {reference} — owed by employee"),
+                new HrFinancePostingLine(HrFinanceAccountRole.EmployeeRecoveriesIncome, false, amount, $"Surcharge {reference} — recovery income")
+            ]
+        };
+    }
+
+    /// <summary>One posting per recovery row; payroll and exit-settlement recoveries are booked by those journals.</summary>
+    public static HrFinancePostingCommand AssetSurchargeRecovered(AssetSurcharge surcharge, AssetSurchargeRecovery recovery)
+    {
+        var reference = $"{surcharge.SurchargeNumber}/R{recovery.RecoveredOn:yyyyMMdd}";
+        var skip = recovery.Method switch
+        {
+            AssetSurchargeRecoveryMethod.PayrollDeduction => "Recovered through payroll: payroll's own journal credits the staff receivable; HR posts nothing.",
+            AssetSurchargeRecoveryMethod.ExitSettlement => "Recovered inside the final settlement: the settlement's release posts it; HR posts nothing here.",
+            _ => recovery.Amount <= 0m ? "The recovery is zero; there is nothing to post." : null
+        };
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.AssetSurchargeRecovered,
+            SourceDocumentId = recovery.Id,
+            SourceReference = reference,
+            EmployeeId = surcharge.EmployeeId,
+            SourceDate = recovery.RecoveredOn.ToDateTime(TimeOnly.MinValue),
+            TransactionCurrencyCode = surcharge.CurrencyCode,
+            Description = $"Surcharge {surcharge.SurchargeNumber} — {recovery.Amount:N2} recovered by {recovery.Method}" +
+                          (string.IsNullOrWhiteSpace(recovery.Reference) ? string.Empty : $" ref {recovery.Reference}"),
+            SkipReason = skip,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, recovery.Amount, $"Surcharge {surcharge.SurchargeNumber} — recovery received"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, false, recovery.Amount, $"Surcharge {surcharge.SurchargeNumber} — receivable reduced")
+            ]
+        };
+    }
+
+    public static HrFinancePostingCommand AssetSurchargeWaived(AssetSurcharge surcharge, bool approvalPosted)
+    {
+        var outstanding = Math.Max(0m, surcharge.AssessedAmount - surcharge.AmountRecovered);
+        var reference = surcharge.SurchargeNumber;
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.AssetSurchargeWaived,
+            SourceDocumentId = surcharge.Id,
+            SourceReference = reference,
+            EmployeeId = surcharge.EmployeeId,
+            SourceDate = surcharge.WaivedAt,
+            TransactionCurrencyCode = surcharge.CurrencyCode,
+            Description = $"Asset surcharge {reference} waived: {surcharge.WaiverReason}",
+            SkipReason = !approvalPosted
+                ? "The surcharge's approval never reached Finance, so there is no receivable to write off."
+                : outstanding <= 0m ? "Nothing was outstanding; there is nothing to write off." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivableWriteOff, true, outstanding, $"Surcharge {reference} — balance forgiven"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, false, outstanding, $"Surcharge {reference} — receivable written off")
+            ]
+        };
+    }
+
+    // ── Discipline (slice 4) ─────────────────────────────────────────────────────────────────
+
+    public static HrFinancePostingCommand DisciplineFineImposed(StaffDisciplineFine fine, string caseNumber, Guid employeeId)
+    {
+        var amount = fine.FineAmount ?? 0m;
+        var reference = $"{caseNumber}/FINE";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.DisciplineFineImposed,
+            SourceDocumentId = fine.Id,
+            SourceReference = reference,
+            EmployeeId = employeeId,
+            SourceDate = fine.CreatedAt,
+            Description = $"Disciplinary fine on case {caseNumber} imposed",
+            SkipReason = amount <= 0m ? "The fine is zero; there is nothing to recognise." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, true, amount, $"Fine {reference} — owed by employee"),
+                new HrFinancePostingLine(HrFinanceAccountRole.EmployeeRecoveriesIncome, false, amount, $"Fine {reference} — penalty income")
+            ]
+        };
+    }
+
+    /// <summary>
+    /// Fires when the fine closes (Fully Paid or Waived). What was paid clears through the
+    /// clearing account (or is left to payroll on that route); what was forgiven is written off.
+    /// </summary>
+    public static HrFinancePostingCommand DisciplineFineSettled(StaffDisciplineFine fine, string caseNumber, Guid employeeId, bool imposedPosted)
+    {
+        var total = fine.FineAmount ?? 0m;
+        var paid = Math.Min(Math.Max(fine.FinePaidAmount ?? 0m, 0m), total);
+        var forgiven = fine.FinePaymentStatus == DisciplinaryFinePaymentStatus.Waived ? total - paid : 0m;
+        var reference = $"{caseNumber}/FINE";
+
+        var direct = new List<HrFinancePostingLine>();
+        var payroll = new List<HrFinancePostingLine>();
+        if (imposedPosted && total > 0m)
+        {
+            if (paid > 0m) direct.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, paid, $"Fine {reference} — paid"));
+            if (forgiven > 0m)
+            {
+                direct.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivableWriteOff, true, forgiven, $"Fine {reference} — forgiven"));
+                payroll.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivableWriteOff, true, forgiven, $"Fine {reference} — forgiven"));
+                payroll.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, false, forgiven, $"Fine {reference} — receivable written off"));
+            }
+            if (paid + forgiven > 0m) direct.Add(new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, false, paid + forgiven, $"Fine {reference} — receivable cleared"));
+        }
+
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.DisciplineFineSettled,
+            SourceDocumentId = fine.Id,
+            SourceReference = reference,
+            EmployeeId = employeeId,
+            SourceDate = fine.FinePaymentDate,
+            Description = fine.FinePaymentStatus == DisciplinaryFinePaymentStatus.Waived
+                ? $"Disciplinary fine on case {caseNumber} closed: {paid:N2} paid, {forgiven:N2} waived"
+                : $"Disciplinary fine on case {caseNumber} fully paid ({paid:N2})",
+            SkipReason = !imposedPosted
+                ? "The fine's imposition never reached Finance, so there is no receivable to settle."
+                : total <= 0m || paid + forgiven <= 0m ? "Nothing was owed; there is nothing to settle." : null,
+            Lines = [],
+            RouteDirectLines = direct,
+            RoutePayrollLines = payroll,
+            RoutePayrollSkipReason = "Recovered through payroll: payroll's own journal credits the staff receivable; HR posts nothing."
+        };
+    }
+
+    // ── Training bonds (slice 4) ─────────────────────────────────────────────────────────────
+
+    public static HrFinancePostingCommand TrainingBondBreached(TrainingServiceBond bond)
+    {
+        var amount = bond.RepaymentAmount ?? 0m;
+        var reference = $"BOND-{bond.Id.ToString("N")[..8].ToUpperInvariant()}";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.TrainingBondBreached,
+            SourceDocumentId = bond.Id,
+            SourceReference = reference,
+            EmployeeId = bond.EmployeeId,
+            SourceDate = bond.ExitDate,
+            TransactionCurrencyCode = bond.Currency,
+            Description = $"Training bond {reference} breached on exit; {amount:N2} of {bond.BondAmount:N2} repayable",
+            SkipReason = amount <= 0m ? "The bond was served in full; nothing is repayable." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, true, amount, $"Bond {reference} — repayment owed by employee"),
+                new HrFinancePostingLine(HrFinanceAccountRole.EmployeeRecoveriesIncome, false, amount, $"Bond {reference} — training cost recovered")
+            ]
+        };
+    }
+
+    public static HrFinancePostingCommand TrainingBondSettled(TrainingServiceBond bond, bool breachPosted)
+    {
+        var amount = bond.RepaymentAmount ?? 0m;
+        var reference = $"BOND-{bond.Id.ToString("N")[..8].ToUpperInvariant()}";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.TrainingBondSettled,
+            SourceDocumentId = bond.Id,
+            SourceReference = reference,
+            EmployeeId = bond.EmployeeId,
+            SourceDate = bond.SettledDate,
+            TransactionCurrencyCode = bond.Currency,
+            Description = $"Training bond {reference} repaid ({amount:N2})",
+            SkipReason = !breachPosted
+                ? "The bond's breach never reached Finance, so there is no receivable to settle."
+                : amount <= 0m ? "Nothing was repayable; there is nothing to settle." : null,
+            Lines = [],
+            RouteDirectLines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffPaymentsClearing, true, amount, $"Bond {reference} — repayment received"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, false, amount, $"Bond {reference} — receivable cleared")
+            ],
+            RoutePayrollLines = [],
+            RoutePayrollSkipReason = "Recovered through payroll: payroll's own journal credits the staff receivable; HR posts nothing."
+        };
+    }
+
+    public static HrFinancePostingCommand TrainingBondWaived(TrainingServiceBond bond, bool breachPosted)
+    {
+        var amount = bond.RepaymentAmount ?? 0m;
+        var reference = $"BOND-{bond.Id.ToString("N")[..8].ToUpperInvariant()}";
+        return new HrFinancePostingCommand
+        {
+            EventCode = HrFinancePostingEventCatalog.TrainingBondWaived,
+            SourceDocumentId = bond.Id,
+            SourceReference = reference,
+            EmployeeId = bond.EmployeeId,
+            SourceDate = bond.WaivedDate,
+            TransactionCurrencyCode = bond.Currency,
+            Description = $"Training bond {reference} waived: {bond.WaiverReason}",
+            SkipReason = !breachPosted
+                ? "No breach was posted for this bond, so there is no receivable to write off."
+                : amount <= 0m ? "Nothing was repayable; there is nothing to write off." : null,
+            Lines =
+            [
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivableWriteOff, true, amount, $"Bond {reference} — repayment forgiven"),
+                new HrFinancePostingLine(HrFinanceAccountRole.StaffReceivables, false, amount, $"Bond {reference} — receivable written off")
+            ]
+        };
+    }
 }

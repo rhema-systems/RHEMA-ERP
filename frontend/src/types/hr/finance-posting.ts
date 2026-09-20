@@ -16,7 +16,9 @@ export type HrFinanceAccountRole =
   | 'BenefitsExpense'
   | 'SeparationExpense'
   | 'EmployeeRecoveriesIncome'
-  | 'StatutoryDeductionsPayable';
+  | 'StatutoryDeductionsPayable'
+  | 'StaffReceivables'
+  | 'StaffReceivableWriteOff';
 
 export type HrFinancePostingStatus = 'Posted' | 'Failed' | 'Unposted' | 'Skipped' | 'Reversed';
 
