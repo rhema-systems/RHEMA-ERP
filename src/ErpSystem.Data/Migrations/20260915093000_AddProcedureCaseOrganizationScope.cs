@@ -10,78 +10,73 @@ public sealed class AddProcedureCaseOrganizationScope : Migration
 {
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.AddColumn<Guid>(
-            name: "OrganizationLevelId",
-            table: "ProcedureCases",
-            type: "uniqueidentifier",
-            nullable: true);
+        migrationBuilder.Sql("""
+IF OBJECT_ID(N'[dbo].[ProcedureCases]', N'U') IS NOT NULL
+   AND COL_LENGTH(N'[dbo].[ProcedureCases]', N'OrganizationUnitId') IS NULL
+BEGIN
+    ALTER TABLE [dbo].[ProcedureCases] ADD [OrganizationLevelId] uniqueidentifier NULL;
+    ALTER TABLE [dbo].[ProcedureCases] ADD [OrganizationUnitId] uniqueidentifier NULL;
 
-        migrationBuilder.AddColumn<Guid>(
-            name: "OrganizationUnitId",
-            table: "ProcedureCases",
-            type: "uniqueidentifier",
-            nullable: true);
+    CREATE INDEX [IX_ProcedureCases_OrganizationLevelId]
+        ON [dbo].[ProcedureCases] ([OrganizationLevelId]);
 
-        migrationBuilder.CreateIndex(
-            name: "IX_ProcedureCases_OrganizationLevelId",
-            table: "ProcedureCases",
-            column: "OrganizationLevelId");
+    CREATE INDEX [IX_ProcedureCases_OrganizationUnitId]
+        ON [dbo].[ProcedureCases] ([OrganizationUnitId]);
 
-        migrationBuilder.CreateIndex(
-            name: "IX_ProcedureCases_OrganizationUnitId",
-            table: "ProcedureCases",
-            column: "OrganizationUnitId");
+    CREATE INDEX [IX_ProcedureCases_TenantId_OrganizationUnitId]
+        ON [dbo].[ProcedureCases] ([TenantId], [OrganizationUnitId]);
 
-        migrationBuilder.CreateIndex(
-            name: "IX_ProcedureCases_TenantId_OrganizationUnitId",
-            table: "ProcedureCases",
-            columns: new[] { "TenantId", "OrganizationUnitId" });
+    ALTER TABLE [dbo].[ProcedureCases]
+        ADD CONSTRAINT [FK_ProcedureCases_OrganizationLevels_OrganizationLevelId]
+        FOREIGN KEY ([OrganizationLevelId])
+        REFERENCES [dbo].[OrganizationLevels] ([Id])
+        ON DELETE NO ACTION;
 
-        migrationBuilder.AddForeignKey(
-            name: "FK_ProcedureCases_OrganizationLevels_OrganizationLevelId",
-            table: "ProcedureCases",
-            column: "OrganizationLevelId",
-            principalTable: "OrganizationLevels",
-            principalColumn: "Id",
-            onDelete: ReferentialAction.Restrict);
-
-        migrationBuilder.AddForeignKey(
-            name: "FK_ProcedureCases_OrganizationUnits_OrganizationUnitId",
-            table: "ProcedureCases",
-            column: "OrganizationUnitId",
-            principalTable: "OrganizationUnits",
-            principalColumn: "Id",
-            onDelete: ReferentialAction.Restrict);
+    ALTER TABLE [dbo].[ProcedureCases]
+        ADD CONSTRAINT [FK_ProcedureCases_OrganizationUnits_OrganizationUnitId]
+        FOREIGN KEY ([OrganizationUnitId])
+        REFERENCES [dbo].[OrganizationUnits] ([Id])
+        ON DELETE NO ACTION;
+END
+""");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
-        migrationBuilder.DropForeignKey(
-            name: "FK_ProcedureCases_OrganizationLevels_OrganizationLevelId",
-            table: "ProcedureCases");
+        migrationBuilder.Sql("""
+IF OBJECT_ID(N'[dbo].[ProcedureCases]', N'U') IS NOT NULL
+   AND COL_LENGTH(N'[dbo].[ProcedureCases]', N'OrganizationUnitId') IS NOT NULL
+BEGIN
+    IF OBJECT_ID(N'[dbo].[FK_ProcedureCases_OrganizationLevels_OrganizationLevelId]', N'F') IS NOT NULL
+        ALTER TABLE [dbo].[ProcedureCases] DROP CONSTRAINT [FK_ProcedureCases_OrganizationLevels_OrganizationLevelId];
 
-        migrationBuilder.DropForeignKey(
-            name: "FK_ProcedureCases_OrganizationUnits_OrganizationUnitId",
-            table: "ProcedureCases");
+    IF OBJECT_ID(N'[dbo].[FK_ProcedureCases_OrganizationUnits_OrganizationUnitId]', N'F') IS NOT NULL
+        ALTER TABLE [dbo].[ProcedureCases] DROP CONSTRAINT [FK_ProcedureCases_OrganizationUnits_OrganizationUnitId];
 
-        migrationBuilder.DropIndex(
-            name: "IX_ProcedureCases_TenantId_OrganizationUnitId",
-            table: "ProcedureCases");
+    IF EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_ProcedureCases_TenantId_OrganizationUnitId'
+          AND [object_id] = OBJECT_ID(N'[dbo].[ProcedureCases]'))
+        DROP INDEX [IX_ProcedureCases_TenantId_OrganizationUnitId] ON [dbo].[ProcedureCases];
 
-        migrationBuilder.DropIndex(
-            name: "IX_ProcedureCases_OrganizationUnitId",
-            table: "ProcedureCases");
+    IF EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_ProcedureCases_OrganizationUnitId'
+          AND [object_id] = OBJECT_ID(N'[dbo].[ProcedureCases]'))
+        DROP INDEX [IX_ProcedureCases_OrganizationUnitId] ON [dbo].[ProcedureCases];
 
-        migrationBuilder.DropIndex(
-            name: "IX_ProcedureCases_OrganizationLevelId",
-            table: "ProcedureCases");
+    IF EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_ProcedureCases_OrganizationLevelId'
+          AND [object_id] = OBJECT_ID(N'[dbo].[ProcedureCases]'))
+        DROP INDEX [IX_ProcedureCases_OrganizationLevelId] ON [dbo].[ProcedureCases];
 
-        migrationBuilder.DropColumn(
-            name: "OrganizationUnitId",
-            table: "ProcedureCases");
-
-        migrationBuilder.DropColumn(
-            name: "OrganizationLevelId",
-            table: "ProcedureCases");
+    ALTER TABLE [dbo].[ProcedureCases] DROP COLUMN [OrganizationUnitId];
+    ALTER TABLE [dbo].[ProcedureCases] DROP COLUMN [OrganizationLevelId];
+END
+""");
     }
 }

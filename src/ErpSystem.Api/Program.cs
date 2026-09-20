@@ -1,4 +1,5 @@
 using System.Text;
+using System.Data;
 using ErpSystem.Api.Configuration;
 using ErpSystem.Api.Data;
 using ErpSystem.Api.Extensions;
@@ -972,13 +973,14 @@ async Task InitializeDatabaseAsync(
 
     using (var testCts = new CancellationTokenSource(databaseConnectionTimeout))
     {
+        var connection = context.Database.GetDbConnection();
+        var openedHere = false;
         try
         {
-            var canConnect = await context.Database.CanConnectAsync(testCts.Token);
-            if (!canConnect)
+            if (connection.State != ConnectionState.Open)
             {
-                throw new InvalidOperationException(
-                    $"Database connection check failed for provider '{providerName}' using '{connectionSummary}'. Startup migrations cannot continue.");
+                await connection.OpenAsync(testCts.Token);
+                openedHere = true;
             }
         }
         catch (OperationCanceledException ex)
@@ -986,6 +988,20 @@ async Task InitializeDatabaseAsync(
             throw new TimeoutException(
                 $"Database connection timed out after {databaseConnectionTimeout.TotalSeconds:F0} seconds.",
                 ex);
+        }
+        catch (Exception ex)
+        {
+            var reason = ex.GetBaseException().Message;
+            throw new InvalidOperationException(
+                $"Database connection check failed for provider '{providerName}' using '{connectionSummary}'. Startup migrations cannot continue. Reason: {reason}",
+                ex);
+        }
+        finally
+        {
+            if (openedHere && connection.State != ConnectionState.Closed)
+            {
+                await connection.CloseAsync();
+            }
         }
     }
 
@@ -996,6 +1012,7 @@ async Task InitializeDatabaseAsync(
     {
         await RepairDevelopmentMigrationHistoryIfNeededAsync(app.Environment, context, logger, migrationCts.Token);
         await context.Database.MigrateAsync(migrationCts.Token);
+        await RepairFinanceBaselineSchemaAsync(context, migrationCts.Token);
         await RepairFinanceSettingsSchemaAsync(context, migrationCts.Token);
         await RepairCustomerPaymentSchemaAsync(context, migrationCts.Token);
         await RepairFinancePurchaseOrderSchemaAsync(context, migrationCts.Token);
@@ -1065,6 +1082,32 @@ static async Task RepairDevelopmentMigrationHistoryIfNeededAsync(
     }
 
     var pendingMigrations = (await context.Database.GetPendingMigrationsAsync(cancellationToken)).ToList();
+
+    const string disposableDevelopmentBaselineMigration =
+        "20260916132000_DisposableDevelopmentCurrentModelBaseline";
+    if (pendingMigrations.Contains(disposableDevelopmentBaselineMigration)
+        && await TableExistsAsync(context, "AspNetRoles", cancellationToken)
+        && await TableExistsAsync(context, "Tenants", cancellationToken)
+        && await TableExistsAsync(context, "ProcedureCases", cancellationToken))
+    {
+        await context.Database.ExecuteSqlRawAsync($"""
+IF OBJECT_ID(N'[dbo].[__EFMigrationsHistory]', N'U') IS NOT NULL
+   AND EXISTS (SELECT 1 FROM [dbo].[__EFMigrationsHistory])
+   AND NOT EXISTS (
+       SELECT 1
+       FROM [dbo].[__EFMigrationsHistory]
+       WHERE [MigrationId] = N'{disposableDevelopmentBaselineMigration}')
+BEGIN
+    INSERT INTO [dbo].[__EFMigrationsHistory] ([MigrationId], [ProductVersion])
+    VALUES (N'{disposableDevelopmentBaselineMigration}', N'8.0.0');
+END
+""", cancellationToken);
+
+        logger.LogWarning(
+            "Stamped migration {MigrationId} as applied because the existing development database already contains the baseline schema.",
+            disposableDevelopmentBaselineMigration);
+    }
+
     if (!pendingMigrations.Contains("20260311184920_AddProjectMaterialCostLedger"))
     {
         return;
@@ -1152,6 +1195,76 @@ static async Task<bool> TableExistsAsync(
             await connection.CloseAsync();
         }
     }
+}
+
+static async Task RepairFinanceBaselineSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
+{
+    await context.Database.ExecuteSqlRawAsync("""
+IF OBJECT_ID(N'[dbo].[AccountSegmentStructures]', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'IsMandatory') IS NOT NULL
+       AND NOT EXISTS (
+           SELECT 1
+           FROM sys.default_constraints
+           WHERE [parent_object_id] = OBJECT_ID(N'[dbo].[AccountSegmentStructures]')
+             AND [parent_column_id] = COLUMNPROPERTY(OBJECT_ID(N'[dbo].[AccountSegmentStructures]'), N'IsMandatory', 'ColumnId'))
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD CONSTRAINT [DF_AccountSegmentStructures_IsMandatory] DEFAULT CAST(0 AS bit) FOR [IsMandatory];
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'FrozenAtUtc') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [FrozenAtUtc] datetime2 NULL;
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'FrozenByUserId') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [FrozenByUserId] uniqueidentifier NULL;
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'IsSystemDefined') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [IsSystemDefined] bit NOT NULL CONSTRAINT [DF_AccountSegmentStructures_IsSystemDefined] DEFAULT CAST(0 AS bit);
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'LifecycleStatus') IS NULL
+    BEGIN
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [LifecycleStatus] int NOT NULL CONSTRAINT [DF_AccountSegmentStructures_LifecycleStatus] DEFAULT 1;
+        EXEC(N'UPDATE [dbo].[AccountSegmentStructures]
+            SET [LifecycleStatus] = 2
+            WHERE [IsActive] = CAST(1 AS bit) AND [IsDeleted] = CAST(0 AS bit);');
+    END
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'RetirementReason') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [RetirementReason] nvarchar(500) NULL;
+
+    IF COL_LENGTH(N'[dbo].[AccountSegmentStructures]', N'RowVersion') IS NULL
+        ALTER TABLE [dbo].[AccountSegmentStructures] ADD [RowVersion] rowversion NOT NULL;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.check_constraints
+        WHERE [name] = N'CK_AccountSegmentStructures_LifecycleActive'
+          AND [parent_object_id] = OBJECT_ID(N'[dbo].[AccountSegmentStructures]'))
+        EXEC(N'ALTER TABLE [dbo].[AccountSegmentStructures] ADD CONSTRAINT [CK_AccountSegmentStructures_LifecycleActive]
+            CHECK (([LifecycleStatus] IN (2, 3) AND [IsActive] = 1) OR ([LifecycleStatus] IN (1, 4) AND [IsActive] = 0));');
+END
+
+IF OBJECT_ID(N'[dbo].[RecurringJournalOccurrences]', N'U') IS NOT NULL
+BEGIN
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalAuthorizedAt') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalAuthorizedAt] datetime2 NULL;
+
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalAuthorizedByUserId') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalAuthorizedByUserId] uniqueidentifier NULL;
+
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalLastAttemptAt') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalLastAttemptAt] datetime2 NULL;
+
+    IF COL_LENGTH(N'[dbo].[RecurringJournalOccurrences]', N'ReversalStatus') IS NULL
+        ALTER TABLE [dbo].[RecurringJournalOccurrences] ADD [ReversalStatus] int NOT NULL CONSTRAINT [DF_RecurringJournalOccurrences_ReversalStatus] DEFAULT 0;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM sys.indexes
+        WHERE [name] = N'IX_RecurringJournalOccurrences_TenantId_ReversalStatus_ReversalDueDate'
+          AND [object_id] = OBJECT_ID(N'[dbo].[RecurringJournalOccurrences]'))
+        EXEC(N'CREATE INDEX [IX_RecurringJournalOccurrences_TenantId_ReversalStatus_ReversalDueDate]
+            ON [dbo].[RecurringJournalOccurrences] ([TenantId], [ReversalStatus], [ReversalDueDate]);');
+END
+""", cancellationToken);
 }
 
 static async Task RepairCustomerPaymentSchemaAsync(ApplicationDbContext context, CancellationToken cancellationToken = default)
