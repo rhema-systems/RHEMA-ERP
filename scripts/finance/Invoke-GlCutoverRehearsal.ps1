@@ -207,6 +207,18 @@ function Invoke-Native([string]$filePath, [string[]]$arguments) {
     }
 }
 
+function Get-BoundedApiBuildArguments() {
+    @(
+        'build', $apiProject,
+        '--configuration', 'Debug',
+        '--nologo',
+        '--disable-build-servers',
+        '/maxcpucount:1',
+        '/nodeReuse:false',
+        '/p:UseSharedCompilation=false'
+    )
+}
+
 function Move-AtomicEvidenceFile([string]$sourcePath, [string]$destinationPath, [bool]$replaceExisting = $false) {
     # The three-argument File.Move overload is unavailable in Windows
     # PowerShell's .NET Framework runtime. File.Replace preserves the atomic
@@ -929,7 +941,7 @@ function Invoke-DisposableDevelopmentReset($databaseTarget, [string]$connectionS
             $null = Invoke-NativeWithEvidence 'git' @('diff', '--check') (Join-Path $evidenceDirectory 'git-diff-check.log')
             $null = Invoke-NativeWithEvidence 'git' @('rev-list', '--parents', 'HEAD') (Join-Path $evidenceDirectory 'commit-ancestry.txt')
             $null = Invoke-NativeWithEvidence 'git' @('rev-parse', 'HEAD', 'HEAD^{tree}') (Join-Path $evidenceDirectory 'git-head-tree.txt')
-            $null = Invoke-NativeWithEvidence 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo') `
+            $null = Invoke-NativeWithEvidence 'dotnet' @(Get-BoundedApiBuildArguments) `
                 (Join-Path $evidenceDirectory 'reset-build.log')
             $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'has-pending-model-changes',
                 '--project', $dataProject, '--startup-project', $apiProject, '--configuration', 'Debug',
@@ -1555,7 +1567,7 @@ if ($Mode -eq 'RehearseFinalClone') {
                 (Join-Path $evidenceDirectoryResolved 'commit-ancestry.txt')
             $null = Invoke-NativeWithEvidence 'git' @('rev-parse', 'HEAD', 'HEAD^{tree}') (Join-Path $evidenceDirectoryResolved 'git-head-tree.txt')
             $cloneBuildLog = Join-Path $evidenceDirectoryResolved 'clone-build.log'
-            $null = Invoke-NativeWithEvidence 'dotnet' @('build', $apiProject, '--configuration', 'Debug', '--nologo') $cloneBuildLog
+            $null = Invoke-NativeWithEvidence 'dotnet' @(Get-BoundedApiBuildArguments) $cloneBuildLog
             $modelLog = Join-Path $evidenceDirectoryResolved 'ef-no-pending-model.log'
             $migrationListLog = Join-Path $evidenceDirectoryResolved 'migration-discovery.log'
             $null = Invoke-NativeWithEvidence 'dotnet' @('ef', 'migrations', 'has-pending-model-changes',
