@@ -6,6 +6,7 @@ param(
     [switch]$DryRun,
     [switch]$ReuseVerifiedArtifacts,
     [switch]$SkipBrowserSmoke,
+    [switch]$LocalVps,
     [switch]$AllowDirtyWorktree,
     [switch]$AllowNonRemoteHead,
 
@@ -208,6 +209,24 @@ function Get-SyncfusionLicenseKey {
         }
     }
 
+    if ($LocalVps) {
+        # A server-local release can read the protected service value directly,
+        # but still keeps it only in memory and never prints it.
+        $path = 'C:\RhemaERP\services\api\RhemaERPAPI.xml'
+        Assert-True (Test-Path -LiteralPath $path) `
+            "The protected API service configuration is missing: $path"
+        [xml]$xml = Get-Content -LiteralPath $path -Raw
+        $node = @($xml.service.env | Where-Object {
+            $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
+            -not [string]::IsNullOrWhiteSpace([string]$_.value)
+        })[0]
+        Assert-True ($null -ne $node) `
+            'The protected Syncfusion API license is not configured.'
+        Write-Host 'Loaded the protected Syncfusion license without logging its value.' `
+            -ForegroundColor DarkGray
+        return [string]$node.value
+    }
+
     # The browser license must be embedded while Next.js is built. Reuse the
     # protected API-service value over SSH when the release host has no local
     # copy. Capture it only in process memory; never echo it or write it to the
@@ -273,6 +292,27 @@ function Invoke-RemoteHelper {
         [hashtable]$Parameters = @{}
     )
 
+    if ($LocalVps) {
+        $helperArguments = @(
+            '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass',
+            '-File', $RemoteHelperPath, '-Action', $Action
+        )
+        foreach ($key in ($Parameters.Keys | Sort-Object)) {
+            $value = $Parameters[$key]
+            if ($null -eq $value -or [string]::IsNullOrWhiteSpace([string]$value)) {
+                continue
+            }
+            $helperArguments += "-$key"
+            $helperArguments += [string]$value
+        }
+        $output = @(& powershell.exe @helperArguments 2>&1 | ForEach-Object { [string]$_ })
+        if ($LASTEXITCODE -ne 0) {
+            $summary = ($output | Select-Object -Last 20) -join [Environment]::NewLine
+            throw "Local VPS $Action failed.$([Environment]::NewLine)$summary"
+        }
+        return @($output | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    }
+
     $parts = @(
         '&', (ConvertTo-SingleQuotedPowerShellLiteral $RemoteHelperPath),
         '-Action', (ConvertTo-SingleQuotedPowerShellLiteral $Action)
@@ -333,6 +373,14 @@ function Invoke-RemoteHelper {
 
 function Copy-ToVps {
     param([string[]]$LocalPaths, [string]$RemoteDirectory)
+    if ($LocalVps) {
+        Assert-True (Test-Path -LiteralPath $RemoteDirectory) `
+            "Local VPS package directory is missing: $RemoteDirectory"
+        foreach ($path in $LocalPaths) {
+            Copy-Item -LiteralPath $path -Destination $RemoteDirectory -Force
+        }
+        return
+    }
     $scpArguments = Get-ScpArguments
     $destination = "${SshUser}@${VpsHost}:$($RemoteDirectory.Replace('\', '/'))/"
     & scp @scpArguments @LocalPaths $destination
@@ -746,11 +794,17 @@ function Write-RunResult {
 
 Push-Location $RepositoryRoot
 try {
-    foreach ($command in @('git', 'ssh', 'scp', 'curl.exe', 'node')) {
+    $requiredCommands = @('git', 'curl.exe', 'node')
+    if (-not $LocalVps) {
+        $requiredCommands += @('ssh', 'scp')
+    }
+    foreach ($command in $requiredCommands) {
         Assert-CommandExists $command
     }
-    Assert-True (Test-Path -LiteralPath $SshKeyPath) `
-        "SSH key is missing: $SshKeyPath"
+    if (-not $LocalVps) {
+        Assert-True (Test-Path -LiteralPath $SshKeyPath) `
+            "SSH key is missing: $SshKeyPath"
+    }
     Assert-True (Test-Path -LiteralPath $RemoteHelperLocalPath) `
         'Remote deployment helper is missing.'
     Assert-True (Test-Path -LiteralPath $BrowserSmokePath) `
@@ -788,6 +842,14 @@ try {
         Copy-ToVps @($RemoteHelperLocalPath) $RemotePackagesRoot
         $uploadedDefaultName = Join-Path $RemotePackagesRoot `
             ([System.IO.Path]::GetFileName($RemoteHelperLocalPath))
+        if ($LocalVps) {
+            if ((Get-FileHash -LiteralPath $uploadedDefaultName -Algorithm SHA256).Hash -ne $remoteHelperHash) {
+                throw 'Local VPS helper hash mismatch.'
+            }
+            Move-Item -LiteralPath $uploadedDefaultName -Destination $remoteHelperPath -Force
+            Write-Output "REMOTE_HELPER|$remoteHelperPath|$remoteHelperHash"
+            return
+        }
         $renameScript = @"
 `$source = '$uploadedDefaultName'
 `$target = '$remoteHelperPath'
