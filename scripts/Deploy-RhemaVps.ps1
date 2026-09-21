@@ -213,18 +213,35 @@ function Get-SyncfusionLicenseKey {
         # A server-local release can read the protected service value directly,
         # but still keeps it only in memory and never prints it.
         $path = 'C:\RhemaERP\services\api\RhemaERPAPI.xml'
-        Assert-True (Test-Path -LiteralPath $path) `
-            "The protected API service configuration is missing: $path"
-        [xml]$xml = Get-Content -LiteralPath $path -Raw
-        $node = @($xml.service.env | Where-Object {
-            $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
-            -not [string]::IsNullOrWhiteSpace([string]$_.value)
-        })[0]
-        Assert-True ($null -ne $node) `
+        if (Test-Path -LiteralPath $path) {
+            [xml]$xml = Get-Content -LiteralPath $path -Raw
+            $value = [string](@($xml.service.env | Where-Object {
+                $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
+                -not [string]::IsNullOrWhiteSpace([string]$_.value)
+            })[0].value)
+        }
+        else {
+            $nssmPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
+            Assert-True (Test-Path -LiteralPath $nssmPath) `
+                "The protected API service configuration is missing: $path or $nssmPath"
+            $properties = Get-ItemProperty -LiteralPath $nssmPath
+            $entries = @(
+                @($properties.AppEnvironment)
+                @($properties.AppEnvironmentExtra)
+            ) | ForEach-Object { [string]$_ }
+            $candidate = @($entries | Where-Object {
+                $_ -match '^(Syncfusion__LicenseKey|SyncfusionLicenseKey)=' -and
+                $_.Length -gt ($_.IndexOf('=') + 1)
+            } | Select-Object -Last 1)[0]
+            if ($null -ne $candidate) {
+                $value = $candidate.Substring($candidate.IndexOf('=') + 1)
+            }
+        }
+        Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
             'The protected Syncfusion API license is not configured.'
         Write-Host 'Loaded the protected Syncfusion license without logging its value.' `
             -ForegroundColor DarkGray
-        return [string]$node.value
+        return $value
     }
 
     # The browser license must be embedded while Next.js is built. Reuse the

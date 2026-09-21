@@ -26,10 +26,17 @@ $BackupsRoot = Join-Path $RhemaRoot 'backups'
 $LogsRoot = Join-Path $RhemaRoot 'logs'
 $ApiServiceXml = Join-Path $RhemaRoot 'services\api\RhemaERPAPI.xml'
 $ExpectedPublicOrigin = 'https://149.102.145.190:8443'
+$NssmParametersPath = 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
     if (-not $Condition) { throw $Message }
+}
+
+$UsesNssmApiConfiguration = -not (Test-Path -LiteralPath $ApiServiceXml)
+if ($UsesNssmApiConfiguration) {
+    Assert-True (Test-Path -LiteralPath $NssmParametersPath) `
+        "API service configuration is missing: $ApiServiceXml or $NssmParametersPath"
 }
 
 function Assert-DeploymentId {
@@ -45,11 +52,122 @@ function Get-ApiConfigurationXml {
     return [xml](Get-Content -LiteralPath $ApiServiceXml)
 }
 
+function Get-NssmEnvironmentSnapshot {
+    $properties = Get-ItemProperty -LiteralPath $NssmParametersPath
+    $snapshot = [ordered]@{}
+    foreach ($name in @('AppEnvironment', 'AppEnvironmentExtra')) {
+        $exists = $null -ne $properties.PSObject.Properties[$name]
+        $snapshot[$name] = [ordered]@{
+            exists = $exists
+            values = if ($exists) { @($properties.$name | ForEach-Object { [string]$_ }) } else { @() }
+        }
+    }
+    return [pscustomobject]$snapshot
+}
+
+function Restore-NssmEnvironmentSnapshot {
+    param([Parameter(Mandatory = $true)]$Snapshot)
+
+    foreach ($name in @('AppEnvironment', 'AppEnvironmentExtra')) {
+        $entry = $Snapshot.$name
+        if ($entry.exists) {
+            Set-ItemProperty -LiteralPath $NssmParametersPath -Name $name `
+                -Value ([string[]]@($entry.values))
+        }
+        else {
+            Remove-ItemProperty -LiteralPath $NssmParametersPath -Name $name `
+                -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+function Get-ApiServiceEnvironment {
+    $environment = [ordered]@{}
+    if (-not $UsesNssmApiConfiguration) {
+        $xml = Get-ApiConfigurationXml
+        foreach ($node in @($xml.service.env)) {
+            $environment[[string]$node.name] = [string]$node.value
+        }
+        return $environment
+    }
+
+    $snapshot = Get-NssmEnvironmentSnapshot
+    foreach ($source in @($snapshot.AppEnvironment.values, $snapshot.AppEnvironmentExtra.values)) {
+        foreach ($entry in @($source)) {
+            $separator = $entry.IndexOf('=')
+            if ($separator -gt 0) {
+                $environment[$entry.Substring(0, $separator)] = $entry.Substring($separator + 1)
+            }
+        }
+    }
+    return $environment
+}
+
+function Set-ApiServiceEnvironmentValues {
+    param([Parameter(Mandatory = $true)][hashtable]$Values)
+
+    if (-not $UsesNssmApiConfiguration) {
+        $xml = Get-ApiConfigurationXml
+        foreach ($entry in $Values.GetEnumerator()) {
+            $node = @($xml.service.env | Where-Object { $_.name -eq $entry.Key })[0]
+            if ($null -eq $node) {
+                $node = $xml.CreateElement('env')
+                $node.SetAttribute('name', [string]$entry.Key)
+                [void]$xml.service.AppendChild($node)
+            }
+            $node.SetAttribute('value', [string]$entry.Value)
+        }
+        $settings = New-Object System.Xml.XmlWriterSettings
+        $settings.Indent = $true
+        $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $writer = [System.Xml.XmlWriter]::Create($ApiServiceXml, $settings)
+        try { $xml.Save($writer) }
+        finally { $writer.Close() }
+        return
+    }
+
+    $environment = Get-ApiServiceEnvironment
+    foreach ($entry in $Values.GetEnumerator()) {
+        $environment[[string]$entry.Key] = [string]$entry.Value
+    }
+    $nssmValues = @($environment.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        "{0}={1}" -f $_.Key, $_.Value
+    })
+    Set-ItemProperty -LiteralPath $NssmParametersPath -Name AppEnvironmentExtra `
+        -Value ([string[]]$nssmValues)
+}
+
+function Remove-ApiServiceEnvironmentValues {
+    param([Parameter(Mandatory = $true)][string[]]$Names)
+
+    if (-not $UsesNssmApiConfiguration) {
+        $xml = Get-ApiConfigurationXml
+        foreach ($name in $Names) {
+            @($xml.service.env | Where-Object { $_.name -eq $name }) |
+                ForEach-Object { [void]$xml.service.RemoveChild($_) }
+        }
+        $settings = New-Object System.Xml.XmlWriterSettings
+        $settings.Indent = $true
+        $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
+        $writer = [System.Xml.XmlWriter]::Create($ApiServiceXml, $settings)
+        try { $xml.Save($writer) }
+        finally { $writer.Close() }
+        return
+    }
+
+    $environment = Get-ApiServiceEnvironment
+    foreach ($name in $Names) { [void]$environment.Remove($name) }
+    $nssmValues = @($environment.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        "{0}={1}" -f $_.Key, $_.Value
+    })
+    Set-ItemProperty -LiteralPath $NssmParametersPath -Name AppEnvironmentExtra `
+        -Value ([string[]]$nssmValues)
+}
+
 function Assert-SyncfusionLicenseConfigured {
-    $xml = Get-ApiConfigurationXml
-    $configured = @($xml.service.env | Where-Object {
-        $_.name -in @('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') -and
-        -not [string]::IsNullOrWhiteSpace([string]$_.value)
+    $environment = Get-ApiServiceEnvironment
+    $configured = @(@('Syncfusion__LicenseKey', 'SyncfusionLicenseKey') | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string]$environment[$_])
     })
     Assert-True ($configured.Count -gt 0) `
         'The protected Syncfusion license is missing from the API service environment.'
@@ -57,10 +175,8 @@ function Assert-SyncfusionLicenseConfigured {
 }
 
 function Get-DatabaseConnectionString {
-    $xml = Get-ApiConfigurationXml
-    $value = [string](($xml.service.env | Where-Object {
-        $_.name -eq 'ConnectionStrings__DefaultConnection'
-    }).value)
+    $environment = Get-ApiServiceEnvironment
+    $value = [string]$environment['ConnectionStrings__DefaultConnection']
     Assert-True (-not [string]::IsNullOrWhiteSpace($value)) `
         'Database connection setting is missing from the API service configuration.'
     return $value
@@ -113,44 +229,20 @@ function Invoke-RobocopyChecked {
     }
 }
 
-function Set-ServiceEnvironmentValue {
-    param(
-        [xml]$Xml,
-        [string]$Name,
-        [string]$Value
-    )
-
-    $node = @($Xml.service.env | Where-Object { $_.name -eq $Name })[0]
-    if ($null -eq $node) {
-        $node = $Xml.CreateElement('env')
-        $node.SetAttribute('name', $Name)
-        [void]$Xml.service.AppendChild($node)
-    }
-    $node.SetAttribute('value', $Value)
-}
-
 function Set-TestServerConfiguration {
-    $xml = Get-ApiConfigurationXml
-    @($xml.service.env | Where-Object {
-        $_.name -like 'CorsSettings__AllowedOrigins__*'
-    }) | ForEach-Object { [void]$xml.service.RemoveChild($_) }
-
-    Set-ServiceEnvironmentValue $xml 'CorsSettings__AllowedOrigins__0' `
-        $ExpectedPublicOrigin
-    Set-ServiceEnvironmentValue $xml `
-        'StartupInitialization__SeedDevelopmentData' 'true'
-    Set-ServiceEnvironmentValue $xml `
-        'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' 'true'
-    Set-ServiceEnvironmentValue $xml 'CandidatePortal__PortalUrl' `
-        $ExpectedPublicOrigin
-    Set-ServiceEnvironmentValue $xml 'FrontendUrl' $ExpectedPublicOrigin
-
-    $settings = New-Object System.Xml.XmlWriterSettings
-    $settings.Indent = $true
-    $settings.Encoding = New-Object System.Text.UTF8Encoding($false)
-    $writer = [System.Xml.XmlWriter]::Create($ApiServiceXml, $settings)
-    try { $xml.Save($writer) }
-    finally { $writer.Close() }
+    $existingCorsNames = @((Get-ApiServiceEnvironment).Keys | Where-Object {
+        $_ -like 'CorsSettings__AllowedOrigins__*'
+    })
+    if ($existingCorsNames.Count -gt 0) {
+        Remove-ApiServiceEnvironmentValues $existingCorsNames
+    }
+    Set-ApiServiceEnvironmentValues @{
+        'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
+        'StartupInitialization__SeedDevelopmentData' = 'true'
+        'StartupInitialization__AllowDevelopmentDataSeedingOutsideDevelopment' = 'true'
+        'CandidatePortal__PortalUrl' = $ExpectedPublicOrigin
+        'FrontendUrl' = $ExpectedPublicOrigin
+    }
 }
 
 function Get-MigrationHistory {
@@ -602,8 +694,12 @@ function Write-ServiceState {
 
 function Invoke-Preflight {
     foreach ($path in @($RhemaRoot, $ApiRoot, $FrontendRoot, $PackagesRoot,
-            $BackupsRoot, $LogsRoot, $ApiServiceXml)) {
+            $BackupsRoot, $LogsRoot)) {
         Assert-True (Test-Path -LiteralPath $path) "Required VPS path is missing: $path"
+    }
+    if (-not $UsesNssmApiConfiguration) {
+        Assert-True (Test-Path -LiteralPath $ApiServiceXml) `
+            "Required VPS path is missing: $ApiServiceXml"
     }
 
     $services = Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy
@@ -616,7 +712,7 @@ function Invoke-Preflight {
     Write-Output "DISK_FREE_GB|$freeGb"
     Assert-True ($freeGb -ge 5) 'Less than 5 GB of free disk space remains on the VPS.'
 
-    $xml = Get-ApiConfigurationXml
+    $environment = Get-ApiServiceEnvironment
     Assert-SyncfusionLicenseConfigured
     $requiredSettings = @{
         'CorsSettings__AllowedOrigins__0' = $ExpectedPublicOrigin
@@ -626,15 +722,13 @@ function Invoke-Preflight {
         'FrontendUrl' = $ExpectedPublicOrigin
     }
     foreach ($entry in $requiredSettings.GetEnumerator()) {
-        $actual = [string](($xml.service.env | Where-Object {
-            $_.name -eq $entry.Key
-        }).value)
+        $actual = [string]$environment[$entry.Key]
         Write-Output "CONFIG|$($entry.Key)|$actual"
         Assert-True ($actual -eq $entry.Value) `
             "Test VPS configuration is invalid for $($entry.Key)."
     }
-    $corsNodes = @($xml.service.env | Where-Object {
-        $_.name -like 'CorsSettings__AllowedOrigins__*'
+    $corsNodes = @($environment.Keys | Where-Object {
+        $_ -like 'CorsSettings__AllowedOrigins__*'
     })
     Assert-True ($corsNodes.Count -eq 1) `
         'The test VPS must expose exactly one HTTPS CORS origin.'
@@ -873,8 +967,16 @@ function Invoke-Backup {
         (Join-Path $FrontendRoot 'logs'),
         '/XF', (Join-Path $FrontendRoot 'let')
     )
-    Copy-Item -LiteralPath $ApiServiceXml -Destination `
-        (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
+    if ($UsesNssmApiConfiguration) {
+        [System.IO.File]::WriteAllText(
+            (Join-Path $serviceBackup 'RhemaERPAPI.nssm-environment.json'),
+            ((Get-NssmEnvironmentSnapshot) | ConvertTo-Json -Depth 6),
+            (New-Object System.Text.UTF8Encoding($false)))
+    }
+    else {
+        Copy-Item -LiteralPath $ApiServiceXml -Destination `
+            (Join-Path $serviceBackup 'RhemaERPAPI.xml') -Force
+    }
 
     $builder = New-Object System.Data.SqlClient.SqlConnectionStringBuilder `
         (Get-DatabaseConnectionString)
@@ -985,6 +1087,23 @@ function Wait-FrontendReady {
 
 function Start-ApiWithControlledMigrations {
     param([DateTime]$StartedAt)
+
+    if ($UsesNssmApiConfiguration) {
+        $originalEnvironment = Get-NssmEnvironmentSnapshot
+        try {
+            Set-ApiServiceEnvironmentValues @{
+                'SkipStartupInitialization' = 'false'
+                'StartupInitialization__SeedDevelopmentData' = 'false'
+                'StartupInitialization__SeedWorkflowDefinitions' = 'false'
+            }
+            Start-Service RhemaERPAPI
+            Wait-ApiReady $StartedAt
+        }
+        finally {
+            Restore-NssmEnvironmentSnapshot $originalEnvironment
+        }
+        return
+    }
 
     $originalXml = Get-ApiConfigurationXml
     $migrationXml = Get-ApiConfigurationXml
@@ -1130,9 +1249,18 @@ function Invoke-Apply {
             '/XD', (Join-Path $ApiRoot 'wwwroot\uploads'),
             (Join-Path $ApiRoot 'logs'), (Join-Path $ApiRoot 'secure-file-storage')
         )
-        $serviceBackup = Join-Path $backup 'services\api\RhemaERPAPI.xml'
-        if (Test-Path -LiteralPath $serviceBackup) {
-            Copy-Item -LiteralPath $serviceBackup -Destination $ApiServiceXml -Force
+        if ($UsesNssmApiConfiguration) {
+            $serviceBackup = Join-Path $backup 'services\api\RhemaERPAPI.nssm-environment.json'
+            if (Test-Path -LiteralPath $serviceBackup) {
+                Restore-NssmEnvironmentSnapshot `
+                    (Get-Content -LiteralPath $serviceBackup -Raw | ConvertFrom-Json)
+            }
+        }
+        else {
+            $serviceBackup = Join-Path $backup 'services\api\RhemaERPAPI.xml'
+            if (Test-Path -LiteralPath $serviceBackup) {
+                Copy-Item -LiteralPath $serviceBackup -Destination $ApiServiceXml -Force
+            }
         }
         Start-Service RhemaERPAPI -ErrorAction SilentlyContinue
         throw "API apply failed and application files were rolled back: $($_.Exception.Message)"
