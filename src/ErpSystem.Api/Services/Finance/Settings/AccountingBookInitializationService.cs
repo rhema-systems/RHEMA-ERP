@@ -85,16 +85,17 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             var book = await _db.AccountingBooks.SingleOrDefaultAsync(item => item.Id == accountingBookId
                 && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
                 ?? throw new KeyNotFoundException("Accounting book was not found.");
-            if (book.BookType != AccountingBookType.Delta || !book.BaseAccountingBookId.HasValue)
-                throw new InvalidOperationException("Only a Delta book with a governed base book can prepare Delta structure.");
+            if (book.BookType is not (AccountingBookType.Delta or AccountingBookType.ParallelFull)
+                || !book.BaseAccountingBookId.HasValue)
+                throw new InvalidOperationException("Only a Delta or Parallel book with a governed base book can prepare inherited structure.");
             if (book.LifecycleStatus is not (AccountingBookLifecycleStatus.Configuring or AccountingBookLifecycleStatus.Initializing))
-                throw new InvalidOperationException("Delta structure may be prepared only while the book is Configuring or Initializing.");
+                throw new InvalidOperationException("Derived-book structure may be prepared only while the book is Configuring or Initializing.");
 
             var baseBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item => item.Id == book.BaseAccountingBookId.Value
                 && item.TenantId == TenantId && !item.IsDeleted, cancellationToken)
-                ?? throw new InvalidOperationException("The Delta book's governed base book is unavailable.");
+                ?? throw new InvalidOperationException("The derived book's governed base book is unavailable.");
             if (baseBook.LifecycleStatus is not (AccountingBookLifecycleStatus.Initializing or AccountingBookLifecycleStatus.Active))
-                throw new InvalidOperationException("The Delta book's governed base book must be initializing or active before Delta structure can be prepared.");
+                throw new InvalidOperationException("The derived book's governed base book must be initializing or active before structure can be prepared.");
 
             var sourceClassifications = await _db.AccountClassifications.AsNoTracking()
                 .Where(item => item.TenantId == TenantId && item.AccountingBookId == baseBook.Id
@@ -108,7 +109,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             if (sourceMappings.Count == 0 || sourceMappings.Any(item => item.Account == null || item.Account.IsDeleted
                 || item.AccountClassification == null || item.AccountClassification.IsDeleted
                 || item.AccountClassification.Status != AccountClassificationStatus.Active))
-                throw new InvalidOperationException("The base book must have complete enabled account mappings with active classifications before Delta structure can be prepared.");
+                throw new InvalidOperationException("The base book must have complete enabled account mappings with active classifications before derived structure can be prepared.");
 
             var targetClassifications = await _db.AccountClassifications
                 .Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted)
@@ -145,7 +146,7 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                     || resolved.CoreAccountType != source.CoreAccountType
                     || resolved.IsPostingClassification != source.IsPostingClassification)
                 {
-                    throw new InvalidOperationException($"Delta classification {resolved.Code} conflicts with its base-book authority.");
+                    throw new InvalidOperationException($"Derived-book classification {resolved.Code} conflicts with its base-book authority.");
                 }
                 else
                 {
@@ -191,14 +192,11 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                     targetMapping.UpdatedBy = ActorName();
                 }
             }
-            var sourceAccountIds = sourceMappings.Select(item => item.AccountId).ToHashSet();
-            foreach (var targetMapping in targetMappings.Values.Where(item =>
-                         item.IsEnabled && !sourceAccountIds.Contains(item.AccountId)))
-            {
-                targetMapping.IsEnabled = false;
-                targetMapping.UpdatedAt = DateTime.UtcNow;
-                targetMapping.UpdatedBy = ActorName();
-            }
+            if (book.BookType == AccountingBookType.ParallelFull)
+                await EnsureParallelProtectedAccountsAsync(book, targetByCode.Values, targetMappings, cancellationToken);
+
+            // Preserve governed local-only mappings. Delta layers may own elimination accounts;
+            // Parallel books own protected translation-reserve and rounding accounts.
             await _db.SaveChangesAsync(cancellationToken);
             await _audit.RecordAsync(new FinanceAuditEventDto
             {
@@ -207,11 +205,11 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                 Resource = "Finance.AccountingBook", ResourceId = book.Id.ToString(),
                 AfterValues = new
                 {
-                    DeltaAccountingBookId = book.Id, DeltaAccountingBookCode = book.Code,
+                    DerivedAccountingBookId = book.Id, DerivedAccountingBookCode = book.Code,
                     BaseAccountingBookId = baseBook.Id, BaseAccountingBookCode = baseBook.Code,
                     ClassificationCount = clonedBySourceId.Count, AccountMappingCount = sourceMappings.Count
                 },
-                Reason = "Prepared the governed Delta classification and account structure from its base book."
+                Reason = "Prepared governed inherited classifications and account mappings from the base book."
             }, cancellationToken);
             return new DeltaBookStructurePreparationDto
             {
@@ -220,6 +218,105 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                 ClassificationCount = clonedBySourceId.Count, AccountMappingCount = sourceMappings.Count
             };
         }, cancellationToken);
+
+    private async Task EnsureParallelProtectedAccountsAsync(
+        AccountingBook book,
+        IEnumerable<AccountClassification> classifications,
+        IDictionary<Guid, AccountAccountingBook> mappings,
+        CancellationToken cancellationToken)
+    {
+        var available = classifications.ToList();
+        var equity = available.FirstOrDefault(item => item.Code == "EQUITY")
+            ?? available.FirstOrDefault(item => item.IsPostingClassification && item.CoreAccountType == AccountType.Equity)
+            ?? throw new InvalidOperationException("PARALLEL_CTA_CLASSIFICATION_REQUIRED: The inherited structure has no active posting Equity classification.");
+        var rounding = available.FirstOrDefault(item => item.Code == "OTHER_EXPENSE")
+            ?? available.FirstOrDefault(item => item.IsPostingClassification && item.CoreAccountType == AccountType.Expense)
+            ?? throw new InvalidOperationException("PARALLEL_ROUNDING_CLASSIFICATION_REQUIRED: The inherited structure has no active posting Expense classification.");
+        var currency = book.FunctionalCurrencyCode
+            ?? throw new InvalidOperationException("PARALLEL_CURRENCY_REQUIRED: A Parallel book requires a functional currency.");
+
+        async Task<Account> EnsureAccountAsync(string suffix, string name, AccountType type, string category)
+        {
+            var code = $"{book.Code}_{suffix}";
+            if (code.Length > 50) code = code[..50];
+            var existing = await _db.Accounts.SingleOrDefaultAsync(item => item.TenantId == TenantId
+                && item.AccountCode == code && !item.IsDeleted, cancellationToken);
+            if (existing != null)
+            {
+                if (!existing.IsSystemAccount || existing.AccountType != type
+                    || !string.Equals(existing.CurrencyCode, currency, StringComparison.Ordinal))
+                    throw new InvalidOperationException($"PARALLEL_PROTECTED_ACCOUNT_CONFLICT: Account code {code} already exists with incompatible authority.");
+                return existing;
+            }
+
+            var account = new Account
+            {
+                TenantId = TenantId,
+                AccountCode = code,
+                AccountNumber = code.Replace('_', '-'),
+                AccountName = name,
+                AccountType = type,
+                AccountCategory = category,
+                Description = $"Protected {book.Code} account; available only to system-generated Parallel replication and translation.",
+                CurrencyCode = currency,
+                IsMultiCurrency = false,
+                IsSegmented = false,
+                IsIFRSClassified = false,
+                IsBaseClassified = false,
+                IsLocalClassified = false,
+                AllowDirectPosting = false,
+                IsControlAccount = false,
+                BudgetTrackingEnabled = false,
+                Status = AccountStatus.Active,
+                IsSystemAccount = true,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = ActorName()
+            };
+            _db.Accounts.Add(account);
+            return account;
+        }
+
+        async Task EnsureMappingAsync(Account account, AccountClassification classification)
+        {
+            if (mappings.TryGetValue(account.Id, out var existing))
+            {
+                existing.AccountClassificationId = classification.Id;
+                existing.IsEnabled = true;
+                existing.UpdatedAt = DateTime.UtcNow;
+                existing.UpdatedBy = ActorName();
+                return;
+            }
+            var mapping = new AccountAccountingBook
+            {
+                TenantId = TenantId,
+                AccountId = account.Id,
+                AccountingBookId = book.Id,
+                AccountClassificationId = classification.Id,
+                IsEnabled = true,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = ActorName()
+            };
+            _db.AccountAccountingBooks.Add(mapping);
+            mappings.Add(account.Id, mapping);
+            await Task.CompletedTask;
+        }
+
+        var reserveAccount = book.CurrencyTranslationReserveAccountId.HasValue
+            ? await _db.Accounts.SingleOrDefaultAsync(item => item.TenantId == TenantId
+                && item.Id == book.CurrencyTranslationReserveAccountId.Value && !item.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("PARALLEL_CTA_ACCOUNT_INVALID: The configured translation-reserve account is unavailable.")
+            : await EnsureAccountAsync("CTA", $"{book.Code} Currency Translation Reserve", AccountType.Equity, "Other comprehensive income");
+        var roundingAccount = book.CurrencyRoundingAccountId.HasValue
+            ? await _db.Accounts.SingleOrDefaultAsync(item => item.TenantId == TenantId
+                && item.Id == book.CurrencyRoundingAccountId.Value && !item.IsDeleted, cancellationToken)
+                ?? throw new InvalidOperationException("PARALLEL_ROUNDING_ACCOUNT_INVALID: The configured rounding account is unavailable.")
+            : await EnsureAccountAsync("ROUNDING", $"{book.Code} Currency Translation Rounding", AccountType.Expense, "Other expenses");
+
+        await EnsureMappingAsync(reserveAccount, equity);
+        await EnsureMappingAsync(roundingAccount, rounding);
+        book.CurrencyTranslationReserveAccountId = reserveAccount.Id;
+        book.CurrencyRoundingAccountId = roundingAccount.Id;
+    }
 
     public Task<AccountingBookInitializationDto> ConfigureAsync(Guid accountingBookId, ConfigureAccountingBookInitializationDto request, CancellationToken cancellationToken = default) =>
         AtomicAsync(async () =>
@@ -353,21 +450,21 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
             try { await EnsureEvidenceUnchangedAsync(initialization, cancellationToken); }
             catch (InvalidOperationException ex) { blockers.Add(ex.Message); }
         }
-        var periods = await _db.AccountingBookPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && item.AccountingBookId == book.Id && !item.IsDeleted).ToListAsync(cancellationToken);
-        // Activation requires the single first posting period containing the day after the approved
-        // cutoff (or the later effective date). Requiring every future period open would defeat close control.
+        // Tenant fiscal authority is the sole period gate. Accounting books no longer maintain a
+        // second open/close state that can drift from the tenant calendar.
         var firstPostingDate = initialization == null ? (DateTime?)null : initialization.CutoffDate.Date.AddDays(1);
-        if (firstPostingDate.HasValue && book.EffectiveFromUtc.HasValue && book.EffectiveFromUtc.Value.Date > firstPostingDate.Value)
+        if (book.BookType == AccountingBookType.Delta && firstPostingDate.HasValue && book.EffectiveFromUtc.HasValue
+            && book.EffectiveFromUtc.Value.Date > firstPostingDate.Value)
             firstPostingDate = book.EffectiveFromUtc.Value.Date;
         var effectivePeriods = firstPostingDate.HasValue ? await _db.FiscalPeriods.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted
             && item.StartDate <= firstPostingDate.Value && item.EndDate >= firstPostingDate.Value).Select(item => item.Id).ToListAsync(cancellationToken) : new List<Guid>();
         if (effectivePeriods.Count != 1) blockers.Add("Exactly one tenant fiscal period must contain the book's first posting date.");
-        var ready = periods.Count(item => effectivePeriods.Contains(item.FiscalPeriodId) && item.PeriodStatus == AccountingBookPeriodStatus.Open
-            && item.PendingStatus is not (AccountingBookPeriodStatus.Closed or AccountingBookPeriodStatus.Locked));
+        var ready = 0;
         if (effectivePeriods.Count == 1)
         {
             var fiscal = await _db.FiscalPeriods.AsNoTracking().SingleAsync(item => item.Id == effectivePeriods[0], cancellationToken);
             if (!fiscal.IsOpen || fiscal.IsClosed || fiscal.IsLocked) blockers.Add("The tenant fiscal period must remain globally open and unlocked.");
+            else ready = 1;
             var fiscalYear = await _db.FiscalYears.AsNoTracking().SingleOrDefaultAsync(item => item.Id == fiscal.FiscalYearId
                 && item.TenantId == TenantId && !item.IsDeleted, cancellationToken);
             if (fiscalYear == null || fiscalYear.IsClosed || fiscalYear.IsLocked)
@@ -386,7 +483,6 @@ public sealed class AccountingBookInitializationService : IAccountingBookInitial
                     blockers.Add("The Finance module must remain open for the book's first posting period.");
             }
         }
-        if (effectivePeriods.Count == 1 && ready != 1) blockers.Add("The book's first posting period must be governed and open.");
         return new AccountingBookActivationReadinessDto { IsReady = blockers.Count == 0, Blockers = blockers,
             InitializationFingerprint = initialization?.EvidenceFingerprint, RequiredPeriodCount = effectivePeriods.Count, ReadyPeriodCount = ready };
     }

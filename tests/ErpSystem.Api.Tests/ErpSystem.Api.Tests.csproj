@@ -282,6 +282,7 @@
     <Compile Include="Services\Finance\AccountingBookLifecycleC3Tests.cs" />
     <Compile Include="Services\Finance\AccountingBookLifecycleC3ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4Tests.cs" />
+    <Compile Include="Services\Finance\AccountingBookModelV2Tests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4ConcurrencySqlServerTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationTests.cs" />
     <Compile Include="Services\Finance\AccountingBookPeriodInitializationC4MigrationSqlServerTests.cs" />

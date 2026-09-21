@@ -197,6 +197,11 @@ export interface AccountingBook {
   effectiveToUtc?: string | null;
   baseAccountingBookId?: string | null;
   baseAccountingBookCode?: string | null;
+  replicationStartDate?: string | null;
+  parallelOpeningMode?: ParallelBookOpeningMode | null;
+  parallelTranslationMethod?: ParallelBookTranslationMethod | null;
+  currencyTranslationReserveAccountId?: string | null;
+  currencyRoundingAccountId?: string | null;
   initializationStartedAtUtc?: string | null;
   isActive: boolean;
   isDefault: boolean;
@@ -228,6 +233,13 @@ export interface AccountingBook {
 }
 
 export type AccountingBookType = 'PrimaryFull' | 'ParallelFull' | 'Delta';
+export type ParallelBookOpeningMode =
+  | 'ZeroOpening'
+  | 'GovernedOpeningConversion'
+  | 'HistoricalReplay';
+export type ParallelBookTranslationMethod =
+  | 'SingleApprovedRate'
+  | 'ClassificationDriven';
 export type AccountingBookLifecycleStatus =
   | 'Draft'
   | 'Configuring'
@@ -246,6 +258,11 @@ export interface SaveAccountingBook {
   effectiveFromUtc?: string | null;
   effectiveToUtc?: string | null;
   baseAccountingBookId?: string | null;
+  replicationStartDate?: string | null;
+  parallelOpeningMode?: ParallelBookOpeningMode | null;
+  parallelTranslationMethod?: ParallelBookTranslationMethod | null;
+  currencyTranslationReserveAccountId?: string | null;
+  currencyRoundingAccountId?: string | null;
   sortOrder: number;
   rowVersion?: string;
 }
@@ -390,6 +407,8 @@ export interface DeltaBookCombinedReportLine {
 export interface DeltaBookCombinedReport {
   deltaAccountingBookId: string;
   deltaAccountingBookCode: string;
+  deltaAccountingBookIds: string[];
+  deltaAccountingBookCodes: string[];
   baseAccountingBookId: string;
   baseAccountingBookCode: string;
   functionalCurrencyCode: string;
@@ -398,6 +417,30 @@ export interface DeltaBookCombinedReport {
   deltaTotal: number;
   combinedTotal: number;
   lines: DeltaBookCombinedReportLine[];
+}
+
+export interface DeltaBookLedgerEntry {
+  journalEntryId: string;
+  journalEntryNumber: string;
+  accountingDate: string;
+  postedAtUtc?: string | null;
+  description: string;
+  referenceNumber?: string | null;
+  sourceBookCode: string;
+  layer: 'Inherited' | 'Adjustment';
+  totalDebit: number;
+  totalCredit: number;
+}
+
+export interface DeltaBookLedgerInquiry {
+  deltaAccountingBookId: string;
+  deltaAccountingBookCode: string;
+  baseAccountingBookId: string;
+  baseAccountingBookCode: string;
+  functionalCurrencyCode: string;
+  fromDate?: string | null;
+  toDate?: string | null;
+  entries: DeltaBookLedgerEntry[];
 }
 
 export type AccountingBookApplicabilityPolicyStatus =

@@ -1283,6 +1283,75 @@ public sealed class FinancePostingEngineTests
     }
 
     [Fact]
+    [Trait("Category", "AccountingBookModelV2")]
+    public async Task PostAsync_ShouldFailAtomicallyWhenActiveParallelHasNoApprovedRate()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var primary = db.AccountingBooks.Local.Single(item => item.Code == "IFRS");
+        primary.BookType = AccountingBookType.PrimaryFull;
+        primary.FunctionalCurrencyCode = "GHS";
+        primary.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var parallel = SeedAdditionalBook(db, tenantId, "USD_PARALLEL", debit.Id, credit.Id);
+        parallel.BookType = AccountingBookType.ParallelFull;
+        parallel.BaseAccountingBookId = primary.Id;
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
+        parallel.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        await db.SaveChangesAsync();
+
+        var action = () => CreateService(db, tenantId)
+            .PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("PARALLEL_EXCHANGE_RATE_REQUIRED:*");
+        (await db.JournalEntries.CountAsync()).Should().Be(0);
+        (await db.FinancePostingEvents.CountAsync()).Should().Be(0);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookModelV2")]
+    public async Task PostAsync_ShouldCreateImmutableSourceToTargetParallelReplica()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var primary = db.AccountingBooks.Local.Single(item => item.Code == "IFRS");
+        primary.BookType = AccountingBookType.PrimaryFull;
+        primary.FunctionalCurrencyCode = "GHS";
+        primary.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var parallel = SeedAdditionalBook(db, tenantId, "USD_PARALLEL", debit.Id, credit.Id);
+        parallel.BookType = AccountingBookType.ParallelFull;
+        parallel.BaseAccountingBookId = primary.Id;
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
+        parallel.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var rate = SeedExchangeRate(db, tenantId, "USD", 12.5m);
+        await db.SaveChangesAsync();
+
+        var result = await CreateService(db, tenantId)
+            .PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        var replica = await db.JournalEntries.Include(item => item.Transactions)
+            .SingleAsync(item => item.AccountingBookId == parallel.Id);
+        replica.ReplicatedFromJournalEntryId.Should().Be(result.JournalEntryId);
+        replica.ReplicationExchangeRateId.Should().Be(rate.Id);
+        replica.ReplicationExchangeRate.Should().Be(0.08m);
+        replica.ReplicationRateDate.Should().Be(new DateTime(2026, 7, 4));
+        replica.TotalDebitAmount.Should().Be(8m);
+        replica.TotalCreditAmount.Should().Be(8m);
+        replica.Transactions.Should().OnlyContain(item => item.FunctionalCurrencyCode == "USD"
+            && item.TransactionCurrency == "GHS" && item.ExchangeRate == 0.08m);
+    }
+
+    [Fact]
     [Trait("Category", "MultiBookIdentityC1")]
     public async Task ReverseAsync_ShouldPreserveOriginalRelationalBookIdentity()
     {

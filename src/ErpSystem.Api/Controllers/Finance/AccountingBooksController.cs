@@ -29,6 +29,23 @@ public sealed class AccountingBooksController : ControllerBase
     public async Task<IActionResult> GetDeltaCombinedReport(Guid id, [FromQuery] DateTime asOfDate, CancellationToken cancellationToken = default) =>
         Ok(await _service.GetDeltaCombinedReportAsync(id, asOfDate, cancellationToken));
 
+    [HttpGet("{id:guid}/delta-ledger")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> GetDeltaLedger(
+        Guid id,
+        [FromQuery] DateTime? fromDate,
+        [FromQuery] DateTime? toDate,
+        CancellationToken cancellationToken = default) =>
+        Ok(await _service.GetDeltaLedgerAsync(id, fromDate, toDate, cancellationToken));
+
+    [HttpGet("delta-combined-report")]
+    [Authorize(Policy = FinancePermissions.ViewFinance)]
+    public async Task<IActionResult> GetMultiDeltaCombinedReport(
+        [FromQuery] Guid[] deltaAccountingBookIds,
+        [FromQuery] DateTime asOfDate,
+        CancellationToken cancellationToken = default) =>
+        Ok(await _service.GetDeltaCombinedReportAsync(deltaAccountingBookIds, asOfDate, cancellationToken));
+
     [HttpPost]
     [Authorize(Policy = FinancePermissions.ManageAccountingBooks)]
     public async Task<IActionResult> Create([FromBody] CreateAccountingBookDto request, CancellationToken cancellationToken) =>

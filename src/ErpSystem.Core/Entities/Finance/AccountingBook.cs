@@ -33,11 +33,32 @@ namespace ErpSystem.Core.Entities.Finance
         [MaxLength(3)]
         public string? FunctionalCurrencyCode { get; set; }
 
+        /// <summary>
+        /// Optional Delta posting-window start. Primary and Parallel books never
+        /// use lifecycle effective dates.
+        /// </summary>
         public DateTime? EffectiveFromUtc { get; set; }
 
+        /// <summary>Optional Delta posting-window end.</summary>
         public DateTime? EffectiveToUtc { get; set; }
 
         public Guid? BaseAccountingBookId { get; set; }
+
+        /// <summary>
+        /// First accounting date replicated into a Parallel book. This is
+        /// operational cutoff evidence, not a lifecycle effective date.
+        /// </summary>
+        public DateTime? ReplicationStartDate { get; set; }
+
+        public ParallelBookOpeningMode? ParallelOpeningMode { get; set; }
+
+        public ParallelBookTranslationMethod? ParallelTranslationMethod { get; set; }
+
+        /// <summary>Protected Parallel-only equity account for translation differences.</summary>
+        public Guid? CurrencyTranslationReserveAccountId { get; set; }
+
+        /// <summary>Protected Parallel-only account for immaterial precision residuals.</summary>
+        public Guid? CurrencyRoundingAccountId { get; set; }
 
         public DateTime? InitializationStartedAtUtc { get; set; }
 
@@ -87,6 +108,9 @@ namespace ErpSystem.Core.Entities.Finance
 
         public virtual AccountingBook? BaseAccountingBook { get; set; }
         public virtual ICollection<AccountingBook> DerivedBooks { get; set; } = new List<AccountingBook>();
+
+        public virtual Account? CurrencyTranslationReserveAccount { get; set; }
+        public virtual Account? CurrencyRoundingAccount { get; set; }
 
         public virtual ICollection<AccountAccountingBook> AccountMappings { get; set; } = new List<AccountAccountingBook>();
         public virtual ICollection<AccountClassification> AccountClassifications { get; set; } = new List<AccountClassification>();

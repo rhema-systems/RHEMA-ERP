@@ -150,6 +150,12 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         var postingEvent = BuildPostingEvent(tenantId, validation, journalEntry.Id, now, postedByUserId);
         await MarkExchangeRatesUsedAsync(tenantId, validation, postingEvent.Id, now, cancellationToken);
 
+        // Resolve every active foreign-currency representation before any ledger row is
+        // committed. Missing rates, mappings, or rounding authority therefore roll the
+        // Primary posting back instead of creating an inconsistent Parallel ledger.
+        var parallelReplicas = await BuildParallelReplicasAsync(
+            tenantId, validation, journalEntry, now, postedByUserId, cancellationToken);
+
         if (validation.BudgetReservationIds.Count > 0)
         {
             if (string.IsNullOrWhiteSpace(validation.BudgetReservationSourceDocumentType))
@@ -192,6 +198,14 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             now, postedByUserId, cancellationToken);
 
         _context.FinancePostingEvents.Add(postingEvent);
+        foreach (var replica in parallelReplicas)
+        {
+            _context.JournalEntries.Add(replica.JournalEntry);
+            _context.FinancePostingEvents.Add(replica.PostingEvent);
+            await _bookBalances.ApplyPostingAsync(tenantId, replica.Book.Id,
+                replica.Book.Code, validation.FiscalPeriod.Id, replica.Book.FunctionalCurrencyCode!,
+                replica.JournalEntry.Transactions.ToArray(), now, postedByUserId, cancellationToken);
+        }
         await _context.SaveChangesAsync(cancellationToken);
         await RecordPostingEventCreatedAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
         await RecordCurrencySnapshotAuditAsync(tenantId, validation, postingEvent, journalEntry.Id, cancellationToken);
@@ -880,6 +894,246 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         };
     }
 
+    private async Task<IReadOnlyList<ParallelReplica>> BuildParallelReplicasAsync(
+        Guid tenantId,
+        ValidatedPosting validation,
+        JournalEntry primaryJournal,
+        DateTime now,
+        Guid? postedByUserId,
+        CancellationToken cancellationToken)
+    {
+        var primaryBook = await _context.AccountingBooks.AsNoTracking().SingleAsync(item =>
+            item.TenantId == tenantId && item.Id == validation.AccountingBookId && !item.IsDeleted,
+            cancellationToken);
+        if (primaryBook.BookType != AccountingBookType.PrimaryFull)
+            return Array.Empty<ParallelReplica>();
+
+        var books = await _context.AccountingBooks.AsNoTracking()
+            .Where(item => item.TenantId == tenantId
+                && item.BookType == AccountingBookType.ParallelFull
+                && item.BaseAccountingBookId == primaryBook.Id
+                && item.LifecycleStatus == AccountingBookLifecycleStatus.Active
+                && item.IsActive && item.AllowsPosting && !item.IsDeleted
+                && item.ReplicationStartDate != null
+                && item.ReplicationStartDate <= validation.PostingDate)
+            .OrderBy(item => item.SortOrder).ThenBy(item => item.Code)
+            .ToListAsync(cancellationToken);
+        if (books.Count == 0) return Array.Empty<ParallelReplica>();
+
+        var sourceAccountIds = primaryJournal.Transactions.Select(item => item.AccountId).Distinct().ToArray();
+        var replicas = new List<ParallelReplica>(books.Count);
+        foreach (var book in books)
+        {
+            if (string.IsNullOrWhiteSpace(book.FunctionalCurrencyCode)
+                || string.Equals(book.FunctionalCurrencyCode, validation.FunctionalCurrencyCode, StringComparison.Ordinal))
+                throw new InvalidOperationException($"PARALLEL_CURRENCY_INVALID: Parallel book {book.Code} must use a foreign currency.");
+
+            var mappedIds = await _context.AccountAccountingBooks.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.AccountingBookId == book.Id
+                    && sourceAccountIds.Contains(item.AccountId) && item.IsEnabled && !item.IsDeleted)
+                .Select(item => item.AccountId).Distinct().ToListAsync(cancellationToken);
+            var missing = sourceAccountIds.Except(mappedIds).ToArray();
+            if (missing.Length > 0)
+                throw new InvalidOperationException($"PARALLEL_ACCOUNT_MAPPING_REQUIRED: Parallel book {book.Code} is missing {missing.Length} inherited account mapping(s).");
+
+            var originalReplica = validation.ReversalOfJournalEntryId.HasValue
+                ? await _context.JournalEntries.Include(item => item.Transactions).SingleOrDefaultAsync(item =>
+                    item.TenantId == tenantId && item.AccountingBookId == book.Id
+                    && item.ReplicatedFromJournalEntryId == validation.ReversalOfJournalEntryId.Value
+                    && !item.IsDeleted, cancellationToken)
+                : null;
+            var rate = originalReplica is null
+                ? await ResolveParallelRateAsync(tenantId, validation.FunctionalCurrencyCode,
+                    book.FunctionalCurrencyCode, validation.PostingDate, cancellationToken)
+                : await ResolveOriginalParallelRateAsync(originalReplica, cancellationToken);
+
+            var lines = primaryJournal.Transactions.OrderBy(item => item.LineNumber).Select(source =>
+            {
+                var debit = RoundMoney(source.DebitAmount * rate.Rate);
+                var credit = RoundMoney(source.CreditAmount * rate.Rate);
+                return new AccountTransaction
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, AccountId = source.AccountId,
+                    TransactionDate = validation.PostingDate, Description = source.Description,
+                    DebitAmount = debit, CreditAmount = credit,
+                    FunctionalCurrencyCode = book.FunctionalCurrencyCode,
+                    TransactionCurrency = validation.FunctionalCurrencyCode,
+                    TransactionDebitAmount = source.DebitAmount,
+                    TransactionCreditAmount = source.CreditAmount,
+                    ForeignCurrencyAmount = source.DebitAmount > 0m ? source.DebitAmount : source.CreditAmount,
+                    ExchangeRateId = rate.Id, ExchangeRate = rate.Rate,
+                    ExchangeRateSource = rate.Source, ExchangeRateDate = rate.Date,
+                    FinanceDimensionSetId = source.FinanceDimensionSetId,
+                    FinanceDimensionSnapshotId = source.FinanceDimensionSnapshotId,
+                    SourceModule = source.SourceModule, SourceDocumentId = source.SourceDocumentId,
+                    SourceDocumentLineId = source.SourceDocumentLineId,
+                    SourceDocumentType = source.SourceDocumentType,
+                    SourceReferenceNumber = source.SourceReferenceNumber,
+                    BookClassification = book.Code, AccountingBookId = book.Id,
+                    FiscalPeriodId = validation.FiscalPeriod.Id, PostedDate = now,
+                    PostingStatus = PostedStatus, SegmentString = source.SegmentString,
+                    LineNumber = source.LineNumber, Notes = source.Notes,
+                    TransactionTag = "Parallel replica", CreatedAt = now,
+                    CreatedBy = _currentUserService.UserName, CreatedById = postedByUserId
+                };
+            }).ToList();
+
+            var debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount));
+            var creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount));
+            var residual = RoundMoney(debitTotal - creditTotal);
+            if (residual != 0m)
+            {
+                if (!book.CurrencyRoundingAccountId.HasValue)
+                    throw new InvalidOperationException($"PARALLEL_ROUNDING_ACCOUNT_REQUIRED: Parallel book {book.Code} has no protected rounding account.");
+                var roundingMapped = await _context.AccountAccountingBooks.AsNoTracking().AnyAsync(item =>
+                    item.TenantId == tenantId && item.AccountingBookId == book.Id
+                    && item.AccountId == book.CurrencyRoundingAccountId.Value
+                    && item.IsEnabled && !item.IsDeleted, cancellationToken);
+                if (!roundingMapped)
+                    throw new InvalidOperationException($"PARALLEL_ROUNDING_ACCOUNT_MAPPING_REQUIRED: Parallel book {book.Code} rounding account is not enabled.");
+                lines.Add(new AccountTransaction
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId,
+                    AccountId = book.CurrencyRoundingAccountId.Value,
+                    TransactionDate = validation.PostingDate,
+                    Description = $"Parallel conversion rounding for {primaryJournal.JournalEntryNumber}",
+                    DebitAmount = residual < 0m ? Math.Abs(residual) : 0m,
+                    CreditAmount = residual > 0m ? residual : 0m,
+                    FunctionalCurrencyCode = book.FunctionalCurrencyCode,
+                    TransactionCurrency = book.FunctionalCurrencyCode,
+                    TransactionDebitAmount = residual < 0m ? Math.Abs(residual) : 0m,
+                    TransactionCreditAmount = residual > 0m ? residual : 0m,
+                    BookClassification = book.Code, AccountingBookId = book.Id,
+                    FiscalPeriodId = validation.FiscalPeriod.Id, PostedDate = now,
+                    PostingStatus = PostedStatus, LineNumber = lines.Count + 1,
+                    TransactionTag = "Parallel rounding", CreatedAt = now,
+                    CreatedBy = _currentUserService.UserName, CreatedById = postedByUserId
+                });
+                debitTotal = RoundMoney(lines.Sum(item => item.DebitAmount));
+                creditTotal = RoundMoney(lines.Sum(item => item.CreditAmount));
+            }
+
+            var journal = new JournalEntry
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                JournalEntryNumber = GeneratePostingJournalNumber("FXREP", now),
+                JournalType = "System Generated", EntryDate = validation.PostingDate,
+                Description = $"{primaryJournal.Description} — {book.Code} translated replica",
+                ReferenceNumber = primaryJournal.ReferenceNumber,
+                SourceModule = primaryJournal.SourceModule, OriginModuleCode = primaryJournal.OriginModuleCode,
+                SourceDocumentId = primaryJournal.SourceDocumentId,
+                SourceDocumentType = primaryJournal.SourceDocumentType,
+                TotalDebitAmount = debitTotal, TotalCreditAmount = creditTotal,
+                BalanceDifference = debitTotal - creditTotal, IsBalanced = debitTotal == creditTotal,
+                IsMultiCurrency = true, PrimaryCurrency = book.FunctionalCurrencyCode,
+                BookClassification = book.Code, AccountingBookId = book.Id,
+                FiscalPeriodId = validation.FiscalPeriod.Id, PostingDate = now,
+                PostedByUserId = postedByUserId, PostingStatus = PostedStatus,
+                ApprovalStatus = "System replica", ReplicatedFromJournalEntryId = primaryJournal.Id,
+                ReplicationExchangeRateId = rate.Id, ReplicationExchangeRate = rate.Rate,
+                ReplicationRateDate = rate.Date, ReplicationRateSource = rate.Source,
+                OriginalJournalEntryId = originalReplica?.Id,
+                ReversalType = originalReplica is null ? null : validation.ReversalType,
+                ReversalReason = originalReplica is null ? null : validation.ReversalReason,
+                CreatedAt = now, CreatedBy = _currentUserService.UserName, CreatedById = postedByUserId,
+                Transactions = lines
+            };
+            foreach (var line in lines) line.JournalEntryId = journal.Id;
+            if (originalReplica != null)
+            {
+                originalReplica.IsReversed = true;
+                originalReplica.ReversalDate = validation.PostingDate;
+                originalReplica.ReversalJournalEntryId = journal.Id;
+                originalReplica.ReversalType = validation.ReversalType;
+                originalReplica.ReversalReason = validation.ReversalReason;
+                var originalLines = originalReplica.Transactions.OrderBy(item => item.LineNumber).ToList();
+                var reversalLines = lines.OrderBy(item => item.LineNumber).ToList();
+                for (var index = 0; index < Math.Min(originalLines.Count, reversalLines.Count); index++)
+                {
+                    originalLines[index].IsReversed = true;
+                    originalLines[index].ReversalDate = validation.PostingDate;
+                    originalLines[index].ReversalTransactionId = reversalLines[index].Id;
+                    reversalLines[index].OriginalTransactionId = originalLines[index].Id;
+                }
+            }
+
+            var fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
+                $"PARALLEL-REPLICA-V1|{validation.RequestFingerprint}|{book.Id:N}|{rate.Id:N}|{rate.Rate.ToString(CultureInfo.InvariantCulture)}")));
+            var eventRow = new FinancePostingEvent
+            {
+                Id = Guid.NewGuid(), TenantId = tenantId,
+                SourceModule = validation.SourceModule, OriginModuleCode = validation.OriginModuleCode,
+                SourceDocumentType = validation.SourceDocumentType, SourceDocumentId = validation.SourceDocumentId,
+                PostingAction = validation.PostingAction, SourceDocumentReference = validation.SourceDocumentReference,
+                IdempotencyKey = ParallelIdempotencyKey(validation.IdempotencyKey, book.Code),
+                RequestFingerprintVersion = "FINPOST-PARALLEL-V1", RequestFingerprint = fingerprint,
+                JournalEntryId = journal.Id, PostingStatus = PostedStatus,
+                PostingDate = validation.PostingDate, RequestedAt = now, PostedAt = now,
+                RequestedByUserId = postedByUserId, TotalDebitAmount = debitTotal,
+                TotalCreditAmount = creditTotal, FunctionalCurrencyCode = book.FunctionalCurrencyCode,
+                HasForeignCurrencyLines = true, PrimaryTransactionCurrencyCode = validation.FunctionalCurrencyCode,
+                PrimaryExchangeRateId = rate.Id, PrimaryExchangeRate = rate.Rate,
+                PrimaryExchangeRateDate = rate.Date, BookClassification = book.Code,
+                AccountingBookId = book.Id, CreatedAt = now,
+                CreatedBy = _currentUserService.UserName, CreatedById = postedByUserId
+            };
+
+            rate.Entity.HasBeenUsedInTransactions = true;
+            rate.Entity.TransactionCount += lines.Count;
+            rate.Entity.FirstUsedDate ??= now;
+            rate.Entity.LastUsedDate = now;
+            replicas.Add(new ParallelReplica(book, journal, eventRow));
+        }
+        return replicas;
+    }
+
+    private async Task<ParallelRate> ResolveParallelRateAsync(Guid tenantId, string sourceCurrency,
+        string targetCurrency, DateTime accountingDate, CancellationToken cancellationToken)
+    {
+        var rate = await _context.ExchangeRates
+            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.IsActive
+                && (item.ApprovalStatus == RateApprovalStatus.Approved
+                    || item.ApprovalStatus == RateApprovalStatus.AutoApproved)
+                && item.BaseCurrencyCode == sourceCurrency && item.TargetCurrencyCode == targetCurrency
+                && item.QuoteSide == ExchangeRateQuoteSide.Mid
+                && item.RateType == ExchangeRateType.Daily
+                && item.EffectiveDate <= accountingDate
+                && (item.EndDate == null || item.EndDate >= accountingDate))
+            .OrderByDescending(item => item.EffectiveDate).ThenByDescending(item => item.Priority)
+            .ThenByDescending(item => item.CreatedDate)
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? throw new InvalidOperationException(
+                $"PARALLEL_EXCHANGE_RATE_REQUIRED: {sourceCurrency}/{targetCurrency} approved rate is missing for accounting date {accountingDate:yyyy-MM-dd}.");
+        // ExchangeRate currently persists Rate as target-to-base (for example,
+        // 1 USD = 12.50 GHS) and InverseRate as base-to-target. A Parallel
+        // replica converts the Primary book into the target book currency, so
+        // its immutable posting multiplier must be the source-to-target side.
+        if (rate.InverseRate <= 0m)
+            throw new InvalidOperationException("PARALLEL_EXCHANGE_RATE_INVALID: Approved Parallel source-to-target rate must be greater than zero.");
+        return new ParallelRate(rate, rate.Id, rate.InverseRate, rate.EffectiveDate.Date, rate.RateSource);
+    }
+
+    private async Task<ParallelRate> ResolveOriginalParallelRateAsync(JournalEntry originalReplica,
+        CancellationToken cancellationToken)
+    {
+        if (!originalReplica.ReplicationExchangeRateId.HasValue
+            || !originalReplica.ReplicationExchangeRate.HasValue
+            || !originalReplica.ReplicationRateDate.HasValue)
+            throw new InvalidOperationException("PARALLEL_REVERSAL_RATE_EVIDENCE_MISSING: Original Parallel replica lacks immutable rate evidence.");
+        var entity = await _context.ExchangeRates.SingleAsync(item =>
+            item.Id == originalReplica.ReplicationExchangeRateId.Value && !item.IsDeleted, cancellationToken);
+        return new ParallelRate(entity, entity.Id, originalReplica.ReplicationExchangeRate.Value,
+            originalReplica.ReplicationRateDate.Value.Date,
+            originalReplica.ReplicationRateSource ?? entity.RateSource);
+    }
+
+    private static string? ParallelIdempotencyKey(string? source, string bookCode)
+    {
+        if (string.IsNullOrWhiteSpace(source)) return null;
+        var value = $"{source}:parallel:{bookCode}";
+        return value.Length <= 450 ? value : value[..450];
+    }
+
     private static decimal GetAccountBalanceDelta(AccountType accountType, AccountTransaction transaction)
     {
         if (transaction.DebitAmount > 0)
@@ -1076,7 +1330,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         }
         // Resolve the concrete tenant-owned book once. Every persisted row and every duplicate,
         // retry, and reversal lookup below carries this ID plus the immutable code snapshot.
-        var accountingBook = await _context.AccountingBooks.AsNoTracking()
+        var accountingBook = await _context.AccountingBooks.AsNoTracking().Include(item => item.BaseAccountingBook)
             .SingleOrDefaultAsync(item => item.TenantId == tenantId && item.Code == normalizedAccountingBookCode && !item.IsDeleted, cancellationToken);
         if (accountingBook == null)
         {
@@ -1090,6 +1344,11 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 tenantId, request, normalizedAccountingBookCode, "BOOK_NOT_POSTABLE", cancellationToken);
             throw new InvalidOperationException("Accounting book is unavailable for posting.");
         }
+        if (accountingBook.BookType == AccountingBookType.ParallelFull)
+            throw new InvalidOperationException("PARALLEL_DIRECT_POSTING_FORBIDDEN: Parallel books accept only immutable system-generated replicas of Primary postings.");
+        if (accountingBook.BookType == AccountingBookType.PrimaryFull
+            && (accountingBook.EffectiveFromUtc.HasValue || accountingBook.EffectiveToUtc.HasValue))
+            throw new InvalidOperationException("PRIMARY_BOOK_EFFECTIVE_DATE_INVALID: The tenant Primary book must be perpetual.");
         var defaultPostingBooks = await _context.AccountingBooks.AsNoTracking()
             .Where(item => item.TenantId == tenantId && item.IsDefault && !item.IsDeleted
                 && (allowHistoricalMappingException || (item.IsActive && item.AllowsPosting)))
@@ -1099,10 +1358,14 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
                 "PRIMARY_BOOK_AUTHORITY_AMBIGUOUS: Exactly one active default posting book is required before posting.");
         var requestedFunctionalCurrency = NormalizeCurrency(request.FunctionalCurrencyCode, "Functional currency");
         var functionalCurrencyConfig = await ResolveTenantFunctionalCurrencyAsync(tenantId, cancellationToken);
-        var functionalCurrency = functionalCurrencyConfig.CurrencyCode;
+        var functionalCurrency = accountingBook.BookType == AccountingBookType.Delta
+            ? accountingBook.BaseAccountingBook?.FunctionalCurrencyCode
+                ?? throw new InvalidOperationException("DELTA_BASE_CURRENCY_REQUIRED: Delta base-book currency authority is missing.")
+            : accountingBook.FunctionalCurrencyCode
+                ?? throw new InvalidOperationException("BOOK_FUNCTIONAL_CURRENCY_REQUIRED: Full-book currency authority is missing.");
         if (!string.Equals(requestedFunctionalCurrency, functionalCurrency, StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Posting functional currency does not match the tenant functional currency.");
+            throw new InvalidOperationException("Posting functional currency does not match the selected book currency.");
         }
         var sourceReference = NormalizeOptional(request.SourceDocumentReference, 100, "Source document reference");
         var idempotencyKey = NormalizeOptional(request.IdempotencyKey, 450, "Idempotency key");
@@ -1150,6 +1413,13 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         }
 
         var postingDate = request.PostingDate.Date;
+        if (accountingBook.BookType == AccountingBookType.Delta)
+        {
+            if (accountingBook.BaseAccountingBook is not { LifecycleStatus: AccountingBookLifecycleStatus.Active, IsActive: true, AllowsPosting: true })
+                throw new InvalidOperationException("DELTA_BASE_NOT_ACTIVE: New Delta postings require an active full base book.");
+            if (accountingBook.EffectiveFromUtc?.Date > postingDate || accountingBook.EffectiveToUtc?.Date < postingDate)
+                throw new InvalidOperationException("DELTA_POSTING_WINDOW_CLOSED: The accounting date is outside this Delta book's optional posting window.");
+        }
         var fiscalPeriod = await ResolveFiscalPeriodAsync(tenantId, postingDate, request.FiscalPeriodId, cancellationToken);
         // Year-end closing may target the closed final period, but an explicit period lock is
         // still authoritative and must be lifted through the controlled reopen process first.
@@ -1177,16 +1447,6 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
         {
             throw new InvalidOperationException("Posting date does not fall inside the fiscal period.");
         }
-
-        // The tenant fiscal calendar remains the outer lock. C4 adds a second, exact-book gate;
-        // absence is not an open period and must never be repaired opportunistically by posting.
-        var bookPeriod = await _context.AccountingBookPeriods.AsNoTracking().SingleOrDefaultAsync(item =>
-            item.TenantId == tenantId && item.AccountingBookId == accountingBook.Id
-            && item.FiscalPeriodId == fiscalPeriod.Id && !item.IsDeleted, cancellationToken);
-        if (bookPeriod == null)
-            throw new InvalidOperationException("ACCOUNTING_BOOK_PERIOD_REQUIRED: Exact-book period authority is missing for the selected fiscal period.");
-        if (bookPeriod.PeriodStatus != AccountingBookPeriodStatus.Open || bookPeriod.PendingStatus is AccountingBookPeriodStatus.Closed or AccountingBookPeriodStatus.Locked)
-            throw new InvalidOperationException("ACCOUNTING_BOOK_PERIOD_NOT_OPEN: The selected accounting book is not open for this fiscal period.");
 
         // Period status answers whether the ledger accepts postings at all. This independent
         // policy answers whether Finance may recognize a transaction after today's business date.
@@ -2061,6 +2321,7 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance posting representation lo
         var matchingIdentities = await _context.FinancePostingEvents.AsNoTracking()
             .Where(
             item => item.TenantId == tenantId && !item.IsDeleted
+                && (item.JournalEntry == null || item.JournalEntry.ReplicatedFromJournalEntryId == null)
                 && ((item.SourceDocumentType == validation.SourceDocumentType
                         && item.SourceDocumentId == validation.SourceDocumentId
                         && item.PostingAction == validation.PostingAction)
@@ -3424,6 +3685,18 @@ IF @result < 0 THROW 51000, 'Could not acquire Finance dimension-set lock.', 1;"
         DateTime? RuleExpiryDate);
 
     private sealed record FunctionalCurrencyConfig(string CurrencyCode, bool IsConfigured);
+
+    private sealed record ParallelReplica(
+        AccountingBook Book,
+        JournalEntry JournalEntry,
+        FinancePostingEvent PostingEvent);
+
+    private sealed record ParallelRate(
+        ExchangeRate Entity,
+        Guid Id,
+        decimal Rate,
+        DateTime Date,
+        string Source);
 
     private sealed record ExchangeRateSnapshot(
         Guid ExchangeRateId,

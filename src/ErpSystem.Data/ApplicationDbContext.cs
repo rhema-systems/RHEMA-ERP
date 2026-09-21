@@ -2946,10 +2946,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint("CK_AccountingBooks_BookType", "[IsDeleted] = 1 OR [BookType] IN (1, 2, 3)");
                 table.HasCheckConstraint("CK_AccountingBooks_LifecycleStatus", "[IsDeleted] = 1 OR [LifecycleStatus] IN (1, 2, 3, 4, 5, 6)");
                 table.HasCheckConstraint("CK_AccountingBooks_EffectiveDates", "[IsDeleted] = 1 OR [EffectiveToUtc] IS NULL OR [EffectiveFromUtc] IS NULL OR [EffectiveToUtc] > [EffectiveFromUtc]");
-                table.HasCheckConstraint("CK_AccountingBooks_BaseShape", "[IsDeleted] = 1 OR ([BookType] = 3 AND [BaseAccountingBookId] IS NOT NULL AND [FunctionalCurrencyCode] IS NULL) OR ([BookType] IN (1, 2) AND [BaseAccountingBookId] IS NULL AND [FunctionalCurrencyCode] IS NOT NULL)");
+                table.HasCheckConstraint("CK_AccountingBooks_BaseShape", "[IsDeleted] = 1 OR ([BookType] = 1 AND [BaseAccountingBookId] IS NULL AND [FunctionalCurrencyCode] IS NOT NULL AND [EffectiveFromUtc] IS NULL AND [EffectiveToUtc] IS NULL AND [ReplicationStartDate] IS NULL AND [ParallelOpeningMode] IS NULL AND [ParallelTranslationMethod] IS NULL) OR ([BookType] = 2 AND [BaseAccountingBookId] IS NOT NULL AND [FunctionalCurrencyCode] IS NOT NULL AND [EffectiveFromUtc] IS NULL AND [EffectiveToUtc] IS NULL AND [ReplicationStartDate] IS NOT NULL AND [ParallelOpeningMode] IS NOT NULL) OR ([BookType] = 3 AND [BaseAccountingBookId] IS NOT NULL AND [FunctionalCurrencyCode] IS NULL AND [ReplicationStartDate] IS NULL AND [ParallelOpeningMode] IS NULL AND [ParallelTranslationMethod] IS NULL)");
                 table.HasCheckConstraint("CK_AccountingBooks_DefaultType", "[IsDeleted] = 1 OR ([BookType] = 1 AND [IsDefault] = 1) OR ([BookType] <> 1 AND [IsDefault] = 0)");
                 table.HasCheckConstraint("CK_AccountingBooks_NoSelfBase", "[IsDeleted] = 1 OR [BaseAccountingBookId] IS NULL OR [BaseAccountingBookId] <> [Id]");
-                table.HasCheckConstraint("CK_AccountingBooks_PostingLifecycle", "[IsDeleted] = 1 OR ([LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([LifecycleStatus] <> 4 AND [IsActive] = 0 AND [AllowsPosting] = 0)");
+                table.HasCheckConstraint("CK_AccountingBooks_PostingLifecycle", "[IsDeleted] = 1 OR ([BookType] = 1 AND [LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([BookType] <> 1 AND [LifecycleStatus] = 4 AND [IsActive] = 1 AND [AllowsPosting] = 1) OR ([BookType] <> 1 AND [LifecycleStatus] <> 4 AND [IsActive] = 0 AND [AllowsPosting] = 0)");
+                table.HasCheckConstraint("CK_AccountingBooks_ParallelTranslationMethod", "[IsDeleted] = 1 OR [BookType] <> 2 OR ([ParallelOpeningMode] = 2 AND [ParallelTranslationMethod] IN (1, 2)) OR ([ParallelOpeningMode] IN (1, 3) AND [ParallelTranslationMethod] IS NULL)");
                 if (this.Database.IsSqlServer())
                 {
                     table.HasCheckConstraint("CK_AccountingBooks_CodeCanonical", "[IsDeleted] = 1 OR ([Code] COLLATE Latin1_General_100_BIN2 = UPPER(LTRIM(RTRIM([Code]))) COLLATE Latin1_General_100_BIN2 AND DATALENGTH([Code]) = DATALENGTH(UPPER(LTRIM(RTRIM([Code])))) AND LEFT([Code], 1) COLLATE Latin1_General_100_BIN2 LIKE N'[A-Z]' AND [Code] COLLATE Latin1_General_100_BIN2 NOT LIKE N'%[^A-Z0-9_]%' AND [Code] COLLATE Latin1_General_100_BIN2 NOT IN (N'ALL', N'ALL_ACTIVE_BOOKS', N'ALL_CLASSIFIED_BOOKS', N'ALLCLASSIFIEDBOOKS'))");
@@ -2966,6 +2967,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.Property(e => e.Description).HasMaxLength(500);
             entity.Property(e => e.Purpose).HasMaxLength(50);
             entity.Property(e => e.FunctionalCurrencyCode).HasMaxLength(3);
+            entity.Property(e => e.ReplicationStartDate).HasColumnType("date");
             entity.Property(e => e.PendingTransitionReason).HasMaxLength(500);
             entity.Property(e => e.TransitionDecisionReason).HasMaxLength(500);
             entity.Property(e => e.PrimaryReplacementReason).HasMaxLength(500);
@@ -2979,6 +2981,16 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasOne(e => e.BaseAccountingBook)
                 .WithMany(e => e.DerivedBooks)
                 .HasForeignKey(e => new { e.TenantId, e.BaseAccountingBookId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CurrencyTranslationReserveAccount)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.CurrencyTranslationReserveAccountId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.CurrencyRoundingAccount)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.CurrencyRoundingAccountId })
                 .HasPrincipalKey(e => new { e.TenantId, e.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.Tenant)
@@ -3636,6 +3648,11 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             entity.HasIndex(e => new { e.TenantId, e.OriginalJournalEntryId })
                 .IsUnique()
                 .HasFilter("[OriginalJournalEntryId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.HasIndex(e => new { e.TenantId, e.AccountingBookId, e.ReplicatedFromJournalEntryId })
+                .IsUnique()
+                .HasFilter("[ReplicatedFromJournalEntryId] IS NOT NULL AND [IsDeleted] = 0");
+            entity.Property(e => e.ReplicationExchangeRate).HasColumnType("decimal(18,6)");
+            entity.Property(e => e.ReplicationRateSource).HasMaxLength(100);
             entity.HasOne(e => e.FiscalPeriod)
                 .WithMany(p => p.JournalEntries)
                 .HasForeignKey(e => e.FiscalPeriodId)
@@ -3644,6 +3661,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 .WithMany()
                 .HasForeignKey(e => new { e.TenantId, e.AccountingBookId })
                 .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReplicatedFromJournalEntry)
+                .WithMany()
+                .HasForeignKey(e => new { e.TenantId, e.ReplicatedFromJournalEntryId })
+                .HasPrincipalKey(e => new { e.TenantId, e.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(e => e.ReplicationExchangeRateRecord)
+                .WithMany()
+                .HasForeignKey(e => e.ReplicationExchangeRateId)
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(e => e.ReversalJournalEntry)
                 .WithMany()
@@ -10549,6 +10575,15 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 if (property.ClrType == typeof(decimal) || property.ClrType == typeof(decimal?))
                 {
+                    // Exchange-rate evidence needs more precision than ordinary quantities. Keep
+                    // this explicit because the broad convention below runs after entity-specific
+                    // configuration and would otherwise silently reduce it to four decimals.
+                    if (property.Name == nameof(JournalEntry.ReplicationExchangeRate))
+                    {
+                        property.SetColumnType("decimal(18,6)");
+                        continue;
+                    }
+
                     // Use precision 18,4 for most decimal fields, 18,2 for currency
                     if (property.Name.Contains("Cost") || property.Name.Contains("Price") ||
                         property.Name.Contains("Amount") || property.Name.Contains("Total") ||

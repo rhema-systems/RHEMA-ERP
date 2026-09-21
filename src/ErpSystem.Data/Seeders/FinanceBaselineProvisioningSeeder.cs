@@ -13,11 +13,11 @@ namespace ErpSystem.Data.Seeders;
 /// </summary>
 public sealed class FinanceBaselineProvisioningSeeder
 {
-    public const string ProvisioningVersion = "FIN-BASELINE-1.0";
+    public const string ProvisioningVersion = "FIN-BASELINE-2.0";
     public const string BaselinePolicyCode = "SYSTEM_DEFAULT_ROUTING";
     public static readonly Guid ProvisioningMakerId = Guid.Parse("00000000-0000-0000-0000-00000000F101");
     public static readonly Guid ProvisioningAuthorityId = Guid.Parse("00000000-0000-0000-0000-00000000F102");
-    private static readonly string[] StandardBookCodes = ["IFRS", "LOCAL_STATUTORY", "MANAGEMENT"];
+    private static readonly string[] StandardBookCodes = ["BASE", "IFRS_ADJUSTMENTS", "USD_PARALLEL"];
     private const string InitializationReason = "System-provisioned zero-balance Finance baseline.";
 
     private readonly ApplicationDbContext _db;
@@ -33,7 +33,7 @@ public sealed class FinanceBaselineProvisioningSeeder
             .OrderBy(item => item.SortOrder).ThenBy(item => item.Code)
             .ToListAsync(cancellationToken);
         if (books.Count != StandardBookCodes.Length)
-            throw new InvalidOperationException("FINANCE_BASELINE_BOOK_SET_INCOMPLETE: all three standard full books must exist before baseline provisioning.");
+            throw new InvalidOperationException("FINANCE_BASELINE_BOOK_SET_INCOMPLETE: BASE, IFRS_ADJUSTMENTS and USD_PARALLEL must exist before baseline provisioning.");
 
         var cutoffPeriod = await FindBaselineCutoffAsync(tenantId, cancellationToken);
         var firstPostingDate = cutoffPeriod.EndDate.Date.AddDays(1);
@@ -44,7 +44,9 @@ public sealed class FinanceBaselineProvisioningSeeder
             throw new InvalidOperationException("FINANCE_BASELINE_FIRST_PERIOD_NOT_OPEN: the first baseline posting period must be globally open and unlocked.");
 
         foreach (var book in books)
-            await ProvisionUntouchedBookAsync(tenantId, tenant.BaseCurrency, book, cutoffPeriod, firstPostingDate, provisionedAtUtc, cancellationToken);
+            await ProvisionUntouchedBookAsync(tenantId,
+                book.BookType == AccountingBookType.ParallelFull ? book.FunctionalCurrencyCode! : tenant.BaseCurrency,
+                book, cutoffPeriod, firstPostingDate, provisionedAtUtc, cancellationToken);
 
         await _db.SaveChangesAsync(cancellationToken);
         await SeedUncoveredApplicabilityAsync(tenantId, books, firstPostingDate, provisionedAtUtc, cancellationToken);
@@ -65,8 +67,10 @@ public sealed class FinanceBaselineProvisioningSeeder
             || await _db.JournalEntries.AnyAsync(item =>
                 item.TenantId == tenantId && item.AccountingBookId == book.Id && !item.IsDeleted, ct);
 
-        if (existingInitialization || hasActivity || book.LifecycleStatus != AccountingBookLifecycleStatus.Configuring
-            || book.IsActive || book.AllowsPosting || book.UpdatedBy != null
+        var expectedLifecycle = book.BookType == AccountingBookType.PrimaryFull
+            ? book.LifecycleStatus == AccountingBookLifecycleStatus.Active && book.IsActive && book.AllowsPosting
+            : book.LifecycleStatus == AccountingBookLifecycleStatus.Configuring && !book.IsActive && !book.AllowsPosting;
+        if (existingInitialization || hasActivity || !expectedLifecycle || book.UpdatedBy != null
             || !string.Equals(book.CreatedBy, $"System ({FinanceClassificationManifestSeeder.ManifestVersion})", StringComparison.Ordinal))
             return;
 
@@ -115,25 +119,7 @@ public sealed class FinanceBaselineProvisioningSeeder
         };
         _db.AccountingBookInitializations.Add(initialization);
 
-        var periods = await _db.FiscalPeriods.AsNoTracking()
-            .Where(item => item.TenantId == tenantId && !item.IsDeleted && item.EndDate.Date > cutoff.EndDate.Date)
-            .OrderBy(item => item.StartDate).ToListAsync(ct);
-        foreach (var period in periods)
-        {
-            _db.AccountingBookPeriods.Add(new AccountingBookPeriod
-            {
-                TenantId = tenantId, AccountingBookId = book.Id, FiscalPeriodId = period.Id,
-                PeriodStatus = period.IsLocked ? AccountingBookPeriodStatus.Locked
-                    : period.IsClosed ? AccountingBookPeriodStatus.Closed
-                    : period.IsOpen ? AccountingBookPeriodStatus.Open : AccountingBookPeriodStatus.Future,
-                DecisionReason = $"Provisioned by {ProvisioningVersion} from tenant fiscal authority.",
-                DecidedByUserId = ProvisioningAuthorityId, DecidedAtUtc = now,
-                CreatedAt = now, CreatedBy = $"System ({ProvisioningVersion})"
-            });
-        }
-
         foreach (var mapping in mappings) mapping.IsEnabled = true;
-        book.EffectiveFromUtc ??= firstPostingDate;
         book.InitializationStartedAtUtc = now;
         book.LifecycleStatus = AccountingBookLifecycleStatus.Active;
         book.IsActive = true;
@@ -144,9 +130,9 @@ public sealed class FinanceBaselineProvisioningSeeder
         DateTime effectiveFrom, DateTime now, CancellationToken ct)
     {
         var activeBooks = books.Where(item => item.LifecycleStatus == AccountingBookLifecycleStatus.Active
-            && item.IsActive && item.AllowsPosting && item.BookType != AccountingBookType.Delta)
+            && item.IsActive && item.AllowsPosting && item.BookType == AccountingBookType.PrimaryFull)
             .OrderBy(item => item.SortOrder).ThenBy(item => item.Code).ToList();
-        if (activeBooks.Count != StandardBookCodes.Length) return;
+        if (activeBooks.Count != 1) return;
         if (await _db.AccountingBookApplicabilityPolicies.AnyAsync(item =>
             item.TenantId == tenantId && item.PolicyCode == BaselinePolicyCode && !item.IsDeleted, ct)) return;
 

@@ -14,9 +14,9 @@ namespace ErpSystem.Api.Services.Finance.Settings;
 
 public sealed class AccountingBookService : IAccountingBookService
 {
-    public const string IfrsCode = "IFRS";
-    public const string LocalStatutoryCode = "LOCAL_STATUTORY";
-    public const string ManagementCode = "MANAGEMENT";
+    public const string PrimaryCode = "BASE";
+    public const string IfrsAdjustmentsCode = "IFRS_ADJUSTMENTS";
+    public const string UsdParallelCode = "USD_PARALLEL";
     public const string WorkflowEntityType = "AccountingBookLifecycle";
     private static readonly HashSet<string> PseudoCodes = new(StringComparer.Ordinal)
     {
@@ -83,17 +83,17 @@ public sealed class AccountingBookService : IAccountingBookService
     public Task<AccountingBookDto> RejectTransitionAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
         DecideAsync(id, request, "Reject", cancellationToken);
     public Task<AccountingBookDto> RequestPrimaryReplacementAsync(Guid id, RequestPrimaryAccountingBookReplacementDto request, CancellationToken cancellationToken = default) =>
-        AtomicAsync(() => RequestPrimaryReplacementCoreAsync(id, request, cancellationToken), cancellationToken);
+        throw new InvalidOperationException("The tenant Primary book is perpetual and cannot be replaced.");
     public Task<AccountingBookDto> ApprovePrimaryReplacementAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
-        DecidePrimaryReplacementAsync(id, request, true, cancellationToken);
+        throw new InvalidOperationException("The tenant Primary book is perpetual and cannot be replaced.");
     public Task<AccountingBookDto> RejectPrimaryReplacementAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
-        DecidePrimaryReplacementAsync(id, request, false, cancellationToken);
+        throw new InvalidOperationException("The tenant Primary book is perpetual and cannot be replaced.");
     public Task<AccountingBookDto> RequestPrimaryReplacementReversalAsync(Guid id, RequestPrimaryAccountingBookReversalDto request, CancellationToken cancellationToken = default) =>
-        AtomicAsync(() => RequestPrimaryReplacementReversalCoreAsync(id, request, cancellationToken), cancellationToken);
+        throw new InvalidOperationException("The tenant Primary book is perpetual and has no replacement designation to reverse.");
     public Task<AccountingBookDto> ApprovePrimaryReplacementReversalAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
-        DecidePrimaryReplacementReversalAsync(id, request, true, cancellationToken);
+        throw new InvalidOperationException("The tenant Primary book is perpetual and has no replacement designation to reverse.");
     public Task<AccountingBookDto> RejectPrimaryReplacementReversalAsync(Guid id, DecideAccountingBookTransitionDto request, CancellationToken cancellationToken = default) =>
-        DecidePrimaryReplacementReversalAsync(id, request, false, cancellationToken);
+        throw new InvalidOperationException("The tenant Primary book is perpetual and has no replacement designation to reverse.");
 
     private async Task<AccountingBookDto> RequestPrimaryReplacementCoreAsync(Guid id, RequestPrimaryAccountingBookReplacementDto request, CancellationToken ct)
     {
@@ -346,14 +346,22 @@ public sealed class AccountingBookService : IAccountingBookService
 
     private async Task<AccountingBookDto> CreateCoreAsync(CreateAccountingBookDto request, CancellationToken ct)
     {
+        if (Enum.TryParse<AccountingBookType>(request.BookType, true, out var requestedType)
+            && requestedType == AccountingBookType.PrimaryFull)
+            throw new InvalidOperationException("The tenant Primary book is system-provisioned and cannot be created manually.");
         var value = await ValidateStructureAsync(request, null, ct);
         var now = DateTime.UtcNow;
         var book = new AccountingBook
         {
             TenantId = TenantId, Code = value.Code, Name = value.Name, Description = value.Description,
             Purpose = value.Purpose, BookType = value.Type, LifecycleStatus = AccountingBookLifecycleStatus.Draft,
-            FunctionalCurrencyCode = value.FunctionalCurrency, EffectiveFromUtc = request.EffectiveFromUtc,
-            EffectiveToUtc = request.EffectiveToUtc, BaseAccountingBookId = value.BaseBook?.Id,
+            FunctionalCurrencyCode = value.FunctionalCurrency, EffectiveFromUtc = value.EffectiveFromUtc,
+            EffectiveToUtc = value.EffectiveToUtc, BaseAccountingBookId = value.BaseBook?.Id,
+            ReplicationStartDate = value.ReplicationStartDate,
+            ParallelOpeningMode = value.ParallelOpeningMode,
+            ParallelTranslationMethod = value.ParallelTranslationMethod,
+            CurrencyTranslationReserveAccountId = value.CurrencyTranslationReserveAccountId,
+            CurrencyRoundingAccountId = value.CurrencyRoundingAccountId,
             IsDefault = value.Type == AccountingBookType.PrimaryFull, IsActive = false, AllowsPosting = false,
             IsSystemDefined = false, SortOrder = request.SortOrder, CreatedAt = now, CreatedBy = ActorName()
         };
@@ -373,7 +381,12 @@ public sealed class AccountingBookService : IAccountingBookService
         var value = await ValidateStructureAsync(request, book, ct);
         var structuralChange = book.Code != value.Code || book.Purpose != value.Purpose || book.BookType != value.Type
             || book.FunctionalCurrencyCode != value.FunctionalCurrency || book.BaseAccountingBookId != value.BaseBook?.Id
-            || book.EffectiveFromUtc != request.EffectiveFromUtc || book.EffectiveToUtc != request.EffectiveToUtc;
+            || book.EffectiveFromUtc != value.EffectiveFromUtc || book.EffectiveToUtc != value.EffectiveToUtc
+            || book.ReplicationStartDate != value.ReplicationStartDate
+            || book.ParallelOpeningMode != value.ParallelOpeningMode
+            || book.ParallelTranslationMethod != value.ParallelTranslationMethod
+            || book.CurrencyTranslationReserveAccountId != value.CurrencyTranslationReserveAccountId
+            || book.CurrencyRoundingAccountId != value.CurrencyRoundingAccountId;
         if (structuralChange && (await HasUseAsync(id, ct) || book.InitializationStartedAtUtc.HasValue
             || book.LifecycleStatus is AccountingBookLifecycleStatus.Initializing or AccountingBookLifecycleStatus.Active
                 or AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired))
@@ -381,8 +394,13 @@ public sealed class AccountingBookService : IAccountingBookService
         var before = Snapshot(book);
         book.Code = value.Code; book.Name = value.Name; book.Description = value.Description; book.Purpose = value.Purpose;
         book.BookType = value.Type; book.FunctionalCurrencyCode = value.FunctionalCurrency;
-        book.EffectiveFromUtc = request.EffectiveFromUtc; book.EffectiveToUtc = request.EffectiveToUtc;
+        book.EffectiveFromUtc = value.EffectiveFromUtc; book.EffectiveToUtc = value.EffectiveToUtc;
         book.BaseAccountingBookId = value.BaseBook?.Id; book.IsDefault = value.Type == AccountingBookType.PrimaryFull;
+        book.ReplicationStartDate = value.ReplicationStartDate;
+        book.ParallelOpeningMode = value.ParallelOpeningMode;
+        book.ParallelTranslationMethod = value.ParallelTranslationMethod;
+        book.CurrencyTranslationReserveAccountId = value.CurrencyTranslationReserveAccountId;
+        book.CurrencyRoundingAccountId = value.CurrencyRoundingAccountId;
         book.SortOrder = request.SortOrder; book.UpdatedAt = DateTime.UtcNow; book.UpdatedBy = ActorName();
         await _db.SaveChangesAsync(ct);
         await AuditAsync(FinanceAuditEvents.AccountingBookUpdated, book, before, Snapshot(book), "Accounting book configuration updated.", ct);
@@ -394,6 +412,8 @@ public sealed class AccountingBookService : IAccountingBookService
         if (!Enum.TryParse<AccountingBookLifecycleStatus>(request.TargetStatus, true, out var target)) throw new InvalidOperationException("Accounting-book target lifecycle status is invalid.");
         if (string.IsNullOrWhiteSpace(request.Reason)) throw new InvalidOperationException("A lifecycle-transition reason is required.");
         var book = await BookQuery().SingleOrDefaultAsync(item => item.Id == id, ct) ?? throw new KeyNotFoundException("Accounting book was not found.");
+        if (book.BookType == AccountingBookType.PrimaryFull)
+            throw new InvalidOperationException("The tenant Primary book is perpetual and does not support lifecycle transitions.");
         ApplyRowVersion(book, request.RowVersion);
         if (book.PendingLifecycleStatus.HasValue || book.PrimaryReplacementRequestedAtUtc.HasValue || await HasPendingPrimaryReversalAsync(ct)) throw new InvalidOperationException("The accounting book already has a pending governed change.");
         await ValidateGovernedTransitionAsync(book, target, ct);
@@ -436,11 +456,11 @@ public sealed class AccountingBookService : IAccountingBookService
             var target = book.PendingLifecycleStatus!.Value;
             book.LifecycleStatus = target;
             if (target == AccountingBookLifecycleStatus.Initializing) book.InitializationStartedAtUtc ??= DateTime.UtcNow;
-            if (book.BookType == AccountingBookType.Delta
+            if ((book.BookType is AccountingBookType.Delta or AccountingBookType.ParallelFull)
                 && target == AccountingBookLifecycleStatus.Initializing)
             {
                 if (_initialization == null)
-                    throw new InvalidOperationException("Delta structure provisioning is unavailable.");
+                    throw new InvalidOperationException("Derived-book structure provisioning is unavailable.");
                 await _initialization.EnsureDeltaStructureAsync(book.Id, ct);
             }
             ApplyPostingFlags(book); ClearPending(book, true);
@@ -462,7 +482,7 @@ public sealed class AccountingBookService : IAccountingBookService
         return await LoadDtoAsync(book.Id, ct);
     }, ct);
 
-    private async Task<(string Code, string Name, string? Description, string Purpose, AccountingBookType Type, string? FunctionalCurrency, AccountingBook? BaseBook)> ValidateStructureAsync(CreateAccountingBookDto request, AccountingBook? currentBook, CancellationToken ct)
+    private async Task<ValidatedBookStructure> ValidateStructureAsync(CreateAccountingBookDto request, AccountingBook? currentBook, CancellationToken ct)
     {
         var currentId = currentBook?.Id;
         if (string.IsNullOrWhiteSpace(request.Code) || string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Purpose))
@@ -481,6 +501,13 @@ public sealed class AccountingBookService : IAccountingBookService
 
         AccountingBook? baseBook = null;
         string? currency;
+        DateTime? effectiveFrom = null;
+        DateTime? effectiveTo = null;
+        DateTime? replicationStart = null;
+        ParallelBookOpeningMode? openingMode = null;
+        ParallelBookTranslationMethod? translationMethod = null;
+        Guid? translationReserveAccountId = null;
+        Guid? roundingAccountId = null;
         if (type == AccountingBookType.Delta)
         {
             if (!request.BaseAccountingBookId.HasValue || request.BaseAccountingBookId == currentId)
@@ -488,6 +515,12 @@ public sealed class AccountingBookService : IAccountingBookService
             baseBook = await _db.AccountingBooks.SingleOrDefaultAsync(item => item.Id == request.BaseAccountingBookId && item.TenantId == TenantId
                 && !item.IsDeleted, ct)
                 ?? throw new InvalidOperationException("Delta base book is invalid for this tenant.");
+            if (baseBook.BookType == AccountingBookType.Delta)
+                throw new InvalidOperationException("A Delta book must be based on a Primary or Parallel full book, never another Delta.");
+            if (request.ReplicationStartDate.HasValue || !string.IsNullOrWhiteSpace(request.ParallelOpeningMode)
+                || !string.IsNullOrWhiteSpace(request.ParallelTranslationMethod)
+                || request.CurrencyTranslationReserveAccountId.HasValue || request.CurrencyRoundingAccountId.HasValue)
+                throw new InvalidOperationException("Parallel replication and translation settings are not valid for a Delta book.");
             var candidate = new AccountingBook
             {
                 Id = currentId ?? Guid.NewGuid(),
@@ -499,10 +532,19 @@ public sealed class AccountingBookService : IAccountingBookService
             };
             await ValidateFullDeltaLineageAsync(candidate, candidate.LifecycleStatus, ct);
             currency = null;
+            effectiveFrom = request.EffectiveFromUtc?.Date;
+            effectiveTo = request.EffectiveToUtc?.Date;
         }
-        else
+        else if (type == AccountingBookType.ParallelFull)
         {
-            if (request.BaseAccountingBookId.HasValue) throw new InvalidOperationException("A full accounting book cannot have a base book.");
+            if (request.EffectiveFromUtc.HasValue || request.EffectiveToUtc.HasValue)
+                throw new InvalidOperationException("Parallel books use a replication cutoff, not lifecycle effective dates.");
+            if (!request.BaseAccountingBookId.HasValue || request.BaseAccountingBookId == currentId)
+                throw new InvalidOperationException("A Parallel book requires the tenant Primary book as its base.");
+            baseBook = await _db.AccountingBooks.AsNoTracking().SingleOrDefaultAsync(item =>
+                item.Id == request.BaseAccountingBookId && item.TenantId == TenantId
+                && item.BookType == AccountingBookType.PrimaryFull && item.IsDefault && !item.IsDeleted, ct)
+                ?? throw new InvalidOperationException("A Parallel book must be based on the tenant Primary book.");
             var setting = await _db.FinanceSettings.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted)
                 .Select(item => item.BaseCurrency).SingleOrDefaultAsync(ct);
             var tenantCurrency = await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId && !item.IsDeleted)
@@ -515,10 +557,43 @@ public sealed class AccountingBookService : IAccountingBookService
                 || !IsCanonicalCurrency(currency))
                 throw new InvalidOperationException(
                     "FUNCTIONAL_CURRENCY_INVALID: Tenant, Finance Settings, and requested full-book currencies must each be exactly three uppercase ASCII letters.");
-            if (!string.Equals(tenantCurrency, setting, StringComparison.Ordinal)
-                || !string.Equals(tenantCurrency, currency, StringComparison.Ordinal))
+            if (!string.Equals(tenantCurrency, setting, StringComparison.Ordinal))
                 throw new InvalidOperationException(
-                    "FUNCTIONAL_CURRENCY_MISMATCH: Tenant, Finance Settings, and requested full-book currencies must match exactly.");
+                    "FUNCTIONAL_CURRENCY_MISMATCH: Tenant and Finance Settings base currencies must match exactly.");
+            if (string.Equals(tenantCurrency, currency, StringComparison.Ordinal))
+                throw new InvalidOperationException("A Parallel book must use a foreign currency different from the tenant Primary currency.");
+            if (!request.ReplicationStartDate.HasValue)
+                throw new InvalidOperationException("A Parallel replication start date is required.");
+            if (!Enum.TryParse<ParallelBookOpeningMode>(request.ParallelOpeningMode, true, out var parsedOpeningMode))
+                throw new InvalidOperationException("A valid Parallel opening mode is required.");
+            openingMode = parsedOpeningMode;
+            if (openingMode == ParallelBookOpeningMode.GovernedOpeningConversion)
+            {
+                if (!Enum.TryParse<ParallelBookTranslationMethod>(request.ParallelTranslationMethod, true, out var parsedTranslationMethod))
+                    throw new InvalidOperationException("A governed Parallel opening conversion requires a translation method.");
+                translationMethod = parsedTranslationMethod;
+            }
+            else if (!string.IsNullOrWhiteSpace(request.ParallelTranslationMethod))
+                throw new InvalidOperationException("A translation method applies only to governed Parallel opening conversion.");
+            replicationStart = request.ReplicationStartDate.Value.Date;
+            translationReserveAccountId = request.CurrencyTranslationReserveAccountId;
+            roundingAccountId = request.CurrencyRoundingAccountId;
+        }
+        else
+        {
+            if (request.BaseAccountingBookId.HasValue || request.EffectiveFromUtc.HasValue || request.EffectiveToUtc.HasValue
+                || request.ReplicationStartDate.HasValue || !string.IsNullOrWhiteSpace(request.ParallelOpeningMode)
+                || !string.IsNullOrWhiteSpace(request.ParallelTranslationMethod))
+                throw new InvalidOperationException("The tenant Primary book is perpetual and cannot have base, effective-date, or replication settings.");
+            var setting = await _db.FinanceSettings.AsNoTracking().Where(item => item.TenantId == TenantId && !item.IsDeleted)
+                .Select(item => item.BaseCurrency).SingleOrDefaultAsync(ct);
+            var tenantCurrency = await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId && !item.IsDeleted)
+                .Select(item => item.BaseCurrency).SingleOrDefaultAsync(ct);
+            currency = request.FunctionalCurrencyCode;
+            if (!IsCanonicalCurrency(tenantCurrency) || !IsCanonicalCurrency(setting) || !IsCanonicalCurrency(currency)
+                || !string.Equals(tenantCurrency, setting, StringComparison.Ordinal)
+                || !string.Equals(tenantCurrency, currency, StringComparison.Ordinal))
+                throw new InvalidOperationException("The Primary book currency must exactly match tenant and Finance Settings base currency authority.");
         }
         var otherPrimaryCount = await _db.AccountingBooks.CountAsync(item => item.TenantId == TenantId
             && item.BookType == AccountingBookType.PrimaryFull && item.IsDefault && item.Id != currentId && !item.IsDeleted, ct);
@@ -533,8 +608,26 @@ public sealed class AccountingBookService : IAccountingBookService
             if (currentIsPrimary && type != AccountingBookType.PrimaryFull)
                 throw new InvalidOperationException("The tenant's primary/default book cannot be converted without a governed replacement workflow.");
         }
-        return (code, request.Name.Trim(), Optional(request.Description), request.Purpose.Trim(), type, currency, baseBook);
+        return new ValidatedBookStructure(code, request.Name.Trim(), Optional(request.Description), request.Purpose.Trim(),
+            type, currency, baseBook, effectiveFrom, effectiveTo, replicationStart, openingMode,
+            translationMethod, translationReserveAccountId, roundingAccountId);
     }
+
+    private sealed record ValidatedBookStructure(
+        string Code,
+        string Name,
+        string? Description,
+        string Purpose,
+        AccountingBookType Type,
+        string? FunctionalCurrency,
+        AccountingBook? BaseBook,
+        DateTime? EffectiveFromUtc,
+        DateTime? EffectiveToUtc,
+        DateTime? ReplicationStartDate,
+        ParallelBookOpeningMode? ParallelOpeningMode,
+        ParallelBookTranslationMethod? ParallelTranslationMethod,
+        Guid? CurrencyTranslationReserveAccountId,
+        Guid? CurrencyRoundingAccountId);
 
     private static void ValidateTransition(AccountingBookLifecycleStatus current, AccountingBookLifecycleStatus target)
     {
@@ -557,10 +650,8 @@ public sealed class AccountingBookService : IAccountingBookService
         CancellationToken ct)
     {
         ValidateTransition(book.LifecycleStatus, target);
-        if (target == AccountingBookLifecycleStatus.Retired
-            && book.BookType == AccountingBookType.PrimaryFull
-            && book.IsDefault)
-            throw new InvalidOperationException("The tenant's primary/default book cannot be retired without a governed replacement workflow.");
+        if (book.BookType == AccountingBookType.PrimaryFull)
+            throw new InvalidOperationException("The tenant Primary book is perpetual and cannot be suspended, retired, or replaced.");
         if (target == AccountingBookLifecycleStatus.Active)
         {
             var readiness = await GetActivationReadinessAsync(book, ct);
@@ -569,8 +660,6 @@ public sealed class AccountingBookService : IAccountingBookService
         }
 
         // One tenant-scoped graph is used for both child advancement and ancestor invalidation.
-        // A direct-only query is insufficient because Delta books may legitimately base on another
-        // Delta, and a stale intermediate lifecycle would otherwise invalidate descendants silently.
         var tenantBooks = await ValidateFullDeltaLineageAsync(book, target, ct);
         ValidateDependentDeltaLineage(book, target, tenantBooks);
     }
@@ -611,34 +700,28 @@ public sealed class AccountingBookService : IAccountingBookService
         AccountingBookLifecycleStatus target,
         IReadOnlyDictionary<Guid, AccountingBook> byId)
     {
-        if (book.BookType != AccountingBookType.Delta)
+        if (book.BookType == AccountingBookType.PrimaryFull)
         {
             if (book.BaseAccountingBookId.HasValue)
-                throw new InvalidOperationException("A full accounting book cannot retain Delta base-book lineage.");
+                throw new InvalidOperationException("The tenant Primary book cannot have a base book.");
             return;
         }
-
-        var seen = new HashSet<Guid> { book.Id };
-        var current = book;
-        while (current.BookType == AccountingBookType.Delta)
-        {
-            if (!current.BaseAccountingBookId.HasValue
-                || !byId.TryGetValue(current.BaseAccountingBookId.Value, out var baseBook))
-                throw new InvalidOperationException("Delta base-book lineage is missing, retired, deleted or belongs to another tenant.");
-            if (!seen.Add(baseBook.Id))
-                throw new InvalidOperationException("Accounting-book base cycles are prohibited.");
-            if (baseBook.LifecycleStatus is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)
-                throw new InvalidOperationException(
-                    $"Delta base-book lineage is invalid because ancestor {baseBook.Code} is {baseBook.LifecycleStatus}.");
-            if (baseBook.PendingLifecycleStatus is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)
-                throw new InvalidOperationException(
-                    $"Delta base-book lineage is invalid because ancestor {baseBook.Code} has a pending {baseBook.PendingLifecycleStatus} transition.");
-            if (!BaseStatusSupports(target, baseBook.LifecycleStatus))
-                throw new InvalidOperationException($"Base book {baseBook.Code} in {baseBook.LifecycleStatus} cannot support a Delta transition to {target}.");
-            current = baseBook;
-        }
-        if (current.BaseAccountingBookId.HasValue)
-            throw new InvalidOperationException("A full accounting book cannot retain Delta base-book lineage.");
+        if (!book.BaseAccountingBookId.HasValue
+            || !byId.TryGetValue(book.BaseAccountingBookId.Value, out var baseBook))
+            throw new InvalidOperationException("Derived-book base lineage is missing, deleted, or belongs to another tenant.");
+        if (baseBook.Id == book.Id)
+            throw new InvalidOperationException("Accounting-book base cycles are prohibited.");
+        if (book.BookType == AccountingBookType.ParallelFull
+            && (baseBook.BookType != AccountingBookType.PrimaryFull || !baseBook.IsDefault))
+            throw new InvalidOperationException("A Parallel book must be based directly on the tenant Primary book.");
+        if (book.BookType == AccountingBookType.Delta
+            && baseBook.BookType is not (AccountingBookType.PrimaryFull or AccountingBookType.ParallelFull))
+            throw new InvalidOperationException("A Delta book must be based directly on a Primary or Parallel full book.");
+        if (baseBook.LifecycleStatus is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired
+            || baseBook.PendingLifecycleStatus is AccountingBookLifecycleStatus.Suspended or AccountingBookLifecycleStatus.Retired)
+            throw new InvalidOperationException($"Base book {baseBook.Code} is not available to support this derived book.");
+        if (!BaseStatusSupports(target, baseBook.LifecycleStatus))
+            throw new InvalidOperationException($"Base book {baseBook.Code} in {baseBook.LifecycleStatus} cannot support a transition to {target}.");
     }
 
     private static bool BaseStatusSupports(AccountingBookLifecycleStatus childTarget, AccountingBookLifecycleStatus baseStatus) =>
@@ -711,26 +794,100 @@ public sealed class AccountingBookService : IAccountingBookService
             reversible?.NewPrimaryBookId == id ? reversible : null);
     }
 
-    public async Task<DeltaBookCombinedReportDto> GetDeltaCombinedReportAsync(Guid id, DateTime asOfDate, CancellationToken cancellationToken = default)
+    public async Task<DeltaBookLedgerInquiryDto> GetDeltaLedgerAsync(Guid id, DateTime? fromDate = null,
+        DateTime? toDate = null, CancellationToken cancellationToken = default)
     {
-        if (asOfDate == default) throw new InvalidOperationException("A report as-of date is required.");
         var delta = await BookQuery().AsNoTracking().SingleOrDefaultAsync(item => item.Id == id, cancellationToken)
             ?? throw new KeyNotFoundException("Accounting book was not found.");
-        if (delta.BookType != AccountingBookType.Delta || !delta.BaseAccountingBookId.HasValue || delta.BaseAccountingBook == null)
-            throw new InvalidOperationException("A combined report is available only for a Delta book with governed base-book authority.");
+        if (delta.BookType != AccountingBookType.Delta
+            || !delta.BaseAccountingBookId.HasValue || delta.BaseAccountingBook == null)
+            throw new InvalidOperationException("A combined Delta ledger inquiry requires a Delta book with governed base-book authority.");
+        if (delta.BaseAccountingBook.BookType == AccountingBookType.Delta)
+            throw new InvalidOperationException("Nested Delta ledger inheritance is not supported.");
+        if (fromDate.HasValue && toDate.HasValue && toDate.Value.Date < fromDate.Value.Date)
+            throw new InvalidOperationException("Ledger inquiry end date cannot be before its start date.");
+
         var baseBook = delta.BaseAccountingBook;
+        var bookIds = new[] { baseBook.Id, delta.Id };
+        var query = _db.JournalEntries.AsNoTracking().Where(item => item.TenantId == TenantId
+            && !item.IsDeleted && item.PostingStatus == "Posted" && bookIds.Contains(item.AccountingBookId));
+        if (fromDate.HasValue)
+            query = query.Where(item => item.EntryDate >= fromDate.Value.Date);
+        if (toDate.HasValue)
+        {
+            var exclusiveEnd = toDate.Value.Date.AddDays(1);
+            query = query.Where(item => item.EntryDate < exclusiveEnd);
+        }
+
+        var rows = await query.OrderByDescending(item => item.EntryDate)
+            .ThenByDescending(item => item.PostingDate)
+            .ThenByDescending(item => item.JournalEntryNumber)
+            .Select(item => new DeltaBookLedgerEntryDto
+            {
+                JournalEntryId = item.Id,
+                JournalEntryNumber = item.JournalEntryNumber,
+                AccountingDate = item.EntryDate,
+                PostedAtUtc = item.PostingDate,
+                Description = item.Description,
+                ReferenceNumber = item.ReferenceNumber,
+                SourceBookCode = item.AccountingBookId == baseBook.Id ? baseBook.Code : delta.Code,
+                Layer = item.AccountingBookId == baseBook.Id ? "Inherited" : "Adjustment",
+                TotalDebit = item.TotalDebitAmount,
+                TotalCredit = item.TotalCreditAmount
+            })
+            .ToListAsync(cancellationToken);
+
+        return new DeltaBookLedgerInquiryDto
+        {
+            DeltaAccountingBookId = delta.Id,
+            DeltaAccountingBookCode = delta.Code,
+            BaseAccountingBookId = baseBook.Id,
+            BaseAccountingBookCode = baseBook.Code,
+            FunctionalCurrencyCode = baseBook.FunctionalCurrencyCode
+                ?? await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId)
+                    .Select(item => item.BaseCurrency).SingleAsync(cancellationToken),
+            FromDate = fromDate?.Date,
+            ToDate = toDate?.Date,
+            Entries = rows
+        };
+    }
+
+    public Task<DeltaBookCombinedReportDto> GetDeltaCombinedReportAsync(Guid id, DateTime asOfDate, CancellationToken cancellationToken = default) =>
+        GetDeltaCombinedReportAsync(new[] { id }, asOfDate, cancellationToken);
+
+    public async Task<DeltaBookCombinedReportDto> GetDeltaCombinedReportAsync(IReadOnlyCollection<Guid> ids, DateTime asOfDate, CancellationToken cancellationToken = default)
+    {
+        if (asOfDate == default) throw new InvalidOperationException("A report as-of date is required.");
+        var selectedIds = ids.Where(item => item != Guid.Empty).Distinct().ToArray();
+        if (selectedIds.Length == 0)
+            throw new InvalidOperationException("Select at least one Delta adjustment layer.");
+        var loadedDeltas = await BookQuery().AsNoTracking().Where(item => selectedIds.Contains(item.Id))
+            .ToListAsync(cancellationToken);
+        var deltaById = loadedDeltas.ToDictionary(item => item.Id);
+        var deltas = selectedIds.Where(deltaById.ContainsKey).Select(id => deltaById[id]).ToList();
+        if (deltas.Count != selectedIds.Length)
+            throw new KeyNotFoundException("One or more selected accounting books were not found.");
+        if (deltas.Any(delta => delta.BookType != AccountingBookType.Delta
+            || !delta.BaseAccountingBookId.HasValue || delta.BaseAccountingBook == null))
+            throw new InvalidOperationException("A combined report accepts only Delta books with governed base-book authority.");
+        var baseIds = deltas.Select(item => item.BaseAccountingBookId!.Value).Distinct().ToArray();
+        if (baseIds.Length != 1)
+            throw new InvalidOperationException("Selected Delta layers must share the same full base book and currency.");
+        var baseBook = deltas[0].BaseAccountingBook!;
         if (baseBook.BookType == AccountingBookType.Delta)
             throw new InvalidOperationException("Nested Delta combined reporting is not yet supported; select a Delta book whose base is a full book.");
+        var deltaIds = deltas.Select(item => item.Id).ToArray();
+        var reportBookIds = deltaIds.Append(baseBook.Id).ToArray();
 
         var mappedAccountIds = await _db.AccountAccountingBooks.AsNoTracking()
             .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.IsEnabled
-                && (item.AccountingBookId == baseBook.Id || item.AccountingBookId == delta.Id))
+                && reportBookIds.Contains(item.AccountingBookId))
             .Select(item => item.AccountId).Distinct().ToListAsync(cancellationToken);
         var exclusiveEnd = asOfDate.Date.AddDays(1);
         var balanceRows = await _db.AccountTransactions.AsNoTracking()
             .Where(item => item.TenantId == TenantId && !item.IsDeleted && item.PostingStatus == "Posted"
                 && item.TransactionDate < exclusiveEnd
-                && (item.AccountingBookId == baseBook.Id || item.AccountingBookId == delta.Id))
+                && reportBookIds.Contains(item.AccountingBookId))
             .GroupBy(item => new { item.AccountingBookId, item.AccountId })
             .Select(group => new
             {
@@ -752,7 +909,7 @@ public sealed class AccountingBookService : IAccountingBookService
         var lines = accounts.Select(account =>
         {
             var baseBalance = balances.GetValueOrDefault((baseBook.Id, account.Id));
-            var deltaBalance = balances.GetValueOrDefault((delta.Id, account.Id));
+            var deltaBalance = deltaIds.Sum(deltaId => balances.GetValueOrDefault((deltaId, account.Id)));
             return new DeltaBookCombinedReportLineDto
             {
                 AccountId = account.Id, AccountNumber = account.AccountNumber, AccountName = account.AccountName,
@@ -764,7 +921,10 @@ public sealed class AccountingBookService : IAccountingBookService
             ?? await _db.Tenants.AsNoTracking().Where(item => item.Id == TenantId).Select(item => item.BaseCurrency).SingleAsync(cancellationToken);
         return new DeltaBookCombinedReportDto
         {
-            DeltaAccountingBookId = delta.Id, DeltaAccountingBookCode = delta.Code,
+            DeltaAccountingBookId = deltas.Count == 1 ? deltas[0].Id : Guid.Empty,
+            DeltaAccountingBookCode = string.Join(" + ", deltas.Select(item => item.Code)),
+            DeltaAccountingBookIds = deltaIds,
+            DeltaAccountingBookCodes = deltas.Select(item => item.Code).ToArray(),
             BaseAccountingBookId = baseBook.Id, BaseAccountingBookCode = baseBook.Code,
             FunctionalCurrencyCode = currency, AsOfDate = asOfDate.Date,
             BaseTotal = lines.Sum(item => item.BaseSignedBalance),
@@ -779,6 +939,11 @@ public sealed class AccountingBookService : IAccountingBookService
         Purpose = book.Purpose, BookType = book.BookType.ToString(), LifecycleStatus = book.LifecycleStatus.ToString(),
         FunctionalCurrencyCode = book.FunctionalCurrencyCode, EffectiveFromUtc = book.EffectiveFromUtc, EffectiveToUtc = book.EffectiveToUtc,
         BaseAccountingBookId = book.BaseAccountingBookId, BaseAccountingBookCode = book.BaseAccountingBook?.Code,
+        ReplicationStartDate = book.ReplicationStartDate,
+        ParallelOpeningMode = book.ParallelOpeningMode?.ToString(),
+        ParallelTranslationMethod = book.ParallelTranslationMethod?.ToString(),
+        CurrencyTranslationReserveAccountId = book.CurrencyTranslationReserveAccountId,
+        CurrencyRoundingAccountId = book.CurrencyRoundingAccountId,
         InitializationStartedAtUtc = book.InitializationStartedAtUtc, IsActive = book.IsActive, IsDefault = book.IsDefault,
         AllowsPosting = book.AllowsPosting, IsSystemDefined = book.IsSystemDefined, SortOrder = book.SortOrder,
         PendingLifecycleStatus = book.PendingLifecycleStatus?.ToString(), PendingTransitionReason = book.PendingTransitionReason,
@@ -819,7 +984,10 @@ public sealed class AccountingBookService : IAccountingBookService
     private static object Snapshot(AccountingBook item) => new
     {
         item.Code, item.Name, item.Description, item.Purpose, BookType = item.BookType.ToString(), LifecycleStatus = item.LifecycleStatus.ToString(),
-        item.FunctionalCurrencyCode, item.EffectiveFromUtc, item.EffectiveToUtc, item.BaseAccountingBookId, item.IsDefault,
+        item.FunctionalCurrencyCode, item.EffectiveFromUtc, item.EffectiveToUtc, item.BaseAccountingBookId,
+        item.ReplicationStartDate, ParallelOpeningMode = item.ParallelOpeningMode?.ToString(),
+        ParallelTranslationMethod = item.ParallelTranslationMethod?.ToString(),
+        item.CurrencyTranslationReserveAccountId, item.CurrencyRoundingAccountId, item.IsDefault,
         item.IsActive, item.AllowsPosting, item.SortOrder, item.InitializationStartedAtUtc,
         PendingLifecycleStatus = item.PendingLifecycleStatus?.ToString(), item.PendingTransitionReason,
         item.TransitionRequestedByUserId, item.TransitionRequestedAtUtc, item.TransitionWorkflowInstanceId,

@@ -169,6 +169,27 @@ class FinanceDataService {
     return apiService.get(`/finance/accounting-books/${id}/delta-combined-report?${query}`);
   }
 
+  async getMultiDeltaBookCombinedReport(
+    ids: string[],
+    asOfDate: string
+  ): Promise<import('@/types/finance').DeltaBookCombinedReport> {
+    const query = new URLSearchParams({ asOfDate });
+    ids.forEach(id => query.append('deltaAccountingBookIds', id));
+    return apiService.get(`/finance/accounting-books/delta-combined-report?${query}`);
+  }
+
+  async getDeltaBookLedger(
+    id: string,
+    fromDate?: string,
+    toDate?: string
+  ): Promise<import('@/types/finance').DeltaBookLedgerInquiry> {
+    const query = new URLSearchParams();
+    if (fromDate) query.set('fromDate', fromDate);
+    if (toDate) query.set('toDate', toDate);
+    const suffix = query.toString() ? `?${query}` : '';
+    return apiService.get(`/finance/accounting-books/${id}/delta-ledger${suffix}`);
+  }
+
   async createAccountingBook(dto: SaveAccountingBook): Promise<AccountingBook> {
     return apiService.post<AccountingBook>('/finance/accounting-books', dto);
   }

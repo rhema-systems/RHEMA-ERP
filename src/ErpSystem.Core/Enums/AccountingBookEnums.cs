@@ -32,6 +32,24 @@ public enum AccountingBookInitializationMode
     BaseBalancesWithOpeningAdjustments = 3
 }
 
+/// <summary>
+/// Governs how a foreign-currency Parallel book establishes its balance at the
+/// replication cutoff. The selected mode becomes immutable after approval.
+/// </summary>
+public enum ParallelBookOpeningMode
+{
+    ZeroOpening = 1,
+    GovernedOpeningConversion = 2,
+    HistoricalReplay = 3
+}
+
+/// <summary>Rate methodology used by a governed Parallel opening conversion.</summary>
+public enum ParallelBookTranslationMethod
+{
+    SingleApprovedRate = 1,
+    ClassificationDriven = 2
+}
+
 public enum AccountingBookInitializationStatus
 {
     Draft = 1,

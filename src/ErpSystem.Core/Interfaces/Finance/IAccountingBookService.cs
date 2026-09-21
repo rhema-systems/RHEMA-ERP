@@ -11,6 +11,10 @@ namespace ErpSystem.Core.Interfaces.Finance
 
         Task<DeltaBookCombinedReportDto> GetDeltaCombinedReportAsync(Guid id, DateTime asOfDate, CancellationToken cancellationToken = default);
 
+        Task<DeltaBookCombinedReportDto> GetDeltaCombinedReportAsync(IReadOnlyCollection<Guid> ids, DateTime asOfDate, CancellationToken cancellationToken = default);
+
+        Task<DeltaBookLedgerInquiryDto> GetDeltaLedgerAsync(Guid id, DateTime? fromDate = null, DateTime? toDate = null, CancellationToken cancellationToken = default);
+
         Task<AccountingBookDto> CreateAsync(CreateAccountingBookDto request, CancellationToken cancellationToken = default);
 
         Task<AccountingBookDto> UpdateAsync(Guid id, UpdateAccountingBookDto request, CancellationToken cancellationToken = default);

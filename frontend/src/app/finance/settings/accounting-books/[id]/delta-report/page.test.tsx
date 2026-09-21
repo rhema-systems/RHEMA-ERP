@@ -19,6 +19,7 @@ vi.mock('@/services/document-output.service', () => ({
 
 const report = {
   deltaAccountingBookId: 'delta-1', deltaAccountingBookCode: 'IFRS_CONSOL_ADJ',
+  deltaAccountingBookIds: ['delta-1'], deltaAccountingBookCodes: ['IFRS_CONSOL_ADJ'],
   baseAccountingBookId: 'ifrs-1', baseAccountingBookCode: 'IFRS', functionalCurrencyCode: 'GHS',
   asOfDate: '2026-09-21T00:00:00', baseTotal: 0, deltaTotal: 0, combinedTotal: 0,
   lines: [{ accountId: 'cash', accountNumber: '1000', accountName: 'Cash', accountType: 'Asset', baseSignedBalance: 1000, deltaSignedBalance: 125, combinedSignedBalance: 1125 }],

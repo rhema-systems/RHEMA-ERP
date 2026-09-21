@@ -45,14 +45,18 @@ public sealed class BaseDeltaReportDocumentBuilder : IDocumentBuilder
         if (!SupportsFormat(request.Format))
             throw new NotSupportedException("Base + Delta report currently supports PDF output only.");
 
-        var deltaBookId = Guid.TryParse(Option(request, "deltaAccountingBookId"), out var parsedBookId)
-            && parsedBookId != Guid.Empty
-                ? parsedBookId
-                : throw new InvalidOperationException("A Delta accounting-book ID is required.");
+        var deltaBookIds = (Option(request, "deltaAccountingBookIds") ?? Option(request, "deltaAccountingBookId") ?? string.Empty)
+            .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(value => Guid.TryParse(value, out var parsedBookId) ? parsedBookId : Guid.Empty)
+            .Where(value => value != Guid.Empty)
+            .Distinct()
+            .ToArray();
+        if (deltaBookIds.Length == 0)
+            throw new InvalidOperationException("At least one Delta accounting-book ID is required.");
         var asOfDate = DateTime.TryParse(Option(request, "asOfDate"), out var parsedDate)
             ? parsedDate.Date
             : DateTime.UtcNow.Date;
-        var report = await _accountingBooks.GetDeltaCombinedReportAsync(deltaBookId, asOfDate, cancellationToken);
+        var report = await _accountingBooks.GetDeltaCombinedReportAsync(deltaBookIds, asOfDate, cancellationToken);
         var companyName = await _tenantSettings.GetCompanyNameAsync();
         var content = BuildPdf(report, companyName, _currentUser.UserName);
 

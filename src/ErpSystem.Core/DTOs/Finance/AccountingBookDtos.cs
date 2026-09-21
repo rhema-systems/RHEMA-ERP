@@ -15,6 +15,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime? EffectiveToUtc { get; set; }
         public Guid? BaseAccountingBookId { get; set; }
         public string? BaseAccountingBookCode { get; set; }
+        public DateTime? ReplicationStartDate { get; set; }
+        public string? ParallelOpeningMode { get; set; }
+        public string? ParallelTranslationMethod { get; set; }
+        public Guid? CurrencyTranslationReserveAccountId { get; set; }
+        public Guid? CurrencyRoundingAccountId { get; set; }
         public DateTime? InitializationStartedAtUtc { get; set; }
         public bool IsActive { get; set; }
         public bool IsDefault { get; set; }
@@ -56,6 +61,11 @@ namespace ErpSystem.Core.DTOs.Finance
         public DateTime? EffectiveFromUtc { get; set; }
         public DateTime? EffectiveToUtc { get; set; }
         public Guid? BaseAccountingBookId { get; set; }
+        public DateTime? ReplicationStartDate { get; set; }
+        public string? ParallelOpeningMode { get; set; }
+        public string? ParallelTranslationMethod { get; set; }
+        public Guid? CurrencyTranslationReserveAccountId { get; set; }
+        public Guid? CurrencyRoundingAccountId { get; set; }
         public int SortOrder { get; set; }
     }
 
@@ -115,6 +125,8 @@ namespace ErpSystem.Core.DTOs.Finance
     {
         public Guid DeltaAccountingBookId { get; set; }
         public string DeltaAccountingBookCode { get; set; } = string.Empty;
+        public IReadOnlyList<Guid> DeltaAccountingBookIds { get; set; } = Array.Empty<Guid>();
+        public IReadOnlyList<string> DeltaAccountingBookCodes { get; set; } = Array.Empty<string>();
         public Guid BaseAccountingBookId { get; set; }
         public string BaseAccountingBookCode { get; set; } = string.Empty;
         public string FunctionalCurrencyCode { get; set; } = string.Empty;
@@ -123,6 +135,32 @@ namespace ErpSystem.Core.DTOs.Finance
         public decimal DeltaTotal { get; set; }
         public decimal CombinedTotal { get; set; }
         public IReadOnlyList<DeltaBookCombinedReportLineDto> Lines { get; set; } = Array.Empty<DeltaBookCombinedReportLineDto>();
+    }
+
+    public sealed class DeltaBookLedgerEntryDto
+    {
+        public Guid JournalEntryId { get; set; }
+        public string JournalEntryNumber { get; set; } = string.Empty;
+        public DateTime AccountingDate { get; set; }
+        public DateTime? PostedAtUtc { get; set; }
+        public string Description { get; set; } = string.Empty;
+        public string? ReferenceNumber { get; set; }
+        public string SourceBookCode { get; set; } = string.Empty;
+        public string Layer { get; set; } = string.Empty;
+        public decimal TotalDebit { get; set; }
+        public decimal TotalCredit { get; set; }
+    }
+
+    public sealed class DeltaBookLedgerInquiryDto
+    {
+        public Guid DeltaAccountingBookId { get; set; }
+        public string DeltaAccountingBookCode { get; set; } = string.Empty;
+        public Guid BaseAccountingBookId { get; set; }
+        public string BaseAccountingBookCode { get; set; } = string.Empty;
+        public string FunctionalCurrencyCode { get; set; } = string.Empty;
+        public DateTime? FromDate { get; set; }
+        public DateTime? ToDate { get; set; }
+        public IReadOnlyList<DeltaBookLedgerEntryDto> Entries { get; set; } = Array.Empty<DeltaBookLedgerEntryDto>();
     }
 
     public class AccountAccountingBookDto

@@ -61,11 +61,7 @@ import { InitializationEvidencePack } from '@/components/finance/accounting-book
 import { SearchableOptionPicker } from '@/components/finance/accounting-books/searchable-option-picker';
 import type { Currency } from '@/types/finance';
 
-const bookTypes: AccountingBookType[] = [
-  'PrimaryFull',
-  'ParallelFull',
-  'Delta',
-];
+const bookTypes: AccountingBookType[] = ['ParallelFull', 'Delta'];
 const lifecycleStates: AccountingBookLifecycleStatus[] = [
   'Draft',
   'Configuring',
@@ -96,6 +92,9 @@ const blankForm = (): SaveAccountingBook => ({
   effectiveFromUtc: null,
   effectiveToUtc: null,
   baseAccountingBookId: null,
+  replicationStartDate: '',
+  parallelOpeningMode: 'ZeroOpening',
+  parallelTranslationMethod: null,
   sortOrder: 100,
 });
 
@@ -106,9 +105,9 @@ const typeOf = (book: AccountingBook): AccountingBookType =>
   book.bookType ?? (book.isDefault ? 'PrimaryFull' : 'ParallelFull');
 
 const baseBookLabel = (book: AccountingBook) =>
-  typeOf(book) === 'Delta'
+  typeOf(book) !== 'PrimaryFull'
     ? book.baseAccountingBookCode || 'Not set'
-    : 'Not applicable — full book';
+    : 'Not applicable — tenant Primary';
 
 const dateValue = (value?: string | null) => (value ? value.slice(0, 10) : '');
 const utcDate = (value: string) => (value ? `${value}T00:00:00.000Z` : null);
@@ -460,9 +459,14 @@ export default function AccountingBooksSettingsPage() {
   const baseBookOptions = useMemo(
     () =>
       books.filter(
-        (book) => book.id !== editing?.id && statusOf(book) !== 'Retired'
+        (book) =>
+          book.id !== editing?.id &&
+          statusOf(book) !== 'Retired' &&
+          (form.bookType === 'ParallelFull'
+            ? typeOf(book) === 'PrimaryFull'
+            : typeOf(book) !== 'Delta')
       ),
-    [books, editing?.id]
+    [books, editing?.id, form.bookType]
   );
   const currencyOptions = useMemo(() => {
     const active = currencies
@@ -498,6 +502,14 @@ export default function AccountingBooksSettingsPage() {
             effectiveFromUtc: dateValue(book.effectiveFromUtc),
             effectiveToUtc: dateValue(book.effectiveToUtc),
             baseAccountingBookId: book.baseAccountingBookId ?? null,
+            replicationStartDate: dateValue(book.replicationStartDate),
+            parallelOpeningMode: book.parallelOpeningMode ?? 'ZeroOpening',
+            parallelTranslationMethod:
+              book.parallelTranslationMethod ?? null,
+            currencyTranslationReserveAccountId:
+              book.currencyTranslationReserveAccountId ?? null,
+            currencyRoundingAccountId:
+              book.currencyRoundingAccountId ?? null,
             sortOrder: book.sortOrder,
             rowVersion: book.rowVersion,
           }
@@ -536,9 +548,24 @@ export default function AccountingBooksSettingsPage() {
             ? null
             : form.functionalCurrencyCode?.trim().toUpperCase(),
         baseAccountingBookId:
-          form.bookType === 'Delta' ? form.baseAccountingBookId : null,
-        effectiveFromUtc: utcDate(form.effectiveFromUtc ?? ''),
-        effectiveToUtc: utcDate(form.effectiveToUtc ?? ''),
+          form.bookType === 'PrimaryFull' ? null : form.baseAccountingBookId,
+        effectiveFromUtc:
+          form.bookType === 'Delta' ? utcDate(form.effectiveFromUtc ?? '') : null,
+        effectiveToUtc:
+          form.bookType === 'Delta' ? utcDate(form.effectiveToUtc ?? '') : null,
+        replicationStartDate:
+          form.bookType === 'ParallelFull'
+            ? utcDate(form.replicationStartDate ?? '')
+            : null,
+        parallelOpeningMode:
+          form.bookType === 'ParallelFull'
+            ? form.parallelOpeningMode
+            : null,
+        parallelTranslationMethod:
+          form.bookType === 'ParallelFull' &&
+          form.parallelOpeningMode === 'GovernedOpeningConversion'
+            ? form.parallelTranslationMethod
+            : null,
       };
       if (editing)
         await financeDataService.updateAccountingBook(editing.id, request);
@@ -991,39 +1018,12 @@ export default function AccountingBooksSettingsPage() {
                 book.pendingLifecycleStatus &&
                 isIndependentChecker(user?.id, book.transitionRequestedByUserId)
             );
-            const canDecidePrimary = Boolean(
-              access.canApproveTransition &&
-                book.primaryReplacementRequestedAtUtc &&
-                isIndependentChecker(
-                  user?.id,
-                  book.primaryReplacementRequestedByUserId
-                )
-            );
-            const canRequestPrimary = Boolean(
-              access.canRequestTransition &&
-                typeOf(book) === 'ParallelFull' &&
-                status === 'Active' &&
-                book.activationReady &&
-                !book.pendingLifecycleStatus &&
-                !book.primaryReplacementRequestedAtUtc &&
-                !book.primaryReversalRequestedAtUtc
-            );
-            const canRequestPrimaryReversal = Boolean(
-              access.canRequestTransition &&
-                book.isDefault &&
-                book.reversiblePrimaryDesignationId &&
-                !book.primaryReversalRequestedAtUtc &&
-                !book.pendingLifecycleStatus &&
-                !book.primaryReplacementRequestedAtUtc
-            );
-            const canDecidePrimaryReversal = Boolean(
-              access.canApproveTransition &&
-                book.primaryReversalRequestedAtUtc &&
-                isIndependentChecker(
-                  user?.id,
-                  book.primaryReversalRequestedByUserId
-                )
-            );
+            // The tenant Primary is system-provisioned and perpetual. Legacy replacement
+            // evidence remains readable, but no new replacement/reversal actions are exposed.
+            const canDecidePrimary = false;
+            const canRequestPrimary = false;
+            const canRequestPrimaryReversal = false;
+            const canDecidePrimaryReversal = false;
             const isGovernedChangeRequester = Boolean(
               user?.id &&
                 ((book.primaryReplacementRequestedAtUtc &&
@@ -1068,8 +1068,18 @@ export default function AccountingBooksSettingsPage() {
                       {book.functionalCurrencyCode || 'Inherited from base'}
                     </span>
                     <span>
-                      <span className="text-muted-foreground">Effective:</span>{' '}
-                      {dateValue(book.effectiveFromUtc) || 'Not set'}
+                      <span className="text-muted-foreground">
+                        {typeOf(book) === 'Delta'
+                          ? 'Posting window:'
+                          : typeOf(book) === 'ParallelFull'
+                            ? 'Replication starts:'
+                            : 'Availability:'}
+                      </span>{' '}
+                      {typeOf(book) === 'Delta'
+                        ? `${dateValue(book.effectiveFromUtc) || 'Open'} → ${dateValue(book.effectiveToUtc) || 'Open'}`
+                        : typeOf(book) === 'ParallelFull'
+                          ? dateValue(book.replicationStartDate) || 'Not set'
+                          : 'Perpetual'}
                     </span>
                     <span>
                       <span className="text-muted-foreground">Base:</span>{' '}
@@ -1134,14 +1144,21 @@ export default function AccountingBooksSettingsPage() {
                       <Link
                         href={`/finance/settings/accounting-books/${book.id}/readiness`}
                       >
-                        Periods &amp; initialization
+                        Initialization
                       </Link>
                     </Button>
                     {typeOf(book) === 'Delta' && status === 'Active' && book.allowsPosting && (
-                      <>
                         <Button asChild variant="outline" size="sm">
                           <Link href={`/finance/journal-entries/new?journalType=Delta%20Adjustment&book=${encodeURIComponent(book.code)}`}>
                             New Delta adjustment
+                          </Link>
+                        </Button>
+                    )}
+                    {typeOf(book) === 'Delta' && (
+                      <>
+                        <Button asChild variant="outline" size="sm">
+                          <Link href={`/finance/settings/accounting-books/${book.id}/delta-ledger`}>
+                            Delta ledger
                           </Link>
                         </Button>
                         <Button asChild variant="outline" size="sm">
@@ -1166,7 +1183,8 @@ export default function AccountingBooksSettingsPage() {
                         Edit
                       </Button>
                     )}
-                    {access.canRequestTransition &&
+                    {typeOf(book) !== 'PrimaryFull' &&
+                      access.canRequestTransition &&
                       !book.pendingLifecycleStatus &&
                       !book.primaryReplacementRequestedAtUtc &&
                       !book.primaryReversalRequestedAtUtc &&
@@ -1305,9 +1323,9 @@ export default function AccountingBooksSettingsPage() {
               {editing ? `Edit ${editing.code}` : 'Create accounting book'}
             </DialogTitle>
             <DialogDescription>
-              Book type, purpose, currency, effective dates and base
-              relationship become immutable once initialization or accounting
-              use begins.
+              Delta books add governed adjustment layers. Parallel books are
+              foreign-currency replicas of the tenant Primary and begin at an
+              explicit replication cutoff.
             </DialogDescription>
           </DialogHeader>
           {structuralLocked && (
@@ -1383,7 +1401,7 @@ export default function AccountingBooksSettingsPage() {
                 placeholder="e.g. IFRS reporting"
               />
             </div>
-            {form.bookType === 'Delta' ? (
+            {form.bookType !== 'PrimaryFull' && (
               <div className="sm:col-span-2">
                 <Label>Base accounting book</Label>
                 <Select
@@ -1405,7 +1423,8 @@ export default function AccountingBooksSettingsPage() {
                   </SelectContent>
                 </Select>
               </div>
-            ) : (
+            )}
+            {form.bookType !== 'Delta' && (
               <div>
                 <Label>Functional currency</Label>
                 <SearchableOptionPicker
@@ -1453,30 +1472,96 @@ export default function AccountingBooksSettingsPage() {
                 }
               />
             </div>
-            <div>
-              <Label htmlFor="book-from">Effective from</Label>
-              <Input
-                id="book-from"
-                type="date"
-                value={dateValue(form.effectiveFromUtc)}
-                disabled={structuralLocked}
-                onChange={(event) =>
-                  setForm({ ...form, effectiveFromUtc: event.target.value })
-                }
-              />
-            </div>
-            <div>
-              <Label htmlFor="book-to">Effective to</Label>
-              <Input
-                id="book-to"
-                type="date"
-                value={dateValue(form.effectiveToUtc)}
-                disabled={structuralLocked}
-                onChange={(event) =>
-                  setForm({ ...form, effectiveToUtc: event.target.value })
-                }
-              />
-            </div>
+            {form.bookType === 'Delta' && (
+              <>
+                <div>
+                  <Label htmlFor="book-from">Posting allowed from (optional)</Label>
+                  <Input
+                    id="book-from"
+                    type="date"
+                    value={dateValue(form.effectiveFromUtc)}
+                    disabled={structuralLocked}
+                    onChange={(event) =>
+                      setForm({ ...form, effectiveFromUtc: event.target.value })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="book-to">Posting allowed through (optional)</Label>
+                  <Input
+                    id="book-to"
+                    type="date"
+                    value={dateValue(form.effectiveToUtc)}
+                    disabled={structuralLocked}
+                    onChange={(event) =>
+                      setForm({ ...form, effectiveToUtc: event.target.value })
+                    }
+                  />
+                </div>
+              </>
+            )}
+            {form.bookType === 'ParallelFull' && (
+              <>
+                <div>
+                  <Label htmlFor="replication-start">Replication start date</Label>
+                  <Input
+                    id="replication-start"
+                    type="date"
+                    value={dateValue(form.replicationStartDate)}
+                    disabled={structuralLocked}
+                    onChange={(event) =>
+                      setForm({ ...form, replicationStartDate: event.target.value })
+                    }
+                  />
+                </div>
+                <div>
+                  <Label>Opening treatment</Label>
+                  <Select
+                    value={form.parallelOpeningMode ?? 'ZeroOpening'}
+                    disabled={structuralLocked}
+                    onValueChange={(value) =>
+                      setForm({
+                        ...form,
+                        parallelOpeningMode: value as SaveAccountingBook['parallelOpeningMode'],
+                        parallelTranslationMethod:
+                          value === 'GovernedOpeningConversion'
+                            ? form.parallelTranslationMethod ?? 'ClassificationDriven'
+                            : null,
+                      })
+                    }
+                  >
+                    <SelectTrigger aria-label="Parallel opening treatment"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="ZeroOpening">Zero opening</SelectItem>
+                      <SelectItem value="GovernedOpeningConversion">Convert Primary closing balances</SelectItem>
+                      <SelectItem value="HistoricalReplay">Replay historical Primary transactions</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {form.parallelOpeningMode === 'GovernedOpeningConversion' && (
+                  <div className="sm:col-span-2">
+                    <Label>Opening translation method</Label>
+                    <Select
+                      value={form.parallelTranslationMethod ?? 'ClassificationDriven'}
+                      disabled={structuralLocked}
+                      onValueChange={(value) =>
+                        setForm({
+                          ...form,
+                          parallelTranslationMethod:
+                            value as SaveAccountingBook['parallelTranslationMethod'],
+                        })
+                      }
+                    >
+                      <SelectTrigger aria-label="Opening translation method"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="ClassificationDriven">Classification-driven rates</SelectItem>
+                        <SelectItem value="SingleApprovedRate">One approved cutoff rate</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </>
+            )}
             <div className="sm:col-span-2">
               <Label htmlFor="book-description">Description</Label>
               <Textarea
@@ -1500,13 +1585,14 @@ export default function AccountingBooksSettingsPage() {
                 !form.code.trim() ||
                 !form.name.trim() ||
                 !form.purpose.trim() ||
-                (form.bookType === 'Delta'
-                  ? !form.baseAccountingBookId
-                  : currencyLoading ||
+                (form.bookType !== 'PrimaryFull' && !form.baseAccountingBookId) ||
+                (form.bookType === 'ParallelFull' &&
+                  (!form.replicationStartDate ||
+                    currencyLoading ||
                     Boolean(currencyError) ||
                     !currencyOptions.some(
                       (option) => option.value === form.functionalCurrencyCode
-                    ))
+                    )))
               }
               onClick={() => void save()}
             >

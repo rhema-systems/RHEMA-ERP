@@ -158,6 +158,22 @@ public class JournalEntry : BusinessEntity
     [Required]
     public Guid AccountingBookId { get; set; }
 
+    /// <summary>
+    /// Primary journal replicated into this immutable Parallel representation.
+    /// Null for Primary and Delta journals.
+    /// </summary>
+    public Guid? ReplicatedFromJournalEntryId { get; set; }
+
+    public Guid? ReplicationExchangeRateId { get; set; }
+
+    [Column(TypeName = "decimal(18,6)")]
+    public decimal? ReplicationExchangeRate { get; set; }
+
+    public DateTime? ReplicationRateDate { get; set; }
+
+    [MaxLength(100)]
+    public string? ReplicationRateSource { get; set; }
+
     // ========================================================================
     // PERIOD MANAGEMENT
     // ========================================================================
@@ -430,6 +446,12 @@ public class JournalEntry : BusinessEntity
 
     [ForeignKey(nameof(AccountingBookId))]
     public virtual AccountingBook AccountingBook { get; set; } = null!;
+
+    [ForeignKey(nameof(ReplicatedFromJournalEntryId))]
+    public virtual JournalEntry? ReplicatedFromJournalEntry { get; set; }
+
+    [ForeignKey(nameof(ReplicationExchangeRateId))]
+    public virtual ExchangeRate? ReplicationExchangeRateRecord { get; set; }
 
     /// <summary>
     /// The reversal journal entry (if this entry was reversed).
