@@ -531,6 +531,10 @@ exit 0
         'DISPOSABLE_RESET_FINAL_HISTORY_DRIFT',
         'DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT',
         'DISPOSABLE_RESET_SERVER_IDENTITY_DRIFT',
+        'requires the current baseline as the first compiled migration',
+        'requires an exact, unique, ordered compiled migration set before DROP',
+        '$script:authoritativeMigrationCount = $repositoryMigrations.Count',
+        '$script:authoritativeLatestMigration = $repositoryLatest',
         'RHEMAERP_DISPOSABLE_DEVELOPMENT_RESET',
         "Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'",
         'Get-DisposableTargetMigrationState $evidenceDirectory $repositoryMigrations',
@@ -545,6 +549,11 @@ exit 0
         $reset -match '(?i)retry\s*\(' -or $reset -match 'Remove-Item[^\r\n]+backup') {
         throw 'Disposable reset contains an extra destructive, retry, or backup-cleanup path.'
     }
+    $baselineCheck = $reset.IndexOf("`$repositoryMigrations[0] -ne '20260916132000_DisposableDevelopmentCurrentModelBaseline'", [StringComparison]::Ordinal)
+    $dropIndex = $reset.IndexOf('DROP DATABASE [RhemaERP]', [StringComparison]::Ordinal)
+    if ($baselineCheck -lt 0 -or $baselineCheck -ge $dropIndex) {
+        throw 'Disposable reset does not verify that the compiled migration chain starts with the disposable-development baseline before DROP.'
+    }
     if (-not $text.Contains("server = '<REDACTED_LOCAL_SERVER>'")) {
         throw 'Disposable reset status does not redact the local machine/server identity.'
     }
@@ -556,7 +565,6 @@ exit 0
     $singleUserIndex = $reset.IndexOf('ALTER DATABASE [RhemaERP] SET SINGLE_USER', [StringComparison]::Ordinal)
     $finalHistoryIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_HISTORY_DRIFT', [StringComparison]::Ordinal)
     $finalFingerprintIndex = $reset.IndexOf('DISPOSABLE_RESET_FINAL_FINGERPRINT_DRIFT', [StringComparison]::Ordinal)
-    $dropIndex = $reset.IndexOf('DROP DATABASE [RhemaERP]', [StringComparison]::Ordinal)
     if ($singleUserIndex -lt 0 -or $finalHistoryIndex -le $singleUserIndex -or
         $finalFingerprintIndex -le $finalHistoryIndex -or $dropIndex -le $finalFingerprintIndex) {
         throw 'Final history/fingerprint checks are not inside the quiescent destructive SQL boundary immediately before DROP.'

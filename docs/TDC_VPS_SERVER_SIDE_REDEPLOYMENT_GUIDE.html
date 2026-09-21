@@ -39,6 +39,52 @@ git log -1 --oneline</pre>
 <p>If the VPS database is empty or the owner has explicitly declared every record disposable, use the separately reviewed guarded reset procedure and its backup/evidence requirements. If the VPS data must be retained or ownership is uncertain, keep the previous compatible code/database pair running. A data-preserving migration or export/import cutover must be designed and reviewed separately before this branch can be deployed.</p>
 </section>
 
+<section class="card"><h2>Disposable test-data reset</h2>
+<p>Use this procedure only after the database owner has explicitly declared the VPS <code>RhemaERP</code> data disposable. It makes a verified <code>COPY_ONLY</code> SQL backup, records immutable reset evidence outside the repository, then drops and recreates the database. It does not run against a remote SQL server, a different database name, an unknown Git state, or enabled Finance accounting producers.</p>
+<div class="notice"><strong>Run this before the normal deployment gate.</strong> Stop the API and frontend so neither service reconnects while the reset owns the database. Do not delete the backup or evidence directory if the reset fails; the script deliberately does not retry or auto-restore.</div>
+<pre>Set-Location $repo
+Stop-Service RhemaERPFrontend
+Stop-Service RhemaERPAPI
+
+# Read the existing protected SQL setting into this PowerShell process only.
+# The command does not display the connection string.
+$parameters = Get-ItemProperty 'HKLM:\SYSTEM\CurrentControlSet\Services\RhemaERPAPI\Parameters'
+$allEntries = @(@($parameters.AppEnvironment) + @($parameters.AppEnvironmentExtra)) |
+  ForEach-Object { [string]$_ }
+$connectionEntry = @($allEntries | Where-Object {
+  $_ -like 'ConnectionStrings__DefaultConnection=*'
+} | Select-Object -Last 1)[0]
+if ([string]::IsNullOrWhiteSpace($connectionEntry)) {
+  throw 'The API NSSM configuration has no protected SQL connection setting.'
+}
+$env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION =
+  $connectionEntry.Substring('ConnectionStrings__DefaultConnection='.Length)
+
+$env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_RESET_ATTESTATION =
+  'I_ATTEST_RHEMAERP_DEVELOPMENT_DATA_IS_DISPOSABLE'
+$env:RHEMA_GL_REVIEWED_COMMIT = (git rev-parse HEAD).Trim()
+$env:RHEMA_GL_REVIEWED_TREE = (git rev-parse 'HEAD^{tree}').Trim()
+$env:Finance__AccountingEvents__Enabled = 'false'
+$env:Finance__ProducerIntents__Enabled = 'false'
+$env:Finance__ProducerIntentGroups__Enabled = 'false'
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$evidence = "C:\RhemaERP\backups\disposable-reset-$stamp"
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\scripts\finance\Invoke-GlCutoverRehearsal.ps1 `
+  -Mode ResetDisposableDevelopment `
+  -ConfirmDisposableDevelopmentReset `
+  -EvidenceDirectory $evidence</pre>
+<p>Continue only when the reset reports a verified backup, exact final migration history, seed and invariant checks, and <code>DBCC CHECKDB</code>. Keep <code>$evidence</code> and its SQL backup. Then clear only the process-scoped sensitive variables, start the services, and use the normal dry run and deployment in the next section.</p>
+<pre>Remove-Item Env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_CONNECTION -ErrorAction SilentlyContinue
+Remove-Item Env:RHEMA_GL_DISPOSABLE_DEVELOPMENT_RESET_ATTESTATION -ErrorAction SilentlyContinue
+Start-Service RhemaERPAPI
+Start-Service RhemaERPFrontend
+
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -LocalVps -DryRun
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\Deploy-RhemaVps.ps1 -Environment Test -LocalVps</pre>
+</section>
+
 <section class="card"><h2>3. Run the deployment gate and build a production release</h2>
 <p>The repository deployment script is the supported release mechanism. Its <code>-LocalVps</code> mode runs entirely on the VPS: no SSH connection and no SSH key are used. It verifies the exact <code>origin/master</code> commit, checks database migration parity, creates application and SQL backups, publishes a self-contained API, builds a clean production frontend, applies both packages, restarts services, and records release evidence.</p>
 <pre>Set-Location $repo
