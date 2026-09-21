@@ -864,7 +864,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
             if (approvedRate.ApprovalStatus != RateApprovalStatus.Approved ||
                 !string.Equals(approvedRate.TargetCurrencyCode, currency, StringComparison.OrdinalIgnoreCase) ||
                 !string.Equals(approvedRate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
-                RoundRate(approvedRate.Rate) != RoundRate(rate))
+                RoundRate(approvedRate.InverseRate) != RoundRate(rate))
                 throw new InvalidOperationException("Opening exchange-rate currency/value does not match approved rate evidence.");
         }
         return new SpecializedOpeningContext(settings, functionalCurrency, currency, rate,
@@ -2429,7 +2429,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
         if (approvedRate == null || approvedRate.ApprovalStatus != RateApprovalStatus.Approved ||
             !string.Equals(approvedRate.BaseCurrencyCode, functionalCurrency, StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(approvedRate.TargetCurrencyCode, currency, StringComparison.OrdinalIgnoreCase) ||
-            RoundRate(approvedRate.Rate) != RoundRate(sourceRate))
+            RoundRate(approvedRate.InverseRate) != RoundRate(sourceRate))
         {
             errors.Add("Foreign-currency opening advance rate is missing, unapproved, or no longer matches its source evidence.");
         }
@@ -3587,7 +3587,7 @@ public sealed class OpeningBalanceService : IOpeningBalanceService
 
         return new BankExchangeRateSnapshot(
             approvedRate.Id,
-            RoundRate(approvedRate.Rate),
+            RoundRate(approvedRate.InverseRate),
             approvedRate.EffectiveDate.Date,
             approvedRate.RateType,
             approvedRate.QuoteSide,

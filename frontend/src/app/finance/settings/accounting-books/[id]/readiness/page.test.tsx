@@ -60,57 +60,13 @@ describe('accounting book C4 readiness', () => {
         expect(screen.queryByRole('button', { name: 'Load governed preparation' })).not.toBeInTheDocument();
     });
 
-    it('creates only a Future book period under the manage permission', async () => {
-        permissions.add('Finance.AccountingBooks.Periods.Manage');
-        vi.mocked(financeDataService.getFiscalPeriods).mockResolvedValue([{ id: 'fp-2', fiscalYearId: 'fy', periodNumber: 2, periodCode: '2026-02', periodName: 'February', startDate: '2026-02-01', endDate: '2026-02-28', periodStatus: 'Open', allowFutureDating: false, isClosed: false, isLocked: false }] as never);
-        vi.mocked(financeDataService.createAccountingBookPeriod).mockResolvedValue(period as never);
-        render(<AccountingBookReadinessPage />);
-        fireEvent.click(await screen.findByLabelText('Fiscal period'));
-        fireEvent.change(screen.getByPlaceholderText('Search period code or name…'), { target: { value: 'February' } });
-        fireEvent.click(screen.getByText('2026-02 — February'));
-        fireEvent.click(screen.getByRole('button', { name: 'Add Future period' }));
-        await waitFor(() => expect(financeDataService.createAccountingBookPeriod).toHaveBeenCalledWith('book-1', 'fp-2'));
-        await waitFor(() => expect(screen.getByLabelText('Fiscal period')).toHaveTextContent('Select another fiscal period'));
-        expect(screen.getByLabelText('Fiscal period')).not.toHaveTextContent('fp-2');
-    });
-
-    it('requires a reason and rowversion for a period transition request', async () => {
-        permissions.add('Finance.AccountingBooks.Periods.Manage');
-        vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([period] as never);
-        render(<AccountingBookReadinessPage />);
-        fireEvent.click(await screen.findByRole('button', { name: 'Request Open…' }));
-        expect(screen.getByRole('button', { name: 'Submit Open request' })).toBeDisabled();
-        fireEvent.change(screen.getByLabelText('Reason to request Open'), { target: { value: 'Open after close checks' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Submit Open request' }));
-        await waitFor(() => expect(financeDataService.requestAccountingBookPeriodTransition).toHaveBeenCalledWith('book-1', 'bp-1', 'Open', 'Open after close checks', 'AQ=='));
-    });
-
-    it('shows a guided next action without collapsing the independent controls', async () => {
+    it('shows a guided next action and defers posting periods to the tenant fiscal calendar', async () => {
         render(<AccountingBookReadinessPage />);
         expect(await screen.findByText('Setup progress')).toBeInTheDocument();
         expect(screen.getByText('Next required action')).toBeInTheDocument();
         expect(screen.getByText('Load governed preparation and save the initialization evidence.')).toBeInTheDocument();
-        expect(screen.getByText('Open period required')).toBeInTheDocument();
-    });
-
-    it('makes period approval a clear confirmation and does not clear a repeated selection', async () => {
-        permissions.add('Finance.AccountingBooks.Periods.Approve');
-        vi.mocked(financeDataService.getAccountingBookPeriods).mockResolvedValue([{
-            ...period, pendingStatus: 'Open', requestedByUserId: 'maker',
-        }] as never);
-        vi.mocked(financeDataService.decideAccountingBookPeriodTransition).mockResolvedValue(period as never);
-        render(<AccountingBookReadinessPage />);
-
-        const selectApproval = await screen.findByRole('button', { name: 'Approve period…' });
-        fireEvent.click(selectApproval);
-        fireEvent.change(screen.getByLabelText('Reason for approval'), { target: { value: 'Calendar and posting controls reviewed' } });
-        fireEvent.click(selectApproval);
-        expect(screen.getByLabelText('Reason for approval')).toHaveValue('Calendar and posting controls reviewed');
-        expect(financeDataService.decideAccountingBookPeriodTransition).not.toHaveBeenCalled();
-
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm period approval' }));
-        await waitFor(() => expect(financeDataService.decideAccountingBookPeriodTransition).toHaveBeenCalledWith(
-            'book-1', 'bp-1', 'approve', 'Calendar and posting controls reviewed', 'AQ=='));
+        expect(screen.queryByText('Open period required')).not.toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Add Future period' })).not.toBeInTheDocument();
     });
 
     it('loads governed preparation and submits exact mapped-account evidence', async () => {

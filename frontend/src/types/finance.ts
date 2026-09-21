@@ -317,6 +317,11 @@ export interface AccountingBookInitializationLine {
   openingCredit: number;
   baseBookSignedBalance: number;
   openingAdjustment: number;
+  translationExchangeRateId?: string | null;
+  translationRate?: number | null;
+  translationRateDate?: string | null;
+  translationRateType?: string | null;
+  translationRateSource?: string | null;
 }
 export interface AccountingBookInitialization {
   id: string;
@@ -331,6 +336,7 @@ export interface AccountingBookInitialization {
   cutoffFiscalPeriodCode: string;
   sourceAccountingBookId?: string | null;
   sourceAccountingBookCode?: string | null;
+  translationMethod?: 'SingleApprovedRate' | 'ClassificationDriven' | null;
   idempotencyKey: string;
   reason: string;
   totalDebits: number;
@@ -364,6 +370,12 @@ export interface AccountingBookInitializationPreparationLine {
   accountClassificationId: string;
   accountClassificationCode: string;
   authoritativeSignedBalance: number;
+  sourceSignedBalance?: number;
+  translationExchangeRateId?: string | null;
+  translationRate?: number | null;
+  translationRateDate?: string | null;
+  translationRateType?: string | null;
+  translationRateSource?: string | null;
 }
 export interface AccountingBookInitializationPreparation {
   accountingBookId: string;
@@ -375,6 +387,7 @@ export interface AccountingBookInitializationPreparation {
   sourceAccountingBookId?: string | null;
   sourceAccountingBookCode?: string | null;
   functionalCurrencyCode: string;
+  translationMethod?: 'SingleApprovedRate' | 'ClassificationDriven' | null;
   accounts: AccountingBookInitializationPreparationLine[];
 }
 export interface AccountingBookActivationReadiness {

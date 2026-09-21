@@ -1,4 +1,5 @@
 using ErpSystem.Api.Services.Finance.Settings;
+using ErpSystem.Api.Services.Finance.GL;
 using ErpSystem.Core.DTOs.Finance;
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.Finance;
@@ -148,6 +149,229 @@ public sealed class AccountingBookModelV2Tests
             new DateTime(2025, 12, 31), null);
         preparation.FunctionalCurrencyCode.Should().Be("USD");
         preparation.Accounts.Should().HaveCount(5).And.OnlyContain(item => item.AuthoritativeSignedBalance == 0m);
+    }
+
+    [Fact]
+    public async Task ParallelGovernedOpening_TranslatesAndSnapshotsApprovedRateEvidence()
+    {
+        await using var db = Context();
+        var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "V2FX", Name = "V2 FX", BaseCurrency = "GHS", Status = TenantStatus.Active });
+        var primary = Book(tenantId, "BASE", AccountingBookType.PrimaryFull, null, AccountingBookLifecycleStatus.Active);
+        var parallel = Book(tenantId, "USD_PARALLEL", AccountingBookType.ParallelFull, primary.Id, AccountingBookLifecycleStatus.Configuring);
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
+        parallel.ParallelOpeningMode = ParallelBookOpeningMode.GovernedOpeningConversion;
+        parallel.ParallelTranslationMethod = ParallelBookTranslationMethod.SingleApprovedRate;
+        db.AccountingBooks.AddRange(primary, parallel);
+        var asset = Account(tenantId, "1000", AccountType.Asset);
+        var equity = Account(tenantId, "3000", AccountType.Equity);
+        var expense = Account(tenantId, "6000", AccountType.Expense);
+        db.Accounts.AddRange(asset, equity, expense);
+        AddPrimaryMapping(db, tenantId, primary, asset, "ASSET");
+        AddPrimaryMapping(db, tenantId, primary, equity, "EQUITY");
+        AddPrimaryMapping(db, tenantId, primary, expense, "OTHER_EXPENSE");
+        var period = new FiscalPeriod
+        {
+            TenantId = tenantId, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025",
+            PeriodCode = "2025-12", PeriodNumber = 12, PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2025, 12, 31),
+            PeriodDays = 31, PeriodStatus = "Closed", IsClosed = true
+        };
+        db.FiscalPeriods.Add(period);
+        db.AccountBalances.AddRange(
+            new AccountBalance { TenantId = tenantId, AccountingBookId = primary.Id, AccountId = asset.Id,
+                FiscalPeriodId = period.Id, ClosingBalance = 1000m },
+            new AccountBalance { TenantId = tenantId, AccountingBookId = primary.Id, AccountId = equity.Id,
+                FiscalPeriodId = period.Id, ClosingBalance = -1000m });
+        var rate = new ExchangeRate
+        {
+            TenantId = tenantId, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m, EffectiveDate = new DateTime(2025, 12, 31),
+            RateType = ExchangeRateType.YearEnd, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana", ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.Add(rate);
+        await db.SaveChangesAsync();
+
+        var service = new AccountingBookInitializationService(
+            db, User(tenantId).Object, Mock.Of<IWorkflowService>(), Audit().Object);
+        await service.EnsureDeltaStructureAsync(parallel.Id);
+        var preparation = await service.PrepareAsync(parallel.Id,
+            nameof(AccountingBookInitializationMode.BaseBookCopyAtCutoff), period.EndDate, primary.Id);
+
+        preparation.TranslationMethod.Should().Be(nameof(ParallelBookTranslationMethod.SingleApprovedRate));
+        preparation.FunctionalCurrencyCode.Should().Be("USD");
+        preparation.Accounts.Single(item => item.AccountId == asset.Id).Should().Match<AccountingBookInitializationPreparationLineDto>(item =>
+            item.SourceSignedBalance == 1000m && item.AuthoritativeSignedBalance == 80m
+            && item.TranslationExchangeRateId == rate.Id && item.TranslationRate == 0.08m);
+        preparation.Accounts.Single(item => item.AccountId == equity.Id).AuthoritativeSignedBalance.Should().Be(-80m);
+    }
+
+    [Fact]
+    public async Task ParallelClassificationDrivenOpening_UsesClosingHistoricalAndCtaTreatments()
+    {
+        await using var db = Context();
+        var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "V2CLASSFX", Name = "V2 Classification FX", BaseCurrency = "GHS", Status = TenantStatus.Active });
+        var primary = Book(tenantId, "BASE", AccountingBookType.PrimaryFull, null, AccountingBookLifecycleStatus.Active);
+        var parallel = Book(tenantId, "USD_PARALLEL", AccountingBookType.ParallelFull, primary.Id, AccountingBookLifecycleStatus.Configuring);
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
+        parallel.ParallelOpeningMode = ParallelBookOpeningMode.GovernedOpeningConversion;
+        parallel.ParallelTranslationMethod = ParallelBookTranslationMethod.ClassificationDriven;
+        db.AccountingBooks.AddRange(primary, parallel);
+        var asset = Account(tenantId, "1000", AccountType.Asset);
+        var equity = Account(tenantId, "3000", AccountType.Equity);
+        var expense = Account(tenantId, "6000", AccountType.Expense);
+        db.Accounts.AddRange(asset, equity, expense);
+        AddPrimaryMapping(db, tenantId, primary, asset, "ASSET");
+        AddPrimaryMapping(db, tenantId, primary, equity, "EQUITY");
+        AddPrimaryMapping(db, tenantId, primary, expense, "OTHER_EXPENSE");
+        var period = new FiscalPeriod
+        {
+            TenantId = tenantId, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025",
+            PeriodCode = "2025-12", PeriodNumber = 12, PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2025, 12, 31),
+            PeriodDays = 31, PeriodStatus = "Closed", IsClosed = true
+        };
+        db.FiscalPeriods.Add(period);
+        db.AccountBalances.AddRange(
+            new AccountBalance { TenantId = tenantId, AccountingBookId = primary.Id, AccountId = asset.Id,
+                FiscalPeriodId = period.Id, ClosingBalance = 1000m },
+            new AccountBalance { TenantId = tenantId, AccountingBookId = primary.Id, AccountId = equity.Id,
+                FiscalPeriodId = period.Id, ClosingBalance = -1000m });
+        var equityOrigin = new DateTime(2024, 1, 1);
+        db.AccountTransactions.Add(new AccountTransaction
+        {
+            TenantId = tenantId, AccountingBookId = primary.Id, AccountId = equity.Id,
+            JournalEntryId = Guid.NewGuid(), FiscalPeriodId = period.Id, TransactionDate = equityOrigin,
+            CreditAmount = 1000m, FunctionalCurrencyCode = "GHS", PostingStatus = "Posted", LineNumber = 1
+        });
+        var historicalRate = new ExchangeRate
+        {
+            TenantId = tenantId, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.05m, InverseRate = 20m, EffectiveDate = equityOrigin,
+            RateType = ExchangeRateType.Fixed, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Historical capital rate", ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        };
+        var closingRate = new ExchangeRate
+        {
+            TenantId = tenantId, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m, EffectiveDate = period.EndDate,
+            RateType = ExchangeRateType.YearEnd, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Closing rate", ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.AddRange(historicalRate, closingRate);
+        await db.SaveChangesAsync();
+
+        var service = new AccountingBookInitializationService(
+            db, User(tenantId).Object, Mock.Of<IWorkflowService>(), Audit().Object);
+        await service.EnsureDeltaStructureAsync(parallel.Id);
+        var preparation = await service.PrepareAsync(parallel.Id,
+            nameof(AccountingBookInitializationMode.BaseBookCopyAtCutoff), period.EndDate, primary.Id);
+
+        preparation.TranslationMethod.Should().Be(nameof(ParallelBookTranslationMethod.ClassificationDriven));
+        preparation.Accounts.Single(item => item.AccountId == asset.Id).Should().Match<AccountingBookInitializationPreparationLineDto>(item =>
+            item.AuthoritativeSignedBalance == 80m && item.TranslationExchangeRateId == closingRate.Id
+            && item.TranslationRateType == nameof(ExchangeRateType.YearEnd));
+        preparation.Accounts.Single(item => item.AccountId == equity.Id).Should().Match<AccountingBookInitializationPreparationLineDto>(item =>
+            item.AuthoritativeSignedBalance == -50m && item.TranslationExchangeRateId == historicalRate.Id
+            && item.TranslationRateType == nameof(ExchangeRateType.Fixed));
+        preparation.Accounts.Single(item => item.AccountId == parallel.CurrencyTranslationReserveAccountId).Should()
+            .Match<AccountingBookInitializationPreparationLineDto>(item =>
+                item.AuthoritativeSignedBalance == -30m && item.TranslationExchangeRateId == null);
+        preparation.Accounts.Sum(item => item.AuthoritativeSignedBalance).Should().Be(0m);
+    }
+
+    [Fact]
+    public async Task ParallelHistoricalReplay_CreatesIdempotentRateSnapshottedReplica()
+    {
+        await using var db = Context();
+        var tenantId = Guid.NewGuid();
+        db.Tenants.Add(new Tenant { Id = tenantId, Code = "V2REPLAY", Name = "V2 Replay", BaseCurrency = "GHS", Status = TenantStatus.Active });
+        var primary = Book(tenantId, "BASE", AccountingBookType.PrimaryFull, null, AccountingBookLifecycleStatus.Active);
+        var parallel = Book(tenantId, "USD_PARALLEL", AccountingBookType.ParallelFull, primary.Id, AccountingBookLifecycleStatus.Configuring);
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
+        parallel.ParallelOpeningMode = ParallelBookOpeningMode.HistoricalReplay;
+        db.AccountingBooks.AddRange(primary, parallel);
+        var cash = Account(tenantId, "1000", AccountType.Asset);
+        var equity = Account(tenantId, "3000", AccountType.Equity);
+        var expense = Account(tenantId, "6000", AccountType.Expense);
+        db.Accounts.AddRange(cash, equity, expense);
+        AddPrimaryMapping(db, tenantId, primary, cash, "ASSET");
+        AddPrimaryMapping(db, tenantId, primary, equity, "EQUITY");
+        AddPrimaryMapping(db, tenantId, primary, expense, "OTHER_EXPENSE");
+        var period = new FiscalPeriod
+        {
+            TenantId = tenantId, FiscalYearId = Guid.NewGuid(), PeriodName = "December 2025",
+            PeriodCode = "2025-12", PeriodNumber = 12, PeriodType = PeriodType.Monthly,
+            StartDate = new DateTime(2025, 12, 1), EndDate = new DateTime(2025, 12, 31),
+            PeriodDays = 31, PeriodStatus = "Closed", IsClosed = true
+        };
+        db.FiscalPeriods.Add(period);
+        var source = Journal(tenantId, primary.Id, "BASE-REPLAY-001", new DateTime(2025, 12, 20), "Posted");
+        source.FiscalPeriodId = period.Id;
+        source.SourceModule = "GL";
+        source.SourceDocumentType = "ManualJournal";
+        source.SourceDocumentId = Guid.NewGuid();
+        source.Transactions = new List<AccountTransaction>
+        {
+            new() { TenantId = tenantId, JournalEntryId = source.Id, AccountId = cash.Id,
+                AccountingBookId = primary.Id, BookClassification = primary.Code, FiscalPeriodId = period.Id,
+                TransactionDate = source.EntryDate, DebitAmount = 125m, FunctionalCurrencyCode = "GHS",
+                PostingStatus = "Posted", LineNumber = 1 },
+            new() { TenantId = tenantId, JournalEntryId = source.Id, AccountId = equity.Id,
+                AccountingBookId = primary.Id, BookClassification = primary.Code, FiscalPeriodId = period.Id,
+                TransactionDate = source.EntryDate, CreditAmount = 125m, FunctionalCurrencyCode = "GHS",
+                PostingStatus = "Posted", LineNumber = 2 }
+        };
+        db.JournalEntries.Add(source);
+        var rate = new ExchangeRate
+        {
+            TenantId = tenantId, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.08m, InverseRate = 12.5m, EffectiveDate = source.EntryDate,
+            RateType = ExchangeRateType.Daily, QuoteSide = ExchangeRateQuoteSide.Mid,
+            RateSource = "Bank of Ghana", ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        };
+        db.ExchangeRates.Add(rate);
+        await db.SaveChangesAsync();
+
+        var user = User(tenantId);
+        var service = new AccountingBookInitializationService(db, user.Object,
+            Mock.Of<IWorkflowService>(), Audit().Object, new BookBalanceReadModelService(db));
+        await service.EnsureDeltaStructureAsync(parallel.Id);
+        parallel.LifecycleStatus = AccountingBookLifecycleStatus.Initializing;
+        db.AccountingBookInitializations.Add(new AccountingBookInitialization
+        {
+            TenantId = tenantId, AccountingBookId = parallel.Id, Version = 1,
+            Mode = AccountingBookInitializationMode.IndependentOpeningBalances,
+            InitializationStatus = AccountingBookInitializationStatus.Approved,
+            CutoffDate = period.EndDate, CutoffFiscalPeriodId = period.Id,
+            SourceAccountingBookId = primary.Id, IdempotencyKey = "replay-init",
+            Reason = "Historical replay", EvidenceFingerprint = new string('A', 64),
+            ReconciliationFingerprint = new string('B', 64), PreparedByUserId = Guid.NewGuid(),
+            PreparedAtUtc = DateTime.UtcNow, ApprovedByUserId = Guid.NewGuid(), ApprovedAtUtc = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        (await service.ReplayHistoricalParallelTransactionsAsync(parallel.Id)).Should().Be(1);
+        (await service.ReplayHistoricalParallelTransactionsAsync(parallel.Id)).Should().Be(0);
+
+        var replica = await db.JournalEntries.Include(item => item.Transactions).SingleAsync(item =>
+            item.AccountingBookId == parallel.Id && item.ReplicatedFromJournalEntryId == source.Id);
+        replica.TotalDebitAmount.Should().Be(10m);
+        replica.TotalCreditAmount.Should().Be(10m);
+        replica.ReplicationExchangeRateId.Should().Be(rate.Id);
+        replica.ReplicationExchangeRate.Should().Be(0.08m);
+        replica.Transactions.Should().OnlyContain(item => item.ExchangeRateId == rate.Id && item.ExchangeRate == 0.08m);
+        (await db.FinancePostingEvents.CountAsync(item => item.AccountingBookId == parallel.Id
+            && item.PostingAction == "HistoricalReplay")).Should().Be(1);
     }
 
     private static AccountingBook Book(Guid tenantId, string code, AccountingBookType type, Guid? baseId,

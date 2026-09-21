@@ -4069,7 +4069,7 @@ namespace ErpSystem.Api.Services.Finance.AR
                 (rate.ExpiryDate.HasValue && rate.ExpiryDate.Value.Date < settlementDate.Date))
                 throw new InvalidOperationException($"The selected AR settlement rate does not match the required currency pair, date, daily rate type, or {quoteSide} quote policy.");
 
-            return new SettlementRateSnapshot(rate.Id, NormalizeExchangeRate(rate.Rate));
+            return new SettlementRateSnapshot(rate.Id, NormalizeExchangeRate(rate.InverseRate));
         }
 
         private async Task<ExchangeRateQuoteSide> GetSettlementQuoteSideAsync(CancellationToken cancellationToken)

@@ -37,11 +37,11 @@ Implement the stakeholder-approved accounting-book model:
 
 ## Current status
 
-`IMPLEMENTING_PHASE_5`
+`PHASE_5_VERIFIED_CUTOVER_REHEARSAL_PENDING`
 
 ## Migration state
 
-Migration `20260921154920_AccountingBookModelV2` has been authored and reviewed but not applied. It fails closed when live accounting books already exist, requiring either the approved fresh-database cutover or a separately reviewed data-conversion plan. Database state is unchanged.
+Migrations `20260921154920_AccountingBookModelV2` and `20260921174134_AccountingBookTranslationEvidence` have been authored and reviewed but not applied. The first fails closed when live accounting books already exist, requiring either the approved fresh-database cutover or a separately reviewed data-conversion plan. The second adds immutable opening-translation evidence and normalizes existing rate rows to the canonical `1 source/base = Rate target` direction. Database state is unchanged.
 
 ## Implemented
 
@@ -54,25 +54,29 @@ Migration `20260921154920_AccountingBookModelV2` has been authored and reviewed 
 - Added Trial Balance Base + multi-Delta selection, aggregation, PDF parameter support, and historical Delta selection.
 - Added a combined Delta ledger inquiry and UI that labels posted base journals as `Inherited` and Delta journals as `Adjustment`, without duplicating base postings.
 - Added V2 create/edit UX for Delta posting windows and Parallel replication/opening/translation settings.
-- Corrected Primary-to-Parallel conversion to persist and apply the source-to-target multiplier (`InverseRate` under the current legacy exchange-rate storage contract).
+- Standardized exchange-rate storage and the public contract to `1 source/base = Rate target`, with the reciprocal in `InverseRate`; updated posting, AP, AR, cash, fixed assets, revaluation, supplier debit notes, GL conversion, and opening-balance consumers.
 - Made zero-opening Parallel evidence use the Parallel book currency rather than the tenant currency, and added explicit UI warnings explaining the historical transactions excluded by each replication cutoff/opening choice.
+- Implemented governed Parallel opening conversion with immutable rate id/value/date/type/source per account, supporting single-approved-rate and classification-driven methods plus protected CTA balancing.
+- Implemented idempotent historical replay during governed activation. Every eligible Primary journal is translated at its accounting-date approved rate, linked to its source journal, and projected into exact-book balances; missing rates or mappings roll back activation.
+- Reversal replicas reuse the original immutable Parallel rate even when later rates exist.
 
 ## Verification evidence
 
 - `dotnet build src/ErpSystem.Api/ErpSystem.Api.csproj --no-restore`: passed, 0 errors (repository warnings remain).
 - Frontend `npm run type-check` filtered to changed Finance files: no changed-file errors; the repository-wide command still reports unrelated baseline TypeScript failures.
-- V2-focused backend suite: 6 passed in the combined run, plus the 4-test model suite passed after adding USD zero-opening currency coverage. Coverage includes Primary creation prohibition, multi-Delta aggregation/order, historical Delta ledger labels, protected Parallel accounts, missing-rate atomic rollback, and immutable translated replication.
+- V2/FX/Parallel/reversal backend sweep: 49 passed. Coverage includes single-rate and classification-driven governed conversion snapshots, CTA balancing, historical replay idempotency, canonical rate direction, Primary creation prohibition, multi-Delta aggregation/order, historical Delta ledger labels, protected Parallel accounts, missing-rate atomic rollback, immutable translated replication, direct-Parallel rejection, and original-rate reversals.
+- Accounting-book readiness frontend suite: 11 passed. Legacy per-book period expectations were removed in favor of the tenant fiscal-calendar model.
 - Delta ledger/report frontend tests: 4 passed across 2 files.
+- Idempotent migration SQL generation passed. Review confirmed `decimal(18,6)` translation evidence, the tenant-scoped exchange-rate foreign key, evidence check constraints, and the one-time `Rate`/`InverseRate` normalization statement.
 - Targeted `AccountingBookPeriodInitializationC4Tests`: 20 passed; 3 legacy assertions fail because they require removed behavior (per-book close readiness, Primary lifecycle transitions, and inactive derived mappings). These tests must be replaced with V2 assertions.
 - No migration was applied and no database was reset.
 
 ## Open implementation slices
 
-- Complete the source-to-target exchange-rate convention migration across every foreign-currency consumer, not only Parallel replication.
-- Implement governed Parallel opening conversion and historical replay execution (configuration shape is present; zero opening is supported).
-- Replace remaining legacy accounting-book assertions and add reversal-rate coverage.
+- Replace remaining legacy accounting-book assertions that still expect per-book periods or Primary lifecycle transitions.
+- Complete final repository-wide frontend build verification and replace the remaining legacy accounting-book assertions.
 - Perform a fresh-database migration/seeding rehearsal only after explicit cutover authorization.
 
 ## Next authorized action
 
-Finish FX convention/opening execution and V2-focused tests in the isolated worktree; do not apply the migration.
+Finish frontend and migration verification in the isolated worktree; do not apply either migration.

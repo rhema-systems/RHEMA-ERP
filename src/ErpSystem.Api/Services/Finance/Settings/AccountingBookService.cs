@@ -454,6 +454,14 @@ public sealed class AccountingBookService : IAccountingBookService
         else if (completed)
         {
             var target = book.PendingLifecycleStatus!.Value;
+            if (target == AccountingBookLifecycleStatus.Active
+                && book.BookType == AccountingBookType.ParallelFull
+                && book.ParallelOpeningMode == ParallelBookOpeningMode.HistoricalReplay)
+            {
+                if (_initialization == null)
+                    throw new InvalidOperationException("Historical Parallel replay is unavailable.");
+                await _initialization.ReplayHistoricalParallelTransactionsAsync(book.Id, ct);
+            }
             book.LifecycleStatus = target;
             if (target == AccountingBookLifecycleStatus.Initializing) book.InitializationStartedAtUtc ??= DateTime.UtcNow;
             if ((book.BookType is AccountingBookType.Delta or AccountingBookType.ParallelFull)

@@ -2044,7 +2044,7 @@ public class AssetDisposalService : IAssetDisposalService
 
         return new ProceedsExchangeRateSnapshot(
             rate.Id,
-            rate.Rate,
+            rate.InverseRate,
             rate.RateSource,
             rate.EffectiveDate.Date,
             rate.RateType,

@@ -1852,10 +1852,10 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
             ?? throw new InvalidOperationException(
                 $"No active approved {side} Daily exchange rate exists for {currency} to {functionalCurrency} on {effectiveDate:yyyy-MM-dd}. Load and approve the rate before saving this supplier debit note.");
 
-        if (suppliedRate <= 0m || RoundRate(suppliedRate) != RoundRate(rate.Rate))
+        if (suppliedRate <= 0m || RoundRate(suppliedRate) != RoundRate(rate.InverseRate))
             throw new InvalidOperationException(
                 $"The supplied exchange-rate snapshot does not match the active approved {side} Daily rate for {currency} to {functionalCurrency} on {effectiveDate:yyyy-MM-dd}. Refresh the approved rate before saving this supplier debit note.");
-        return rate.Rate;
+        return rate.InverseRate;
     }
 
     private async Task<decimal> ValidatePersistedExchangeRateEvidenceAsync(
@@ -1891,7 +1891,7 @@ public sealed partial class SupplierDebitNoteService : ISupplierDebitNoteService
              item.ApprovalStatus == RateApprovalStatus.AutoApproved) &&
             item.EffectiveDate.Date <= effectiveDate &&
             (!item.EndDate.HasValue || item.EndDate.Value.Date >= effectiveDate) &&
-            item.Rate == storedRate,
+            item.InverseRate == storedRate,
             cancellationToken);
         if (!hasEvidence)
             throw new InvalidOperationException(

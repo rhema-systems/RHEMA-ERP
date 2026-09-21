@@ -88,12 +88,12 @@ public sealed class FinanceBaselineProvisioningSeeder
             throw new InvalidOperationException($"FINANCE_BASELINE_MAPPING_INVALID: {book.Code} does not have complete untouched manifest-owned account authority.");
 
         var idempotencyKey = $"{ProvisioningVersion}-{book.Code}";
-        var lineEvidence = string.Join('|', mappings.Select(item => $"{item.AccountId:N}:{currency}:0:0:0:0"));
+        var lineEvidence = string.Join('|', mappings.Select(item => $"{item.AccountId:N}:{currency}:0:0:0:0::0:::"));
         var evidence = AccountingBookInitializationFingerprint.Evidence(
             tenantId, book.Id, book.Code, book.BookType, book.FunctionalCurrencyCode,
             AccountingBookInitializationMode.IndependentOpeningBalances, cutoff.EndDate.Date,
             cutoff.Id, cutoff.PeriodCode, cutoff.StartDate, cutoff.EndDate,
-            null, null, null, null, idempotencyKey, InitializationReason, lineEvidence);
+            null, null, null, null, null, idempotencyKey, InitializationReason, lineEvidence);
         var authority = string.Join('|', mappings.Select(item => $"{item.AccountId:N}:{item.Account.AccountNumber}:{item.Account.AccountType}:{item.Id:N}:{item.AccountClassificationId:N}:{item.AccountClassification!.Code}:{item.AccountClassification.Status}:{item.AccountClassification.IsPostingClassification}"));
         var reconciliation = AccountingBookInitializationFingerprint.Reconciliation(evidence, authority, string.Empty, string.Empty, 0, 0);
         var initialization = new AccountingBookInitialization

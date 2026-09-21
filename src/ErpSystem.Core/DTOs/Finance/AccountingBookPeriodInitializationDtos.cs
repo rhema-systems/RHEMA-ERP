@@ -57,6 +57,11 @@ public sealed class AccountingBookInitializationLineDto
     public decimal OpeningCredit { get; set; }
     public decimal BaseBookSignedBalance { get; set; }
     public decimal OpeningAdjustment { get; set; }
+    public Guid? TranslationExchangeRateId { get; set; }
+    public decimal? TranslationRate { get; set; }
+    public DateTime? TranslationRateDate { get; set; }
+    public string? TranslationRateType { get; set; }
+    public string? TranslationRateSource { get; set; }
 }
 
 public sealed class ConfigureAccountingBookInitializationDto
@@ -87,6 +92,7 @@ public sealed class AccountingBookInitializationDto
     public string CutoffFiscalPeriodCode { get; set; } = string.Empty;
     public Guid? SourceAccountingBookId { get; set; }
     public string? SourceAccountingBookCode { get; set; }
+    public string? TranslationMethod { get; set; }
     public string IdempotencyKey { get; set; } = string.Empty;
     public string Reason { get; set; } = string.Empty;
     public decimal TotalDebits { get; set; }
@@ -131,6 +137,7 @@ public sealed class AccountingBookInitializationPreparationDto
     public Guid? SourceAccountingBookId { get; set; }
     public string? SourceAccountingBookCode { get; set; }
     public string FunctionalCurrencyCode { get; set; } = string.Empty;
+    public string? TranslationMethod { get; set; }
     public IReadOnlyCollection<AccountingBookInitializationPreparationLineDto> Accounts { get; set; } = Array.Empty<AccountingBookInitializationPreparationLineDto>();
 }
 
@@ -142,6 +149,12 @@ public sealed class AccountingBookInitializationPreparationLineDto
     public Guid AccountClassificationId { get; set; }
     public string AccountClassificationCode { get; set; } = string.Empty;
     public decimal AuthoritativeSignedBalance { get; set; }
+    public decimal SourceSignedBalance { get; set; }
+    public Guid? TranslationExchangeRateId { get; set; }
+    public decimal? TranslationRate { get; set; }
+    public DateTime? TranslationRateDate { get; set; }
+    public string? TranslationRateType { get; set; }
+    public string? TranslationRateSource { get; set; }
 }
 
 public sealed class AccountingBookActivationReadinessDto

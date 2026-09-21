@@ -545,7 +545,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
             var calculation = FxRevaluationMath.Calculate(
                 exposure.ForeignCurrencyBalance,
                 exposure.CarryingFunctionalAmount,
-                closingRate.Rate,
+                closingRate.InverseRate,
                 exposure.PriorUnreversedAdjustment);
             var revaluedFunctionalAmount = calculation.TargetFunctionalValue;
             var gainLossAmount = calculation.Delta;
@@ -585,7 +585,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 CarryingFunctionalAmount = exposure.CarryingFunctionalAmount,
                 PriorUnreversedAdjustment = exposure.PriorUnreversedAdjustment,
                 ClosingExchangeRateId = closingRate.Id,
-                ClosingExchangeRate = closingRate.Rate,
+                ClosingExchangeRate = closingRate.InverseRate,
                 ClosingRateDate = closingRate.EffectiveDate,
                 ClosingRateType = closingRate.RateType.ToString(),
                 ClosingQuoteSide = closingRate.QuoteSide.ToString(),
@@ -594,7 +594,7 @@ public sealed class CurrencyRevaluationService : ICurrencyRevaluationService, IF
                 GainLossType = gainLossType,
                 GainLossAccountId = gainLossAccountId,
                 ClosingExchangeRateRecord = closingRate,
-                Notes = $"Closing rate {closingRate.Rate} effective {closingRate.EffectiveDate:yyyy-MM-dd} | {exposure.Frequency}",
+                Notes = $"Closing rate {closingRate.InverseRate} effective {closingRate.EffectiveDate:yyyy-MM-dd} | {exposure.Frequency}",
                 CreatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUserService.UserName
             });

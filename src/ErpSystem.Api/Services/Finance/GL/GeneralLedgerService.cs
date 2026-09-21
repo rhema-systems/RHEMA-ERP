@@ -446,7 +446,7 @@ namespace ErpSystem.Api.Services.Finance.GL
                         continue; 
                     }
 
-                    decimal rate = exchangeRateEntity.Rate;
+                    decimal rate = exchangeRateEntity.InverseRate;
                     decimal newBaseBalance = foreignBalance * rate;
                     decimal adjustment = newBaseBalance - currentBaseBalance;
 

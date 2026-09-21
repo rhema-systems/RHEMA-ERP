@@ -1256,6 +1256,12 @@ public sealed class FinancePostingEngineTests
         var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
         var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
         var localBook = SeedAdditionalBook(db, tenantId, "LOCAL_STATUTORY", debit.Id, credit.Id);
+        var primaryBook = db.AccountingBooks.Local.Single(item => item.TenantId == tenantId && item.IsDefault);
+        localBook.BookType = AccountingBookType.ParallelFull;
+        localBook.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        localBook.BaseAccountingBookId = primaryBook.Id;
+        localBook.FunctionalCurrencyCode = "USD";
+        localBook.ReplicationStartDate = new DateTime(2027, 1, 1);
         await db.SaveChangesAsync();
         var service = CreateService(db, tenantId);
         var first = CreateRequest(tenantId, debit.Id, credit.Id);
@@ -1277,7 +1283,7 @@ public sealed class FinancePostingEngineTests
         var action = () => service.PostAsync(second);
 
         await action.Should().ThrowAsync<InvalidOperationException>()
-            .WithMessage("PARALLEL_BOOK_POSTING_DISABLED:*");
+            .WithMessage("PARALLEL_DIRECT_POSTING_FORBIDDEN:*");
         (await db.FinancePostingEvents.CountAsync()).Should().Be(1);
         (await db.JournalEntries.CountAsync()).Should().Be(1);
     }
@@ -1349,6 +1355,53 @@ public sealed class FinancePostingEngineTests
         replica.TotalCreditAmount.Should().Be(8m);
         replica.Transactions.Should().OnlyContain(item => item.FunctionalCurrencyCode == "USD"
             && item.TransactionCurrency == "GHS" && item.ExchangeRate == 0.08m);
+    }
+
+    [Fact]
+    [Trait("Category", "AccountingBookModelV2")]
+    public async Task ReverseAsync_ShouldReuseOriginalParallelReplicaRateAfterMarketRateChanges()
+    {
+        var tenantId = Guid.NewGuid();
+        await using var db = CreateContext();
+        SeedTenant(db, tenantId);
+        SeedOpenPeriod(db, tenantId);
+        var debit = SeedAccount(db, tenantId, "1100", AccountType.Asset);
+        var credit = SeedAccount(db, tenantId, "4100", AccountType.Revenue);
+        var primary = db.AccountingBooks.Local.Single(item => item.Code == "IFRS");
+        primary.BookType = AccountingBookType.PrimaryFull;
+        primary.FunctionalCurrencyCode = "GHS";
+        primary.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var parallel = SeedAdditionalBook(db, tenantId, "USD_PARALLEL", debit.Id, credit.Id);
+        parallel.BookType = AccountingBookType.ParallelFull;
+        parallel.BaseAccountingBookId = primary.Id;
+        parallel.FunctionalCurrencyCode = "USD";
+        parallel.ReplicationStartDate = new DateTime(2026, 1, 1);
+        parallel.LifecycleStatus = AccountingBookLifecycleStatus.Active;
+        var originalRate = SeedExchangeRate(db, tenantId, "USD", 12.5m);
+        await db.SaveChangesAsync();
+        var service = CreateService(db, tenantId);
+        var original = await service.PostAsync(CreateRequest(tenantId, debit.Id, credit.Id));
+
+        originalRate.IsActive = false;
+        originalRate.EndDate = new DateTime(2026, 7, 4);
+        db.ExchangeRates.Add(new ExchangeRate
+        {
+            TenantId = tenantId, BaseCurrencyCode = "GHS", TargetCurrencyCode = "USD",
+            Rate = 0.1m, InverseRate = 10m, EffectiveDate = new DateTime(2026, 7, 5),
+            RateType = ExchangeRateType.Daily, QuoteSide = ExchangeRateQuoteSide.Mid,
+            IsActive = true, RateSource = "Later market rate", ApprovalStatus = RateApprovalStatus.Approved,
+            CreatedByUserId = Guid.NewGuid(), CreatedDate = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        await service.ReverseAsync(original.PostingEventId, "Reverse with original FX evidence", new DateTime(2026, 7, 5));
+
+        var replicas = await db.JournalEntries.Where(item => item.AccountingBookId == parallel.Id)
+            .OrderBy(item => item.EntryDate).ThenBy(item => item.CreatedAt).ToListAsync();
+        replicas.Should().HaveCount(2);
+        replicas.Should().OnlyContain(item => item.ReplicationExchangeRateId == originalRate.Id
+            && item.ReplicationExchangeRate == 0.08m && item.ReplicationRateDate == new DateTime(2026, 7, 4));
+        replicas[1].OriginalJournalEntryId.Should().Be(replicas[0].Id);
     }
 
     [Fact]
@@ -1514,6 +1567,9 @@ public sealed class FinancePostingEngineTests
             TenantId = tenantId,
             Code = "IFRS",
             Name = "IFRS Primary",
+            BookType = AccountingBookType.PrimaryFull,
+            LifecycleStatus = AccountingBookLifecycleStatus.Active,
+            FunctionalCurrencyCode = "GHS",
             IsDefault = true,
             IsActive = true,
             AllowsPosting = true
@@ -1693,8 +1749,8 @@ public sealed class FinancePostingEngineTests
             TenantId = tenantId,
             BaseCurrencyCode = "GHS",
             TargetCurrencyCode = targetCurrencyCode,
-            Rate = rate,
-            InverseRate = decimal.Round(1m / rate, 6, MidpointRounding.AwayFromZero),
+            Rate = decimal.Round(1m / rate, 6, MidpointRounding.AwayFromZero),
+            InverseRate = rate,
             EffectiveDate = new DateTime(2026, 7, 4),
             RateType = ExchangeRateType.Daily,
             RateSource = "Unit Test",

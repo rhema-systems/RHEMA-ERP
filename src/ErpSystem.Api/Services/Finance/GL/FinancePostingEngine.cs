@@ -1104,13 +1104,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             .FirstOrDefaultAsync(cancellationToken)
             ?? throw new InvalidOperationException(
                 $"PARALLEL_EXCHANGE_RATE_REQUIRED: {sourceCurrency}/{targetCurrency} approved rate is missing for accounting date {accountingDate:yyyy-MM-dd}.");
-        // ExchangeRate currently persists Rate as target-to-base (for example,
-        // 1 USD = 12.50 GHS) and InverseRate as base-to-target. A Parallel
-        // replica converts the Primary book into the target book currency, so
-        // its immutable posting multiplier must be the source-to-target side.
-        if (rate.InverseRate <= 0m)
+        // Canonical storage is source-to-target: 1 BaseCurrency = Rate TargetCurrency.
+        if (rate.Rate <= 0m)
             throw new InvalidOperationException("PARALLEL_EXCHANGE_RATE_INVALID: Approved Parallel source-to-target rate must be greater than zero.");
-        return new ParallelRate(rate, rate.Id, rate.InverseRate, rate.EffectiveDate.Date, rate.RateSource);
+        return new ParallelRate(rate, rate.Id, rate.Rate, rate.EffectiveDate.Date, rate.RateSource);
     }
 
     private async Task<ParallelRate> ResolveOriginalParallelRateAsync(JournalEntry originalReplica,
@@ -2155,7 +2152,10 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             }
         }
 
-        if (suppliedRate.HasValue && RoundRate(suppliedRate.Value) != RoundRate(rate.Rate))
+        var functionalMultiplier = rate.InverseRate;
+        if (functionalMultiplier <= 0m)
+            throw new InvalidOperationException("Exchange rate has no positive target-to-functional reciprocal.");
+        if (suppliedRate.HasValue && RoundRate(suppliedRate.Value) != RoundRate(functionalMultiplier))
         {
             await RecordForeignCurrencyPostingBlockedAuditAsync(
                 tenantId,
@@ -2166,7 +2166,7 @@ public sealed class FinancePostingEngine : IFinancePostingEngine, IAccountingEve
             throw new InvalidOperationException("Supplied exchange-rate snapshot does not match the tenant exchange-rate record.");
         }
 
-        return new ExchangeRateSnapshot(rate.Id, rate.Rate, rate.RateSource, rate.EffectiveDate.Date, policyOverrideUsed);
+        return new ExchangeRateSnapshot(rate.Id, functionalMultiplier, rate.RateSource, rate.EffectiveDate.Date, policyOverrideUsed);
     }
 
     private static ExchangeRateType ParseExchangeRateType(string? value, ExchangeRateType fallback)

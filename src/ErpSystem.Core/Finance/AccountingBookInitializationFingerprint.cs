@@ -13,6 +13,19 @@ namespace ErpSystem.Core.Finance;
 public static class AccountingBookInitializationFingerprint
 {
     public static string Evidence(
+        Guid tenantId, Guid bookId, string bookCode, AccountingBookType bookType,
+        string? functionalCurrencyCode, AccountingBookInitializationMode mode,
+        DateTime cutoffDate, Guid cutoffPeriodId, string cutoffPeriodCode,
+        DateTime cutoffPeriodStart, DateTime cutoffPeriodEnd, Guid? sourceBookId,
+        string? sourceBookCode, AccountingBookType? sourceBookType,
+        string? sourceFunctionalCurrencyCode, string idempotencyKey, string reason,
+        string lineEvidence)
+        => Evidence(tenantId, bookId, bookCode, bookType, functionalCurrencyCode, mode,
+            cutoffDate, cutoffPeriodId, cutoffPeriodCode, cutoffPeriodStart, cutoffPeriodEnd,
+            sourceBookId, sourceBookCode, sourceBookType, sourceFunctionalCurrencyCode,
+            null, idempotencyKey, reason, lineEvidence);
+
+    public static string Evidence(
         Guid tenantId,
         Guid bookId,
         string bookCode,
@@ -28,8 +41,19 @@ public static class AccountingBookInitializationFingerprint
         string? sourceBookCode,
         AccountingBookType? sourceBookType,
         string? sourceFunctionalCurrencyCode,
+        ParallelBookTranslationMethod? translationMethod,
         string idempotencyKey,
         string reason,
+        string lineEvidence)
+        => Hash($"BOOK-INITIALIZATION-EVIDENCE-V4|{tenantId:N}|{bookId:N}|{bookCode}|{StructuralType(bookType)}|{functionalCurrencyCode}|{mode}|{cutoffDate:yyyy-MM-dd}|{cutoffPeriodId:N}|{cutoffPeriodCode}|{cutoffPeriodStart:O}|{cutoffPeriodEnd:O}|{Format(sourceBookId)}|{sourceBookCode}|{StructuralType(sourceBookType)}|{sourceFunctionalCurrencyCode}|{translationMethod}|{idempotencyKey}|{reason}|{lineEvidence}");
+
+    public static string LegacyEvidenceV3(
+        Guid tenantId, Guid bookId, string bookCode, AccountingBookType bookType,
+        string? functionalCurrencyCode, AccountingBookInitializationMode mode,
+        DateTime cutoffDate, Guid cutoffPeriodId, string cutoffPeriodCode,
+        DateTime cutoffPeriodStart, DateTime cutoffPeriodEnd, Guid? sourceBookId,
+        string? sourceBookCode, AccountingBookType? sourceBookType,
+        string? sourceFunctionalCurrencyCode, string idempotencyKey, string reason,
         string lineEvidence)
         => Hash($"BOOK-INITIALIZATION-EVIDENCE-V3|{tenantId:N}|{bookId:N}|{bookCode}|{StructuralType(bookType)}|{functionalCurrencyCode}|{mode}|{cutoffDate:yyyy-MM-dd}|{cutoffPeriodId:N}|{cutoffPeriodCode}|{cutoffPeriodStart:O}|{cutoffPeriodEnd:O}|{Format(sourceBookId)}|{sourceBookCode}|{StructuralType(sourceBookType)}|{sourceFunctionalCurrencyCode}|{idempotencyKey}|{reason}|{lineEvidence}");
 

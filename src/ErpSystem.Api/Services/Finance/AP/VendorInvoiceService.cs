@@ -3940,12 +3940,12 @@ namespace ErpSystem.Api.Services.Finance.AP
                     "The selected AP invoice exchange rate is not active, approved, effective, or compliant with the tenant invoice-rate policy.");
             }
 
-            if (RoundRate(suppliedRate) != RoundRate(rate.Rate))
+            if (RoundRate(suppliedRate) != RoundRate(rate.InverseRate))
                 throw new InvalidOperationException("The AP invoice exchange-rate value does not match the approved rate record.");
 
             return new OpeningInvoiceExchangeRateSnapshot(
                 rate.Id,
-                rate.Rate,
+                rate.InverseRate,
                 transactionCurrency,
                 functionalCurrency,
                 rate.RateSource);

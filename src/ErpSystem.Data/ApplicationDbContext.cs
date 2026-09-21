@@ -3392,6 +3392,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                 table.HasCheckConstraint("CK_AccountingBookInitializations_MakerChecker", "[ApprovedByUserId] IS NULL OR [ApprovedByUserId] <> [PreparedByUserId]");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_DecisionMakerChecker", "[DecidedByUserId] IS NULL OR [DecidedByUserId] <> [PreparedByUserId]");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_Coverage", "[RequiredAccountCount] >= 0 AND [CoveredAccountCount] >= 0 AND [CoveredAccountCount] <= [RequiredAccountCount]");
+                table.HasCheckConstraint("CK_AccountingBookInitializations_TranslationMethod", "[TranslationMethod] IS NULL OR [TranslationMethod] IN (1, 2)");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_SourceShape", "([Mode] = 1 AND [SourceAccountingBookId] IS NULL) OR ([Mode] IN (2, 3) AND [SourceAccountingBookId] IS NOT NULL AND [SourceAccountingBookId] <> [AccountingBookId])");
                 table.HasCheckConstraint("CK_AccountingBookInitializations_ApprovalShape", "([InitializationStatus] IN (1, 2) AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 3 AND [ApprovedByUserId] IS NOT NULL AND [ApprovedAtUtc] IS NOT NULL AND [RejectedByUserId] IS NULL AND [RejectedAtUtc] IS NULL) OR ([InitializationStatus] = 4 AND [ApprovedByUserId] IS NULL AND [ApprovedAtUtc] IS NULL AND [RejectedByUserId] IS NOT NULL AND [RejectedAtUtc] IS NOT NULL)");
                 if (this.Database.IsSqlServer())
@@ -3432,15 +3433,22 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
             {
                 table.HasCheckConstraint("CK_AccountingBookInitializationLines_NoDelete", "[IsDeleted] = 0");
                 table.HasCheckConstraint("CK_AccountingBookInitializationLines_Amounts", "[OpeningDebit] >= 0 AND [OpeningCredit] >= 0 AND NOT ([OpeningDebit] > 0 AND [OpeningCredit] > 0)");
+                table.HasCheckConstraint("CK_AccountingBookInitializationLines_TranslationEvidence", "([TranslationExchangeRateId] IS NULL AND [TranslationRate] IS NULL AND [TranslationRateDate] IS NULL AND [TranslationRateType] IS NULL AND [TranslationRateSource] IS NULL) OR ([TranslationExchangeRateId] IS NOT NULL AND [TranslationRate] > 0 AND [TranslationRateDate] IS NOT NULL AND [TranslationRateType] IS NOT NULL AND [TranslationRateSource] IS NOT NULL)");
                 if (this.Database.IsSqlServer())
                     table.HasCheckConstraint("CK_AccountingBookInitializationLines_Currency", "LEN([CurrencyCode]) = 3 AND [CurrencyCode] = RTRIM([CurrencyCode]) AND [CurrencyCode] COLLATE Latin1_General_100_BIN2 LIKE '[A-Z][A-Z][A-Z]'");
             });
             entity.HasIndex(item => new { item.TenantId, item.AccountingBookInitializationId, item.AccountId }).IsUnique();
             entity.Property(item => item.CurrencyCode).HasMaxLength(3).IsRequired();
+            entity.Property(item => item.TranslationRate).HasPrecision(18, 6);
+            entity.Property(item => item.TranslationRateType).HasMaxLength(30);
+            entity.Property(item => item.TranslationRateSource).HasMaxLength(100);
             entity.HasOne(item => item.Initialization).WithMany(initialization => initialization.Lines)
                 .HasForeignKey(item => new { item.TenantId, item.AccountingBookInitializationId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Account).WithMany().HasForeignKey(item => new { item.TenantId, item.AccountId })
+                .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.TranslationExchangeRate).WithMany()
+                .HasForeignKey(item => new { item.TenantId, item.TranslationExchangeRateId })
                 .HasPrincipalKey(item => new { item.TenantId, item.Id }).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.Tenant).WithMany().HasForeignKey(item => item.TenantId).OnDelete(DeleteBehavior.Restrict);
         });
@@ -10578,7 +10586,8 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
                     // Exchange-rate evidence needs more precision than ordinary quantities. Keep
                     // this explicit because the broad convention below runs after entity-specific
                     // configuration and would otherwise silently reduce it to four decimals.
-                    if (property.Name == nameof(JournalEntry.ReplicationExchangeRate))
+                    if (property.Name == nameof(JournalEntry.ReplicationExchangeRate)
+                        || property.Name == nameof(AccountingBookInitializationLine.TranslationRate))
                     {
                         property.SetColumnType("decimal(18,6)");
                         continue;
@@ -12701,6 +12710,7 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
         builder.Entity<ExchangeRate>(entity =>
         {
+            entity.HasAlternateKey(r => new { r.TenantId, r.Id });
             entity.HasIndex(r => new { r.TenantId, r.BaseCurrencyCode, r.TargetCurrencyCode, r.RateType, r.QuoteSide, r.EffectiveDate })
                 .IsUnique()
                 .HasFilter("[IsDeleted] = 0");
