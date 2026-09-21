@@ -60,13 +60,33 @@ function Register-SensitiveEvidenceToken([string]$value) {
     }
 }
 
+function Replace-OrdinalIgnoreCase([string]$value, [string]$oldValue, [string]$newValue) {
+    # The case-insensitive String.Replace overload is unavailable in the
+    # Windows PowerShell .NET Framework runtime used by the VPS.
+    if ([string]::IsNullOrEmpty($oldValue)) { return $value }
+
+    $result = [System.Text.StringBuilder]::new()
+    $offset = 0
+    while ($true) {
+        $match = $value.IndexOf($oldValue, $offset, [StringComparison]::OrdinalIgnoreCase)
+        if ($match -lt 0) {
+            [void]$result.Append($value, $offset, $value.Length - $offset)
+            break
+        }
+        [void]$result.Append($value, $offset, $match - $offset)
+        [void]$result.Append($newValue)
+        $offset = $match + $oldValue.Length
+    }
+    return $result.ToString()
+}
+
 function ConvertTo-SanitizedEvidenceLine([string]$value) {
     $line = [string]$value
-    $line = $line.Replace($repositoryRoot, '<REPOSITORY>', [StringComparison]::OrdinalIgnoreCase)
+    $line = Replace-OrdinalIgnoreCase $line $repositoryRoot '<REPOSITORY>'
     $line = [regex]::Replace($line, 'C:\\Users\\[^\\\r\n]+', '<USER_PROFILE>', 'IgnoreCase')
     $line = [regex]::Replace($line, '(?i)\b[A-Z]:\\[^;\r\n]+', '<LOCAL_PATH>')
     foreach ($token in $script:sensitiveEvidenceTokens) {
-        $line = $line.Replace($token, '<LOCAL_SQL_SERVER>', [StringComparison]::OrdinalIgnoreCase)
+        $line = Replace-OrdinalIgnoreCase $line $token '<LOCAL_SQL_SERVER>'
     }
     $line = [regex]::Replace($line, '(?i)(Password|Pwd|User ID|UID|Data Source|Server|Integrated Security|Trusted_Connection)\s*=\s*[^;\r\n]+', '$1=<REDACTED>')
     $line = [regex]::Replace($line, '(?i)ClientConnectionId:[0-9a-f-]+', 'ClientConnectionId:<REDACTED>')
@@ -747,7 +767,7 @@ function Read-MigrationHistoryEvidence([string]$path, [string]$context) {
         throw "$context evidence is empty or lacks its deterministic terminal newline."
     }
     $normalized = $raw.Replace("`r`n", "`n")
-    if ($normalized.Contains("`r", [StringComparison]::Ordinal)) {
+    if ($normalized.IndexOf("`r", [StringComparison]::Ordinal) -ge 0) {
         throw "$context evidence contains a noncanonical line ending."
     }
     $lines = @($normalized.Substring(0, $normalized.Length - 1).Split("`n"))

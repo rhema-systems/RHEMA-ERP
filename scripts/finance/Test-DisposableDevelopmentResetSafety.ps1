@@ -557,6 +557,11 @@ exit 0
     if (-not $text.Contains("server = '<REDACTED_LOCAL_SERVER>'")) {
         throw 'Disposable reset status does not redact the local machine/server identity.'
     }
+    if (-not $text.Contains('function Replace-OrdinalIgnoreCase') -or
+        $text -match '\.Replace\([^\r\n]+,[^\r\n]+,[^\r\n]+\)' -or
+        $text -match '\.Contains\([^\r\n]+,\s*\[StringComparison\]') {
+        throw 'Disposable reset retains a PowerShell 7-only String API call that cannot run on the VPS Windows PowerShell runtime.'
+    }
     $resetStartedIndex = $reset.IndexOf("Write-DisposablePhaseMarker `$evidenceDirectory 5 'RESET_STARTED'", [StringComparison]::Ordinal)
     $invokeBoundaryIndex = $reset.IndexOf("Invoke-SqlWithSanitizedEvidence `$databaseTarget.Builder 'master' '' `$destructiveSqlPath", [StringComparison]::Ordinal)
     if ($resetStartedIndex -lt 0 -or $invokeBoundaryIndex -le $resetStartedIndex) {
