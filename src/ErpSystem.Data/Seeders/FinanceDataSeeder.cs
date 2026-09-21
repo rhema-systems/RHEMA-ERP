@@ -84,8 +84,11 @@ public class FinanceDataSeeder
             // Stable codes, not environment-specific GUIDs, bind books, classifications and the
             // reviewed Finance demo chart. Unreviewed external accounts remain readiness blockers.
             await new FinanceClassificationManifestSeeder(_context, _logger).SeedAsync(tenantId, baseDate);
-            await new FinanceFinancialStatementStandardSeeder(_context, _logger).SeedAsync(tenantId, baseDate);
             await new FinanceBaselineProvisioningSeeder(_context, _logger).SeedAsync(tenantId, baseDate);
+            // Protected statement standards require the canonical books to be active. Provision
+            // them after baseline activation so a fresh seed receives the same layouts as a later
+            // idempotent seed-finance-baseline pass.
+            await new FinanceFinancialStatementStandardSeeder(_context, _logger).SeedAsync(tenantId, baseDate);
 
             // 7. Seed Fixed Asset Categories
             await SeedFixedAssetCategoriesAsync(tenantId, baseDate);

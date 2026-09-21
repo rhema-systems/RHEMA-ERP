@@ -37,11 +37,11 @@ Implement the stakeholder-approved accounting-book model:
 
 ## Current status
 
-`PHASE_5_VERIFIED_CUTOVER_REHEARSAL_PENDING`
+`CUTOVER_REHEARSAL_PASSED`
 
 ## Migration state
 
-Migrations `20260921154920_AccountingBookModelV2` and `20260921174134_AccountingBookTranslationEvidence` have been authored and reviewed but not applied. The first fails closed when live accounting books already exist, requiring either the approved fresh-database cutover or a separately reviewed data-conversion plan. The second adds immutable opening-translation evidence and normalizes existing rate rows to the canonical `1 source/base = Rate target` direction. Database state is unchanged.
+Migrations `20260921154920_AccountingBookModelV2` and `20260921174134_AccountingBookTranslationEvidence` have been authored and reviewed. They remain unapplied to the live/demo database. Both were successfully applied through the complete migration chain to the isolated local rehearsal database `RHEMAERP_GL_REHEARSAL_BOOKV2_20260921_A4`. The first fails closed when live accounting books already exist, requiring either the approved fresh-database cutover or a separately reviewed data-conversion plan. The second adds immutable opening-translation evidence and normalizes existing rate rows to the canonical `1 source/base = Rate target` direction.
 
 ## Implemented
 
@@ -64,19 +64,23 @@ Migrations `20260921154920_AccountingBookModelV2` and `20260921174134_Accounting
 
 - `dotnet build src/ErpSystem.Api/ErpSystem.Api.csproj --no-restore`: passed, 0 errors (repository warnings remain).
 - Frontend `npm run type-check` filtered to changed Finance files: no changed-file errors; the repository-wide command still reports unrelated baseline TypeScript failures.
-- V2/FX/Parallel/reversal backend sweep: 49 passed. Coverage includes single-rate and classification-driven governed conversion snapshots, CTA balancing, historical replay idempotency, canonical rate direction, Primary creation prohibition, multi-Delta aggregation/order, historical Delta ledger labels, protected Parallel accounts, missing-rate atomic rollback, immutable translated replication, direct-Parallel rejection, and original-rate reversals.
+- V2/FX/Parallel/reversal/protected-layout backend sweep: 51 passed. Coverage includes single-rate and classification-driven governed conversion snapshots, CTA balancing, historical replay idempotency, canonical rate direction, Primary creation prohibition, multi-Delta aggregation/order, historical Delta ledger labels, protected Parallel accounts, protected layout idempotency, missing-rate atomic rollback, immutable translated replication, direct-Parallel rejection, and original-rate reversals.
 - Accounting-book readiness frontend suite: 11 passed. Legacy per-book period expectations were removed in favor of the tenant fiscal-calendar model.
 - Delta ledger/report frontend tests: 4 passed across 2 files.
+- Full Next.js production build passed and generated all Finance administration routes, including currencies and both dimension pages.
 - Idempotent migration SQL generation passed. Review confirmed `decimal(18,6)` translation evidence, the tenant-scoped exchange-rate foreign key, evidence check constraints, and the one-time `Rate`/`InverseRate` normalization statement.
+- Fresh A4 migration plus `seed-db` passed. Direct SQL verification found exactly 3 canonical active books, 3 approved balanced initialization packages, 2 protected non-postable Parallel control accounts, 1 approved default routing policy with 10 rules, and 6 active protected statement layouts.
+- `seed-finance-baseline` reran successfully without duplicates. `seed-finance-demo-dimensions` reran twice and produced 22 values across 6 dimensions with zero duplicate codes.
+- Rehearsal correction: Finance protected layouts were previously filtered to retired book codes and invoked before baseline activation. The canonical codes are now `BASE`, `IFRS_ADJUSTMENTS`, and `USD_PARALLEL`, and protected-layout seeding runs after baseline activation.
 - Targeted `AccountingBookPeriodInitializationC4Tests`: 20 passed; 3 legacy assertions fail because they require removed behavior (per-book close readiness, Primary lifecycle transitions, and inactive derived mappings). These tests must be replaced with V2 assertions.
 - No migration was applied and no database was reset.
 
 ## Open implementation slices
 
 - Replace remaining legacy accounting-book assertions that still expect per-book periods or Primary lifecycle transitions.
-- Complete final repository-wide frontend build verification and replace the remaining legacy accounting-book assertions.
-- Perform a fresh-database migration/seeding rehearsal only after explicit cutover authorization.
+- Replace the remaining legacy accounting-book assertions that intentionally encode removed per-book period and Primary lifecycle behavior.
+- Choose and execute the separately governed live/demo database strategy: fresh reset or reviewed data conversion. The rehearsal does not authorize either automatically.
 
 ## Next authorized action
 
-Finish frontend and migration verification in the isolated worktree; do not apply either migration.
+Preserve the passing A4 rehearsal evidence and prepare the live/demo cutover decision. Do not apply either migration to the live/demo database without a separate target-specific action.
