@@ -2646,6 +2646,8 @@ public class ConsultantClientDto : BaseDto
     public string? Region { get; set; }
     public string? PostalCode { get; set; }
     public Guid? CountryId { get; set; }
+    /// <summary>The Finance customer this client is billed as; null = invoices stay HR-side (slice 6).</summary>
+    public Guid? FinanceCustomerId { get; set; }
     public string? CountryName { get; set; }
 
     // Billing Contact
@@ -2723,6 +2725,7 @@ public class CreateConsultantClientDto : CreateDtoBase
     public string? PostalCode { get; set; }
 
     public Guid? CountryId { get; set; }
+    public Guid? FinanceCustomerId { get; set; }
 
     [MaxLength(200)]
     public string? BillingContactName { get; set; }
@@ -2788,6 +2791,7 @@ public class UpdateConsultantClientDto : UpdateDtoBase
     public string? PostalCode { get; set; }
 
     public Guid? CountryId { get; set; }
+    public Guid? FinanceCustomerId { get; set; }
 
     [MaxLength(200)]
     public string? BillingContactName { get; set; }

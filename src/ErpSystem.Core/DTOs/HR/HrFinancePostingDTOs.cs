@@ -70,6 +70,9 @@ public sealed class HrFinancePostingCommand
 
     /// <summary>The payee's name as HR recorded it, for the invoice notes and the register.</summary>
     public string? PayeeName { get; init; }
+
+    /// <summary>For a <see cref="HrFinancePostingKind.CustomerInvoice"/> event: the Finance customer the invoice is raised to.</summary>
+    public Guid? PayeeCustomerId { get; init; }
 }
 
 /// <summary>What the adapter hands back to the HR area after an event ran.</summary>
@@ -227,7 +230,10 @@ public sealed class HrFinancePostingRecordDto
     /// <summary>For an AP row: the Finance vendor invoice this event created.</summary>
     public Guid? VendorInvoiceId { get; set; }
     public string? VendorInvoiceNumber { get; set; }
-    /// <summary>For an AP row: Finance's invoice status when last read (pull sync).</summary>
+    /// <summary>For an AR row: the Finance customer invoice this event created.</summary>
+    public Guid? CustomerInvoiceId { get; set; }
+    public string? CustomerInvoiceNumber { get; set; }
+    /// <summary>For an AP or AR row: Finance's invoice status when last read (pull sync).</summary>
     public string? ExternalStatus { get; set; }
     public DateTime? ExternalStatusAt { get; set; }
     /// <summary>True for Unposted, Failed and Reversed rows: the register can post (again) — a re-post after a reversal is the next generation.</summary>
@@ -235,7 +241,8 @@ public sealed class HrFinancePostingRecordDto
     /// <summary>True for Posted rows: the register can reverse through Finance (an AP invoice only while Finance still holds it as a draft).</summary>
     public bool CanReverse => Status == HrFinancePostingStatus.Posted;
     /// <summary>True for a posted AP row: Finance's status and the payment voucher can be pulled.</summary>
-    public bool CanRefresh => Kind == HrFinancePostingKind.VendorInvoice && Status == HrFinancePostingStatus.Posted && VendorInvoiceId.HasValue;
+    public bool CanRefresh => Status == HrFinancePostingStatus.Posted
+        && ((Kind == HrFinancePostingKind.VendorInvoice && VendorInvoiceId.HasValue) || (Kind == HrFinancePostingKind.CustomerInvoice && CustomerInvoiceId.HasValue));
 }
 
 public sealed class HrFinancePostingRecordQueryDto
@@ -269,4 +276,46 @@ public sealed class ReverseHrFinancePostingDto
     [MinLength(5)]
     [MaxLength(500)]
     public string Reason { get; set; } = string.Empty;
+}
+
+/// <summary>What Finance says was spent against an HR budget (slice 6). A read of book balances.</summary>
+public sealed class HrBudgetFinanceActualsDto
+{
+    public Guid BudgetId { get; set; }
+    public string BudgetNumber { get; set; } = string.Empty;
+    /// <summary>Manpower or Training.</summary>
+    public string BudgetKind { get; set; } = string.Empty;
+    public string? UnitName { get; set; }
+    public DateTime PeriodStart { get; set; }
+    public DateTime PeriodEnd { get; set; }
+    /// <summary>True when an account and Finance's book were resolved and the periods were read.</summary>
+    public bool Linked { get; set; }
+    /// <summary>Why the actuals could not be read, when they could not — a sentence for the screen.</summary>
+    public string? Problem { get; set; }
+    public Guid? AccountId { get; set; }
+    public string? AccountCode { get; set; }
+    public string? AccountName { get; set; }
+    public string? AccountingBookCode { get; set; }
+    public string FunctionalCurrencyCode { get; set; } = string.Empty;
+    /// <summary>The HR budget figure (manpower: total budget; training: allocated).</summary>
+    public decimal Budget { get; set; }
+    /// <summary>Finance's net movement on the account over the periods (debits less credits).</summary>
+    public decimal Actual { get; set; }
+    public decimal Variance => Budget - Actual;
+    public decimal VariancePercentage => Budget > 0m ? decimal.Round(Variance / Budget * 100m, 2) : 0m;
+    public List<HrBudgetFinanceActualsPeriodDto> Periods { get; set; } = new();
+}
+
+public sealed class HrBudgetFinanceActualsPeriodDto
+{
+    public Guid FiscalPeriodId { get; set; }
+    public string PeriodName { get; set; } = string.Empty;
+    public DateTime StartDate { get; set; }
+    public DateTime EndDate { get; set; }
+    /// <summary>The fiscal period starts before or ends after the budget's window; the whole period is counted.</summary>
+    public bool PartlyOutsideBudget { get; set; }
+    public decimal Debits { get; set; }
+    public decimal Credits { get; set; }
+    public decimal NetMovement { get; set; }
+    public int TransactionCount { get; set; }
 }

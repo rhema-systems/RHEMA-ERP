@@ -83,6 +83,8 @@ public static class HrFinancePostingEventCatalog
     public const string MedicalInsurerRecoveryReceived = "MEDICAL_INSURER_RECOVERY_RECEIVED";
     public const string NhisClaimReimbursed = "NHIS_CLAIM_REIMBURSED";
     public const string SheInsuranceClaimReceived = "SHE_INSURANCE_CLAIM_RECEIVED";
+    // slice 6 — HR's one revenue
+    public const string TimesheetInvoiceSent = "TIMESHEET_INVOICE_SENT";
 
     public const string SourceMedicalExpenseClaim = "MedicalExpenseClaim";
     public const string SourceStaffTravelExpenseClaim = "StaffTravelExpenseClaim";
@@ -101,6 +103,7 @@ public static class HrFinancePostingEventCatalog
     public const string SourceMedicalInsuranceClaim = "MedicalInsuranceClaim";
     public const string SourceNhisClaim = "NHISClaim";
     public const string SourceSafetyIncident = "SafetyIncident";
+    public const string SourceTimesheetInvoice = "TimesheetInvoice";
 
     public static IReadOnlyList<HrFinancePostingEventDefinition> Events { get; } =
     [
@@ -265,7 +268,15 @@ public static class HrFinancePostingEventCatalog
             "An incident's insurance claim is recorded as approved and paid (POST safety/incidents/{id}/file-claim with an amount paid).",
             "Dr Staff payments clearing / Cr Insurance recoveries income, for the amount paid. A claim filed but not yet paid posts nothing.",
             [HrFinanceAccountRole.StaffPaymentsClearing],
-            [HrFinanceAccountRole.InsuranceRecoveriesIncome])
+            [HrFinanceAccountRole.InsuranceRecoveriesIncome]),
+
+        // ── slice 6 — HR's one revenue ───────────────────────────────────────────────────────
+        new(TimesheetInvoiceSent, "Consulting invoice issued (AR invoice)", "Consulting", SourceTimesheetInvoice, "Issue",
+            "HR sends a timesheet invoice to a client (POST timesheet-invoices/{id}/send) whose client is linked to a Finance customer.",
+            "An Accounts Receivable customer invoice to the client, one service line on Consulting revenue for the billed hours (before tax — Finance's tax group is authoritative), submitted into Finance's AR approval. Finance issues, collects and posts it; the register reads the status and the receipt back onto the HR invoice. A client not linked to a Finance customer stays HR-side and is recorded Skipped.",
+            [],
+            [HrFinanceAccountRole.ConsultingRevenue],
+            Kind: HrFinancePostingKind.CustomerInvoice)
     ];
 
     private static readonly IReadOnlyDictionary<string, HrFinancePostingEventDefinition> ByCode =
@@ -300,6 +311,7 @@ public static class HrFinancePostingEventCatalog
         HrFinanceAccountRole.StaffReceivableWriteOff => AccountType.Expense,
         HrFinanceAccountRole.RecruitmentExpense => AccountType.Expense,
         HrFinanceAccountRole.InsuranceRecoveriesIncome => AccountType.Revenue,
+        HrFinanceAccountRole.ConsultingRevenue => AccountType.Revenue,
         _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Unknown HR Finance account role.")
     };
 }

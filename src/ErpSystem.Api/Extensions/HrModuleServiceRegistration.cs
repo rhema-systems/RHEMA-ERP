@@ -746,6 +746,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ErpSystem.Core.Services.HR.Finance.IHrFinancePostingStore, ErpSystem.Core.Services.HR.Finance.HrFinancePostingStore>();
         services.AddScoped<IHrFinancePostingAdapter, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdapter>();
         services.AddScoped<IHrFinancePostingAdminService, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdminService>();
+        services.AddScoped<IHrFinanceActualsService, ErpSystem.Core.Services.HR.Finance.HrFinanceActualsService>();
         // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
         services.AddScoped<StaffTravelPolicyGuard>();
         // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).

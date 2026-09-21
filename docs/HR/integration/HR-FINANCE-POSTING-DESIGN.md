@@ -203,6 +203,53 @@ already exists and already posted. Journaling it again would double the expense;
 integration is the budget *read* (slice 6, with the manpower actuals). The same reasoning keeps the
 awards and travel budget figures out of the ledger.
 
+### 3.1f Slice 6 — HR's one revenue, and the budget reads (built 2026-09-21)
+
+**Consulting invoices go to Accounts Receivable.** The receivables twin of the AP hand-off: kind
+`CustomerInvoice`. When HR *sends* a timesheet invoice to a client whose `ConsultantClient` is
+linked to a Finance customer (`FinanceCustomerId`, chosen through the new read door
+`api/hr/customers`), the adapter raises a Finance customer invoice under the manual-AR route with
+one service line on the new Revenue role *Consulting revenue* — **the billed hours before tax**:
+HR's typed tax percentage is advisory, Finance's tax group is authoritative for the receivable —
+and submits it into Finance's AR approval. Finance issues, collects and posts it; the register's
+refresh pulls the status back and, once Finance records a receipt, writes `PaidAmount`, `PaidDate`
+and Paid / Partially paid onto the HR invoice, which HR may no longer mark paid or void by hand
+while Finance holds it. A client with no Finance customer is recorded Skipped and the invoice stays
+HR-side. Entity-sweep decision #11, answered. The rule ships OFF like the AP one.
+
+⚠ **The AR invoice is raised after HR's commit, not inside it.** Finance's AR service wraps
+every call in its own transaction and cannot join HR's ("the connection is already in a
+transaction" — found live), so for this one kind the send commits first and the customer invoice
+follows immediately; a Finance refusal leaves the HR invoice Sent with a **Failed** register row to
+post again, instead of rolling the send back. Journals and AP invoices keep the all-or-nothing path
+(§ 4).
+
+| Event | Kind | Source type / action | Lines / effect |
+|---|---|---|---|
+| `TIMESHEET_INVOICE_SENT` | **AR invoice** | `TimesheetInvoice` / `Issue` (HR's send) | one service line Cr Consulting revenue for `SubTotal`, in the invoice's currency, to the client's Finance customer, submitted into AR approval; Skipped when the client is not linked |
+
+Register columns added: `CustomerInvoiceId`, `CustomerInvoiceNumber`; `ConsultantClients.FinanceCustomerId`
+(migration `AddHrFinancePostingSlice6`).
+
+**The budget reads.** `ManpowerBudget.ActualSpent` / `Variance` keep having no writer — that was the
+backlog's decision: HR does not invent a number. What Finance says was spent is now *read*:
+`GET JobAnalysis/budgets/{id}/finance-actuals` and `GET training-budgets/{id}/finance-actuals`
+(`HrFinanceActualsService`) resolve the account the budget is charged to (the unit's
+`OrganizationUnit.FinanceAccountId` from round 2 lane B2; for a training budget its typed
+`GLAccountCode` first, the unit's account second), the fiscal periods touching the budget's window,
+and Finance's book balances on that account per period (`IBookBalanceReadModelService`); the
+result is budget, actual (net movement), variance and a period table, or a sentence saying why it
+could not be read (no unit, unit not charged to an account, code not on the chart, no periods). No
+dimension is sent or read; a unit is one account, which is what the link says today. This is the
+shape of every HR budget conversation with Finance until FIN-INT-015's reserve → consume →
+release is opened for HR (§ 6, D-9).
+
+**Deliberately not posted: succession development activity cost.** `SuccessionDevelopmentActivity
+.ActualCost` names an external provider by free text and contact, not a supplier, and like a
+training budget transaction it is HR's memo of a cost Finance pays through its own AP. The
+three-way training double-count (manpower training envelope, training budget, development cost)
+stays a planning question the budget reads make visible rather than a posting.
+
 ### 3.2 Identity
 
 - `SourceModule = "HR"`, `OriginModuleCode = "HR"` — Finance's module-lock catalogue already knows HR, so a Finance administrator can lock HR out of a period without touching payroll.
@@ -318,6 +365,23 @@ until Finance grants one); a withdrawn row must be re-postable from the register
 accepts Reversed). Finance answers 500, not 404, for a deleted invoice id: recorded for the Finance
 owner, not fixed.
 
+**Verified live 2026-09-21 (slice 6) on `ErpSystemDB_UAT`:** `run-slice6.mjs`, 50 assertions, green
+twice. A Finance customer created in AR is read through HR's `api/hr/customers` door as
+`{id, code, name, isActive, currencyCode}`; a client naming a customer that does not exist is
+refused; a client linked to one, an engagement, a timesheet with entries submitted, approved, sent
+for confirmation and confirmed through the public tokenised door, an invoice generated (posts
+nothing) and sent → a Finance AR customer invoice to that customer for the billed hours before tax,
+PendingApproval, on a register row of kind CustomerInvoice; HR's mark-paid and void are refused
+while Finance holds it; Finance's three AR tiers sign it through `api/finance/approvals`, refresh
+pulls the status, HR can no longer withdraw it; an unlinked client's invoice is Skipped and its
+receipt is still recorded by hand. A training budget naming GL 6020 reads Finance's fiscal periods
+and an actual at least the 14,000 the premium slice posted there, with the current period's
+transaction count; a code not on the chart is reported as such; a manpower budget answers linked
+figures or the sentence saying what to set. Two live lessons, both now in the code: a Finance
+"customer" is a BusinessPartner row read through Finance's customer service, not the Sales
+Customer entity; and Finance's AR service cannot join HR's transaction, so the AR invoice is raised
+after HR's commit (§ 3.1f).
+
 ## 6. Decisions taken here, and what they wait on
 
 | # | Decision | Taken as | Waits on |
@@ -329,6 +393,7 @@ owner, not fixed.
 | D-5 | Dimensions | None sent | TDC's cost-attribution answer; then a Finance route with dimension rules |
 | D-6 | Posting date | The HR action date by default; per event switchable to the document date | — |
 | D-7 | Routes | Journals: route-less FIN-INT-001 overload, as Procurement's tender fee. **AP invoices: the manual-AP dimension route** (`FinanceApVendorInvoice`, the one Finance's own AP screen uses), because Finance approves an invoice only when it carries dimension provenance recorded under a producer route, and the route-less overload records none — the first live run proved an HR invoice could never be approved | Finance to add HR routes (hand-off Q1); switch is one line per event / one enum value for AP |
+| D-9 | HR's budgets and Finance's budget control | **Read, not reserve** (slice 6): HR keeps its own envelopes (manpower, training, awards, travel) and reads Finance's actuals on the account the budget is charged to. No `BudgetEntryId`, no reservation, nothing written back to `ActualSpent`. | The budget-commitment conversation (finish plan 8a): whether HR budgets become Finance budget entries. Until then HR plans, Finance posts, HR reads the difference. |
 | D-8 | The AP hand-off before Finance answered | **Built behind a rule that ships OFF** (slice 5), on the route-less `IVendorInvoiceService.CreateAsync` the Estate and QS producers already use; HR's approval submits the invoice into AP approval; a non-supplier payee is Skipped; one expense role, not one per category; no `BudgetEntryId` (HR enforces its own envelope). | The recruitment-cost hand-off's five questions. Each answer is one line or a toggle: a producer route (D-7), "receive as Draft" (one call), per-category accounts (roles), budget reservation (one field). Turning the rule on is the tenant's decision, made once Finance has confirmed. |
 
 ---
@@ -351,14 +416,15 @@ expense line is needed, and a contract test.
 | ~~6 Recruitment cost (R8)~~ | **built, slice 5** — AP vendor invoice on HR's approval; rule ships OFF until Finance confirms | | |
 | ~~11 Medical premium, insurer recovery, NHIS recovery~~ | **built, slice 5** | | |
 | ~~10 SHE incident insurance proceeds~~ | **built, slice 5** | | |
-| ~~7 Training budget transactions~~ | **not posted, by decision** (§ 3.1e) — a memo of a Finance document; the budget read is slice 6 | | |
-| 13 Succession development actual cost | `DEVELOPMENT_ACTIVITY_COMPLETED` | Training expense role | only after the three-way training decision |
-| Budget surfaces (manpower, training, awards, travel) | none — reads of Finance actuals | | FIN-INT-015 shape needs a Planned conversation; not wired unilaterally |
+| ~~7 Training budget transactions~~ | **not posted, by decision** (§ 3.1e) — a memo of a Finance document | | |
+| ~~Consultant-client billing (sweep § 3.1b)~~ | **built, slice 6** — AR customer invoice on HR's send; rule ships OFF | | |
+| ~~13 Succession development actual cost~~ | **not posted, by decision** (§ 3.1f) — a memo of a cost Finance pays through AP | | |
+| ~~Budget surfaces (manpower, training)~~ | **read, slice 6** — Finance's book balances on the budget's account, per period; nothing written | | awards and travel budgets have no account link to read against; FIN-INT-015 for HR stays a Planned conversation (D-9) |
 
 ---
 
 ## 8. Verification
 
 - `HrFinancePostingAdapterTests` (21) — contract helper on every request; retry returns the original without a second Finance call; refusal rolls back and logs Failed; disabled/missing rule logs Unposted; unmapped, wrong-type, inactive and cross-tenant accounts refuse; travel settlement legs; payroll-offset skip; foreign advance evidence; reversed-row generation; edit guard.
-- `HrFinancePostingCatalogueTests` (14) — every event (25) has a balanced builder inside its roles (an AP event: exactly one expense leg and a supplier); distinct actions per source type; zero amounts skip; the settlement route toggle in both positions; receivables raised once, cleared by what was collected and written off for the rest; a settlement line recovering a posted surcharge credits the receivable; every wired area service routes through the adapter and never touches `IJournalEntryService`.
+- `HrFinancePostingCatalogueTests` (16) — every event (26) has a balanced builder inside its roles (an AP event: exactly one expense leg and a supplier; an AR event: exactly one revenue leg and a customer); distinct actions per source type; zero amounts skip; the settlement route toggle in both positions; receivables raised once, cleared by what was collected and written off for the rest; a settlement line recovering a posted surcharge credits the receivable; every wired area service routes through the adapter and never touches `IJournalEntryService`.
 - Live: `D:\Rhema\TDC ERPS\dev-harness\hr-finance\run-slice1.mjs` (outside the repo, see its README) — maps the roles, enables the events, walks medical approve → pay and travel advance → claim → pay, reads the journals back from Finance, asserts idempotency, reversal and the edit guard. Requires the baseline database (§ 5).

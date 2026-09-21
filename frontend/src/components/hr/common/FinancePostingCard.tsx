@@ -56,13 +56,18 @@ export function fmtPostingMoney(amount: number, currency: string) {
 const fmtDate = (value?: string | null) => (value ? new Date(value).toLocaleDateString() : '—');
 
 /**
- * What Finance holds the row under: a GL journal number, or — when the event raises an Accounts
- * Payable vendor invoice instead — the invoice number with Finance's own status in brackets.
+ * What Finance holds the row under: a GL journal number, or — when the event raises an invoice
+ * instead — the Accounts Payable or Accounts Receivable invoice number with Finance's own status
+ * in brackets.
  */
 export function financePostingReference(record: HrFinancePostingRecord): string | null {
   if (record.kind === 'VendorInvoice') {
     if (!record.vendorInvoiceNumber) return null;
     return `AP invoice ${record.vendorInvoiceNumber}${record.externalStatus ? ` (${record.externalStatus})` : ''}`;
+  }
+  if (record.kind === 'CustomerInvoice') {
+    if (!record.customerInvoiceNumber) return null;
+    return `AR invoice ${record.customerInvoiceNumber}${record.externalStatus ? ` (${record.externalStatus})` : ''}`;
   }
   return record.journalEntryNumber;
 }
@@ -230,6 +235,11 @@ export function FinancePostingCard({ sourceDocumentId, invalidateKeys = [], clas
             <p className="text-sm text-muted-foreground">
               HR can only withdraw a DRAFT invoice for {reversing?.eventName.toLowerCase()} on {reversing?.sourceReference}.
               Once Finance holds it, Accounts Payable must reject or void the invoice and the row is then refreshed.
+            </p>
+          ) : reversing?.kind === 'CustomerInvoice' ? (
+            <p className="text-sm text-muted-foreground">
+              HR can only withdraw a DRAFT invoice for {reversing?.eventName.toLowerCase()} on {reversing?.sourceReference}.
+              Once Finance holds it, Accounts Receivable must reject or cancel the invoice and the row is then refreshed.
             </p>
           ) : (
             <p className="text-sm text-muted-foreground">

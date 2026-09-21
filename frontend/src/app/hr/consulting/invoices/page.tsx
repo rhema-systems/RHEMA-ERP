@@ -36,6 +36,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { timesheetInvoiceService } from '@/services/hr/consultant.service';
 import { formatDate, formatHours, formatMoney, today } from '@/lib/hr/attendance-format';
 import { INVOICE_STATUS_OPTIONS } from '@/types/hr/consultant';
@@ -198,6 +199,8 @@ export default function TimesheetInvoicesPage() {
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead>Due</TableHead>
                   <TableHead>Status</TableHead>
+                  {/* Lane 8, slice 6: what Finance holds for this invoice — the AR row, once raised. */}
+                  <TableHead>Finance</TableHead>
                   <TableHead className="w-[60px]" />
                 </TableRow>
               </TableHeader>
@@ -205,7 +208,7 @@ export default function TimesheetInvoicesPage() {
                 {isLoading ? (
                   [...Array(5)].map((_, i) => (
                     <TableRow key={i}>
-                      {[...Array(9)].map((__, j) => (
+                      {[...Array(10)].map((__, j) => (
                         <TableCell key={j}>
                           <Skeleton className="h-4 w-[70px]" />
                         </TableCell>
@@ -214,7 +217,7 @@ export default function TimesheetInvoicesPage() {
                   ))
                 ) : rows.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={9}>
+                    <TableCell colSpan={10}>
                       <EmptyState
                         icon={Receipt}
                         title="No invoices"
@@ -238,6 +241,9 @@ export default function TimesheetInvoicesPage() {
                       <TableCell>{formatDate(inv.dueDate)}</TableCell>
                       <TableCell>
                         <StatusBadge status={inv.status} />
+                      </TableCell>
+                      <TableCell>
+                        <FinancePostingInlineStatus sourceDocumentId={inv.id} />
                       </TableCell>
                       <TableCell>
                         <DropdownMenu>

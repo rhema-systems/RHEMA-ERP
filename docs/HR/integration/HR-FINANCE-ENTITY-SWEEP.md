@@ -290,6 +290,13 @@ money going *out*; this one is money coming *in*, so none of decisions #1–#10 
 its own decision (#11 below): does a `TimesheetInvoice` become a Finance AR invoice, and is the
 `ConsultantClient` a Finance customer?
 
+**Decided and built 2026-09-21 (lane 8 slice 6): yes to both.** `ConsultantClient.FinanceCustomerId`
+links the client to a Finance (Sales) customer through HR's read door `api/hr/customers`; sending a
+timesheet invoice raises a Finance AR customer invoice (`TIMESHEET_INVOICE_SENT`, one revenue line
+for the billed hours before tax — Finance's tax group governs) into AR approval, and the posting
+register's refresh writes Finance's receipt back onto the HR invoice, which can no longer be marked
+paid by hand. See `HR-FINANCE-POSTING-DESIGN.md` § 3.1f.
+
 ### 3.2 Benefits & Medical — the priority back-fill
 
 Medical claims (`MedicalExpenseClaim`) have a **live, working create→approve→pay workflow** —

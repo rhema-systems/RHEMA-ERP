@@ -165,6 +165,11 @@ public class HrFinancePostingRecord : TenantEntity
 
     public string? VendorInvoiceNumber { get; set; }
 
+    /// <summary>For a customer-invoice event: the AR invoice Finance holds (slice 6). Null on other rows.</summary>
+    public Guid? CustomerInvoiceId { get; set; }
+
+    public string? CustomerInvoiceNumber { get; set; }
+
     /// <summary>Finance's invoice status as last pulled by the register's refresh.</summary>
     public string? ExternalStatus { get; set; }
 

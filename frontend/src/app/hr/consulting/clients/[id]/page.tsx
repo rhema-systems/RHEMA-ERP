@@ -12,6 +12,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { hrCustomerKey } from '@/components/hr/common/FinanceCustomerPicker';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import {
   TextField,
@@ -92,6 +93,14 @@ export default function ConsultantClientDetailPage() {
     queryKey: ['hr', 'consultant-clients', id, 'portal-accounts'],
     queryFn: () => consultantClientService.getPortalAccounts(id),
     enabled: !!id,
+  });
+
+  // Lane 8, slice 6: the client stores only the Finance customer's ID, so the name is resolved
+  // here. Shares the picker's cache key, so opening the edit dialog does not re-fetch it.
+  const { data: financeCustomer } = useQuery({
+    queryKey: hrCustomerKey(client?.financeCustomerId ?? ''),
+    queryFn: () => consultantClientService.getCustomer(client?.financeCustomerId as string),
+    enabled: !!client?.financeCustomerId,
   });
 
   const emptyEngagement: EngagementForm = {
@@ -193,6 +202,23 @@ export default function ConsultantClientDetailPage() {
                 }
               />
               <InfoRow label="Tax ID" value={client.taxIdentificationNumber} />
+              {/* Without a Finance customer nothing can be raised in Accounts Receivable — the
+                  invoices this client's timesheets produce stay HR-side. */}
+              <InfoRow
+                label="Finance customer"
+                value={
+                  !client.financeCustomerId ? (
+                    <span className="text-muted-foreground">Not linked to a Finance customer</span>
+                  ) : financeCustomer ? (
+                    <>
+                      {financeCustomer.code} — {financeCustomer.name}
+                      {financeCustomer.isActive ? '' : ' (inactive)'}
+                    </>
+                  ) : (
+                    <span className="text-muted-foreground">Linked — loading…</span>
+                  )
+                }
+              />
             </CardContent>
           </Card>
 

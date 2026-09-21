@@ -14,6 +14,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { FinanceActualsCard } from '@/components/hr/common/FinanceActualsCard';
 import { DateField, TextField, TextareaField, NumberField, FieldRow } from '@/components/hr/employee/tabs/fields';
 import { EmployeePickerField } from '@/components/hr/attendance/EmployeePickerField';
 import {
@@ -59,6 +60,16 @@ export default function TrainingBudgetDetailPage() {
     queryKey: ['hr', 'training', 'budgets', id],
     queryFn: () => trainingBudgetService.getById(id),
     enabled: !!id,
+  });
+
+  // Lane 8, slice 6: what FINANCE says was spent on the budget's GL account (else its unit's)
+  // over the year or quarter. HR's own `spentAmount` above is the transactions recorded here;
+  // the two are allowed to disagree, and the disagreement is the point.
+  const financeActuals = useQuery({
+    queryKey: ['hr', 'training', 'budgets', id, 'finance-actuals'],
+    queryFn: () => trainingBudgetService.getFinanceActuals(id),
+    enabled: !!id,
+    staleTime: 60 * 1000,
   });
 
   const invalidateBudget = () => queryClient.invalidateQueries({ queryKey: ['hr', 'training', 'budgets', id] });
@@ -163,6 +174,8 @@ export default function TrainingBudgetDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      <FinanceActualsCard title="Finance actuals" query={financeActuals} />
 
       <Tabs defaultValue="overview">
         <TabsList>

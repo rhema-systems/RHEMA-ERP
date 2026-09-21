@@ -30,6 +30,7 @@ import {
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { PlanningBaselinePanel } from '@/components/hr/manpower/PlanningBaselinePanel';
+import { FinanceActualsCard } from '@/components/hr/common/FinanceActualsCard';
 import {
   BudgetLineDialog,
   budgetLineFormFromLine,
@@ -143,6 +144,16 @@ export default function ManpowerBudgetDetailPage() {
     queryFn: () => jobArchitectureService.getRecruitmentSpend(id),
     enabled: !!budget && (budget.status === 'Approved' || budget.status === 'Active'),
     staleTime: 30 * 1000,
+  });
+
+  // Lane 8, slice 6: what FINANCE says was spent on the unit's account over the budget window.
+  // Asked for unconditionally — a draft budget with movement already on its account is exactly
+  // the case worth seeing — and the card explains itself when nothing is mapped.
+  const financeActuals = useQuery({
+    queryKey: ['manpower-budget', id, 'finance-actuals'],
+    queryFn: () => jobArchitectureService.getFinanceActuals(id),
+    enabled: !!id,
+    staleTime: 60 * 1000,
   });
 
   // Round 2b, R4b: the establishment round-trip through Excel. The export is a download; the
@@ -380,6 +391,8 @@ export default function ManpowerBudgetDetailPage() {
           </CardContent>
         </Card>
       )}
+
+      <FinanceActualsCard title="Finance actuals" query={financeActuals} />
 
       {/* Round 2b, lane R1: "the full details specified on the creation form don't display in the
           edit view". Every field the form takes is shown here, grouped the way the form groups

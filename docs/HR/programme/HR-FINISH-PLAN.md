@@ -1244,8 +1244,14 @@ than income twice). **Slice 5 BUILT 2026-09-20**: the third-party payees — rec
 become an AP vendor invoice on HR's approval (the R8 hand-off, rule shipped OFF until Finance
 confirms), premiums paid, insurer / NHIS / incident-insurance proceeds; training budget
 transactions deliberately not posted (memo of a Finance document). 25 events, 15 account roles,
-35 gate tests. Still to do in this lane: the manpower and training budget actuals read, consulting
-AR, and the back-fill rows — design section 7.
+35 gate tests. **Slice 6 BUILT 2026-09-21**: HR's one revenue — a consulting invoice sent to a client
+linked to a Finance customer becomes an AR customer invoice (rule OFF until Finance confirms, like
+AP); the manpower and training budget actuals **read** from Finance's book balances on the budget's
+account (nothing written back — D-9); compensation recorded as payroll's; succession development
+cost recorded as not posted. 26 events, 16 account roles, 37 gate tests. What the lane still owes
+is not code: the budget-commitment conversation (8a), FIN-INT-011 via the payroll owner (hand-off
+`HANDOFF-PAYROLL-FIN-INT-011.md`), and Finance's answers to the two hand-offs, each of which lands as
+a toggle or a one-line change.
 
 Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGRATION-BACKLOG.md) · entity map:
 [`HR-FINANCE-ENTITY-SWEEP.md`](../integration/HR-FINANCE-ENTITY-SWEEP.md) · mechanism:
@@ -1257,9 +1263,9 @@ Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGR
       Medical, SHE. ⚠ **Medical is the priority**: it has a live claim → approve → **pay** path, so
       it is the closest analogue to travel 12.1 and the two must post the same way. Without this
       the sweep is a re-survey.
-- [ ] **Raise FIN-INT-011** ("SH Fund, PF, ESB and fuel allocation") with the Finance owner — the
-      one catalogue entry that is HR/payroll-shaped and has **no assigned owner**. Coordination is
-      required before anyone designs against it.
+- [x] **Raise FIN-INT-011** ("SH Fund, PF, ESB and fuel allocation") — raised 2026-09-21 as
+      [`HANDOFF-PAYROLL-FIN-INT-011.md`](../integration/handoffs/HANDOFF-PAYROLL-FIN-INT-011.md): payroll-shaped, so it is
+      the payroll owner's to design against with the Finance owner; HR holds no field it would post.
 - [ ] **Open the budget-commitment conversation.** No contract exists for HR's four budget surfaces
       (`ManpowerBudget`, `TrainingBudget`, `AwardBudget`, `StaffTravelBudget`), which today each
       track `BudgetAmount`/`SpentAmount` themselves with no reserve → consume → release. FIN-INT-015
@@ -1267,7 +1273,8 @@ Register: [`HR-FINANCE-INTEGRATION-BACKLOG.md`](../integration/HR-FINANCE-INTEGR
       conversation**, not something HR wires up unilaterally.
 - [ ] Settle the **three-way training double-count**: area 7's training budget, succession
       development activities, and `ManpowerBudget.TrainingBudget`.
-- [ ] Decide who writes `ManpowerBudget.ActualSpent` and `.Variance` — nothing does today.
+- [x] Decide who writes `ManpowerBudget.ActualSpent` and `.Variance` — **nobody** (2026-09-21, D-9): they are
+      read from Finance's book balances on the unit's account (`budgets/{id}/finance-actuals`), not written.
 - [ ] Decide whether a manpower budget carries a currency at all, and if so which.
 - [ ] Decide whether an approved asset surcharge is an employee receivable, a payroll deduction, or
       both in sequence.

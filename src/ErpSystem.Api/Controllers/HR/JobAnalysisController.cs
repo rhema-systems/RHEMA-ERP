@@ -17,13 +17,16 @@ public class JobAnalysisController : ControllerBase
 {
     private readonly IJobDescriptionService _jobDescriptionService;
     private readonly IManpowerBudgetService _manpowerBudgetService;
+    private readonly IHrFinanceActualsService _financeActuals;
 
     public JobAnalysisController(
         IJobDescriptionService jobDescriptionService,
-        IManpowerBudgetService manpowerBudgetService)
+        IManpowerBudgetService manpowerBudgetService,
+        IHrFinanceActualsService financeActuals)
     {
         _jobDescriptionService = jobDescriptionService;
         _manpowerBudgetService = manpowerBudgetService;
+        _financeActuals = financeActuals;
     }
 
     #region Job Descriptions
@@ -891,6 +894,12 @@ public class JobAnalysisController : ControllerBase
     [HttpGet("budgets/{id:guid}/recruitment-spend")]
     public async Task<ActionResult<RecruitmentSpendDto>> GetRecruitmentSpend(Guid id, CancellationToken cancellationToken)
         => Ok(await _manpowerBudgetService.GetRecruitmentSpendAsync(id, cancellationToken));
+
+    /// <summary>What Finance says was spent on the unit's account over the budget period (lane 8, slice 6). A read of Finance's book balances; HR writes nothing.</summary>
+    [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
+    [HttpGet("budgets/{id:guid}/finance-actuals")]
+    public async Task<ActionResult<HrBudgetFinanceActualsDto>> GetFinanceActuals(Guid id, CancellationToken cancellationToken)
+        => Ok(await _financeActuals.GetManpowerBudgetActualsAsync(id, cancellationToken));
 
     [Authorize(Policy = HrPermissions.ManpowerBudgetReadPolicy)]
     [HttpGet("budgets/pending-approvals")]
