@@ -688,8 +688,21 @@ SELECT
 }
 
 function Write-ServiceState {
-    Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
-        ForEach-Object { Write-Output "SERVICE|$($_.Name)|$($_.Status)" }
+    Get-ManagedServices | ForEach-Object {
+        Write-Output "SERVICE|$($_.Name)|$($_.Status)"
+    }
+    if ($null -eq (Get-Service RhemaERPHTTPSIPProxy -ErrorAction SilentlyContinue)) {
+        Write-Output 'SERVICE|RhemaERPHTTPSIPProxy|NOT_INSTALLED'
+    }
+}
+
+function Get-ManagedServices {
+    $services = @(Get-Service RhemaERPAPI,RhemaERPFrontend)
+    $proxy = Get-Service RhemaERPHTTPSIPProxy -ErrorAction SilentlyContinue
+    if ($null -ne $proxy) {
+        $services += $proxy
+    }
+    return $services
 }
 
 function Invoke-Preflight {
@@ -702,7 +715,7 @@ function Invoke-Preflight {
             "Required VPS path is missing: $ApiServiceXml"
     }
 
-    $services = Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy
+    $services = Get-ManagedServices
     $notRunning = @($services | Where-Object { $_.Status -ne 'Running' })
     Assert-True ($notRunning.Count -eq 0) `
         "Preflight requires all deployed services running. Not running: $($notRunning.Name -join ', ')"
@@ -1429,8 +1442,7 @@ function Invoke-ResumeFrontend {
 function Invoke-Verify {
     Assert-SyncfusionLicenseConfigured
     Write-ServiceState
-    $notRunning = @(Get-Service RhemaERPAPI,RhemaERPFrontend,RhemaERPHTTPSIPProxy |
-        Where-Object { $_.Status -ne 'Running' })
+    $notRunning = @(Get-ManagedServices | Where-Object { $_.Status -ne 'Running' })
     Assert-True ($notRunning.Count -eq 0) 'One or more VPS services are not running.'
 
     foreach ($item in @(
