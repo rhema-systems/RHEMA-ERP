@@ -656,9 +656,17 @@ function Compare-MigrationState {
     $localIds = Get-LocalMigrationIds
     $missing = @($localIds | Where-Object { $_ -notin $remoteIds })
     $extra = @($remoteIds | Where-Object { $_ -notin $localIds })
+    $baselineId = '20260916132000_DisposableDevelopmentCurrentModelBaseline'
     $allowedHistoricalExtra = @('20260402003233_InitialCreate')
     $unexpectedExtra = @($extra | Where-Object { $_ -notin $allowedHistoricalExtra })
     Write-Host "Migrations: local=$($localIds.Count), VPS=$($remoteIds.Count), pending=$($missing.Count), historical-extra=$($extra.Count)"
+
+    Assert-True (-not (($missing -contains $baselineId) -and $remoteIds.Count -gt 0)) `
+        ('The VPS database has existing migration history but has not adopted ' +
+         "$baselineId. The current baseline creates a fresh schema and is not a " +
+         'data-preserving upgrade. Stop deployment: retain the current compatible ' +
+         'code/database pair, or use an explicitly approved disposable reset or ' +
+         'separately reviewed data-preserving cutover plan.')
 
     $guardCoverage = @($RemoteOutput | Where-Object { $_ -like 'GUARD_COVERAGE|*' } |
         ForEach-Object { $_.Substring('GUARD_COVERAGE|'.Length) })

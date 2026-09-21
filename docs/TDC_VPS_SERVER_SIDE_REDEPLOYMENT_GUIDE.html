@@ -34,6 +34,11 @@ git log -1 --oneline</pre>
 <div class="stop"><strong>If Git says it cannot fast-forward, stop.</strong> Do not run a blind merge. That means the VPS clone has commits that are not on <code>origin/master</code>. Inspect them with <code>git log --oneline origin/master..HEAD</code>, decide whether they belong in a pull request, then return the VPS source clone to the approved release branch.</div>
 <p>The migration comparison is deliberate. It tells you whether this release changes the database before services are touched.</p></section>
 
+<section class="card"><h2>Baseline cutover decision</h2>
+<div class="stop"><strong>Do not deploy the current baseline to a VPS database with retained data and older migration history.</strong> The disposable-development baseline creates a fresh schema; it is not a data-preserving upgrade path. The deployment dry run intentionally stops in this condition.</div>
+<p>If the VPS database is empty or the owner has explicitly declared every record disposable, use the separately reviewed guarded reset procedure and its backup/evidence requirements. If the VPS data must be retained or ownership is uncertain, keep the previous compatible code/database pair running. A data-preserving migration or export/import cutover must be designed and reviewed separately before this branch can be deployed.</p>
+</section>
+
 <section class="card"><h2>3. Run the deployment gate and build a production release</h2>
 <p>The repository deployment script is the supported release mechanism. Its <code>-LocalVps</code> mode runs entirely on the VPS: no SSH connection and no SSH key are used. It verifies the exact <code>origin/master</code> commit, checks database migration parity, creates application and SQL backups, publishes a self-contained API, builds a clean production frontend, applies both packages, restarts services, and records release evidence.</p>
 <pre>Set-Location $repo
