@@ -723,6 +723,19 @@ public class JobApplicationService : IJobApplicationService
             };
         }
 
+        // Round 4, lane A. The Location criterion tests tree CONTAINMENT, which needs the
+        // candidate's ancestor path. A snapshot written before round 4 carries neither id nor path;
+        // one written since carries the id and — if the read that built it Included the navigation
+        // — the path. Resolve the gap here, once per application, so EvaluateCriterion can stay
+        // pure and synchronous.
+        //
+        // ⚠ Deliberately resolved from the LIVE tree. If the area has since been re-parented, the
+        // live answer is the one a recruiter looking at the map today would give, and the frozen
+        // path is preferred when present precisely so that a re-score of an old application is
+        // stable. Both positions are defensible; the split is which question is being asked.
+        if (scoringView.GeoAreaPath is null && scoringView.GeoAreaId is { } candidateAreaId)
+            scoringView.GeoAreaPath = await ResolveGeoAreaPathAsync(candidateAreaId, cancellationToken);
+
         var breakdown = new List<CriterionScoreResult>();
         decimal totalWeight = 0m;
         decimal earnedScore = 0m;
@@ -771,10 +784,50 @@ public class JobApplicationService : IJobApplicationService
             };
         }
 
+        // ⚠ Round 4, lane A. Nothing measurable ⇒ NO SCORE, not full marks.
+        //
+        // This used to fall through to 100 whenever `totalWeight` came out zero — the same
+        // inflation round 3 lane K removed from the branch above, reached one level down. There it
+        // was "the vacancy states no criteria"; here it is "every criterion the vacancy states
+        // turned out to be unevaluable", and the old code answered the two questions differently.
+        //
+        // It mattered little while `Other` was the only way to get here. It matters now: this slice
+        // added three more exclusion paths — an empty criterion, an unanswerable numeric bound, and
+        // a Location criterion listing areas against a candidate who has none — and the last is
+        // ordinary. A vacancy screening on Greater Accra, scored against candidates who applied
+        // through the public form and have no area on file, would have handed EVERY ONE OF THEM
+        // 100 and put them at the top of the shortlist.
+        //
+        // A null score is never auto-shortlisted, which is the whole point: the recruiter is told
+        // nothing could be measured rather than being shown a number that means the opposite.
+        if (totalWeight <= 0)
+        {
+            application.AutoScore = null;
+            application.AutoScoreBreakdown = JsonSerializer.Serialize(breakdown);
+            application.ScoredAt = DateTime.UtcNow;
+            application.ScoreIsStale = false;
+            await _applicationRepository.UpdateAsync(application);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+            _logger.LogInformation(
+                "Application {AppId} has {Count} criteria but none could be evaluated — no score written.",
+                applicationId, breakdown.Count);
+
+            return new ApplicationAutoScoreDto
+            {
+                ApplicationId = applicationId,
+                AutoScore = null,
+                HasCriteria = true,
+                ScoredAt = application.ScoredAt.Value,
+                AllMandatoryPassed = allMandatoryPassed,
+                TotalWeight = 0m,
+                MaxPossibleScore = 100m,
+                Breakdown = breakdown,
+            };
+        }
+
         // Normalise criterion score to 0–100
-        decimal criterionScore = totalWeight > 0
-            ? Math.Round(earnedScore / totalWeight * 100m, 2)
-            : 100m;
+        decimal criterionScore = Math.Round(earnedScore / totalWeight * 100m, 2);
 
         // ── Test score integration ────────────────────────────────────────────
         decimal finalScore = criterionScore;
@@ -862,6 +915,22 @@ public class JobApplicationService : IJobApplicationService
         public Gender   Gender               { get; init; }
         public string   City                 { get; init; } = string.Empty;
 
+        /// <summary>The candidate's administrative area, when they have one on file.</summary>
+        public Guid?    GeoAreaId            { get; init; }
+
+        /// <summary>
+        /// The materialised ancestor path of <see cref="GeoAreaId"/>, in the form
+        /// <c>/root/child/leaf</c> and INCLUDING the area's own id as the last segment.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ Settable after construction, unlike everything else here, because the path is the one
+        /// field that may need a database read: a snapshot written before round 4 carries the id
+        /// but not the path, and the orchestrator back-fills it from the live tree before scoring
+        /// rather than making <c>EvaluateCriterion</c> async. Null means "no area, or the area
+        /// could not be read" — both fall through to the free-text city.
+        /// </remarks>
+        public string?  GeoAreaPath          { get; set; }
+
         // ── Pre-normalised sets for O(1) lookups ──────────────────────────────
         public HashSet<string> SkillNames          { get; init; } = new();
         public HashSet<Guid>   SkillIds            { get; init; } = new();
@@ -879,6 +948,10 @@ public class JobApplicationService : IJobApplicationService
                 DateOfBirth         = c.DateOfBirth,
                 Gender              = c.Gender,
                 City                = c.City?.ToLowerInvariant() ?? string.Empty,
+                GeoAreaId           = c.GeoAreaId,
+                // Only set when the caller Included the navigation; the orchestrator back-fills it
+                // from the live tree otherwise.
+                GeoAreaPath         = c.GeoArea?.Path,
                 SkillNames          = c.Skills
                                         .Select(s => s.SkillName.ToLowerInvariant())
                                         .ToHashSet(),
@@ -916,6 +989,10 @@ public class JobApplicationService : IJobApplicationService
                 DateOfBirth         = snap.DateOfBirth,
                 Gender              = snap.Gender,
                 City                = snap.City?.ToLowerInvariant() ?? string.Empty,
+                GeoAreaId           = snap.GeoAreaId,
+                // Null on every snapshot written before round 4, and on the anonymous apply path
+                // when the candidate row had no area loaded. Back-filled by the orchestrator.
+                GeoAreaPath         = snap.GeoAreaPath,
                 SkillNames          = snap.Skills
                                         .Select(s => s.SkillName.ToLowerInvariant())
                                         .ToHashSet(),
@@ -958,7 +1035,7 @@ public class JobApplicationService : IJobApplicationService
         {
             case JobShortlistingCriteriaType.YearsOfExperience:
             {
-                (passed, rawScore, notes) = EvaluateNumericCriterion(criterion, view.YearsOfExperience, "year(s) of experience");
+                (passed, rawScore, notes, autoEvaluated) = EvaluateNumericCriterion(criterion, view.YearsOfExperience, "year(s) of experience");
                 break;
             }
 
@@ -973,7 +1050,7 @@ public class JobApplicationService : IJobApplicationService
                     notes    = $"Qualification matched by catalogue ID ({criterion.RequiredQualificationId.Value}).";
                     break;
                 }
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.QualificationIds, view.QualificationNames, "qualification");
+                (passed, rawScore, notes, autoEvaluated) = EvaluateListCriterion(criterion, view.QualificationIds, view.QualificationNames, "qualification");
                 notes += $" Candidate qualifications: {string.Join(", ", view.QualificationNames)}.";
                 break;
             }
@@ -987,7 +1064,7 @@ public class JobApplicationService : IJobApplicationService
                     notes    = $"Skill matched by catalogue ID ({criterion.RequiredSkillId.Value}).";
                     break;
                 }
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.SkillIds, view.SkillNames, "skill");
+                (passed, rawScore, notes, autoEvaluated) = EvaluateListCriterion(criterion, view.SkillIds, view.SkillNames, "skill");
                 break;
             }
 
@@ -996,14 +1073,30 @@ public class JobApplicationService : IJobApplicationService
                 // A candidate's certificate carries a name, not a catalogue id (lane C1 added the
                 // number, body and expiry; the id is a follow-on), so a catalogue-picked value
                 // matches on the mirrored catalogue name — which is exactly why the label is mirrored.
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, new HashSet<Guid>(), view.CertificationNames, "certification");
+                (passed, rawScore, notes, autoEvaluated) = EvaluateListCriterion(criterion, new HashSet<Guid>(), view.CertificationNames, "certification");
                 break;
             }
 
             case JobShortlistingCriteriaType.Age:
             {
+                // ⚠ Round 4, lane A. DateOfBirth is a NON-NULLABLE DateTime on both the candidate
+                // and the snapshot, so a candidate HR typed in without one carries DateTime.MinValue
+                // — and this line then computed an age of roughly 2,026 years, which passed every
+                // minimum and failed every maximum. An unknown age is not an age: the criterion is
+                // left out of the score the way Other is, rather than being answered with a number
+                // nobody could act on.
+                if (view.DateOfBirth == default || view.DateOfBirth.Year <= 1)
+                {
+                    passed = true;
+                    rawScore = 0m;
+                    autoEvaluated = false;
+                    notes = "The candidate has no date of birth on file, so their age cannot be "
+                          + "computed. This criterion is left out of the score.";
+                    break;
+                }
+
                 decimal ageYears = (decimal)((DateTime.UtcNow - view.DateOfBirth).TotalDays / 365.25);
-                (passed, rawScore, notes) = EvaluateNumericCriterion(criterion, ageYears, "years old");
+                (passed, rawScore, notes, autoEvaluated) = EvaluateNumericCriterion(criterion, ageYears, "years old");
                 break;
             }
 
@@ -1015,9 +1108,14 @@ public class JobApplicationService : IJobApplicationService
                 var mine = view.Gender.ToString().ToLowerInvariant();
                 if (accepted.Count == 0)
                 {
+                    // Round 4, lane A — the same inflation as the empty list criterion. This used
+                    // to award full marks to everybody for a criterion stating no preference, which
+                    // raised every percentage without separating anyone.
                     passed = true;
-                    rawScore = 1m;
-                    notes = "No gender specified; every candidate passes.";
+                    rawScore = 0m;
+                    autoEvaluated = false;
+                    notes = "No gender specified; this criterion measures nothing and is left out "
+                          + "of the score entirely.";
                 }
                 else
                 {
@@ -1030,29 +1128,14 @@ public class JobApplicationService : IJobApplicationService
 
             case JobShortlistingCriteriaType.Language:
             {
-                (passed, rawScore, notes) = EvaluateListCriterion(criterion, view.LanguageIds, view.LanguageNames, "language");
+                (passed, rawScore, notes, autoEvaluated) = EvaluateListCriterion(criterion, view.LanguageIds, view.LanguageNames, "language");
                 notes += $" Candidate languages: {string.Join(", ", view.LanguageNames)}.";
                 break;
             }
 
             case JobShortlistingCriteriaType.Location:
             {
-                var accepted = RequiredLabels(criterion);
-                if (accepted.Count == 0)
-                {
-                    passed = true;
-                    rawScore = 1m;
-                    notes = "No required location specified; defaulting to pass.";
-                }
-                else
-                {
-                    var op = criterion.ComparisonOperator ?? ShortlistingComparisonOperator.Contains;
-                    passed = op == ShortlistingComparisonOperator.Equals
-                        ? accepted.Contains(view.City)
-                        : accepted.Any(a => view.City.Contains(a, StringComparison.Ordinal));
-                    rawScore = passed ? 1m : 0m;
-                    notes = $"Required location: '{string.Join(", ", accepted)}'; Candidate city: '{view.City}'.";
-                }
+                (passed, rawScore, notes, autoEvaluated) = EvaluateLocationCriterion(criterion, view);
                 break;
             }
 
@@ -1094,7 +1177,167 @@ public class JobApplicationService : IJobApplicationService
     /// exactly, or its mirrored label under the strategy — so a candidate who typed the same name
     /// still matches. Duplicates collapse.
     /// </summary>
-    private static (bool passed, decimal rawScore, string notes) EvaluateListCriterion(
+    /// <summary>
+    /// The Location criterion — round 4, lane A. Areas from the shared geography tree, matched by
+    /// containment, with the pre-tree free-text path kept for candidates who have no area.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>What this replaced, and why each part was wrong.</b> The old arm compared the
+    /// criterion's typed labels against the candidate's typed city with a raw
+    /// <c>string.Contains</c>:</para>
+    /// <list type="number">
+    ///   <item><description><b>Only two operators were honoured.</b> Anything that was not
+    ///   <c>Equals</c> fell through to substring — so <c>NotEquals</c> <i>inverted nothing</i> and a
+    ///   "not Accra" criterion passed Accra candidates, and <c>In</c> behaved as Contains.</description></item>
+    ///   <item><description><b>Matching was one-directional</b>, unlike <c>MatchesValue</c> which
+    ///   every other list criterion uses. "Accra" matched "Greater Accra"; "Greater Accra" did not
+    ///   match "Accra". Which way round it worked was an accident of who typed what.</description></item>
+    ///   <item><description><b><c>MatchMode</c> and <c>MatchStrategy</c> were ignored.</b> A
+    ///   Location criterion set to "all required" behaved as "any", silently.</description></item>
+    ///   <item><description><b>The score was binary.</b> Every other list criterion gives partial
+    ///   credit for matching some of several values; this one gave all or nothing.</description></item>
+    ///   <item><description><b>An empty criterion scored FULL MARKS</b> — "defaulting to pass" with
+    ///   <c>rawScore = 1</c>, lifting every candidate's percentage for a criterion that measured
+    ///   nothing. It is now treated the way <c>Other</c> is: excluded from the total entirely, so it
+    ///   neither lifts nor lowers anybody.</description></item>
+    /// </list>
+    ///
+    /// <para><b>Containment, not string comparison.</b> <c>GeoArea.Path</c> is
+    /// <c>/root/child/leaf</c> and includes the area's own id as its last segment, so a candidate is
+    /// inside an accepted area when that area's id appears anywhere in their path. That is what
+    /// makes "Greater Accra" match somebody recorded in Tema — the thing the free-text version could
+    /// never do.</para>
+    ///
+    /// <para><b>The text fallback is not legacy debt.</b> Most countries have no geography scheme
+    /// loaded, and the anonymous apply form collects a typed city by design. A candidate with no
+    /// area is matched on their city, through the same bidirectional <c>MatchesValue</c> the rest of
+    /// the engine uses, against the criterion's mirrored labels.</para>
+    /// </remarks>
+    private static (bool passed, decimal rawScore, string? notes, bool autoEvaluated)
+        EvaluateLocationCriterion(JobShortlistingCriteria criterion, ScoringCandidateView view)
+    {
+        var values = criterion.Values.Where(v => !v.IsDeleted).OrderBy(v => v.SortOrder).ToList();
+        var areaIds = values
+            .Where(v => v.Kind == ShortlistingValueKind.GeoArea && v.ReferenceId.HasValue)
+            .Select(v => v.ReferenceId!.Value)
+            .Distinct()
+            .ToList();
+        var labels = RequiredLabels(criterion);
+
+        if (areaIds.Count == 0 && labels.Count == 0)
+            return (true, 0m, "No location specified; this criterion measures nothing and is left "
+                            + "out of the score entirely.", false);
+
+        var op = criterion.ComparisonOperator ?? ShortlistingComparisonOperator.In;
+        var negated = op == ShortlistingComparisonOperator.NotEquals;
+
+        int matched;
+        int considered;
+        string basis;
+
+        if (areaIds.Count > 0 && !string.IsNullOrWhiteSpace(view.GeoAreaPath))
+        {
+            // Exact means "this precise tier"; every other operator means "in, or anywhere under".
+            var exactTierOnly = op == ShortlistingComparisonOperator.Equals;
+            var path = view.GeoAreaPath!;
+            matched = areaIds.Count(id => exactTierOnly
+                ? view.GeoAreaId == id
+                : PathContainsArea(path, id));
+            considered = areaIds.Count;
+            basis = exactTierOnly
+                ? $"candidate's own area against {considered} listed area(s)"
+                : $"candidate's area and its ancestors against {considered} listed area(s)";
+        }
+        else if (labels.Count > 0)
+        {
+            // No area on either side — fall back to the city, bidirectionally, honouring the
+            // criterion's own match strategy like every other list criterion does.
+            matched = labels.Count(l => MatchesValue(view.City, l, criterion.MatchStrategy));
+            considered = labels.Count;
+            basis = $"candidate's typed city '{view.City}' against {considered} listed name(s) "
+                  + $"[{criterion.MatchStrategy}]";
+        }
+        else
+        {
+            // Nothing to compare on either side: no usable area, and no label either.
+            //
+            // ⚠ This is NOT the "candidate has no area" case, which is the common one and is
+            // handled by the text branch above — every GeoArea value carries the area's name
+            // mirrored onto it at save, so a candidate with only a typed city is measured against
+            // that name and can genuinely miss. Scoring such a miss as zero is deliberate:
+            // excluding it would let a candidate with no address outrank one who demonstrably does
+            // not match, which is the "rewards missing data" fault G-13.2 removed from the talent
+            // pool. The round 4 harness asserts both halves — the miss AND a typed city that hits.
+            //
+            // So this branch is reached only by a row the write path will not produce: values that
+            // carry neither a reference nor a label. Kept for rows written before the write path
+            // enforced that, and for a corrupt one. Excluded rather than failed, because a record
+            // that says nothing should not be read as a candidate saying no.
+            return (true, 0m,
+                "This location criterion carries no usable area or name, so it could not be "
+                + "evaluated. It is left out of the score.", false);
+        }
+
+        var allRequired = criterion.MatchMode == MandatoryMatchMode.AllRequired;
+        var positive = allRequired ? matched == considered : matched > 0;
+        var passed = negated ? matched == 0 : positive;
+
+        // Partial credit, on the same terms as every other list criterion. A negated criterion is
+        // binary by nature: "not in these places" is satisfied or it is not.
+        var rawScore = negated
+            ? (passed ? 1m : 0m)
+            : (considered > 0 ? (decimal)matched / considered : 0m);
+
+        var mode = negated ? "none may match" : allRequired ? "all required" : "any sufficient";
+        var notes = $"{matched}/{considered} matched — {basis} [{mode}].";
+
+        return (passed, rawScore, notes, true);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="path"/> — a <c>GeoArea.Path</c> of the form <c>/a/b/c</c> — passes
+    /// through <paramref name="areaId"/> at any tier, including as its own leaf.
+    /// </summary>
+    /// <remarks>
+    /// The trailing slash is appended to both sides so the last segment is delimited like every
+    /// other one. Without it, a path ending in the area's id would not match, and a leaf candidate
+    /// would fail a criterion naming their own area.
+    /// </remarks>
+    private static bool PathContainsArea(string path, Guid areaId)
+        => (path.EndsWith('/') ? path : path + '/')
+            .Contains($"/{areaId}/", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// The ancestor path of one area, read from the live tree — the back-fill for applications
+    /// whose snapshot predates round 4.
+    /// </summary>
+    /// <remarks>
+    /// Returns null for an area this tenant cannot see or that has been hard-removed, which the
+    /// caller reads as "no area" and falls back to the typed city for. A soft-deleted area still
+    /// answers: the candidate genuinely lived there, and the criterion that named it is what the
+    /// <c>ShortlistingCriteriaGeoAreaConsumer</c> probe protects.
+    /// </remarks>
+    private async Task<string?> ResolveGeoAreaPathAsync(Guid geoAreaId, CancellationToken cancellationToken)
+    {
+        var tenantId = GetTenantId();
+        var path = await _unitOfWork.Repository<ErpSystem.Core.Entities.Reference.GeoArea>()
+            .GetQueryable()
+            .Where(a => a.Id == geoAreaId && a.TenantId == tenantId)
+            .Select(a => a.Path)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return string.IsNullOrWhiteSpace(path) ? null : path;
+    }
+
+    /// <remarks>
+    /// ⚠ Returns <c>autoEvaluated</c> as of round 4, lane A. An EMPTY criterion used to return
+    /// <c>(true, 1m, "defaulting to pass")</c> — full marks, for a criterion that measures nothing,
+    /// lifting every candidate's percentage and flattening the ranking the score exists to produce.
+    /// It is now treated exactly as <c>Other</c> is: excluded from both the earned score and the
+    /// total weight, so it neither lifts nor lowers anybody. This is the same repair the vacancy's
+    /// "no criteria at all" branch already had, one level down.
+    /// </remarks>
+    private static (bool passed, decimal rawScore, string notes, bool autoEvaluated) EvaluateListCriterion(
         JobShortlistingCriteria criterion, HashSet<Guid> candidateIds, HashSet<string> candidateNames, string noun)
     {
         var items = new List<(Guid? Id, string Label)>();
@@ -1111,7 +1354,9 @@ public class JobApplicationService : IJobApplicationService
         }
 
         if (items.Count == 0)
-            return (true, 1m, $"No required {noun} specified; defaulting to pass.");
+            return (true, 0m,
+                $"No {noun} specified; this criterion measures nothing and is left out of the score "
+                + "entirely.", false);
 
         int matched = items.Count(i =>
             (i.Id is Guid id && candidateIds.Contains(id))
@@ -1122,7 +1367,7 @@ public class JobApplicationService : IJobApplicationService
         decimal rawScore = (decimal)matched / items.Count;
         string notes = $"{matched}/{items.Count} required {noun}(s) matched "
                      + $"[{(criterion.MatchMode == MandatoryMatchMode.AllRequired ? "all required" : "any sufficient")}, {criterion.MatchStrategy}; ids first, names second].";
-        return (passed, rawScore, notes);
+        return (passed, rawScore, notes, true);
     }
 
     /// <summary>The accepted labels of a criterion, lower-cased: value rows first, legacy text second.</summary>
@@ -1135,7 +1380,13 @@ public class JobApplicationService : IJobApplicationService
         return labels;
     }
 
-    private static (bool passed, decimal rawScore, string notes) EvaluateNumericCriterion(
+    /// <remarks>
+    /// ⚠ Returns <c>autoEvaluated</c> as of round 4, lane A, for the same reason the list evaluator
+    /// does: a criterion the engine cannot answer must be excluded from the total, not scored zero.
+    /// Scoring it zero would make an unanswerable criterion *lower* the candidate's percentage,
+    /// which is the mirror image of the bug being fixed.
+    /// </remarks>
+    private static (bool passed, decimal rawScore, string notes, bool autoEvaluated) EvaluateNumericCriterion(
         JobShortlistingCriteria criterion,
         decimal candidateValue,
         string unit)
@@ -1143,6 +1394,19 @@ public class JobApplicationService : IJobApplicationService
         decimal min = criterion.MinValue ?? 0;
         decimal max = criterion.MaxValue ?? decimal.MaxValue;
         var op = criterion.ComparisonOperator ?? ShortlistingComparisonOperator.Between;
+
+        // ⚠ Round 4, lane A. "Less than" with no ceiling compared against decimal.MaxValue and so
+        // PASSED EVERY CANDIDATE — a criterion that reads as a restriction and restricted nobody.
+        // The write path refuses a numeric criterion with neither bound, but not one carrying only
+        // the bound the chosen operator does not use, so the hole was reachable from the form.
+        // Treat it the way an empty criterion is treated: measured nothing, so scores nothing.
+        var ceilingNeeded = op is ShortlistingComparisonOperator.LessThan
+                                or ShortlistingComparisonOperator.LessThanOrEqual;
+        if (ceilingNeeded && criterion.MaxValue is null)
+            return (true, 0m,
+                $"Candidate: {candidateValue:F1} {unit}; the criterion asks for less than a maximum "
+                + "it does not state, so it could not be evaluated and is left out of the score.",
+                false);
 
         bool passed = op switch
         {
@@ -1185,7 +1449,7 @@ public class JobApplicationService : IJobApplicationService
             _ => criterion.MaxValue.HasValue ? $"{min}–{max}" : $">= {min}",
         };
         string notes = $"Candidate: {candidateValue:F1} {unit}; required {label}.";
-        return (passed, rawScore, notes);
+        return (passed, rawScore, notes, true);
     }
 
     // ── Public CV upload tickets ─────────────────────────────────────────────
@@ -3150,6 +3414,20 @@ public class JobApplicationService : IJobApplicationService
                 DateOfBirth          = dto.DateOfBirth,
                 Gender               = dto.Gender,
                 City                 = dto.City?.Trim(),
+                // Round 4, lane A. ⚠ This is the THIRD snapshot writer and the only one that does
+                // not go through IApplicationSnapshotService — it builds from the public form's DTO
+                // rather than from the candidate graph. Anything added to the snapshot has to be
+                // added here too, or this path alone writes it null forever.
+                //
+                // The area comes from the CANDIDATE, not the DTO: the anonymous apply form collects
+                // a free-text city and no cascade (most applicants are in a country with no scheme,
+                // and the form is deliberately short). A returning applicant whose profile already
+                // carries an area therefore keeps it; a brand-new one has none, and the Location
+                // criterion falls back to the city below.
+                GeoAreaId            = candidate.GeoAreaId,
+                GeoAreaPath          = string.IsNullOrWhiteSpace(candidate.GeoArea?.Path)
+                                           ? null
+                                           : candidate.GeoArea!.Path,
                 TotalYearsExperience = null,   // not collected on the external form
                 Skills               = snapshotSkills.AsReadOnly(),
                 Qualifications       = snapshotQuals.AsReadOnly(),

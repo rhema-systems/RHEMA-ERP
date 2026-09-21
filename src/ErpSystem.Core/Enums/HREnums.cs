@@ -2382,6 +2382,18 @@ public enum ShortlistingValueKind
 
     [Description("Gender")]
     Gender = 5,
+
+    /// <summary>
+    /// An administrative area from the shared geography tree — round 4, lane A.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The value's <c>ReferenceId</c> is a <c>GeoArea.Id</c> and its <c>Label</c> is the area's
+    /// name mirrored at save. Matching is by <b>tree containment</b>, not by the label: an accepted
+    /// area matches a candidate in it and anywhere beneath it, so "Greater Accra" matches Tema. The
+    /// label exists for display and for the legacy text fallback, never as the comparison.
+    /// </remarks>
+    [Description("Geographic Area")]
+    GeoArea = 6,
 }
 
 /// <summary>

@@ -790,8 +790,46 @@ public class JobCandidate : TenantEntity
     [MaxLength(30)]
     public string? DigitalAddress { get; set; }
 
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since round 4, not the source of truth, on the same terms as
+    /// <see cref="Employee.City"/>. When <see cref="GeoAreaId"/> is set the service overwrites this
+    /// with the resolved town or district name. Kept because it is the only address a candidate
+    /// recorded before the tree existed has, because the careers portal of a country with no scheme
+    /// still has to write something, and because the shortlisting engine falls back to it.
+    /// </summary>
     [MaxLength(100)]
     public string City { get; set; } = string.Empty;
+
+    /// <summary>
+    /// ⚠ A DISPLAY SNAPSHOT since round 4 — see <see cref="City"/>. Holds the resolved tier-1 name
+    /// (region/state) when <see cref="GeoAreaId"/> is set, and is null otherwise. Added so the
+    /// candidate register can say where somebody is without walking the tree on every row.
+    /// </summary>
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// Where this candidate lives, as one reference to the administrative geography tree.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>⚠ One FK, not one per tier.</b> It points at the <i>lowest</i> tier known — a
+    /// community if that is what was chosen, a district if not — and the ancestors come from
+    /// <c>GeoArea.Path</c>. Same shape as <see cref="Employee.GeoAreaId"/>, and the reason a
+    /// vacancy's Location criterion can match "Greater Accra" against a candidate in Tema.</para>
+    ///
+    /// <para>Nullable and expected to stay null on plenty of rows: the register predates the tree,
+    /// most countries have no scheme loaded, and an anonymous public application may supply nothing
+    /// but a typed city. <see cref="City"/> carries whatever those rows already said, and the
+    /// scoring engine falls back to it. See docs/GEOGRAPHY-REFERENCE-DESIGN.md.</para>
+    ///
+    /// <para>⚠ A soft-deleted area does not fire this key, so
+    /// <c>JobCandidateGeoAreaConsumer</c> in <c>GeoAreaConsumers.cs</c> is what actually protects
+    /// it. Registering the probe is not optional.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    [ForeignKey(nameof(GeoAreaId))]
+    public virtual ErpSystem.Core.Entities.Reference.GeoArea? GeoArea { get; set; }
 
     /// <summary>
     /// The candidate's country. <b>Optional</b> — an external applicant supplies it on the public
@@ -1527,6 +1565,28 @@ public sealed class ApplicationCandidateSnapshot
 
     [MaxLength(100)]
     public string? City { get; init; }
+
+    /// <summary>
+    /// The candidate's administrative area at the moment they applied, frozen with the rest of the
+    /// profile so a re-score uses the address they had then.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Null on every snapshot written before round 4, and on any candidate with no area on file.
+    /// The Location criterion falls back to <see cref="City"/> for exactly those rows — see
+    /// <c>JobApplicationService.EvaluateCriterion</c>.
+    /// </remarks>
+    public Guid? GeoAreaId { get; init; }
+
+    /// <summary>
+    /// The materialised ancestor path of <see cref="GeoAreaId"/>, frozen at the same moment.
+    /// </summary>
+    /// <remarks>
+    /// Stored so containment ("is this candidate anywhere under Greater Accra?") can be answered
+    /// from the snapshot alone, without a second read of a tree that may have been re-parented, or
+    /// the area soft-deleted, since the application was submitted.
+    /// </remarks>
+    [MaxLength(1000)]
+    public string? GeoAreaPath { get; init; }
 
     /// <summary>Self-reported total years of professional experience from candidate profile.</summary>
     public int? TotalYearsExperience { get; init; }

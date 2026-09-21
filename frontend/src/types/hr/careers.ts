@@ -152,7 +152,12 @@ export interface CandidateProfile {
   alternatePhone?: string | null;
   dateOfBirth?: string | null;
   gender?: Gender | null;
+  /** ⚠ Round 4, lane A — the server rewrites this from `geoAreaId` when one is set. */
   city?: string | null;
+  /** Round 4, lane A — the resolved tier-1 name; derived, never sent on a write. */
+  region?: string | null;
+  /** Round 4, lane A — the candidate's chosen area; re-opens their cascade on the next visit. */
+  geoAreaId?: string | null;
   countryId?: string | null;
   countryName?: string | null;
   postalAddress?: string | null;
@@ -201,6 +206,11 @@ export interface SaveCandidateProfilePayload {
   dateOfBirth?: string | null;
   gender?: Gender | null;
   city?: string | null;
+  /**
+   * Round 4, lane A — the chosen administrative area. Null clears it; this payload replaces the
+   * address wholesale. Only offered where the country has a scheme, which is a minority of them.
+   */
+  geoAreaId?: string | null;
   /** Optional since 2026-09-14 — send null for "no country". The old EMPTY_GUID sentinel is retired. */
   countryId?: string | null;
   postalAddress?: string | null;

@@ -168,3 +168,57 @@ class GeographyService {
 }
 
 export const geographyService = new GeographyService();
+
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+//  The anonymous careers reader — round 4, lane A.
+//
+//  ⚠ These exist because `api/reference/geo` is InternalOnly, and InternalOnly is a BLOCKLIST that
+//  excludes ExternalUser, Candidate and ConsultantClient. A signed-in candidate filling in their
+//  own address is refused by it — and refused INVISIBLY, because a react-query default of []
+//  renders as an empty dropdown. Without this the careers cascade would have read "this country
+//  has no scheme" for every candidate on earth, and looked entirely healthy doing it.
+//
+//  Same shape as the currency picker's public mode: tenant in a header, no auth, rate-limited.
+// ═══════════════════════════════════════════════════════════════════════════════════════════════
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || '/api';
+
+async function publicGet<T>(path: string, tenantId: string, fallback: T): Promise<T> {
+  const res = await fetch(`${API_BASE}/public/catalogue/${path}`, {
+    headers: { 'X-Tenant-Id': tenantId },
+  });
+  // 204 is the documented "this country has no scheme" answer, not a failure.
+  if (res.status === 204) return fallback;
+  if (!res.ok) throw new Error(`Could not read the geography catalogue (${res.status})`);
+  return (await res.json()) as T;
+}
+
+/**
+ * The three cascade reads, against either the internal route or the anonymous careers one.
+ *
+ * Pass `publicTenantId` on a candidate-facing page and nothing anywhere else: the internal route
+ * carries more (aliases, historical areas, the whole tree) and is the one every HR screen wants.
+ */
+export function geographyReader(publicTenantId?: string | null) {
+  if (!publicTenantId) {
+    return {
+      getSchemeForCountry: (countryId: string) => geographyService.getSchemeForCountry(countryId),
+      getAreaOptions: (levelId: string, parentId?: string) =>
+        geographyService.getAreaOptions(levelId, parentId),
+      getAncestors: (areaId: string) => geographyService.getAncestors(areaId),
+    };
+  }
+
+  return {
+    getSchemeForCountry: (countryId: string) =>
+      publicGet<GeoSchemeDetail | null>(`geo-scheme?countryId=${countryId}`, publicTenantId, null),
+    getAreaOptions: (levelId: string, parentId?: string) =>
+      publicGet<GeoAreaOption[]>(
+        `geo-areas?levelId=${levelId}${parentId ? `&parentId=${parentId}` : ''}`,
+        publicTenantId,
+        [],
+      ),
+    getAncestors: (areaId: string) =>
+      publicGet<GeoAreaOption[]>(`geo-areas/${areaId}/ancestors`, publicTenantId, []),
+  };
+}

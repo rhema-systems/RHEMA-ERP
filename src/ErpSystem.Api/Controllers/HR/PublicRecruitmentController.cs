@@ -212,6 +212,123 @@ public class PublicRecruitmentController : ControllerBase
         return Ok(currencies);
     }
 
+    // =========================================================================
+    // GEOGRAPHY — round 4, lane A
+    // =========================================================================
+    //
+    // ⚠ Why these exist at all, rather than the careers pages calling api/reference/geo.
+    // That controller is [Authorize(Policy = "InternalOnly")], and InternalOnly is a BLOCKLIST that
+    // excludes exactly three roles: ExternalUser, Candidate and ConsultantClient. So a signed-in
+    // candidate filling in their own address is refused by it — and refused silently, because a
+    // react-query default of [] renders as an empty dropdown rather than an error. The cascade
+    // would have looked like "this country has no scheme" for every candidate, forever.
+    //
+    // These three mirror GeographyController's cascade reads exactly, scoped to the header tenant
+    // and returning nothing but what an address form needs. Read-only, rate-limited with the rest
+    // of this controller. Historical areas are excluded: nobody should be asked to file a new
+    // address in a district that no longer exists.
+
+    /// <summary>
+    /// The administrative scheme a country uses, with its tiers — or <b>204</b> when it has none.
+    /// </summary>
+    /// <remarks>
+    /// 204 rather than 404 on purpose, matching <c>GeographyController</c>: a country with no
+    /// scheme is the NORMAL case (most of the world), and the address widget reads it as "fall back
+    /// to the free-text city", not as an error to show the candidate.
+    /// </remarks>
+    [HttpGet("catalogue/geo-scheme")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    public async Task<IActionResult> GetGeoSchemeForCountry(
+        [FromQuery] Guid countryId, CancellationToken ct = default)
+    {
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+        if (countryId == Guid.Empty) return NoContent();
+
+        var scheme = await _unitOfWork.Repository<ErpSystem.Core.Entities.Reference.GeoScheme>()
+            .GetQueryable()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted && s.IsActive && s.CountryId == countryId)
+            .OrderByDescending(s => s.IsDefault)
+            .Select(s => new { s.Id, s.Name, s.Code })
+            .FirstOrDefaultAsync(ct);
+        if (scheme is null) return NoContent();
+
+        var levels = await _unitOfWork.Repository<ErpSystem.Core.Entities.Reference.GeoLevel>()
+            .GetQueryable()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.IsActive && l.SchemeId == scheme.Id)
+            .OrderBy(l => l.LevelNumber)
+            .Select(l => new { l.Id, l.Name, l.Code, l.LevelNumber, l.IsRequiredInAddress, l.AllowsAddressAssignment })
+            .ToListAsync(ct);
+
+        return Ok(new { scheme.Id, scheme.Name, scheme.Code, Levels = levels });
+    }
+
+    /// <summary>The areas offered at one tier, under one parent — the cascade's driver.</summary>
+    [HttpGet("catalogue/geo-areas")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGeoAreaOptions(
+        [FromQuery] Guid levelId, [FromQuery] Guid? parentId, CancellationToken ct = default)
+    {
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+        if (levelId == Guid.Empty) return Ok(Array.Empty<object>());
+
+        var query = _unitOfWork.Repository<ErpSystem.Core.Entities.Reference.GeoArea>()
+            .GetQueryable()
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.IsActive && a.GeoLevelId == levelId);
+
+        // A null parent means the broadest tier, where no area has one. Filtering on
+        // "ParentAreaId == null" is therefore correct rather than "any parent".
+        query = parentId is { } pid
+            ? query.Where(a => a.ParentAreaId == pid)
+            : query.Where(a => a.ParentAreaId == null);
+
+        var areas = await query
+            .OrderBy(a => a.Name)
+            .Select(a => new { a.Id, a.Name, a.Code, a.GeoLevelId, a.ParentAreaId })
+            .ToListAsync(ct);
+        return Ok(areas);
+    }
+
+    /// <summary>
+    /// One area's ancestors, broadest first and including the area itself — what lets a returning
+    /// candidate's saved address re-open the cascade at the right tier on every visit.
+    /// </summary>
+    [HttpGet("catalogue/geo-areas/{areaId:guid}/ancestors")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGeoAreaAncestors(Guid areaId, CancellationToken ct = default)
+    {
+        if (!TryGetTenantId(out var tenantId))
+            return BadRequest(new { message = "A valid X-Tenant-Id header is required." });
+
+        var repo = _unitOfWork.Repository<ErpSystem.Core.Entities.Reference.GeoArea>();
+        var area = await repo.GetQueryable()
+            .Where(a => a.Id == areaId && a.TenantId == tenantId && !a.IsDeleted)
+            .Select(a => new { a.Id, a.Path })
+            .FirstOrDefaultAsync(ct);
+        if (area is null) return Ok(Array.Empty<object>());
+
+        // Path is "/root/child/leaf" and already includes this area as its last segment, so the
+        // whole chain comes out of one parse and one IN query rather than a walk up the tree.
+        var ids = (area.Path ?? string.Empty)
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(s => Guid.TryParse(s, out var g) ? g : (Guid?)null)
+            .Where(g => g.HasValue).Select(g => g!.Value)
+            .ToList();
+        if (ids.Count == 0) ids.Add(areaId);
+
+        var rows = await repo.GetQueryable()
+            .Where(a => ids.Contains(a.Id) && a.TenantId == tenantId && !a.IsDeleted)
+            .Select(a => new { a.Id, a.Name, a.Code, a.GeoLevelId, a.ParentAreaId })
+            .ToListAsync(ct);
+
+        // Ordered by the path, not by the database — the path IS the ancestry.
+        var byId = rows.ToDictionary(r => r.Id);
+        var ordered = ids.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+        return Ok(ordered);
+    }
+
     // The anonymous two-phase CV upload (cv-upload -> single-use ticket -> apply) was retired
     // with the anonymous apply, 2026-08-30. A registered candidate's CV rides their profile and
     // documents on api/candidate. The ticket table, minting service and sweeper survive only to

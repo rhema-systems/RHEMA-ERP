@@ -11,7 +11,7 @@ import {
   SwitchField,
   TextField,
 } from '@/components/hr/employee/tabs/fields';
-import { countryService } from '@/services/hr/country.service';
+import { AddressCascadeField } from '@/components/hr/employee/tabs/address-fields';
 import { identificationTypeService } from '@/services/hr/lookup.service';
 import { GENDERS } from '@/types/hr/recruitment-pipeline';
 
@@ -26,7 +26,13 @@ export const candidateSchema = z.object({
   alternatePhone: z.string().max(20).optional().nullable(),
   postalAddress: z.string().max(200).optional().nullable(),
   digitalAddress: z.string().max(30).optional().nullable(),
-  city: z.string().min(1, 'City is required').max(100),
+  // Round 4, lane A. No longer `min(1)`: when the chosen country has a geography scheme the
+  // cascade below owns the address, the city box is disabled, and the server rewrites it from the
+  // tree on save. A required-but-uneditable field is a form that cannot be submitted. The address
+  // stays compulsory through the refine at the bottom — an area, or a city, never neither.
+  city: z.string().max(100).optional().nullable(),
+  region: z.string().max(100).optional().nullable(),
+  geoAreaId: z.string().optional().nullable(),
   // G-7.3: free text, and optional. Nationality is not the same question as country of residence —
   // a dual national or a stateless applicant is not served by a single FK into the country table.
   nationality: z.string().max(100).optional().nullable(),
@@ -45,6 +51,12 @@ export const candidateSchema = z.object({
 }).refine((v) => !v.nationalIdNumber?.trim() || !!v.nationalIdTypeId, {
   message: 'Say which document the number is from',
   path: ['nationalIdTypeId'],
+}).refine((v) => !!v.geoAreaId || !!v.city?.trim(), {
+  // Mirrors the server's JobCandidateAddressRule. Most of the world has no scheme loaded, so
+  // demanding an area would make the form unfillable outside Ghana; demanding a city would make it
+  // unfillable inside Ghana, where the cascade writes it. One or the other, never neither.
+  message: 'Say where the candidate is: pick an area, or type a city.',
+  path: ['city'],
 });
 
 export type CandidateFormValues = z.infer<typeof candidateSchema>;
@@ -61,6 +73,8 @@ export const emptyCandidate: CandidateFormValues = {
   postalAddress: null,
   digitalAddress: null,
   city: '',
+  region: null,
+  geoAreaId: null,
   nationality: null,
   countryId: '',
   linkedInProfile: null,
@@ -82,11 +96,9 @@ export const emptyCandidate: CandidateFormValues = {
  * inputs for them here would silently discard what the user typed.
  */
 export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFormValues> }) {
-  // Active only — an inactive country should not be offered on a new record.
-  const countries = useQuery({
-    queryKey: ['hr', 'countries', 'active'],
-    queryFn: () => countryService.getActive(),
-  });
+  // ⚠ Round 4, lane A: the country list is no longer fetched here. AddressCascadeField owns the
+  // country picker now, because the scheme it loads is keyed on the country — splitting the two
+  // across two components meant the cascade could not react to the country changing.
   // The tenant's identity documents (Ghana Card, passport, …) — the server refuses any other type.
   const idTypes = useQuery({
     queryKey: ['hr', 'identification-types', 'active'],
@@ -154,22 +166,27 @@ export function CandidateFormFields({ form }: { form: UseFormReturn<CandidateFor
             <TextField form={form} name="alternatePhone" label="Alternate phone" type="tel" />
             <TextField form={form} name="digitalAddress" label="Digital address" />
           </FieldRow>
-          <FieldRow>
-            <TextField form={form} name="postalAddress" label="Postal address" />
-            <TextField form={form} name="city" label="City" required />
-          </FieldRow>
-          <FieldRow>
-            <SelectField
-              form={form}
-              name="countryId"
-              label="Country"
-              options={(countries.data ?? []).map((c: any) => ({ value: c.id, label: c.name }))}
-            />
-            {/* G-7.3: displayed on the Personal card since the module was built and settable by
-                nothing — the demo seeder was its only writer, which is why it read "Ghanaian" in
-                every walkthrough and "—" on every real tenant. */}
-            <TextField form={form} name="nationality" label="Nationality" />
-          </FieldRow>
+          {/* Round 4, lane A. The country select and the free-text city used to sit here as two
+              unrelated inputs; they are now one control, the same cascade the employee register
+              uses. City and Region render underneath — disabled when the chosen country has a
+              scheme, because the server rewrites both from the tree on save, and as ordinary text
+              inputs when it has none, which is most countries. The area is what lets a vacancy's
+              Location criterion match "Greater Accra" against somebody recorded in Tema. */}
+          <AddressCascadeField
+            form={form}
+            countryName="countryId"
+            geoAreaName="geoAreaId"
+            cityName="city"
+            regionName="region"
+          >
+            <FieldRow>
+              <TextField form={form} name="postalAddress" label="Postal address" />
+              {/* G-7.3: displayed on the Personal card since the module was built and settable by
+                  nothing — the demo seeder was its only writer, which is why it read "Ghanaian" in
+                  every walkthrough and "—" on every real tenant. */}
+              <TextField form={form} name="nationality" label="Nationality" />
+            </FieldRow>
+          </AddressCascadeField>
         </CardContent>
       </Card>
 

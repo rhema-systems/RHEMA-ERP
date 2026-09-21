@@ -1192,6 +1192,15 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
             services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
                                ErpSystem.Core.Services.HR.EmployeeWorkHistoryGeoAreaConsumer>();
 
+            // Round 4, lane A — recruitment. The candidate's own address, and the areas a vacancy's
+            // Location criterion screens on. The second is not an address and earns a probe anyway:
+            // deleting an area a live vacancy accepts would silently stop matching the candidates
+            // who are in it, and a shortlist that quietly shrinks explains nothing on screen.
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.JobCandidateGeoAreaConsumer>();
+            services.AddScoped<ErpSystem.Core.Interfaces.Reference.IGeoAreaConsumer,
+                               ErpSystem.Core.Services.HR.ShortlistingCriteriaGeoAreaConsumer>();
+
             // The company seal and signature, versioned rather than overwritten.
             services.AddScoped<ErpSystem.Core.Services.HR.ICompanySealAssetService,
                                ErpSystem.Core.Services.HR.CompanySealAssetService>();

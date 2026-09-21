@@ -18,6 +18,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { CurrencyPicker } from '@/components/hr/common/CurrencyPicker';
 import { PhotoPanel } from '@/components/hr/common/PhotoDialog';
+import { AddressFields } from '@/components/reference/AddressFields';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, humanizeEnum } from '@/lib/hr/attendance-format';
 import { candidateService, publicCareersService } from '@/services/hr/careers.service';
@@ -377,6 +378,8 @@ export default function CandidateProfilePage() {
       dateOfBirth: p.dateOfBirth ? p.dateOfBirth.slice(0, 10) : '',
       gender: p.gender ?? '',
       city: p.city ?? '',
+      // Round 4, lane A — seeded so the cascade re-opens where the candidate actually is.
+      geoAreaId: p.geoAreaId ?? '',
       countryId: p.countryId ?? '',
       postalAddress: p.postalAddress ?? '',
       digitalAddress: p.digitalAddress ?? '',
@@ -465,6 +468,9 @@ export default function CandidateProfilePage() {
         dateOfBirth: str(f.dateOfBirth),
         gender: f.gender || null,
         city: str(f.city),
+        // '' does not bind to a Guid? — it is a 400 before the service runs. Null genuinely clears
+        // the area; this payload replaces the address wholesale.
+        geoAreaId: f.geoAreaId || null,
         countryId: f.countryId || null,
         postalAddress: str(f.postalAddress),
         digitalAddress: str(f.digitalAddress),
@@ -680,21 +686,39 @@ export default function CandidateProfilePage() {
           {text('alternatePhone', 'Alternate phone')}
           {text('dateOfBirth', 'Date of birth', false, 'date')}
           {select('gender', 'Gender', GENDERS, true)}
-          {text('city', 'City')}
-          <div className="space-y-1.5">
-            <Label>Country</Label>
-            <Select value={form.countryId || ''} onValueChange={(v) => set('countryId', v)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Choose…" />
-              </SelectTrigger>
-              <SelectContent>
-                {(countries.data ?? []).map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          {/* Round 4, lane A. Country and City were two unrelated boxes; they are now the shared
+              cascade, in PUBLIC mode — api/reference/geo is InternalOnly, which blocks the
+              Candidate role, so this reads the anonymous careers catalogue instead. Where the
+              chosen country has no scheme loaded (most of them), it falls back to the plain City
+              box below and nothing changes for the candidate. */}
+          <div className="sm:col-span-2">
+            <AddressFields
+              countryId={form.countryId || ''}
+              onCountryChange={(v) => {
+                set('countryId', v);
+                set('geoAreaId', '');
+              }}
+              geoAreaId={form.geoAreaId || ''}
+              onGeoAreaChange={(v) => set('geoAreaId', v)}
+              publicTenantId={tenantId}
+              countryOptions={countries.data ?? []}
+              fallback={(schemeLoaded) => (
+                <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="city">City / Town</Label>
+                    <Input
+                      id="city"
+                      value={form.city ?? ''}
+                      disabled={schemeLoaded}
+                      onChange={(e) => set('city', e.target.value)}
+                    />
+                    {schemeLoaded && (
+                      <p className="text-xs text-muted-foreground">Set from the address above</p>
+                    )}
+                  </div>
+                </div>
+              )}
+            />
           </div>
           {text('postalAddress', 'Postal address')}
           {text('digitalAddress', 'Digital address')}

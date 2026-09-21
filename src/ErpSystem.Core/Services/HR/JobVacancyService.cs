@@ -1109,6 +1109,13 @@ public class JobVacancyService : IJobVacancyService
             ShortlistingValueKind.Qualification => (await _qualificationMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
             ShortlistingValueKind.Certification => (await _certificationMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
             ShortlistingValueKind.Language => (await _languageMasterRepository.FindAsync(x => x.TenantId == tenantId && !x.IsDeleted)).ToDictionary(x => x.Id, x => x.Name),
+            // Round 4, lane A. Active areas only: a criterion may not be written against an area
+            // that has been retired, though one written earlier keeps working — the evaluator tests
+            // the stored id against the candidate's path and never re-reads the catalogue.
+            ShortlistingValueKind.GeoArea => await _unitOfWork.Repository<ErpSystem.Core.Entities.Reference.GeoArea>()
+                .GetQueryable()
+                .Where(a => a.TenantId == tenantId && !a.IsDeleted && a.IsActive)
+                .ToDictionaryAsync(a => a.Id, a => a.Name),
             _ => new Dictionary<Guid, string>(),
         };
 
@@ -1123,7 +1130,9 @@ public class JobVacancyService : IJobVacancyService
                 if (kind is ShortlistingValueKind.Text or ShortlistingValueKind.Gender)
                     throw new InvalidOperationException($"A {shape.Label} criterion takes typed values, not a catalogue id.");
                 if (!master.TryGetValue(key, out var name))
-                    throw new InvalidOperationException($"The {shape.Label.ToLowerInvariant()} chosen is not in the catalogue. Pick one from the list.");
+                    throw new InvalidOperationException(kind == ShortlistingValueKind.GeoArea
+                        ? "The area chosen is not on the tenant's active geography tree. Pick one from the cascade."
+                        : $"The {shape.Label.ToLowerInvariant()} chosen is not in the catalogue. Pick one from the list.");
                 referenceId = key;
                 label = name;
             }

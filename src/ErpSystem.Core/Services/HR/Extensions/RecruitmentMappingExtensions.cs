@@ -840,6 +840,8 @@ public static class RecruitmentMappingExtensions
             PostalAddress = entity.PostalAddress,
             DigitalAddress = entity.DigitalAddress,
             City = entity.City,
+            Region = entity.Region,
+            GeoAreaId = entity.GeoAreaId,
             Nationality = entity.Nationality,
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name ?? string.Empty,
@@ -881,6 +883,7 @@ public static class RecruitmentMappingExtensions
             Email = entity.Email,
             Phone = entity.Phone,
             City = entity.City,
+            Region = entity.Region,
             CountryName = entity.Country?.Name ?? string.Empty,
             IsInTalentPool = entity.IsInTalentPool,
             HasPhoto = entity.HasPhotoOnFile(),
@@ -919,6 +922,8 @@ public static class RecruitmentMappingExtensions
             PostalAddress = entity.PostalAddress,
             DigitalAddress = entity.DigitalAddress,
             City = entity.City,
+            Region = entity.Region,
+            GeoAreaId = entity.GeoAreaId,
             Nationality = entity.Nationality,
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name ?? string.Empty,
@@ -975,7 +980,11 @@ public static class RecruitmentMappingExtensions
             AlternatePhone = dto.AlternatePhone,
             PostalAddress = dto.PostalAddress,
             DigitalAddress = dto.DigitalAddress,
-            City = dto.City,
+            // Round 4, lane A: City stopped being [Required] when the geography cascade arrived, so
+            // a payload that supplies an area legitimately carries no city. The service overwrites
+            // this from the tree straight afterwards; the empty string is what it writes over.
+            City = dto.City ?? string.Empty,
+            GeoAreaId = dto.GeoAreaId,
             // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
             Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim(),
             // Guid.Empty is read as "no country", not refused: a client written against the old
@@ -1005,7 +1014,12 @@ public static class RecruitmentMappingExtensions
         entity.AlternatePhone = dto.AlternatePhone;
         entity.PostalAddress = dto.PostalAddress;
         entity.DigitalAddress = dto.DigitalAddress;
-        entity.City = dto.City;
+        // Round 4, lane A — see the create mapper for why City may legitimately arrive empty.
+        // ⚠ A null GeoAreaId here means "no area", not "leave it": this DTO replaces the address
+        // wholesale, which is why it needs no ClearGeoArea flag of the kind the employee's
+        // patch-style update carries.
+        entity.City = dto.City ?? string.Empty;
+        entity.GeoAreaId = dto.GeoAreaId;
         // G-7.3: settable since 2026-09-15. Before that the demo seeder was its only writer.
         entity.Nationality = string.IsNullOrWhiteSpace(dto.Nationality) ? null : dto.Nationality.Trim();
         entity.CountryId = dto.CountryId == Guid.Empty ? null : dto.CountryId;
@@ -1441,6 +1455,8 @@ public static class RecruitmentMappingExtensions
             PostalAddress = entity.PostalAddress,
             DigitalAddress = entity.DigitalAddress,
             City = entity.City,
+            Region = entity.Region,
+            GeoAreaId = entity.GeoAreaId,
             Nationality = entity.Nationality,
             CountryId = entity.CountryId,
             CountryName = entity.Country?.Name ?? string.Empty,

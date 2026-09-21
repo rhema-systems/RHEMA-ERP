@@ -484,6 +484,14 @@ export interface JobVacancy {
    */
   autoShortlistMinScore?: number | null;
   autoShortlistRequireAllMandatory?: boolean;
+  /**
+   * ⚠ Declared here in round 4, lane A, as a drive-by. `JobVacancyDto` has carried it since blind
+   * screening was built and this READ type never did — while `CreateJobVacancy` gained it and the
+   * edit form already reads `v.isBlindScreeningEnabled` off a `JobVacancy`. That is a live
+   * type error on the edit page, not a theoretical one; the sibling comment on the create type
+   * describes the same omission causing blind screening to be unswitchable-on.
+   */
+  isBlindScreeningEnabled?: boolean;
   /** Derived on the read (round 3, lane K; D-7): a Gender or Age criterion is on this vacancy. */
   usesProtectedCharacteristicCriterion?: boolean;
 
@@ -641,6 +649,12 @@ export const SHORTLISTING_VALUE_KINDS = [
   'Certification',
   'Language',
   'Gender',
+  /**
+   * Round 4, lane A — an administrative area from the shared geography tree. The value's
+   * `referenceId` is a `GeoArea.Id`; matching is tree containment, so an accepted area also
+   * accepts everything beneath it.
+   */
+  'GeoArea',
 ] as const;
 export type ShortlistingValueKind = (typeof SHORTLISTING_VALUE_KINDS)[number];
 

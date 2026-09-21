@@ -134,10 +134,25 @@ public static class ShortlistingCriteriaShapes
         },
         new ShortlistingCriteriaShape
         {
+            // Round 4, lane A. Was ValueKind.Text matched by ordinal substring against the
+            // candidate's typed city, which made "Greater Accra" miss everybody in Tema and made
+            // "Accra" match "Accra Central" by luck rather than by meaning. Now the values are
+            // areas from the shared geography tree and matching is CONTAINMENT: an accepted area
+            // matches a candidate in it and anywhere beneath it. The free-text path survives for
+            // candidates with no area on file — see EvaluateLocationCriterion.
             Type = JobShortlistingCriteriaType.Location, Label = "Location",
-            ValueKind = ShortlistingValueKind.Text, IsList = true, RequiresValues = true,
-            Operators = new[] { ShortlistingComparisonOperator.Contains, ShortlistingComparisonOperator.Equals },
-            Hint = "Matched against the candidate's city. Contains is the default; Equals demands the whole city name. Several cities may be listed.",
+            ValueKind = ShortlistingValueKind.GeoArea, IsList = true, RequiresValues = true,
+            Operators = new[]
+            {
+                ShortlistingComparisonOperator.In,
+                ShortlistingComparisonOperator.Equals,
+                ShortlistingComparisonOperator.NotEquals,
+                ShortlistingComparisonOperator.Contains,
+            },
+            Hint = "Pick the areas the role draws from. The default accepts a candidate anywhere "
+                 + "inside a listed area — choose Greater Accra and someone in Tema qualifies. "
+                 + "Equals demands that exact tier. Not in excludes the areas listed. A candidate "
+                 + "with no area on file is matched on their typed city instead.",
         },
         new ShortlistingCriteriaShape
         {

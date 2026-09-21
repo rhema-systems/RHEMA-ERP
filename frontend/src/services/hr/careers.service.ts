@@ -146,6 +146,37 @@ class PublicCareersService {
     if (!res.ok) throw new Error(body?.message ?? `Request failed (${res.status})`);
     return body ?? {};
   }
+
+  /**
+   * Activates a self-registered careers account from the emailed link — round 4.
+   *
+   * ⚠ Anonymous by necessity, not by oversight: the account this activates is inactive and
+   * cannot sign in, which is the situation the link exists to resolve. The Identity token is
+   * single-use, expiring and bound to that one user, and the server refuses any account that is
+   * not in the Candidate role.
+   */
+  async activateAccount(userId: string, token: string): Promise<{ message: string }> {
+    const res = await fetch(`${API_BASE}/auth/candidate/activate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId, token }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.message ?? `Activation failed (${res.status})`);
+    return body ?? { message: 'Your account is active.' };
+  }
+
+  /** Asks for a fresh activation link when the first expired or never arrived. */
+  async resendActivation(email: string): Promise<{ message: string }> {
+    const res = await fetch(`${API_BASE}/auth/candidate/activate/resend`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    const body = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(body?.message ?? `Request failed (${res.status})`);
+    return body ?? { message: 'If that address has an account awaiting activation, a link is on its way.' };
+  }
 }
 
 class CandidateService {

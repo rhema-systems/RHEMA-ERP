@@ -28,6 +28,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { AddressFields } from '@/components/reference/AddressFields';
+import { geographyService } from '@/services/reference/geography.service';
 import { useToast } from '@/hooks/use-toast';
 import { certificationService } from '@/services/hr/certification.service';
 import { languageService } from '@/services/hr/language.service';
@@ -225,6 +227,30 @@ export function VacancyCriteriaPanel({
     (valueKind === 'Qualification' && qualifications.isLoading) ||
     (valueKind === 'Certification' && certifications.isLoading) ||
     (valueKind === 'Language' && languages.isLoading);
+
+  // Round 4, lane A — the geography cascade's own state. It is NOT part of the criterion: it is the
+  // scratch pad you walk down before pressing Add, and it resets after each area so the next one
+  // can start from a different tier.
+  const [areaCountryId, setAreaCountryId] = useState('');
+  const [areaId, setAreaId] = useState('');
+
+  // The chosen area's name, for the badge. AddressFields emits an id only, so the name is read
+  // back through the ancestors endpoint — the same call the cascade already makes to re-open
+  // itself, so this is a cache hit rather than a second round trip.
+  const areaAncestors = useQuery({
+    queryKey: ['reference', 'geo', 'ancestors', areaId],
+    queryFn: () => geographyService.getAncestors(areaId),
+    enabled: !!areaId,
+  });
+  const areaLabel = useMemo(() => {
+    const chain = areaAncestors.data ?? [];
+    if (chain.length === 0) return '';
+    // Broadest-first, own area last. Name it as "Tema Metropolitan, Greater Accra" so two
+    // like-named districts in different regions are told apart on the badge.
+    const own = chain[chain.length - 1];
+    const parent = chain.length > 1 ? chain[chain.length - 2] : undefined;
+    return parent ? `${own.name}, ${parent.name}` : own.name;
+  }, [areaAncestors.data]);
 
   const refresh = () =>
     queryClient.invalidateQueries({ queryKey: ['hr', 'vacancy-criteria', vacancyId] });
@@ -605,12 +631,53 @@ export function VacancyCriteriaPanel({
                     })}
                   </div>
                 )}
+                {/* Round 4, lane A. Location used to be a text box — "A city, e.g. Kumasi" — matched
+                    by ordinal substring against whatever the candidate typed, so "Greater Accra"
+                    found nobody in Tema. It is now the shared geography cascade: pick a country,
+                    walk down as far as you mean to go, and Add. Adding at a HIGHER tier is the
+                    point, not a shortcut — one entry for Greater Accra accepts every district,
+                    town and community beneath it. */}
+                {valueKind === 'GeoArea' && (
+                  <div className="space-y-2">
+                    <AddressFields
+                      countryId={areaCountryId}
+                      onCountryChange={(v) => {
+                        setAreaCountryId(v);
+                        setAreaId('');
+                      }}
+                      geoAreaId={areaId}
+                      onGeoAreaChange={setAreaId}
+                      fallback={(schemeLoaded) =>
+                        schemeLoaded ? null : (
+                          <p className="mt-2 text-xs text-muted-foreground">
+                            This country has no administrative tree loaded, so there are no areas to
+                            pick. Choose a country that does, or set this criterion up as free text
+                            on a vacancy that needs one.
+                          </p>
+                        )
+                      }
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      disabled={!areaId}
+                      onClick={() => {
+                        if (!areaId) return;
+                        addPicked({ referenceId: areaId, label: areaLabel || 'Selected area' });
+                        setAreaId('');
+                      }}
+                    >
+                      Add this area
+                    </Button>
+                  </div>
+                )}
                 {valueKind === 'Text' && (
                   <div className="flex gap-2">
                     <Input
                       id="criteriaTypedValue"
                       value={typedValue}
-                      placeholder={form.type === 'Location' ? 'A city, e.g. Kumasi' : 'A value'}
+                      placeholder="A value"
                       onChange={(e) => setTypedValue(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === 'Enter') {

@@ -71,6 +71,14 @@ public sealed class ApplicationSnapshotService : IApplicationSnapshotService
             DateOfBirth          = candidate.DateOfBirth,
             Gender               = candidate.Gender,
             City                 = candidate.City?.Trim(),
+            // Round 4, lane A. The path is taken from the navigation and is therefore null unless
+            // the caller Included GeoArea — which JobCandidateRepository.GetWithFullDetailsAsync
+            // now does. A null path is not a failure: the scorer resolves it from GeoAreaId against
+            // the live tree instead, and only falls back to the free-text city when both are absent.
+            GeoAreaId            = candidate.GeoAreaId,
+            GeoAreaPath          = string.IsNullOrWhiteSpace(candidate.GeoArea?.Path)
+                                       ? null
+                                       : candidate.GeoArea!.Path,
             TotalYearsExperience = candidate.TotalYearsExperience,
             Skills               = skills.AsReadOnly(),
             Qualifications       = qualifications.AsReadOnly(),

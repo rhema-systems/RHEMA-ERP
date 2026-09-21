@@ -37,6 +37,9 @@ export default function NewCandidatePage() {
         digitalAddress: values.digitalAddress || null,
         // '' does not bind to a Guid? — it is a 400 before the service ever runs.
         countryId: values.countryId || null,
+        // Same rule, and the cascade emits '' for "nothing chosen at this tier".
+        geoAreaId: values.geoAreaId || null,
+        city: values.city?.trim() || null,
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,

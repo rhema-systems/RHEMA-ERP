@@ -294,6 +294,8 @@ export interface JobCandidateSummary {
   email: string;
   phone: string;
   city: string;
+  /** Round 4, lane A — resolved from the area, so the list can print "Tema, Greater Accra". */
+  region?: string | null;
   countryName: string;
   isInTalentPool: boolean;
   /** A photograph is on file — fetch `GET /job-candidates/{id}/photo` only then (round 3, lane C2). */
@@ -323,7 +325,15 @@ export interface JobCandidate {
   alternatePhone?: string | null;
   postalAddress?: string | null;
   digitalAddress?: string | null;
+  /** ⚠ Round 4, lane A — a display snapshot the server rewrites from `geoAreaId` when one is set. */
   city: string;
+  /** ⚠ Round 4, lane A — display snapshot, as `city`. Never sent on a write; it is derived. */
+  region?: string | null;
+  /**
+   * The candidate's administrative area — the lowest tier they chose, from the shared geography
+   * tree. The edit form re-opens its cascade by asking the server for this area's ancestors.
+   */
+  geoAreaId?: string | null;
   nationality?: string | null;
   /** Optional since slice 13b: an internal candidate is a shadow record with no country on file. */
   countryId?: string | null;
@@ -390,7 +400,13 @@ export interface CreateJobCandidate {
   alternatePhone?: string | null;
   postalAddress?: string | null;
   digitalAddress?: string | null;
-  city: string;
+  /**
+   * ⚠ Round 4, lane A — optional now, and the server overwrites it from `geoAreaId` when one is
+   * sent. Send one or the other: a payload with neither is refused, by the form and by the server.
+   */
+  city?: string | null;
+  /** The chosen administrative area. Null clears it — this payload replaces the address wholesale. */
+  geoAreaId?: string | null;
   /**
    * The candidate's nationality, as free text.
    *

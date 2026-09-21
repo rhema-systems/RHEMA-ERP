@@ -36,6 +36,16 @@ public static class RecruitmentEmailCatalog
         public const string OfferIssued                = "OfferIssued";
         public const string OfferAccepted              = "OfferAccepted";
         public const string OfferLetter                = "OfferLetter";
+        /// <summary>
+        /// The link that activates a self-registered careers account — round 4.
+        /// </summary>
+        /// <remarks>
+        /// ⚠ This is the FIRST thing a candidate ever receives from the organisation, sent before
+        /// they can sign in, and for many it is the only one they will see if it does not work. It
+        /// belongs in the catalogue for the same reason every other letter does: the wording of
+        /// something that leaves the building is the employer's, not a developer's.
+        /// </remarks>
+        public const string CandidateAccountActivation = "CandidateAccountActivation";
     }
 
     private static IReadOnlyList<EmailEventDescriptor>? _all;
@@ -73,6 +83,55 @@ public static class RecruitmentEmailCatalog
     private static List<EmailEventDescriptor> Build()
     {
         var list = new List<EmailEventDescriptor>();
+
+        // ── 0. Account activation ──────────────────────────────────────────────
+        // Deliberately first: it is the earliest email in the candidate's whole journey, and it
+        // is the one that decides whether there IS a journey.
+        list.Add(new EmailEventDescriptor
+        {
+            Module = Module,
+            EventKey = Events.CandidateAccountActivation,
+            Name = "Careers Account Activation",
+            Category = "Account",
+            Description =
+                "Sent the moment someone registers on the careers site. The link both confirms the "
+                + "email address and activates the account — until it is followed the account cannot "
+                + "sign in, so this is the one recruitment email that must never be switched off.",
+            DefaultSubject = "Activate your {{CompanyName}} careers account",
+            DefaultHtmlBody = Shell(BlueGradient, "Confirm your email address",
+                @"  <p>Hi <strong>{{CandidateName}}</strong>,</p>
+  <p>
+    Thank you for creating a careers account with <strong>{{CompanyName}}</strong>. Confirm your
+    email address to activate it — you will not be able to sign in or apply for a role until you do.
+  </p>" +
+                PrimaryButton("{{ActivationLink}}", "Activate my account") + @"
+  <p style='color:#6b7280;font-size:0.875rem;margin-top:1.5rem'>
+    This link expires in {{ExpiryHours}} hours and can be used once. If it has expired, request a
+    new one from the sign-in page.
+  </p>
+  <div style='background:#fff;border:1px solid #e5e7eb;border-radius:8px;padding:0.875rem;margin-top:1rem'>
+    <div style='color:#6b7280;font-size:0.8rem;margin-bottom:0.35rem'>
+      If the button does not work, paste this address into your browser:
+    </div>
+    <div style='font-family:monospace;font-size:0.75rem;word-break:break-all;color:#374151'>{{ActivationLink}}</div>
+  </div>
+  <p style='color:#9ca3af;font-size:0.8rem;margin-top:2rem'>
+    If you did not create this account, no action is needed — it stays inactive and the link expires
+    on its own. {{#if SupportEmail}}Questions? Write to {{SupportEmail}}.{{/if}}
+  </p>"),
+            Tokens = new()
+            {
+                T("CandidateName", "The name the candidate registered with.", "Ada Boahen"),
+                T("CompanyName", "The employer's name, from the company profile.", "Tema Development Corporation"),
+                // ⚠ A whole URL, not a portal base plus a path. The token is single-use and bound to
+                // one account, so the link cannot be reconstructed from parts in the template.
+                T("ActivationLink", "The complete, single-use activation URL. Do not split it.",
+                  "https://careers.example.com/careers/verify-email?uid=…&token=…"),
+                T("ExpiryHours", "How long the link remains valid.", "24"),
+                T("SupportEmail", "Where to write for help. Omitted when none is configured.",
+                  "recruitment@example.com"),
+            }
+        });
 
         // ── 1. Application received ────────────────────────────────────────────
         list.Add(new EmailEventDescriptor

@@ -52,6 +52,11 @@ export default function EditCandidatePage() {
       postalAddress: data.postalAddress ?? null,
       digitalAddress: data.digitalAddress ?? null,
       city: data.city,
+      // Round 4, lane A. Both seeded so the cascade re-opens where the candidate actually is —
+      // AddressFields asks the server for the area's ancestors and rebuilds the tiers from this
+      // one id. Region is display-only and disabled whenever a scheme is loaded.
+      region: data.region ?? null,
+      geoAreaId: data.geoAreaId ?? '',
       // G-7.3: seeded so an edit that does not touch it does not clear it.
       nationality: data.nationality ?? null,
       // Optional on the read since slice 13b (internal shadow candidates carry no country), but
@@ -79,6 +84,10 @@ export default function EditCandidatePage() {
         digitalAddress: values.digitalAddress || null,
         // '' does not bind to a Guid? — it is a 400 before the service ever runs.
         countryId: values.countryId || null,
+        // Same rule, and the cascade emits '' for "nothing chosen at this tier". ⚠ A null here
+        // genuinely clears the area — this DTO replaces the address wholesale.
+        geoAreaId: values.geoAreaId || null,
+        city: values.city?.trim() || null,
         linkedInProfile: values.linkedInProfile || null,
         portfolioUrl: values.portfolioUrl || null,
         gitHubUrl: values.gitHubUrl || null,

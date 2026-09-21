@@ -49,6 +49,11 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
         // replace-set save deleted an interest and the response served it straight back.
         return await _dbSet
             .Include(c => c.Country)
+            // Round 4, lane A: the application snapshot freezes GeoArea.Path so a re-score can test
+            // "is this candidate under Greater Accra?" without re-reading a tree that may have been
+            // re-parented since. Without this include the path is silently null on every snapshot
+            // and the scorer has to resolve it live — correct, but a query per application.
+            .Include(c => c.GeoArea)
             .Include(c => c.NationalIdTypeRef)
             // Round 3, lane C2: the catalogue rows behind a qualification and a skill ride along —
             // no lazy loading here, so without these the mappers' `Qualification?.Name` and

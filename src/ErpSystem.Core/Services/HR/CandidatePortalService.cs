@@ -6,6 +6,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.Common;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Services.HR.Recruitment;
+using ErpSystem.Core.Services.Reference;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Security.Cryptography;
@@ -42,6 +43,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
     private readonly ITemplatedEmailService _templatedEmail;
     private readonly IApplicationSnapshotService _snapshotService;
     private readonly IApplicationPipelineService _pipelineService;
+    private readonly IGeographyService _geography;
 
     public CandidatePortalService(
         IJobCandidateRepository candidateRepo,
@@ -65,7 +67,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         IEmailService email,
         ITemplatedEmailService templatedEmail,
         IApplicationSnapshotService snapshotService,
-        IApplicationPipelineService pipelineService)
+        IApplicationPipelineService pipelineService,
+        IGeographyService geography)
     {
         _candidateRepo    = candidateRepo;
         _workHistoryRepo  = workHistoryRepo;
@@ -89,6 +92,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
         _pipelineService  = pipelineService;
         _email            = email;
         _templatedEmail   = templatedEmail;
+        _geography        = geography;
     }
 
     // Portal callers supply tenantId via header/JWT. When ICurrentUserProvider.TenantId is set
@@ -198,7 +202,7 @@ public sealed class CandidatePortalService : ICandidatePortalService
 
                 candidate = byEmail;
                 candidate.UserId = account.UserId;
-                MapDtoToCandidate(dto, candidate);
+                await MapDtoToCandidateAsync(dto, candidate, ct);
                 await _candidateRepo.UpdateAsync(candidate);
                 await _unitOfWork.SaveChangesAsync(ct);
             }
@@ -211,14 +215,14 @@ public sealed class CandidatePortalService : ICandidatePortalService
                     Email           = account.Email,
                     UserId          = account.UserId,
                 };
-                MapDtoToCandidate(dto, candidate);
+                await MapDtoToCandidateAsync(dto, candidate, ct);
                 await _candidateRepo.AddAsync(candidate);
                 await _unitOfWork.SaveChangesAsync(ct);
             }
         }
         else
         {
-            MapDtoToCandidate(dto, candidate);
+            await MapDtoToCandidateAsync(dto, candidate, ct);
             await _candidateRepo.UpdateAsync(candidate);
             await _unitOfWork.SaveChangesAsync(ct);
         }
@@ -950,6 +954,31 @@ public sealed class CandidatePortalService : ICandidatePortalService
         await _unitOfWork.SaveChangesAsync(ct);
     }
 
+    /// <remarks>
+    /// ⚠ <b>Async, and not static, since round 4 lane A</b>, so the geography snapshot is applied
+    /// where the payload is applied. <c>SaveProfileAsync</c> calls this from three branches —
+    /// adopt-by-email, create, and plain update — and a separate call after each is three chances
+    /// for the fourth branch to forget. The address rule now travels with the mapping.
+    /// </remarks>
+    private async Task MapDtoToCandidateAsync(
+        UpdateCandidatePortalProfileDto dto, JobCandidate c, CancellationToken ct)
+    {
+        MapDtoToCandidate(dto, c);
+
+        // Region has no input on the careers form and is only ever written from the tree, so an
+        // area the candidate cleared must take its region with it. See the HR-side twin in
+        // JobCandidateService for the full reasoning.
+        if (c.GeoAreaId is null) c.Region = null;
+
+        c.CountryId = await GeoAddressSnapshot.ReconcileCountryAsync(
+            _geography, c.GeoAreaId, c.CountryId, "candidate", ct);
+
+        await GeoAddressSnapshot.ApplyAsync(
+            _geography, _logger, c.GeoAreaId,
+            r => c.Region = r, city => c.City = city,
+            "candidate", c.Id, ct);
+    }
+
     private static void MapDtoToCandidate(UpdateCandidatePortalProfileDto dto, JobCandidate c)
     {
         c.FirstName       = dto.FirstName;
@@ -960,6 +989,11 @@ public sealed class CandidatePortalService : ICandidatePortalService
         c.DateOfBirth     = dto.DateOfBirth ?? c.DateOfBirth;
         c.Gender          = dto.Gender ?? c.Gender;
         c.City            = dto.City ?? string.Empty;
+        // Round 4, lane A. Null is "no area" — this profile save replaces the address wholesale,
+        // the same contract the HR-side update DTO carries. ⚠ Region is NOT taken from the payload:
+        // it has no input on the careers form and is only ever written from the tree, by
+        // ApplyGeoAreaSnapshotAsync below.
+        c.GeoAreaId       = dto.GeoAreaId;
         // The careers page used to send Guid.Empty to mean "no country" and this line read it as
         // "leave unchanged". The DTO is nullable now, so null and Guid.Empty both mean none, and
         // a country the candidate clears actually clears.
@@ -1016,6 +1050,8 @@ public sealed class CandidatePortalService : ICandidatePortalService
         dto.DateOfBirth    = c.DateOfBirth == default ? null : c.DateOfBirth;
         dto.Gender          = c.Gender;
         dto.City            = c.City;
+        dto.Region          = c.Region;
+        dto.GeoAreaId       = c.GeoAreaId;
         dto.CountryId       = c.CountryId;
         dto.CountryName     = c.Country?.Name;
         dto.PostalAddress   = c.PostalAddress;

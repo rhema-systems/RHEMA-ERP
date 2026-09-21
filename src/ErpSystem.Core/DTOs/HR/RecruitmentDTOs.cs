@@ -977,7 +977,23 @@ public class JobCandidateDto : BaseDto
     public string? AlternatePhone { get; set; }
     public string? PostalAddress { get; set; }
     public string? DigitalAddress { get; set; }
+    /// <summary>⚠ A display snapshot resolved from <see cref="GeoAreaId"/> when one is set.</summary>
     public string City { get; set; } = string.Empty;
+    /// <summary>⚠ A display snapshot resolved from <see cref="GeoAreaId"/> when one is set.</summary>
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, as one reference to the geography tree — the lowest tier known.
+    /// The edit form re-opens its cascade from this by asking for the area's ancestors.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ No <c>GeoAreaName</c> or full path beside it, deliberately — the same call the employee
+    /// read DTO makes. Either would be null on every read whose query did not Include the
+    /// navigation, and lists print <see cref="Region"/> and <see cref="City"/>, which is what the
+    /// snapshot columns are kept for.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
     public string? Nationality { get; set; }
     /// <summary>Optional since slice 13b — an internal candidate may have no country on file.</summary>
     public Guid? CountryId { get; set; }
@@ -1030,6 +1046,8 @@ public class JobCandidateSummaryDto
     public string Email { get; set; } = string.Empty;
     public string Phone { get; set; } = string.Empty;
     public string City { get; set; } = string.Empty;
+    /// <summary>Round 4, lane A — so the register can say "Tema, Greater Accra" without a tree walk.</summary>
+    public string? Region { get; set; }
     public string CountryName { get; set; } = string.Empty;
     public bool IsInTalentPool { get; set; }
     /// <summary>Round 3, lane C2 — the list shows a face beside the name when one is on file.</summary>
@@ -1050,8 +1068,37 @@ public class JobCandidateDetailDto : JobCandidateDto
     public List<JobApplicationSummaryDto> Applications { get; set; } = new();
 }
 
-public class CreateJobCandidateDto : CreateDtoBase
+/// <summary>
+/// The one statement of what counts as an address on a candidate, shared by the create and update
+/// DTOs so the two cannot drift.
+/// </summary>
+/// <remarks>
+/// ⚠ Kept deliberately permissive about <i>which</i> form. Most of the world has no geography
+/// scheme loaded, so insisting on an area would make the careers form unfillable outside Ghana;
+/// insisting on a city would make it unfillable inside Ghana, where the cascade writes the city and
+/// the input is disabled. One or the other, never neither.
+/// </remarks>
+internal static class JobCandidateAddressRule
 {
+    public static IEnumerable<ValidationResult> Validate(Guid? geoAreaId, string? city)
+    {
+        if (geoAreaId is null && string.IsNullOrWhiteSpace(city))
+            yield return new ValidationResult(
+                "Say where the candidate is: pick an area, or type a city.",
+                new[] { nameof(CreateJobCandidateDto.City), nameof(CreateJobCandidateDto.GeoAreaId) });
+    }
+}
+
+public class CreateJobCandidateDto : CreateDtoBase, IValidatableObject
+{
+    /// <summary>
+    /// An address in one form or the other. <see cref="City"/> stopped being <c>[Required]</c> when
+    /// the geography cascade arrived, and without this a candidate could be created with no stated
+    /// location at all — which the Location shortlisting criterion would then silently fail.
+    /// </summary>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        => JobCandidateAddressRule.Validate(GeoAreaId, City);
+
     [Required]
     [MaxLength(100)]
     public string FirstName { get; set; } = string.Empty;
@@ -1087,9 +1134,33 @@ public class CreateJobCandidateDto : CreateDtoBase
     [MaxLength(30)]
     public string? DigitalAddress { get; set; }
 
-    [Required]
+    /// <summary>
+    /// The candidate's town or city, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>No longer <c>[Required]</c> as of round 4, lane A</b>, and that is deliberate rather
+    /// than a relaxation. When <see cref="GeoAreaId"/> is supplied the service <i>overwrites</i>
+    /// this from the tree, so a form whose cascade is filled in has nothing to put here — and a
+    /// required field the user is not allowed to type into is a form that cannot be submitted.
+    /// The address is still compulsory: <c>Validate</c> refuses a payload carrying neither an area
+    /// nor a city.
+    /// </remarks>
     [MaxLength(100)]
-    public string City { get; set; } = string.Empty;
+    public string? City { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, as one reference to the geography tree — the lowest tier chosen.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null is "no area", not "leave unchanged": this DTO replaces the record's address
+    /// wholesale, so there is no <c>ClearGeoArea</c> flag of the kind the employee's patch-style
+    /// update needs.</para>
+    ///
+    /// <para>The area's country is reconciled with <c>CountryId</c> on save — a candidate cannot
+    /// claim Nigeria while pointing at a Ghanaian district — and a stated country that is silent is
+    /// filled in from the area rather than refused.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
 
     /// <summary>
     /// The candidate's nationality, as free text.
@@ -1143,8 +1214,12 @@ public class CreateJobCandidateDto : CreateDtoBase
     public bool IsInTalentPool { get; set; }
 }
 
-public class UpdateJobCandidateDto : UpdateDtoBase
+public class UpdateJobCandidateDto : UpdateDtoBase, IValidatableObject
 {
+    /// <inheritdoc cref="CreateJobCandidateDto.Validate"/>
+    public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
+        => JobCandidateAddressRule.Validate(GeoAreaId, City);
+
     [Required]
     [MaxLength(100)]
     public string FirstName { get; set; } = string.Empty;
@@ -1180,9 +1255,33 @@ public class UpdateJobCandidateDto : UpdateDtoBase
     [MaxLength(30)]
     public string? DigitalAddress { get; set; }
 
-    [Required]
+    /// <summary>
+    /// The candidate's town or city, as free text.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b>No longer <c>[Required]</c> as of round 4, lane A</b>, and that is deliberate rather
+    /// than a relaxation. When <see cref="GeoAreaId"/> is supplied the service <i>overwrites</i>
+    /// this from the tree, so a form whose cascade is filled in has nothing to put here — and a
+    /// required field the user is not allowed to type into is a form that cannot be submitted.
+    /// The address is still compulsory: <c>Validate</c> refuses a payload carrying neither an area
+    /// nor a city.
+    /// </remarks>
     [MaxLength(100)]
-    public string City { get; set; } = string.Empty;
+    public string? City { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, as one reference to the geography tree — the lowest tier chosen.
+    /// </summary>
+    /// <remarks>
+    /// <para>Null is "no area", not "leave unchanged": this DTO replaces the record's address
+    /// wholesale, so there is no <c>ClearGeoArea</c> flag of the kind the employee's patch-style
+    /// update needs.</para>
+    ///
+    /// <para>The area's country is reconciled with <c>CountryId</c> on save — a candidate cannot
+    /// claim Nigeria while pointing at a Ghanaian district — and a stated country that is silent is
+    /// filled in from the area rather than refused.</para>
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
 
     /// <summary>
     /// The candidate's nationality, as free text.
@@ -5857,6 +5956,10 @@ public class CandidatePortalProfileDto
     public DateTime? DateOfBirth { get; set; }
     public ErpSystem.Core.Enums.Gender? Gender { get; set; }
     public string? City { get; set; }
+    /// <summary>Round 4, lane A — the resolved tier-1 name, so the portal can echo the full address back.</summary>
+    public string? Region { get; set; }
+    /// <summary>Round 4, lane A — the candidate re-opens their cascade from this on the next visit.</summary>
+    public Guid? GeoAreaId { get; set; }
     public Guid? CountryId { get; set; }
     public string? CountryName { get; set; }
     public string? PostalAddress { get; set; }
@@ -5914,8 +6017,24 @@ public class UpdateCandidatePortalProfileDto
     public string? AlternatePhone { get; set; }
     public DateTime? DateOfBirth { get; set; }
     public ErpSystem.Core.Enums.Gender? Gender { get; set; }
+    /// <summary>
+    /// ⚠ Overwritten by the resolved town or district when <see cref="GeoAreaId"/> is supplied —
+    /// round 4, lane A. It remains the only address a candidate in a country with no geography
+    /// scheme can give, which is most of the world.
+    /// </summary>
     [MaxLength(100)]
     public string? City { get; set; }
+
+    /// <summary>
+    /// Where the candidate lives, from the shared geography tree — the lowest tier they chose.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The careers form only shows the cascade when the chosen country has a published scheme;
+    /// the endpoint answers 204 otherwise and the form falls back to the free-text city. Null here
+    /// therefore means "no area", never "the candidate skipped a required step".
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
     /// <summary>
     /// Optional, matching the entity. ⚠ Until 2026-09-14 this was a non-nullable <c>Guid</c> and
     /// the careers page sent <c>Guid.Empty</c> as a sentinel meaning "no country" — a handshake
