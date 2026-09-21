@@ -42,6 +42,37 @@ file carrying the defect received no change in this range.
 | 18 | Payroll loans readable by anyone | **Open** | `PayrollController.cs` untouched |
 | 19 | Helpdesk tickets readable by any employee | **Open** | `EhcInternalTicketsController` untouched |
 | 20 | Shared reporting crashes `tsc` | **Open (new)** | introduced by this range |
+| 21 | Supplier registration claims a "verified email address" and verifies nothing | **Open (new, 2026-09-21)** | found during HR round 4, § below |
+
+### 21 — Procurement supplier registration does not verify the applicant's email
+
+**Raised for the procurement owner. Not HR's to fix.**
+
+`BusinessPartnerRegistrationService.SubmitAsync` refuses submission with:
+
+> *"A verified email address or phone number is required for submission"*
+
+The check behind that message tests only that the field is **non-empty and syntactically valid**.
+A grep of the whole procurement area finds **no OTP, no confirmation token and no ownership check of
+any kind**. Supplier portal credentials and a one-time temporary password are later emailed to what
+the code itself calls *"the verified application contact"* — an address nobody proved ownership of.
+
+**What contains the risk:** a supplier application is reviewed by a person and its documents must
+each be verified or rejected before approval, so no account is provisioned on the say-so of the form
+alone. The exposure is a typo'd or deliberately supplied third-party address receiving live supplier
+credentials, and a message that asserts a check the code does not perform.
+
+**Two suggestions, one in each direction:**
+
+- Correct the wording, or build the check. HR's `auth/candidate/activate` (round 4) is a worked
+  example of the second: a single-use, expiring, user-bound Identity token, anonymous because the
+  account cannot yet sign in, refusing any account outside the expected role, with a resend endpoint
+  that returns one neutral message so it cannot be used to enumerate accounts.
+- ⚠ **HR should borrow procurement's token design.** `ProcurementSupplierOnboardingToken` stores the
+  token **SHA-256 hashed at rest** with only the last four characters in clear, plus `Generation`,
+  `Status`, issued/activated/expired timestamps and an `ExpiryReason`. HR's offer-response and
+  interview-confirmation tokens are stored in clear and carry none of that audit trail. Theirs is
+  the better model and the gap is ours.
 
 ### Not a numbered defect, but fixed by this range
 

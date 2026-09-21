@@ -414,6 +414,37 @@ public class JobInterviewController : ControllerBase
         return Ok(new { message = "Slot time updated." });
     }
 
+    /// <summary>
+    /// What the day would look like at this interval — writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// Answers the question the schedule screen exists to ask: <i>can we see all of them today?</i>
+    /// The response carries the timetable, whoever does not fit, and the first free time afterwards.
+    /// Readable by a panelist as well as HR; only applying it is an HR act.
+    /// </remarks>
+    [HttpPost("{interviewId:guid}/slots/preview")]
+    [ProducesResponseType(typeof(InterviewSlotPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<InterviewSlotPlanDto>> PreviewSlots(
+        Guid interviewId, [FromBody] ApportionInterviewSlotsDto dto, CancellationToken ct = default)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        dto.InterviewId = interviewId;
+        return Ok(await _service.PreviewSlotApportionmentAsync(dto, ct));
+    }
+
+    /// <summary>Writes the timetable onto the session's candidates.</summary>
+    [HttpPost("{interviewId:guid}/slots/apply")]
+    [ProducesResponseType(typeof(InterviewSlotPlanDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
+    public async Task<ActionResult<InterviewSlotPlanDto>> ApplySlots(
+        Guid interviewId, [FromBody] ApportionInterviewSlotsDto dto, CancellationToken ct = default)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+        dto.InterviewId = interviewId;
+        return Ok(await _service.ApplySlotApportionmentAsync(dto, ct));
+    }
+
     [HttpPost("interviewees/{intervieweeId:guid}/attendance")]
     public async Task<IActionResult> RecordIntervieweeAttendance(
         Guid intervieweeId, [FromBody] RecordIntervieweeAttendanceDto dto)

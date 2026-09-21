@@ -1,3 +1,4 @@
+using System.Text.Json;
 using System.Text;
 using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.HR;
@@ -746,6 +747,10 @@ public class JobInterviewService : IJobInterviewService
 
         if (createDto.ApplicationIds?.Count > 0)
         {
+            // Slots placed so far in this loop, so two candidates on the same payload cannot be
+            // given the same time. Nothing is on the database yet to compare against.
+            var placedSlots = new List<(TimeSpan Start, TimeSpan End)>();
+
             foreach (var appId in createDto.ApplicationIds)
             {
                 var ie = new AddJobIntervieweeDto
@@ -757,8 +762,18 @@ public class JobInterviewService : IJobInterviewService
                 var slot = createDto.ApplicationSlots?.FirstOrDefault(s => s.ApplicationId == appId);
                 if (slot != null)
                 {
+                    // ⚠ Round 4, lane C. These arrived from the payload and were written straight
+                    // onto the row — a slot could sit outside the session it belongs to, or on top
+                    // of the candidate booked before it, and nothing said so until two people
+                    // turned up together. Checked here against the session and the slots already
+                    // placed in this same loop.
+                    ValidateSlotAgainstWindow(entity, slot.SlotStartTime, slot.SlotEndTime, placedSlots);
+
                     ie.SlotStartTime = slot.SlotStartTime;
                     ie.SlotEndTime   = slot.SlotEndTime;
+
+                    if (slot.SlotStartTime.HasValue && slot.SlotEndTime.HasValue)
+                        placedSlots.Add((slot.SlotStartTime.Value, slot.SlotEndTime.Value));
                 }
 
                 await _intervieweeRepository.AddAsync(ie);
@@ -895,6 +910,16 @@ public class JobInterviewService : IJobInterviewService
         entity.LocationOrLink = dto.LocationOrLink;
         entity.RescheduleReason = dto.RescheduleReason;
         entity.Status = JobInterviewStatus.Rescheduled;
+
+        // ⚠ Round 4, lane C — § 3 defect 23. The window moved and every candidate's slot stayed
+        // where it was, and the reschedule notice below then emailed each candidate their ORIGINAL
+        // time against the NEW date, with a fresh confirmation token inviting them to confirm it.
+        // Move a 09:00–11:00 session to 14:00–16:00 and everyone was told to arrive at 09:20.
+        //
+        // Where the day was apportioned, lay it out again at the same interval. Where it was not,
+        // CLEAR the slots: a hand-typed time that no longer sits inside the session is worse than
+        // no time at all, because it reads as deliberate.
+        await ReapportionAfterRescheduleAsync(entity, cancellationToken);
 
         await _interviewRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -1542,12 +1567,309 @@ public class JobInterviewService : IJobInterviewService
         if (dto.SlotStartTime.HasValue && dto.SlotEndTime.HasValue && dto.SlotEndTime <= dto.SlotStartTime)
             throw new InvalidOperationException("A candidate's slot must end after it starts.");
 
+        // ⚠ Round 4, lane C. Until this, a slot was checked for nothing beyond ending after it
+        // started: it could sit wholly outside the session, land on top of another candidate, or
+        // fall inside the lunch break, and the only sign was two people in the corridor.
+        var interview = await GetOwnedInterviewAsync(entity.JobInterviewId);
+        await EnsureSlotIsUsableAsync(interview, entity.Id, dto.SlotStartTime, dto.SlotEndTime, cancellationToken);
+
         entity.SlotStartTime = dto.SlotStartTime;
         entity.SlotEndTime   = dto.SlotEndTime;
 
         await _intervieweeRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
         return true;
+    }
+
+    /// <summary>
+    /// Refuses a slot that does not sit inside the session, collides with another candidate, or
+    /// falls in a break — round 4, lane C.
+    /// </summary>
+    /// <remarks>
+    /// <para><b>A half-supplied slot is refused too.</b> A start with no end is not a shorter
+    /// interview, it is a record nobody can read: the timetable cannot place it, the invitation
+    /// cannot state it, and the clash check cannot compare it.</para>
+    ///
+    /// <para><b>Overlap is tested against the OTHER candidates, excluding this one</b>, so saving a
+    /// slot unchanged is never refused for colliding with itself.</para>
+    /// </remarks>
+    private async Task EnsureSlotIsUsableAsync(
+        JobInterview interview,
+        Guid intervieweeId,
+        TimeSpan? start,
+        TimeSpan? end,
+        CancellationToken cancellationToken)
+    {
+        // Clearing a slot is always allowed — it returns the candidate to "see them during the
+        // session", which is what an un-apportioned interview means.
+        if (start is null && end is null) return;
+
+        if (start is null || end is null)
+            throw new InvalidOperationException(
+                "A slot needs both a start and an end time. Give both, or clear both to put the "
+                + "candidate back on the session's own time.");
+
+        if (start < interview.StartTime || end > interview.EndTime)
+            throw new InvalidOperationException(
+                $"That slot falls outside the interview, which runs {interview.StartTime:hh\\:mm}"
+                + $"–{interview.EndTime:hh\\:mm}. Move the slot, or widen the session first.");
+
+        foreach (var b in ReadBreaks(interview))
+        {
+            if (start < b.End && b.Start < end)
+                throw new InvalidOperationException(
+                    $"That slot runs into the {b.Label ?? "break"} at {b.Start:hh\\:mm}–{b.End:hh\\:mm}.");
+        }
+
+        var others = (await _intervieweeRepository.GetByInterviewIdAsync(interview.Id))
+            .Where(i => i.Id != intervieweeId && i.TenantId == interview.TenantId && !i.IsDeleted)
+            .Where(i => i.SlotStartTime.HasValue && i.SlotEndTime.HasValue);
+
+        foreach (var other in others)
+        {
+            if (start < other.SlotEndTime && other.SlotStartTime < end)
+            {
+                var who = other.JobApplication?.JobCandidate?.FullName ?? "another candidate";
+                throw new InvalidOperationException(
+                    $"That slot overlaps {who} at {other.SlotStartTime:hh\\:mm}–{other.SlotEndTime:hh\\:mm}. "
+                    + "Two candidates cannot be seen at once.");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Re-lays the day after a reschedule, or clears the slots when there is no layout to reproduce.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Called BEFORE the reschedule emails go out, because those emails read
+    /// <c>ie.SlotStartTime</c>. Moving this after them puts the defect straight back.
+    /// </remarks>
+    private async Task ReapportionAfterRescheduleAsync(JobInterview interview, CancellationToken cancellationToken)
+    {
+        var attendees = (await _intervieweeRepository.GetByInterviewIdAsync(interview.Id))
+            .Where(i => i.TenantId == interview.TenantId && !i.IsDeleted)
+            .ToList();
+        if (attendees.Count == 0) return;
+
+        if (interview.SlotMinutes is { } slotMinutes)
+        {
+            var plan = InterviewSlotApportioner.Apportion(
+                interview.StartTime,
+                interview.EndTime,
+                slotMinutes,
+                interview.SlotBufferMinutes ?? 0,
+                ReadBreaks(interview),
+                attendees.Select(a => a.JobApplicationId).ToList());
+
+            var bySlot = plan.Slots.ToDictionary(s => s.ApplicationId);
+            foreach (var attendee in attendees)
+            {
+                var hit = bySlot.TryGetValue(attendee.JobApplicationId, out var slot);
+                attendee.SlotStartTime = hit ? slot!.Start : null;
+                attendee.SlotEndTime = hit ? slot!.End : null;
+                await _intervieweeRepository.UpdateAsync(attendee);
+            }
+
+            if (!plan.AllFit)
+                _logger.LogWarning(
+                    "Interview {InterviewNumber} was rescheduled into a window that holds only "
+                    + "{Placed} of {Total} candidates; {Unplaced} lost their slot.",
+                    interview.InterviewNumber, plan.Slots.Count, attendees.Count, plan.Unplaced.Count);
+            return;
+        }
+
+        // Never apportioned: any slot present was typed by hand against the OLD window.
+        foreach (var attendee in attendees.Where(a => a.SlotStartTime.HasValue || a.SlotEndTime.HasValue))
+        {
+            attendee.SlotStartTime = null;
+            attendee.SlotEndTime = null;
+            await _intervieweeRepository.UpdateAsync(attendee);
+        }
+    }
+
+    /// <summary>
+    /// The synchronous half of the slot rules, for the create path — where nothing is on the
+    /// database yet and the only slots to collide with are the ones on the same payload.
+    /// </summary>
+    private static void ValidateSlotAgainstWindow(
+        JobInterview interview,
+        TimeSpan? start,
+        TimeSpan? end,
+        IReadOnlyList<(TimeSpan Start, TimeSpan End)> alreadyPlaced)
+    {
+        if (start is null && end is null) return;
+
+        if (start is null || end is null)
+            throw new InvalidOperationException(
+                "A slot needs both a start and an end time. Give both, or omit both.");
+
+        if (end <= start)
+            throw new InvalidOperationException("A candidate's slot must end after it starts.");
+
+        if (start < interview.StartTime || end > interview.EndTime)
+            throw new InvalidOperationException(
+                $"A slot of {start:hh\\:mm}–{end:hh\\:mm} falls outside the interview, which runs "
+                + $"{interview.StartTime:hh\\:mm}–{interview.EndTime:hh\\:mm}.");
+
+        foreach (var (otherStart, otherEnd) in alreadyPlaced)
+        {
+            if (start < otherEnd && otherStart < end)
+                throw new InvalidOperationException(
+                    $"Two candidates are booked into overlapping slots ({start:hh\\:mm}–{end:hh\\:mm} "
+                    + $"and {otherStart:hh\\:mm}–{otherEnd:hh\\:mm}). They cannot be seen at once.");
+        }
+    }
+
+    /// <summary>The interview's stored breaks, or an empty set when the day was never apportioned.</summary>
+    private static IReadOnlyList<InterviewSlotApportioner.Break> ReadBreaks(JobInterview interview)
+    {
+        if (string.IsNullOrWhiteSpace(interview.BreaksJson))
+            return Array.Empty<InterviewSlotApportioner.Break>();
+        try
+        {
+            return JsonSerializer.Deserialize<List<InterviewSlotApportioner.Break>>(interview.BreaksJson)
+                   ?? (IReadOnlyList<InterviewSlotApportioner.Break>)Array.Empty<InterviewSlotApportioner.Break>();
+        }
+        catch (JsonException)
+        {
+            // A break list that will not parse must not make the interview unsaveable. The day
+            // simply has no breaks as far as validation is concerned, and the log says so.
+            return Array.Empty<InterviewSlotApportioner.Break>();
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<InterviewSlotPlanDto> PreviewSlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default)
+    {
+        var interview = await GetOwnedInterviewWithDetailsAsync(dto.InterviewId);
+        await EnsureCanReadInterviewAsync(interview.Id);
+        return BuildPlan(interview, dto);
+    }
+
+    /// <inheritdoc />
+    public async Task<InterviewSlotPlanDto> ApplySlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default)
+    {
+        var interview = await GetOwnedInterviewWithDetailsAsync(dto.InterviewId);
+        EnsureHr("apportion interview slots");
+
+        if (interview.Status is JobInterviewStatus.Completed or JobInterviewStatus.Cancelled)
+            throw new InvalidOperationException(
+                $"A {interview.Status.ToString().ToLowerInvariant()} interview cannot be re-timetabled.");
+
+        var plan = BuildPlan(interview, dto);
+
+        // ⚠ The parameters are stored even when somebody did not fit. The day WAS apportioned at
+        // this interval, and a reschedule must be able to reproduce it — refusing to remember the
+        // shape of a partially-placed day would mean the reschedule silently fell back to clearing
+        // every slot, which is the defect this column exists to close.
+        interview.SlotMinutes = dto.SlotMinutes;
+        interview.SlotBufferMinutes = dto.BufferMinutes;
+        interview.BreaksJson = plan.Breaks.Count == 0
+            ? null
+            : JsonSerializer.Serialize(plan.Breaks.Select(b =>
+                new InterviewSlotApportioner.Break(b.Start, b.End, b.Label)));
+
+        var bySlot = plan.Slots.ToDictionary(s => s.IntervieweeId);
+        var attendees = (await _intervieweeRepository.GetByInterviewIdAsync(interview.Id))
+            .Where(i => i.TenantId == interview.TenantId && !i.IsDeleted)
+            .ToList();
+
+        foreach (var attendee in attendees)
+        {
+            if (bySlot.TryGetValue(attendee.Id, out var slot))
+            {
+                attendee.SlotStartTime = slot.SlotStartTime;
+                attendee.SlotEndTime = slot.SlotEndTime;
+            }
+            else
+            {
+                // Everyone who did not fit loses any slot they had. Leaving a stale time on a
+                // candidate the new layout could not place is exactly how somebody arrives for an
+                // appointment nobody is expecting to keep.
+                attendee.SlotStartTime = null;
+                attendee.SlotEndTime = null;
+            }
+            await _intervieweeRepository.UpdateAsync(attendee);
+        }
+
+        await _interviewRepository.UpdateAsync(interview);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation(
+            "Interview {InterviewNumber} apportioned: {Placed} placed, {Unplaced} unplaced at {Slot} min.",
+            interview.InterviewNumber, plan.Slots.Count, plan.Unplaced.Count, dto.SlotMinutes);
+
+        return plan;
+    }
+
+    /// <summary>Runs the apportioner over one interview's attendees and dresses the result for a screen.</summary>
+    private static InterviewSlotPlanDto BuildPlan(JobInterview interview, ApportionInterviewSlotsDto dto)
+    {
+        var attendees = (interview.Interviewees ?? new List<JobInterviewee>())
+            .Where(i => !i.IsDeleted)
+            .ToList();
+
+        // The caller may name an order; otherwise take them as they were added. Ids the caller
+        // supplies that are not on this interview are ignored rather than refused — a stale board
+        // should not make the preview unusable.
+        var ordered = dto.ApplicationIds is { Count: > 0 }
+            ? dto.ApplicationIds
+                .Select(id => attendees.FirstOrDefault(a => a.JobApplicationId == id))
+                .Where(a => a is not null)
+                .Select(a => a!)
+                .ToList()
+            : attendees;
+
+        var breaks = dto.Breaks?
+            .Select(b => new InterviewSlotApportioner.Break(b.Start, b.End, b.Label))
+            ?? Array.Empty<InterviewSlotApportioner.Break>();
+
+        var plan = InterviewSlotApportioner.Apportion(
+            interview.StartTime,
+            interview.EndTime,
+            dto.SlotMinutes,
+            dto.BufferMinutes,
+            breaks,
+            ordered.Select(a => a.JobApplicationId).ToList());
+
+        InterviewSlotAssignmentDto Describe(JobInterviewee a, InterviewSlotApportioner.Slot? s) => new()
+        {
+            IntervieweeId = a.Id,
+            JobApplicationId = a.JobApplicationId,
+            CandidateName = a.JobApplication?.JobCandidate?.FullName ?? "Candidate",
+            ApplicationNumber = a.JobApplication?.ApplicationNumber ?? string.Empty,
+            Ordinal = s?.Ordinal ?? 0,
+            SlotStartTime = s?.Start ?? default,
+            SlotEndTime = s?.End ?? default,
+        };
+
+        var byApplication = ordered.ToDictionary(a => a.JobApplicationId);
+
+        return new InterviewSlotPlanDto
+        {
+            InterviewId = interview.Id,
+            ScheduledDate = interview.ScheduledDate,
+            WindowStart = interview.StartTime,
+            WindowEnd = interview.EndTime,
+            SlotMinutes = dto.SlotMinutes,
+            BufferMinutes = dto.BufferMinutes,
+            Breaks = plan.Breaks
+                .Select(b => new InterviewBreakDto { Start = b.Start, End = b.End, Label = b.Label })
+                .ToList(),
+            Slots = plan.Slots
+                .Where(s => byApplication.ContainsKey(s.ApplicationId))
+                .Select(s => Describe(byApplication[s.ApplicationId], s))
+                .ToList(),
+            Unplaced = plan.Unplaced
+                .Where(byApplication.ContainsKey)
+                .Select(id => Describe(byApplication[id], null))
+                .ToList(),
+            AllFit = plan.AllFit,
+            FirstFreeAfterWindow = plan.FirstFreeAfterWindow,
+            Summary = plan.Summary,
+        };
     }
 
     public async Task<bool> RecordAttendanceAsync(Guid intervieweeId, bool? attended, string? noShowReason, Guid updatedByUserId, CancellationToken cancellationToken = default)

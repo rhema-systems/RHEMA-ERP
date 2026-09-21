@@ -1882,6 +1882,42 @@ public class JobInterview : TenantEntity
     [ForeignKey(nameof(QuestionPresetId))]
     public virtual InterviewQuestionPreset? QuestionPreset { get; set; }
 
+    // ── Slot apportionment (round 4, lane C) ────────────────────────────────────────────────────
+    //
+    // ⚠ These three exist so a RESCHEDULE can re-apportion rather than re-ask. Without them,
+    // moving a session moved the window and left every candidate's slot behind — and the reschedule
+    // notice then emailed each candidate their ORIGINAL time against the NEW date, with a fresh
+    // confirmation token inviting them to confirm it. Recorded as round 4 § 3 defect 23.
+    //
+    // Null means the day was never apportioned: slots were typed by hand, or there are none. A
+    // reschedule then CLEARS the slots rather than shifting them, because a time that no longer
+    // sits inside the session is worse than no time at all.
+
+    /// <summary>How long each candidate gets, when the day was apportioned.</summary>
+    public int? SlotMinutes { get; set; }
+
+    /// <summary>
+    /// Turnaround between candidates. Applied between slots and never after the last, so it cannot
+    /// by itself push the day past its end.
+    /// </summary>
+    public int? SlotBufferMinutes { get; set; }
+
+    /// <summary>
+    /// The day's breaks, as JSON — <c>[{"start":"12:30:00","end":"13:30:00","label":"Lunch"}]</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ <b>JSON rather than a child table, deliberately.</b> A break has no identity anyone
+    /// refers to, nothing points at one, and it is only ever read as a whole set while laying out
+    /// one day. A table would buy cascade deletes and an id nobody needs, and cost a join on every
+    /// read of the interview. The same call the appraisal breakdown and the application profile
+    /// snapshot already make.</para>
+    ///
+    /// <para>Written and read only through <c>InterviewSlotApportioner.Break</c>, which normalises
+    /// them — clipped to the window, overlaps merged — so nothing downstream has to cope with a
+    /// break that runs past midnight or two that overlap.</para>
+    /// </remarks>
+    public string? BreaksJson { get; set; }
+
 	public virtual ICollection<JobInterviewee> Interviewees { get; set; } = new List<JobInterviewee>();
     public virtual ICollection<JobInterviewPanelist> Panelists { get; set; } = new List<JobInterviewPanelist>();
     public virtual ICollection<JobInterviewExternalPanelist> ExternalPanelists { get; set; } = new List<JobInterviewExternalPanelist>();

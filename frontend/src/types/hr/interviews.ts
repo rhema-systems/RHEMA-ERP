@@ -663,3 +663,60 @@ export interface SendPanelistNotifications {
 // not have shown either even though both were on the wire. Transcribed from a live payload in
 // slice 8 and now kept in one place.
 export type { ExternalAssociateSearchResult } from './external-associate';
+
+// ── slot apportionment (round 4, lane C) ───────────────────────────────────
+
+/** A rest period inside the interview window that no candidate may be booked into. */
+export interface InterviewBreak {
+  /** `HH:mm:ss`. */
+  start: string;
+  /** `HH:mm:ss`. */
+  end: string;
+  /** Printed on the timetable — "Lunch", "Panel conference". */
+  label?: string | null;
+}
+
+export interface ApportionSlotsRequest {
+  slotMinutes: number;
+  bufferMinutes: number;
+  breaks: InterviewBreak[];
+  /**
+   * The candidates to place, in the order they should be seen. Omit to place everyone currently
+   * booked in, in the order they were added.
+   */
+  applicationIds?: string[] | null;
+}
+
+export interface InterviewSlotAssignment {
+  intervieweeId: string;
+  jobApplicationId: string;
+  candidateName: string;
+  applicationNumber: string;
+  /** 1-based position in the day. Zero for a candidate who did not fit. */
+  ordinal: number;
+  slotStartTime: string;
+  slotEndTime: string;
+}
+
+/**
+ * The timetable, and the fact the screen leads with: whether everybody actually fits.
+ *
+ * ⚠ `unplaced` is not an error list. It is the answer to "can we see all of them today?", and it
+ * carries the candidates in the order they would have been seen — so a recruiter can decide who
+ * moves rather than being told only that somebody must.
+ */
+export interface InterviewSlotPlan {
+  interviewId: string;
+  scheduledDate: string;
+  windowStart: string;
+  windowEnd: string;
+  slotMinutes: number;
+  bufferMinutes: number;
+  breaks: InterviewBreak[];
+  slots: InterviewSlotAssignment[];
+  unplaced: InterviewSlotAssignment[];
+  allFit: boolean;
+  /** First free time of day after the window. Null when everybody fits. The DATE is the user's. */
+  firstFreeAfterWindow?: string | null;
+  summary: string;
+}

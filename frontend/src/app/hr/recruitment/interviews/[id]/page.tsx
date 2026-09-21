@@ -25,6 +25,7 @@ import { InterviewCandidatesPanel } from '@/components/hr/recruitment/InterviewC
 import { InterviewPanelPanel } from '@/components/hr/recruitment/InterviewPanelPanel';
 import { InterviewQuestionsPanel } from '@/components/hr/recruitment/InterviewQuestionsPanel';
 import { InterviewScoresPanel } from '@/components/hr/recruitment/InterviewScoresPanel';
+import { InterviewSlotApportionPanel } from '@/components/hr/recruitment/InterviewSlotApportionPanel';
 import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { HR_ROLES } from '@/components/hr/common/PermissionGate';
@@ -253,13 +254,17 @@ export default function InterviewDetailPage() {
           <TabsTrigger value="scores">Scorecards</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="candidates" className="mt-4">
+        <TabsContent value="candidates" className="mt-4 space-y-4">
           <InterviewCandidatesPanel
             interview={data}
             canManage={canManage}
             canScore={canScore}
             myPanelistId={myPanelist?.id}
           />
+          {/* Round 4, lane C. Under the candidate list rather than beside it: you book people in
+              first, then decide how the day is divided between them. Hidden once the session is
+              over or cancelled — there is no day left to lay out. */}
+          {!isTerminal && <InterviewSlotApportionPanel interview={data} canManage={canManage} />}
         </TabsContent>
 
         <TabsContent value="panel" className="mt-4">

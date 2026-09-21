@@ -102,6 +102,29 @@ public interface IJobInterviewService
     Task<bool> RemoveIntervieweeAsync(Guid intervieweeId, CancellationToken cancellationToken = default);
     Task<IEnumerable<JobIntervieweeDto>> GetIntervieweesAsync(Guid interviewId, CancellationToken cancellationToken = default);
     Task<bool> UpdateIntervieweeSlotAsync(UpdateIntervieweeSlotDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What the day would look like at a given interval — a dry run that writes nothing.
+    /// </summary>
+    /// <remarks>
+    /// Separate from <see cref="ApplySlotApportionmentAsync"/> because a recruiter changes the
+    /// interval several times before they like the shape of the day, and each attempt must not
+    /// rewrite nine candidates' times. Readable by the panel as well as HR.
+    /// </remarks>
+    Task<InterviewSlotPlanDto> PreviewSlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Writes the timetable onto the session's candidates, and remembers the interval so a
+    /// reschedule can lay the day out again.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Candidates the window cannot hold have any existing slot CLEARED rather than left
+    /// standing — a stale time on somebody the new layout could not place is how a candidate
+    /// arrives for an appointment nobody is keeping.
+    /// </remarks>
+    Task<InterviewSlotPlanDto> ApplySlotApportionmentAsync(
+        ApportionInterviewSlotsDto dto, CancellationToken cancellationToken = default);
     Task<ConfirmPanelistAssignmentResultDto> ConfirmPanelistAssignmentByTokenAsync(string token, CancellationToken cancellationToken = default);
     Task<bool> RecordAttendanceAsync(Guid intervieweeId, bool? attended, string? noShowReason, Guid updatedByUserId, CancellationToken cancellationToken = default);
     Task<bool> RecordOutcomeAsync(RecordIntervieweeOutcomeDto dto, Guid updatedByUserId, CancellationToken cancellationToken = default);

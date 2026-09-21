@@ -3,6 +3,7 @@ import type {
   AddJobInterviewExternalPanelist,
   AddJobInterviewPanelist,
   AddJobInterviewee,
+  ApportionSlotsRequest,
   CancelJobInterview,
   CommitInterviewQuestions,
   CreateInterviewQuestion,
@@ -17,6 +18,7 @@ import type {
   InterviewQuestionType,
   InterviewQuestionTypeSummary,
   InterviewScoreDraft,
+  InterviewSlotPlan,
   JobInterview,
   JobInterviewDetail,
   JobInterviewExternalPanelist,
@@ -247,6 +249,30 @@ class JobInterviewService {
       intervieweeId,
       slotStartTime,
       slotEndTime,
+    });
+  }
+
+  // ── Slot apportionment (round 4, lane C) ─────────────────────────────────
+
+  /**
+   * What the day would look like at this interval. **Writes nothing** — call it as often as the
+   * user changes the numbers.
+   *
+   * ⚠ Times go over the wire as `HH:mm:ss`. `<input type="time">` yields `HH:mm`, so append
+   * `:00` — the same correction the scheduling form already makes for the session window.
+   */
+  previewSlots(interviewId: string, plan: ApportionSlotsRequest): Promise<InterviewSlotPlan> {
+    return apiService.post<InterviewSlotPlan>(`${this.baseUrl}/${interviewId}/slots/preview`, {
+      ...plan,
+      interviewId,
+    });
+  }
+
+  /** Writes the timetable onto the session's candidates. HR only. */
+  applySlots(interviewId: string, plan: ApportionSlotsRequest): Promise<InterviewSlotPlan> {
+    return apiService.post<InterviewSlotPlan>(`${this.baseUrl}/${interviewId}/slots/apply`, {
+      ...plan,
+      interviewId,
     });
   }
 

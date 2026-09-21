@@ -2893,6 +2893,97 @@ public class UpdateIntervieweeSlotDto
     public TimeSpan? SlotEndTime   { get; set; }
 }
 
+// ── Slot apportionment (round 4, lane C) ────────────────────────────────────────────────────────
+
+/// <summary>One rest period inside the interview window that no candidate may be booked into.</summary>
+public class InterviewBreakDto
+{
+    [Required] public TimeSpan Start { get; set; }
+    [Required] public TimeSpan End   { get; set; }
+
+    /// <summary>What the break is for — printed on the timetable. "Lunch", "Panel conference".</summary>
+    [MaxLength(100)]
+    public string? Label { get; set; }
+}
+
+/// <summary>
+/// Asks what a day would look like at a given interval, without writing anything.
+/// </summary>
+/// <remarks>
+/// A dry run on purpose: a recruiter changes the interval three times before they like the shape of
+/// the day, and each attempt must not rewrite nine candidates' times — nor send anybody anything.
+/// </remarks>
+public class ApportionInterviewSlotsDto
+{
+    [Required]
+    public Guid InterviewId { get; set; }
+
+    [Range(InterviewSlotLimits.MinSlotMinutes, InterviewSlotLimits.MaxSlotMinutes)]
+    public int SlotMinutes { get; set; } = 30;
+
+    [Range(0, InterviewSlotLimits.MaxBufferMinutes)]
+    public int BufferMinutes { get; set; }
+
+    public List<InterviewBreakDto> Breaks { get; set; } = new();
+
+    /// <summary>
+    /// The candidates to place, in the order they should be seen. Omit to place everyone currently
+    /// booked into the session, in the order they were added.
+    /// </summary>
+    public List<Guid>? ApplicationIds { get; set; }
+}
+
+/// <summary>The bounds shared by the DTO attributes and the apportioner, so the two cannot drift.</summary>
+public static class InterviewSlotLimits
+{
+    public const int MinSlotMinutes = 5;
+    public const int MaxSlotMinutes = 480;
+    public const int MaxBufferMinutes = 120;
+}
+
+/// <summary>One candidate's place in the day.</summary>
+public class InterviewSlotAssignmentDto
+{
+    public Guid IntervieweeId { get; set; }
+    public Guid JobApplicationId { get; set; }
+    public string CandidateName { get; set; } = string.Empty;
+    public string ApplicationNumber { get; set; } = string.Empty;
+    public int Ordinal { get; set; }
+    public TimeSpan SlotStartTime { get; set; }
+    public TimeSpan SlotEndTime { get; set; }
+}
+
+/// <summary>
+/// The timetable, and — the reason this endpoint exists — whether everybody actually fits.
+/// </summary>
+public class InterviewSlotPlanDto
+{
+    public Guid InterviewId { get; set; }
+    public DateOnly ScheduledDate { get; set; }
+    public TimeSpan WindowStart { get; set; }
+    public TimeSpan WindowEnd { get; set; }
+    public int SlotMinutes { get; set; }
+    public int BufferMinutes { get; set; }
+    public List<InterviewBreakDto> Breaks { get; set; } = new();
+
+    public List<InterviewSlotAssignmentDto> Slots { get; set; } = new();
+
+    /// <summary>Candidates the window could not hold, in the order they would have been seen.</summary>
+    public List<InterviewSlotAssignmentDto> Unplaced { get; set; } = new();
+
+    /// <summary>True when every candidate fits. The single fact the screen leads with.</summary>
+    public bool AllFit { get; set; }
+
+    /// <summary>
+    /// The first time of day after the window that is not inside a break — where a second session
+    /// could pick up. Null when everybody fits. The DATE is the recruiter's to choose.
+    /// </summary>
+    public TimeSpan? FirstFreeAfterWindow { get; set; }
+
+    /// <summary>A sentence a recruiter can act on without reading the table.</summary>
+    public string Summary { get; set; } = string.Empty;
+}
+
 public class RecordIntervieweeAttendanceDto
 {
     [Required]
