@@ -3,6 +3,7 @@ using ErpSystem.Core.Interfaces.Ehc;
 using ErpSystem.Api.Services;
 using Microsoft.AspNetCore.RateLimiting;
 using System.Globalization;
+using System.Text.Json;
 using ErpSystem.Core.DTOs.Sales;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
@@ -2373,6 +2374,22 @@ public sealed class EstateExternalDocumentsController : ControllerBase
                 : await partners.OrderBy(p => p.PartnerName).FirstOrDefaultAsync(cancellationToken);
             if (request.BusinessPartnerId.HasValue && partner is null)
                 return BadRequest(new { success = false, message = "The selected business partner is not linked to your portal account." });
+            var duplicate = await FindDuplicatePropertyEnquiryAsync(
+                tenantId,
+                listingId,
+                request.SubmissionId,
+                partner?.Id,
+                _currentUserService.Email ?? partner?.PrimaryEmail,
+                partner?.PrimaryPhone,
+                cancellationToken);
+            if (duplicate is not null)
+            {
+                return Conflict(new
+                {
+                    success = false,
+                    message = $"You already have an active enquiry for this property ({duplicate.TicketNumber}). Sales will continue from that request."
+                });
+            }
             var reference = demarcationListing is null ? asset.AssetCode
                 : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
             var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
@@ -2453,11 +2470,294 @@ public sealed class EstateExternalDocumentsController : ControllerBase
         }
     }
 
+    [AllowAnonymous]
+    [HttpPost("/api/estate/public/listings/{listingId:guid}/enquiries")]
+    [EnableRateLimiting("SensitivePolicy")]
+    public async Task<IActionResult> CreatePublicListingEnquiry(Guid listingId,
+        [FromBody] CreatePropertyListingEnquiryRequest request, CancellationToken cancellationToken)
+    {
+        if (request is null || request.SubmissionId == Guid.Empty || string.IsNullOrWhiteSpace(request.Message) || request.Message.Trim().Length > 4000)
+            return BadRequest(new { success = false, message = "Enter an enquiry message of up to 4,000 characters and a submission identifier." });
+        if (string.IsNullOrWhiteSpace(request.ContactName))
+            return BadRequest(new { success = false, message = "Enter your name before sending the enquiry." });
+        if (string.IsNullOrWhiteSpace(request.ContactPhone))
+            return BadRequest(new { success = false, message = "Enter your phone number before sending the enquiry." });
+        if (!string.IsNullOrWhiteSpace(request.ContactEmail) && !request.ContactEmail.Contains('@', StringComparison.Ordinal))
+            return BadRequest(new { success = false, message = "Enter a valid email address or leave the email field empty." });
+
+        try
+        {
+            var tenantId = await ResolvePublicTenantIdAsync(cancellationToken);
+            if (tenantId == Guid.Empty)
+            {
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
+            }
+
+            var (asset, demarcationListing) = await LoadExternalListingForEnquiryAsync(tenantId, listingId, cancellationToken);
+            if (asset == null)
+            {
+                return NotFound(new { success = false, message = "Listing was not found or is not available." });
+            }
+
+            var duplicate = await FindDuplicatePropertyEnquiryAsync(
+                tenantId,
+                listingId,
+                request.SubmissionId,
+                businessPartnerId: null,
+                contactEmail: request.ContactEmail,
+                contactPhone: request.ContactPhone,
+                cancellationToken);
+            if (duplicate is not null)
+            {
+                return Conflict(new
+                {
+                    success = false,
+                    message = $"You already have an active enquiry for this property ({duplicate.TicketNumber}). Sales will continue from that request."
+                });
+            }
+
+            var category = await _db.EhcTicketCategories.AsNoTracking().FirstOrDefaultAsync(c =>
+                c.TenantId == tenantId && !c.IsDeleted && c.Code == "PROPERTY-LISTING", cancellationToken);
+            if (category is null)
+            {
+                _logger.LogError(
+                    "Property enquiry routing category PROPERTY-LISTING is missing for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
+                    tenantId,
+                    listingId,
+                    HttpContext.TraceIdentifier);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
+            }
+
+            var forwardedHost = Request.Headers["X-Forwarded-Host"].FirstOrDefault();
+            await _captchaService.EnsureCaptchaValidAsync(tenantId, request.CaptchaToken,
+                string.IsNullOrWhiteSpace(forwardedHost) ? Request.Host.Host : forwardedHost,
+                HttpContext.Connection.RemoteIpAddress?.ToString(), cancellationToken);
+
+            var requester = await ResolvePublicPropertyEnquiryRequesterAsync(tenantId, cancellationToken);
+            if (requester is null)
+            {
+                _logger.LogError(
+                    "No active public property enquiry requester account exists for tenant {TenantId}; listing {ListingId}; trace {TraceId}",
+                    tenantId,
+                    listingId,
+                    HttpContext.TraceIdentifier);
+                return StatusCode(StatusCodes.Status503ServiceUnavailable, new { success = false, message = "The enquiry could not be sent right now. Please try again later." });
+            }
+
+            var reference = demarcationListing is null ? asset.AssetCode
+                : EstateLandDemarcationReference.Build(asset.AssetCode, demarcationListing.DemarcationNumber);
+            var name = demarcationListing is null ? asset.Name : $"{asset.Name} - Parcel {demarcationListing.DemarcationNumber:000}";
+            var type = demarcationListing?.ExternalListingType ?? asset.ExternalListingType;
+            var currency = demarcationListing?.ExternalListingCurrency ?? asset.ExternalListingCurrency;
+            var price = type == "Rent"
+                ? demarcationListing?.ExternalMonthlyRent ?? asset.ExternalMonthlyRent
+                : type == "Lease"
+                    ? demarcationListing?.ExternalMonthlyRent ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalMonthlyRent ?? asset.ExternalListingPrice
+                    : demarcationListing?.ExternalSalePrice ?? asset.ExternalSalePrice ?? demarcationListing?.ExternalListingPrice ?? asset.ExternalListingPrice;
+            var contactName = request.ContactName.Trim();
+            var contactEmail = string.IsNullOrWhiteSpace(request.ContactEmail) ? null : request.ContactEmail.Trim();
+            var contactPhone = request.ContactPhone.Trim();
+            var contactReference = string.IsNullOrWhiteSpace(request.ContactReference) ? null : request.ContactReference.Trim();
+            var property = new EhcPropertyListingContextDto("estate-public-listing", listingId, reference, name, type,
+                string.IsNullOrWhiteSpace(currency) ? "GHS" : currency, asset.Location, price, asset.Id, demarcationListing?.Id,
+                null, contactName, contactName, contactEmail, contactPhone, contactReference);
+            var ticket = await _ticketService.CreatePublicPropertyEnquiryAsync(new CreateEhcTicketRequestDto
+            {
+                TicketType = EhcTicketType.Enquiry,
+                Source = EhcTicketSource.Web,
+                CategoryId = category.Id,
+                Subject = Truncate($"Property enquiry: {name}", 200),
+                Description = request.Message.Trim(),
+                RelatedEntityType = "EstateListing",
+                RelatedEntityReference = reference
+            }, property, request.SubmissionId, tenantId, requester.Id, requester.UserName, cancellationToken);
+            return Ok(new { success = true, data = ticket });
+        }
+        catch (CaptchaVerificationException ex) { return BadRequest(new { success = false, message = ex.Message }); }
+        catch (ArgumentException ex)
+        {
+            _logger.LogError(ex,
+                "Public property enquiry validation/setup failed for listing {ListingId}; submission {SubmissionId}; trace {TraceId}",
+                listingId,
+                request.SubmissionId,
+                HttpContext.TraceIdentifier);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "The enquiry could not be sent right now. Please try again later."
+            });
+        }
+        catch (InvalidOperationException ex)
+        {
+            _logger.LogError(ex,
+                "Public property enquiry could not be completed for listing {ListingId}; submission {SubmissionId}; trace {TraceId}",
+                listingId,
+                request.SubmissionId,
+                HttpContext.TraceIdentifier);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "The enquiry could not be sent right now. Please try again later."
+            });
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to create public property enquiry for listing {ListingId}; submission {SubmissionId}; trace {TraceId}",
+                listingId,
+                request.SubmissionId,
+                HttpContext.TraceIdentifier);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                success = false,
+                message = "The enquiry could not be sent right now. Please try again later."
+            });
+        }
+    }
+
     private IQueryable<BusinessPartner> PortalEnquiryPartners(Guid tenantId, Guid userId)
         => _db.BusinessPartners.AsNoTracking().Where(p => p.TenantId == tenantId && !p.IsDeleted && p.IsActive
             && p.ApprovalStatus == "Approved" && (p.PartnerType == "Supplier" || p.PartnerType == "Customer" || p.PartnerType == "Both")
             && (p.UserId == userId || _db.BusinessPartnerUsers.Any(link => link.TenantId == tenantId && !link.IsDeleted
                 && link.IsActive && link.UserId == userId && link.BusinessPartnerId == p.Id)));
+
+    private async Task<(EstateManagedAsset? Asset, EstateLandDemarcation? Demarcation)> LoadExternalListingForEnquiryAsync(
+        Guid tenantId,
+        Guid listingId,
+        CancellationToken cancellationToken)
+    {
+        var asset = await WhereExternallyAvailableListings(_db.EstateManagedAssets.AsNoTracking())
+            .FirstOrDefaultAsync(item => item.Id == listingId
+                && item.TenantId == tenantId
+                && (item.AssetType == EstateManagedAssetType.Land
+                    || item.AssetType == EstateManagedAssetType.Property
+                    || item.AssetType == EstateManagedAssetType.Facility), cancellationToken);
+        var demarcationListing = asset is null
+            ? await _db.EstateLandDemarcations
+                .AsNoTracking()
+                .Include(item => item.EstateManagedAsset)
+                .FirstOrDefaultAsync(item => item.Id == listingId
+                    && item.TenantId == tenantId
+                    && !item.IsDeleted
+                    && item.IsPublishedToExternalPortal
+                    && item.ExternalListingStatus == "Published"
+                    && item.BoundaryVerified
+                    && item.EstateManagedAsset.TenantId == tenantId
+                    && !item.EstateManagedAsset.IsDeleted
+                    && item.EstateManagedAsset.AssetType == EstateManagedAssetType.Land
+                    && item.EstateManagedAsset.Status == EstateManagedAssetStatus.LandBank
+                    && !item.EstateManagedAsset.ProjectId.HasValue
+                    && !item.EstateManagedAsset.IsPublishedToExternalPortal,
+                    cancellationToken)
+            : null;
+
+        return (asset ?? demarcationListing?.EstateManagedAsset, demarcationListing);
+    }
+
+    private async Task<DuplicatePropertyEnquiry?> FindDuplicatePropertyEnquiryAsync(
+        Guid tenantId,
+        Guid listingId,
+        Guid submissionId,
+        Guid? businessPartnerId,
+        string? contactEmail,
+        string? contactPhone,
+        CancellationToken cancellationToken)
+    {
+        var normalizedEmail = string.IsNullOrWhiteSpace(contactEmail) ? null : contactEmail.Trim().ToLowerInvariant();
+        var normalizedPhone = NormalizeContactPhone(contactPhone);
+        if (!businessPartnerId.HasValue && string.IsNullOrWhiteSpace(normalizedEmail) && string.IsNullOrWhiteSpace(normalizedPhone))
+        {
+            return null;
+        }
+
+        var candidates = await _db.EhcTickets
+            .AsNoTracking()
+            .Where(ticket => ticket.TenantId == tenantId
+                && !ticket.IsDeleted
+                && ticket.TicketType == EhcTicketType.Enquiry
+                && ticket.Status != EhcTicketStatus.Closed
+                && ticket.ExternalSubmissionId != submissionId
+                && ticket.PropertyListingContextJson != null)
+            .OrderByDescending(ticket => ticket.CreatedAt)
+            .Select(ticket => new
+            {
+                ticket.Id,
+                ticket.TicketNumber,
+                ticket.Status,
+                ticket.PropertyListingContextJson
+            })
+            .Take(5000)
+            .ToListAsync(cancellationToken);
+
+        foreach (var candidate in candidates)
+        {
+            EhcPropertyListingContextDto? property;
+            try
+            {
+                property = JsonSerializer.Deserialize<EhcPropertyListingContextDto>(candidate.PropertyListingContextJson!);
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+
+            if (property is null ||
+                property.ListingId != listingId ||
+                !(string.Equals(property.Source, "estate-public-listing", StringComparison.OrdinalIgnoreCase) ||
+                  string.Equals(property.Source, "state-public-listing", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (businessPartnerId.HasValue && property.BusinessPartnerId == businessPartnerId)
+            {
+                return new DuplicatePropertyEnquiry(candidate.Id, candidate.TicketNumber, candidate.Status);
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalizedEmail) &&
+                string.Equals(property.ContactEmail?.Trim(), normalizedEmail, StringComparison.OrdinalIgnoreCase))
+            {
+                return new DuplicatePropertyEnquiry(candidate.Id, candidate.TicketNumber, candidate.Status);
+            }
+
+            if (!string.IsNullOrWhiteSpace(normalizedPhone) &&
+                string.Equals(NormalizeContactPhone(property.ContactPhone), normalizedPhone, StringComparison.Ordinal))
+            {
+                return new DuplicatePropertyEnquiry(candidate.Id, candidate.TicketNumber, candidate.Status);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<PublicPropertyEnquiryRequester?> ResolvePublicPropertyEnquiryRequesterAsync(
+        Guid tenantId,
+        CancellationToken cancellationToken)
+    {
+        return await _db.Users
+            .AsNoTracking()
+            .Where(user => user.TenantId == tenantId && user.IsActive
+                && (user.UserName == "external" || user.Email == "external@default.com"))
+            .OrderBy(user => user.UserName)
+            .Select(user => new PublicPropertyEnquiryRequester(user.Id, user.UserName ?? "external"))
+            .FirstOrDefaultAsync(cancellationToken)
+            ?? await _db.Users
+                .AsNoTracking()
+                .Where(user => user.TenantId == tenantId && user.IsActive)
+                .OrderBy(user => user.UserName)
+                .Select(user => new PublicPropertyEnquiryRequester(user.Id, user.UserName ?? "public-enquiry"))
+                .FirstOrDefaultAsync(cancellationToken);
+    }
+
+    private static string? NormalizeContactPhone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value)) return null;
+        var digits = new string(value.Where(char.IsDigit).ToArray());
+        return string.IsNullOrWhiteSpace(digits) ? value.Trim() : digits;
+    }
+
+    private sealed record DuplicatePropertyEnquiry(Guid Id, string TicketNumber, EhcTicketStatus Status);
+    private sealed record PublicPropertyEnquiryRequester(Guid Id, string UserName);
 
     private HashSet<string> BuildIdentityTerms()
     {
@@ -3710,4 +4010,12 @@ public sealed record ExternalEstateRequestDefinition(
     string EntityType,
     string Category);
 
-public sealed record CreatePropertyListingEnquiryRequest(Guid SubmissionId, string Message, Guid? BusinessPartnerId = null, string? CaptchaToken = null);
+public sealed record CreatePropertyListingEnquiryRequest(
+    Guid SubmissionId,
+    string Message,
+    Guid? BusinessPartnerId = null,
+    string? CaptchaToken = null,
+    string? ContactName = null,
+    string? ContactEmail = null,
+    string? ContactPhone = null,
+    string? ContactReference = null);

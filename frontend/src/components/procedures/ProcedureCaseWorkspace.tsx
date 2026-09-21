@@ -40,7 +40,10 @@ import {
 } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { CentralDocumentViewerDialog } from '@/components/document-management/CentralDocumentViewerDialog';
+import {
+  CentralDocumentViewerDialog,
+  type CentralDocumentViewerFile,
+} from '@/components/document-management/CentralDocumentViewerDialog';
 import { useToast } from '@/hooks/use-toast';
 import { getStatusBadgeClassName } from '@/lib/status-badge';
 import { organizationLevelService } from '@/services/hr/organization-level.service';
@@ -49,6 +52,7 @@ import type { OrganizationUnitSummary } from '@/types/hr/organization';
 import {
   documentManagementService,
   type CentralDocumentGenerationTemplate,
+  type CentralDocumentVersionDownloadFormat,
   type GeneratedCentralDocumentResult,
 } from '@/services/document-management.service';
 import {
@@ -225,6 +229,21 @@ const parseAmount = (value?: string | null): number | null => {
   const parsed = Number(value.replace(/[^\d.-]/g, ''));
   return Number.isFinite(parsed) ? parsed : null;
 };
+
+function safeDownloadName(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, ' ').trim();
+}
+
+function triggerBlobDownload(blob: Blob, fileName: string) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = fileName;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
 
 type StageFieldRequirement = {
   key: string;
@@ -489,6 +508,9 @@ export function ProcedureCaseWorkspace({
     Record<string, File | null>
   >({});
   const [previewDocumentId, setPreviewDocumentId] = React.useState<
+    string | null
+  >(null);
+  const [dmsViewerDocumentId, setDmsViewerDocumentId] = React.useState<
     string | null
   >(null);
   const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
@@ -790,9 +812,55 @@ export function ProcedureCaseWorkspace({
     selectedCase?.documents.find(
       (document) => document.id === previewDocumentId
     ) ?? null;
+  const dmsViewerDocument =
+    selectedCase?.documents.find(
+      (document) => document.id === dmsViewerDocumentId
+    ) ?? null;
   const previewDocumentUrl = previewDocument
     ? getDocumentPreviewUrl(previewDocument)
     : null;
+
+  const toDmsViewerFile = (
+    document: ProcedureCaseDocument | null | undefined
+  ): CentralDocumentViewerFile | null => {
+    if (!document?.centralDocumentRecordId) {
+      return null;
+    }
+
+    const versionId = document.centralDocumentVersionId;
+    return {
+      documentRecordId: document.centralDocumentRecordId,
+      versionId,
+      title: document.name,
+      fileName:
+        document.fileName ||
+        document.centralDocumentVersion ||
+        document.name,
+      repositoryPath:
+        document.centralDocumentRepositoryPath ||
+        (versionId
+          ? `/api/document-management/records/${encodeURIComponent(
+              document.centralDocumentRecordId
+            )}/versions/${encodeURIComponent(versionId)}/content`
+          : undefined),
+      renditionPath: document.centralDocumentRenditionPath,
+      contentType: document.centralDocumentContentType,
+      sourceLabel: document.providedBy || document.requiredFrom || undefined,
+      version: document.centralDocumentVersion,
+      annotationStateJson: document.centralDocumentAnnotationStateJson,
+    };
+  };
+
+  const refreshSelectedCase = async () => {
+    if (!selectedCase) {
+      return null;
+    }
+
+    const refreshed = await procedureCaseService.getCase(selectedCase.id);
+    setSelectedCase(refreshed);
+    await loadCases();
+    return refreshed;
+  };
 
   const loadCases = React.useCallback(async () => {
     setIsLoading(true);
@@ -1241,6 +1309,26 @@ export function ProcedureCaseWorkspace({
     setError(null);
     try {
       const selectedFile = documentFiles[document.id];
+      if (selectedFile && document.centralDocumentRecordId) {
+        await documentManagementService.uploadVersionFile(
+          document.centralDocumentRecordId,
+          {
+            file: selectedFile,
+            status: 'Current',
+            changeSummary:
+              'Edited workflow copy uploaded from the procedure case workspace.',
+          }
+        );
+        setDocumentFiles((current) => ({ ...current, [document.id]: null }));
+        await refreshSelectedCase();
+        toast({
+          title: 'Document version uploaded',
+          description: 'The edited copy is now the current DMS version.',
+          variant: 'success',
+        });
+        return;
+      }
+
       const updated = selectedFile
         ? await procedureCaseService.uploadDocument(
             selectedCase.id,
@@ -1273,6 +1361,106 @@ export function ProcedureCaseWorkspace({
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const generateDmsRendition = async (file: CentralDocumentViewerFile) => {
+    if (!file.documentRecordId || !file.versionId) {
+      return null;
+    }
+
+    const version = await documentManagementService.generateVersionRendition(
+      file.documentRecordId,
+      file.versionId,
+      Boolean(file.renditionPath)
+    );
+    await refreshSelectedCase();
+
+    return {
+      ...file,
+      renditionPath: version.renditionPath,
+      repositoryPath: version.repositoryPath || file.repositoryPath,
+      contentType: version.contentType || file.contentType,
+      fileName: version.fileName || file.fileName,
+    };
+  };
+
+  const downloadDmsVersion = async (
+    file: CentralDocumentViewerFile,
+    format: CentralDocumentVersionDownloadFormat
+  ) => {
+    if (!file.documentRecordId || !file.versionId) {
+      throw new Error('This DMS version cannot be downloaded.');
+    }
+
+    const blob = await documentManagementService.downloadVersionFile(
+      file.documentRecordId,
+      file.versionId,
+      format
+    );
+    const extension = format === 'pdf' ? 'pdf' : 'docx';
+    const baseName =
+      file.fileName?.replace(/\.[^.]+$/, '') || file.title || 'document';
+
+    triggerBlobDownload(
+      blob,
+      safeDownloadName(`${baseName}-${file.version || 'version'}.${extension}`)
+    );
+  };
+
+  const saveDmsAnnotations = async (
+    file: CentralDocumentViewerFile,
+    annotationStateJson: string | null,
+    annotatedPdfBlob: Blob | null
+  ) => {
+    if (!file.documentRecordId || !file.versionId) {
+      throw new Error('This DMS version cannot save annotations.');
+    }
+
+    const sourcePdf =
+      annotatedPdfBlob ||
+      (await documentManagementService.downloadVersionFile(
+        file.documentRecordId,
+        file.versionId,
+        'pdf'
+      ));
+    const baseName =
+      file.fileName?.replace(/\.[^.]+$/, '') || file.title || 'document';
+    const annotatedFile = new File(
+      [sourcePdf],
+      safeDownloadName(`${baseName}-annotated.pdf`),
+      { type: 'application/pdf' }
+    );
+    const version = await documentManagementService.uploadVersionFile(
+      file.documentRecordId,
+      {
+        file: annotatedFile,
+        status: 'Current',
+        changeSummary:
+          'PDF annotations, comments, and signatures saved from the procedure case workspace.',
+      }
+    );
+    await documentManagementService.addAnnotationReview(file.documentRecordId, {
+      documentVersionId: version.id,
+      reviewTitle: `${file.title} annotation save`,
+      status: 'Open',
+      syncfusionAnnotationStatus: 'Annotations saved',
+      reviewNotes:
+        'Annotations, comments, and signature marks were saved from the case document viewer.',
+      annotationStateJson: annotationStateJson || '{}',
+    });
+    await refreshSelectedCase();
+
+    return {
+      ...file,
+      versionId: version.id,
+      fileUploadRecordId: version.fileUploadRecordId,
+      fileName: version.fileName || file.fileName,
+      repositoryPath: version.repositoryPath || file.repositoryPath,
+      renditionPath: version.renditionPath || version.repositoryPath,
+      contentType: version.contentType || 'application/pdf',
+      version: version.versionNumber,
+      annotationStateJson: annotationStateJson || '{}',
+    };
   };
 
   const openDocument = async (document: ProcedureCaseDocument) => {
@@ -2520,7 +2708,12 @@ export function ProcedureCaseWorkspace({
                     {visibleDocuments.map((document) => {
                       const isDmsDocument =
                         isDocumentManagementDocument(document);
-                      const previewUrl = getDocumentPreviewUrl(document);
+                      const canModifyDocument =
+                        document.canUploadAtCurrentStage &&
+                        selectedCase.canEditCurrentStage;
+                      const documentStageLabel = document.requiredFrom
+                        ? `Required at ${document.requiredFrom}`
+                        : 'Current stage document';
                       const sourceLabel =
                         document.providedBy &&
                         document.providedBy !== 'Internal'
@@ -2528,6 +2721,7 @@ export function ProcedureCaseWorkspace({
                           : document.requiredFrom;
                       const isReadOnlyProvidedDocument =
                         Boolean(document.fileName) &&
+                        !canModifyDocument &&
                         (isDmsDocument ||
                           (document.providedBy &&
                             document.providedBy !== 'Internal'));
@@ -2578,7 +2772,7 @@ export function ProcedureCaseWorkspace({
                                 {document.name}
                               </div>
                               <div className="mt-1 text-xs text-muted-foreground">
-                                {sourceLabel}
+                                {sourceLabel || documentStageLabel}
                               </div>
                             </div>
                             <Badge
@@ -2597,7 +2791,18 @@ export function ProcedureCaseWorkspace({
                                 </div>
                                 {document.fileUrl ? (
                                   <div className="mt-2 flex flex-wrap gap-2">
-                                    {!isDmsDocument ? (
+                                    {isDmsDocument ? (
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-primary hover:underline"
+                                        onClick={() =>
+                                          setDmsViewerDocumentId(document.id)
+                                        }
+                                      >
+                                        <Eye className="h-3 w-3" />
+                                        View / annotate
+                                      </button>
+                                    ) : (
                                       <button
                                         type="button"
                                         className="inline-flex items-center gap-1 text-primary hover:underline"
@@ -2608,8 +2813,8 @@ export function ProcedureCaseWorkspace({
                                         <ExternalLink className="h-3 w-3" />
                                         Open uploaded file
                                       </button>
-                                    ) : null}
-                                    {isPdfDocument(document) ? (
+                                    )}
+                                    {!isDmsDocument && isPdfDocument(document) ? (
                                       <button
                                         type="button"
                                         className="inline-flex items-center gap-1 text-primary hover:underline"
@@ -2696,13 +2901,19 @@ export function ProcedureCaseWorkspace({
                               <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
                                 Awaiting {document.providedBy}.
                               </div>
+                            ) : !canModifyDocument ? (
+                              <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
+                                {document.fileName
+                                  ? `${documentStageLabel}. This document is view-only outside its owning stage.`
+                                  : `${documentStageLabel}. Upload is available only when the case reaches that stage.`}
+                              </div>
                             ) : (
                               <>
                                 <Input
                                   type="file"
                                   accept=".pdf,.doc,.docx,.txt,.rtf,.jpg,.jpeg,.png,.gif,.bmp,.svg,.webp,.ico"
                                   disabled={
-                                    !selectedCase.canEditCurrentStage ||
+                                    !canModifyDocument ||
                                     isSaving
                                   }
                                   onChange={(event) =>
@@ -2717,29 +2928,40 @@ export function ProcedureCaseWorkspace({
                                     Selected: {documentFiles[document.id]?.name}
                                   </div>
                                 ) : null}
-                                <Textarea
-                                  placeholder="Notes"
-                                  value={document.notes ?? ''}
-                                  disabled={!selectedCase.canEditCurrentStage}
-                                  onChange={(event) =>
-                                    updateDocumentNotes(
-                                      document.id,
-                                      event.target.value
-                                    )
-                                  }
-                                />
+                                {!isDmsDocument ? (
+                                  <Textarea
+                                    placeholder="Notes"
+                                    value={document.notes ?? ''}
+                                    disabled={!canModifyDocument}
+                                    onChange={(event) =>
+                                      updateDocumentNotes(
+                                        document.id,
+                                        event.target.value
+                                      )
+                                    }
+                                  />
+                                ) : (
+                                  <div className="rounded-md border border-border bg-background px-2 py-1.5 text-xs text-muted-foreground">
+                                    Upload an edited Word/PDF copy here to make
+                                    it the current DMS version.
+                                  </div>
+                                )}
                                 <Button
                                   size="sm"
                                   variant="outline"
                                   className="w-full gap-2"
                                   disabled={
-                                    !selectedCase.canEditCurrentStage ||
-                                    isSaving
+                                    !canModifyDocument ||
+                                    isSaving ||
+                                    (isDmsDocument &&
+                                      !documentFiles[document.id])
                                   }
                                   onClick={() => void saveDocument(document)}
                                 >
                                   <FileUp className="h-4 w-4" />
-                                  {documentFiles[document.id]
+                                  {isDmsDocument
+                                    ? 'Upload edited version'
+                                    : documentFiles[document.id]
                                     ? 'Upload document'
                                     : 'Save notes'}
                                 </Button>
@@ -2803,6 +3025,22 @@ export function ProcedureCaseWorkspace({
           {renderCreateCaseForm()}
         </DialogContent>
       </Dialog>
+      <CentralDocumentViewerDialog
+        open={Boolean(dmsViewerDocument)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDmsViewerDocumentId(null);
+          }
+        }}
+        file={toDmsViewerFile(dmsViewerDocument)}
+        enableAnnotations={Boolean(
+          dmsViewerDocument?.canUploadAtCurrentStage &&
+            selectedCase?.canEditCurrentStage
+        )}
+        onGenerateRendition={generateDmsRendition}
+        onDownload={downloadDmsVersion}
+        onSaveAnnotations={saveDmsAnnotations}
+      />
       <Dialog
         open={Boolean(previewDocument && previewDocumentUrl)}
         onOpenChange={(open) => {

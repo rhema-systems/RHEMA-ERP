@@ -33,7 +33,9 @@ import {
 } from '@/components/document-management/CentralDocumentViewerDialog';
 import {
   documentManagementService,
+  type CentralDocumentAnnotationReview,
   type CentralDocumentRecordDetail,
+  type CentralDocumentVersion,
   type CentralDocumentVersionDownloadFormat,
 } from '@/services/document-management.service';
 import { getStatusBadgeClassName } from '@/lib/status-badge';
@@ -71,6 +73,32 @@ function triggerBlobDownload(blob: Blob, fileName: string) {
   link.click();
   link.remove();
   URL.revokeObjectURL(url);
+}
+
+function timestamp(value?: string | null) {
+  if (!value) return 0;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+function compareVersionRecency(
+  left: CentralDocumentVersion,
+  right: CentralDocumentVersion
+) {
+  return (
+    timestamp(right.publishedAt || right.createdAt) -
+    timestamp(left.publishedAt || left.createdAt)
+  );
+}
+
+function compareAnnotationReviewRecency(
+  left: CentralDocumentAnnotationReview,
+  right: CentralDocumentAnnotationReview
+) {
+  return (
+    timestamp(right.updatedAt || right.createdAt) -
+    timestamp(left.updatedAt || left.createdAt)
+  );
 }
 
 export default function CentralDocumentRecordDetailPage() {
@@ -144,18 +172,21 @@ export default function CentralDocumentRecordDetailPage() {
     record.repositoryPath && /^https?:\/\//i.test(record.repositoryPath)
       ? record.repositoryPath
       : null;
+  const versionsByMostRecent = [...versions].sort(compareVersionRecency);
   const currentVersionRecord =
-    versions.find(
-      (version) =>
-        version.status === 'Current' ||
-        version.versionNumber === record.currentVersion
-    ) || versions[0];
+    versionsByMostRecent.find(
+      (version) => version.versionNumber === record.currentVersion
+    ) ||
+    versionsByMostRecent.find((version) => version.status === 'Current') ||
+    versionsByMostRecent[0];
   const annotationStateForVersion = (versionId?: string | null) =>
-    annotationReviews.find(
-      (review) =>
-        review.documentVersionId === versionId &&
-        review.annotationStateJson?.trim()
-    )?.annotationStateJson || null;
+    [...annotationReviews]
+      .filter(
+        (review) =>
+          review.documentVersionId === versionId &&
+          review.annotationStateJson?.trim()
+      )
+      .sort(compareAnnotationReviewRecency)[0]?.annotationStateJson || null;
 
   const openViewer = (file: CentralDocumentViewerFile | null | undefined) => {
     if (file) {
@@ -170,7 +201,8 @@ export default function CentralDocumentRecordDetailPage() {
 
     const version = await documentManagementService.generateVersionRendition(
       file.documentRecordId,
-      file.versionId
+      file.versionId,
+      Boolean(file.renditionPath)
     );
 
     setDetail((current) =>

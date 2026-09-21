@@ -19,6 +19,7 @@ import { ThemeProvider } from '../contexts/ThemeContext';
 import { Toaster } from '../components/ui/toaster';
 import { Toaster as SonnerToaster } from 'sonner';
 import { PWAInit } from '../components/PWAInit';
+import { SyncfusionLicenseBootstrap } from '../components/SyncfusionLicenseBootstrap';
 import { NotificationProvider } from '../contexts/NotificationContext';
 import { NotificationToast } from '../components/notifications/NotificationToast';
 
@@ -71,6 +72,7 @@ export default function RootLayout({
             <SessionBlacklistProvider>
               <TenantProvider>
                 <NotificationProvider>
+                  <SyncfusionLicenseBootstrap />
                   {children}
                   <Toaster />
                   <SonnerToaster position="bottom-right" richColors />

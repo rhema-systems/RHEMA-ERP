@@ -2100,7 +2100,8 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
+        if (!CanUseSourceModuleForDms(record.SourceModule)
+            && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanUpload, cancellationToken))
         {
             return Forbid();
         }
@@ -2773,6 +2774,7 @@ public sealed class DocumentManagementController : ControllerBase
     public async Task<IActionResult> GenerateVersionRendition(
         Guid id,
         Guid versionId,
+        [FromQuery] bool force,
         CancellationToken cancellationToken)
     {
         var tenantId = GetTenantId();
@@ -2800,7 +2802,7 @@ public sealed class DocumentManagementController : ControllerBase
             return Forbid();
         }
 
-        if (!string.IsNullOrWhiteSpace(version.RenditionPath))
+        if (!force && !string.IsNullOrWhiteSpace(version.RenditionPath))
         {
             return Ok(new { success = true, data = ToVersionDto(version) });
         }
@@ -3285,7 +3287,8 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS document record was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
+        if (!CanUseSourceModuleForDms(record.SourceModule)
+            && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
         {
             return Forbid();
         }
@@ -3339,7 +3342,8 @@ public sealed class DocumentManagementController : ControllerBase
             return NotFound(new { success = false, message = "DMS annotation review was not found." });
         }
 
-        if (!await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
+        if (!CanUseSourceModuleForDms(record.SourceModule)
+            && !await CanUseRecordActionAsync(tenantId, record, rule => rule.CanAnnotate, cancellationToken))
         {
             return Forbid();
         }
@@ -6307,6 +6311,10 @@ public sealed class DocumentManagementController : ControllerBase
     private bool IsDmsAccessAdministrator()
         => _currentUserService.IsInRole("SuperAdmin")
             || _currentUserService.IsInRole("TenantAdmin")
+            || _currentUserService.IsInRole("Admin")
+            || _currentUserService.IsInRole("Administrator")
+            || _currentUserService.IsInRole("SystemAdmin")
+            || _currentUserService.IsInRole("System Admin")
             || _currentUserService.IsInRole("Document Control Officer")
             || _currentUserService.IsInRole("Records Officer");
 
@@ -6697,7 +6705,8 @@ public sealed class DocumentManagementController : ControllerBase
         review.ClosedAt,
         review.ReviewNotes,
         review.AnnotationStateJson,
-        review.CreatedAt
+        review.CreatedAt,
+        review.UpdatedAt
     };
 
     private static object ToMetadataValueDto(CentralDocumentMetadataValue value) => new

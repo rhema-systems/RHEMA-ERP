@@ -310,11 +310,17 @@ const isRentalApplication = (procedureCase: ProcedureCaseDetail) => {
     procedureCase,
     'requestType'
   ).toLowerCase();
+  const listingType = caseFieldValue(
+    procedureCase,
+    'listingType'
+  ).toLowerCase();
   const title = procedureCase.title.toLowerCase();
+  const transactionText = `${requestType} ${listingType} ${title}`;
   return !(
-    requestType.includes('purchase') ||
-    requestType.includes('sale') ||
+    transactionText.includes('purchase') ||
+    transactionText.includes('sale') ||
     title.startsWith('purchase bid') ||
+    title.startsWith('purchase enquiry') ||
     title.startsWith('sale request')
   );
 };
@@ -339,6 +345,62 @@ const editableFieldKeys = (procedureCase: ProcedureCaseDetail) => {
   }
   return keys;
 };
+
+const requiredStageFieldKeys = (procedureCase: ProcedureCaseDetail) => {
+  const approved = isApprovedDecision(caseFieldValue(procedureCase, 'decisionStatus'));
+  const rental = isRentalApplication(procedureCase);
+
+  switch (procedureCase.currentStageIndex) {
+    case 0:
+      return ['customerValidationStatus', 'listingValidationStatus'];
+    case 1:
+      return rental
+        ? [
+            'availabilityCheck',
+            'commercialReviewStatus',
+            'reservationStatus',
+            'premiumChargeRequired',
+          ]
+        : ['availabilityCheck', 'commercialReviewStatus', 'reservationStatus'];
+    case 2:
+      return rental && approved
+        ? ['decisionStatus', 'requestedLeaseTerm', 'moveInDate']
+        : ['decisionStatus'];
+    case 3:
+      return ['legalAgreementReviewStatus'];
+    case 4:
+      return [
+        'signedAgreementReference',
+        'agreementExecutionStatus',
+        'internalApprovalStatus',
+        'internalSignatureStatus',
+        'finalSignedAgreementReference',
+      ];
+    case 5:
+      return rental
+        ? ['billingStartDate', 'billingStartStatus']
+        : ['salePaymentStatus', 'salePaymentCheckStatus'];
+    case 6:
+      return rental
+        ? ['moveInEffectiveStatus']
+        : ['legalConveyanceStatus', 'ownershipTransferStatus'];
+    case 7:
+    default:
+      return ['customerNotificationStatus', 'applicationStatus'];
+  }
+};
+
+const isStageFieldComplete = (procedureCase: ProcedureCaseDetail, key: string) => {
+  const value = caseFieldValue(procedureCase, key);
+  if (!value) return false;
+  if (key === 'moveInDate' || key === 'billingStartDate') {
+    return /^\d{4}-\d{2}-\d{2}$/.test(value);
+  }
+  return true;
+};
+
+const fieldLabel = (procedureCase: ProcedureCaseDetail, key: string) =>
+  procedureCase.fields.find((field) => field.key === key)?.label || key;
 
 const firstNonBlank = (...values: Array<string | null | undefined>) =>
   values.find((value) => value?.trim())?.trim() || '';
@@ -438,6 +500,9 @@ export function ListingApplicationWorkspace() {
   const [isSaving, setIsSaving] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [completionNotes, setCompletionNotes] = React.useState('');
+  const [dirtyStageFieldKeys, setDirtyStageFieldKeys] = React.useState<Set<string>>(
+    () => new Set()
+  );
   const [saleCloseoutChecklist, setSaleCloseoutChecklist] = React.useState({
     customerStatus: false,
     auditReferences: false,
@@ -567,6 +632,7 @@ export function ListingApplicationWorkspace() {
       customerStatus: false,
       auditReferences: false,
     });
+    setDirtyStageFieldKeys(new Set());
   }, [selectedCaseId]);
 
   React.useEffect(() => {
@@ -688,6 +754,11 @@ export function ListingApplicationWorkspace() {
   };
 
   const updateField = (key: string, value: string) => {
+    setDirtyStageFieldKeys((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
     setSelectedCase((current) =>
       current
         ? {
@@ -722,6 +793,7 @@ export function ListingApplicationWorkspace() {
           description: selectedCase.description,
         })
       );
+      setDirtyStageFieldKeys(new Set());
       toast.success('Stage updates saved.');
     } catch (saveError) {
       const message = errorMessage(
@@ -759,6 +831,45 @@ export function ListingApplicationWorkspace() {
 
   const completeStage = async () => {
     if (!selectedCase) return;
+
+    if (dirtyStageFieldKeys.size > 0) {
+      setError('Save the current stage updates before routing this request forward.');
+      return;
+    }
+
+    const missingStageFields = requiredStageFieldKeys(selectedCase)
+      .filter((key) => !isStageFieldComplete(selectedCase, key))
+      .map((key) => fieldLabel(selectedCase, key));
+    if (missingStageFields.length > 0) {
+      setError(
+        `Complete the required current-stage field(s) before routing forward: ${missingStageFields
+          .slice(0, 4)
+          .join(', ')}${missingStageFields.length > 4 ? ` and ${missingStageFields.length - 4} more` : ''}.`
+      );
+      return;
+    }
+
+    if (
+      isRentalApplication(selectedCase) &&
+      isPremiumChargeRequired(selectedCase) &&
+      selectedCase.currentStageIndex >= 1 &&
+      !(caseMoneyValue(selectedCase, 'premiumChargeAmount') > 0)
+    ) {
+      setError('Enter and save the premium charge amount before routing this request forward.');
+      return;
+    }
+
+    if (
+      isRentalApplication(selectedCase) &&
+      isPremiumChargeRequired(selectedCase) &&
+      selectedCase.currentStageIndex >= 2 &&
+      !isPremiumChargeSettled(selectedCase)
+    ) {
+      setError(
+        'Premium charge payment is pending. Wait for Finance payment confirmation or record an approved waiver before routing this request forward.'
+      );
+      return;
+    }
 
     const approved = isApprovedDecision(
       caseFieldValue(selectedCase, 'decisionStatus')
@@ -1401,6 +1512,15 @@ export function ListingApplicationWorkspace() {
   );
   const stageConfirmed = stageItems.every((item) => item.isCompleted);
   const caseIsCompleted = selectedCase ? isCompletedCase(selectedCase) : false;
+  const requiredStageKeys = selectedCase
+    ? requiredStageFieldKeys(selectedCase)
+    : [];
+  const missingRequiredStageFields = selectedCase
+    ? requiredStageKeys
+        .filter((key) => !isStageFieldComplete(selectedCase, key))
+        .map((key) => fieldLabel(selectedCase, key))
+    : [];
+  const hasUnsavedStageUpdates = dirtyStageFieldKeys.size > 0;
   const approvedDecision = selectedCase
     ? isApprovedDecision(caseFieldValue(selectedCase, 'decisionStatus'))
     : false;
@@ -1446,10 +1566,17 @@ export function ListingApplicationWorkspace() {
     : 'GHS';
   const missingPremiumChargePayment = Boolean(
     selectedCase &&
-      approvedDecision &&
       rentalApplication &&
       premiumChargeRequired &&
+      selectedCase.currentStageIndex >= 2 &&
       !premiumChargeSettled
+  );
+  const missingPremiumChargeAmount = Boolean(
+    selectedCase &&
+      rentalApplication &&
+      premiumChargeRequired &&
+      selectedCase.currentStageIndex >= 1 &&
+      !(premiumChargeAmount > 0)
   );
   const missingApprovedAgreement = Boolean(
     selectedCase &&
@@ -1903,10 +2030,7 @@ export function ListingApplicationWorkspace() {
                             htmlFor={field.id}
                           >
                             {field.label}
-                            {(field.key === 'moveInDate' ||
-                              field.key === 'requestedLeaseTerm') &&
-                            rentalApplication &&
-                            isDecisionStage(selectedCase)
+                            {requiredStageKeys.includes(field.key)
                               ? ' *'
                               : ''}
                           </label>
@@ -2843,7 +2967,10 @@ export function ListingApplicationWorkspace() {
                         : isSaving ||
                           caseIsCompleted ||
                           !selectedCase.canEditCurrentStage ||
+                          hasUnsavedStageUpdates ||
+                          missingRequiredStageFields.length > 0 ||
                           !stageConfirmed ||
+                          missingPremiumChargeAmount ||
                           missingApprovedMoveInDate ||
                           missingApprovedRentTerm ||
                           missingPremiumChargePayment ||
@@ -2868,6 +2995,22 @@ export function ListingApplicationWorkspace() {
                           ? 'Complete stage and route forward'
                           : 'Complete manual stage'}
                   </Button>
+                  {hasUnsavedStageUpdates ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Save the current stage updates before routing this request
+                      forward.
+                    </p>
+                  ) : null}
+                  {missingRequiredStageFields.length > 0 ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Complete the required current-stage field(s):{' '}
+                      {missingRequiredStageFields.slice(0, 4).join(', ')}
+                      {missingRequiredStageFields.length > 4
+                        ? ` and ${missingRequiredStageFields.length - 4} more`
+                        : ''}
+                      .
+                    </p>
+                  ) : null}
                   {missingLegalAgreementReview && !missingApprovedAgreement ? (
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       Submit the generated agreement to Legal and wait for Legal
@@ -2878,6 +3021,12 @@ export function ListingApplicationWorkspace() {
                     <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                       Enter the approved rental term before routing this rental
                       case forward.
+                    </p>
+                  ) : null}
+                  {missingPremiumChargeAmount ? (
+                    <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                      Enter and save the premium charge amount before routing
+                      this request forward.
                     </p>
                   ) : null}
                   {missingPremiumChargePayment ? (

@@ -99,11 +99,13 @@ function commercialSummary(asset: EstateManagedAsset) {
 }
 
 function listingStatusLabel(asset: EstateManagedAsset) {
+  const status = asset.externalListingStatus?.trim();
   if (asset.isPublishedToExternalPortal && asset.externalListingStatus) {
     return asset.externalListingStatus;
   }
+  if (status && status !== 'Draft') return status;
   if (asset.listingScope === 'demarcation') return 'Pending publication';
-  return asset.externalListingStatus || 'Draft';
+  return status || 'Draft';
 }
 
 function listingTypeLabel(asset: EstateManagedAsset) {
@@ -124,6 +126,11 @@ function listingTypeLabel(asset: EstateManagedAsset) {
     return 'Rent';
   }
   return 'Not set';
+}
+
+function isWorkflowLockedListingStatus(status?: string | null) {
+  const normalized = (status || '').trim().toLowerCase();
+  return normalized === 'reserved' || normalized.includes('estate');
 }
 
 export default function EstatePropertyListingsPage() {
@@ -322,6 +329,10 @@ export default function EstatePropertyListingsPage() {
   );
   const listingIsLease = isLeaseListing(form.externalListingType);
   const selectedIsLand = selected?.assetType === EstateManagedAssetType.Land;
+  const selectedListingStatus = selected ? listingStatusLabel(selected) : '';
+  const listingLockedByWorkflow = isWorkflowLockedListingStatus(
+    selectedListingStatus
+  );
   const listingPublicationBlockedByGroundRent = Boolean(
     selected &&
       form.isPublishedToExternalPortal &&
@@ -364,6 +375,12 @@ export default function EstatePropertyListingsPage() {
           minimumSalePrice,
           form.externalListingCurrency || selected.currency
         )}.`
+      );
+      return;
+    }
+    if (listingLockedByWorkflow) {
+      toast.error(
+        'This listing is reserved for an active Estate case and cannot be republished manually.'
       );
       return;
     }
@@ -460,6 +477,12 @@ export default function EstatePropertyListingsPage() {
 
   const removeListing = async () => {
     if (!selected) return;
+    if (listingLockedByWorkflow) {
+      toast.error(
+        'This listing is reserved for an active Estate case and cannot be removed manually.'
+      );
+      return;
+    }
     setIsSaving(true);
     try {
       const payload = {
@@ -757,6 +780,7 @@ export default function EstatePropertyListingsPage() {
                   <div className="space-y-2">
                     <Label>Customer portal visibility</Label>
                     <Select
+                      disabled={listingLockedByWorkflow}
                       value={
                         form.externalListingStatus === 'Published'
                           ? 'published'
@@ -783,6 +807,7 @@ export default function EstatePropertyListingsPage() {
                   <div className="space-y-2">
                     <Label>Listing type</Label>
                     <Select
+                      disabled={listingLockedByWorkflow}
                       value={
                         listingIsLease
                           ? 'Lease'
@@ -810,6 +835,7 @@ export default function EstatePropertyListingsPage() {
                   <div className="space-y-2">
                     <Label>Status</Label>
                     <Select
+                      disabled={listingLockedByWorkflow}
                       value={form.externalListingStatus}
                       onValueChange={(value) =>
                         setForm((current) => ({
@@ -831,6 +857,7 @@ export default function EstatePropertyListingsPage() {
                   <div className="space-y-2">
                     <Label>Currency</Label>
                     <Input
+                      disabled={listingLockedByWorkflow}
                       value={form.externalListingCurrency}
                       onChange={(event) =>
                         setForm((current) => ({
@@ -857,6 +884,7 @@ export default function EstatePropertyListingsPage() {
                         <Input
                           type="number"
                           min={minimumSalePrice ?? 0}
+                          disabled={listingLockedByWorkflow}
                           value={form.externalSalePrice}
                           onChange={(event) =>
                             setForm((current) => ({
@@ -898,6 +926,7 @@ export default function EstatePropertyListingsPage() {
                         <Input
                           type="number"
                           min="0"
+                          disabled={listingLockedByWorkflow}
                           value={form.externalMonthlyRent}
                           onChange={(event) =>
                             setForm((current) => ({
@@ -979,9 +1008,18 @@ export default function EstatePropertyListingsPage() {
                   </div>
                 ) : null}
 
+                {listingLockedByWorkflow ? (
+                  <div className="rounded-md border border-violet-200 bg-violet-50 p-4 text-sm text-violet-900">
+                    This listing is reserved for an active Estate case. It is no
+                    longer visible to external customers and can only be
+                    released by rejecting the Estate application workflow.
+                  </div>
+                ) : null}
+
                 <div className="space-y-2">
                   <Label>Listing notes</Label>
                   <Textarea
+                    disabled={listingLockedByWorkflow}
                     value={form.externalListingNotes}
                     onChange={(event) =>
                       setForm((current) => ({
@@ -996,16 +1034,23 @@ export default function EstatePropertyListingsPage() {
                   <Button
                     variant="outline"
                     onClick={() => void removeListing()}
-                    disabled={isSaving}
+                    disabled={isSaving || listingLockedByWorkflow}
                   >
                     <Trash2 className="mr-2 h-4 w-4" />
                     Remove from Portal Listings
                   </Button>
                   <Button
                     onClick={saveListing}
-                    disabled={isSaving}
+                    disabled={
+                      isSaving ||
+                      listingLockedByWorkflow ||
+                      listingPublicationBlockedByGroundRent ||
+                      leaseAmountBelowGroundRent
+                    }
                     title={
-                      listingPublicationBlockedByGroundRent
+                      listingLockedByWorkflow
+                        ? 'Reserved listings cannot be republished manually.'
+                        : listingPublicationBlockedByGroundRent
                         ? selected.listingScope === 'demarcation'
                           ? 'Assess annual ground rent for this demarcated land portion before publishing.'
                           : 'Assess annual ground rent before publishing this land lease listing.'

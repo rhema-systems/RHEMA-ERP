@@ -16,4 +16,5 @@ public sealed record EhcPropertyListingContextDto(
     string BusinessPartnerName,
     string? ContactName,
     string? ContactEmail,
-    string? ContactPhone);
+    string? ContactPhone,
+    string? ContactReference = null);

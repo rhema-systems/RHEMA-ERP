@@ -9,6 +9,7 @@ using ErpSystem.Core.DTOs.Maintenance;
 using ErpSystem.Core.DTOs.Notifications;
 using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.DTOs.Workflow;
+using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.HR;
@@ -781,12 +782,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return null;
         }
 
-        EnsureCanEdit(procedureCase);
         var document = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId);
         if (document is null)
         {
             return null;
         }
+        EnsureCanModifyDocument(procedureCase, document);
 
         var tenantId = RequireTenantId();
         var userId = RequireUserId();
@@ -865,6 +866,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
 
         EnsureCanEdit(procedureCase);
+        await EnsureCurrentStageRequiredFieldsReadyAsync(procedureCase);
+        EnsurePropertyListingPremiumChargeGateReady(procedureCase);
 
         var currentItems = procedureCase.ChecklistItems
             .Where(item => item.StageIndex == procedureCase.CurrentStageIndex)
@@ -1327,12 +1330,12 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return null;
         }
 
-        EnsureCanEdit(procedureCase);
         var document = procedureCase.Documents.FirstOrDefault(item => item.Id == documentId);
         if (document is null)
         {
             return null;
         }
+        EnsureCanModifyDocument(procedureCase, document);
 
         var upload = await _fileStorageService.UploadFileAsync(new FileUploadRequest
         {
@@ -1350,14 +1353,28 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             throw new InvalidOperationException(upload.ErrorMessage ?? "Procedure case document upload failed.");
         }
 
+        var tenantId = RequireTenantId();
+        var userId = RequireUserId();
+        var dmsRecord = CreateProcedureDocumentRecord(
+            procedureCase,
+            document,
+            upload.FilePath,
+            upload.OriginalFileName,
+            string.IsNullOrWhiteSpace(contentType) ? ResolveContentType(upload.OriginalFileName) : contentType,
+            fileSize,
+            tenantId,
+            userId);
+        _db.CentralDocumentRecords.Add(dmsRecord.Record);
+        _db.CentralDocumentVersions.Add(dmsRecord.Version);
+
         return await UpdateDocumentAttachmentAsync(
             procedureCase,
             document,
             upload.OriginalFileName,
-            upload.FilePath,
+            $"/document-management/records/{dmsRecord.Record.Id}",
             notes,
-            RequireTenantId(),
-            RequireUserId(),
+            tenantId,
+            userId,
             isUpload: true);
     }
 
@@ -3061,6 +3078,136 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
     }
 
+    private async Task EnsureCurrentStageRequiredFieldsReadyAsync(ProcedureCase procedureCase)
+    {
+        var requiredKeys = await GetCurrentStageRequiredFieldKeysAsync(procedureCase);
+        if (requiredKeys.Count == 0)
+        {
+            return;
+        }
+
+        var missingLabels = requiredKeys
+            .Where(key => !IsProcedureStageFieldSatisfied(procedureCase, key))
+            .Select(key => ProcedureFieldLabel(procedureCase, key))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (missingLabels.Count == 0)
+        {
+            return;
+        }
+
+        var visibleMissing = missingLabels.Take(4).ToList();
+        var suffix = missingLabels.Count > visibleMissing.Count
+            ? $" and {missingLabels.Count - visibleMissing.Count} more"
+            : string.Empty;
+        throw new InvalidOperationException(
+            $"Complete and save the required field(s) for {procedureCase.CurrentStageName}: {string.Join(", ", visibleMissing)}{suffix}.");
+    }
+
+    private async Task<IReadOnlyList<string>> GetCurrentStageRequiredFieldKeysAsync(ProcedureCase procedureCase)
+    {
+        if (procedureCase.WorkflowStepId.HasValue)
+        {
+            var configurationJson = await _db.WorkflowSteps
+                .AsNoTracking()
+                .Where(step => step.Id == procedureCase.WorkflowStepId.Value && !step.IsDeleted)
+                .Select(step => step.Configuration)
+                .FirstOrDefaultAsync();
+            var configuration = DeserializeStepConfiguration(configurationJson);
+            var configuredRequiredFields = configuration?.FormFields
+                ?.Where(field => field.IsRequired && !string.IsNullOrWhiteSpace(field.Name))
+                .Select(field => field.Name.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList() ?? [];
+            if (configuredRequiredFields.Count > 0)
+            {
+                return configuredRequiredFields;
+            }
+        }
+
+        return IsPropertyManagementListingApplication(procedureCase)
+            ? GetRequiredPropertyListingStageFieldKeys(procedureCase)
+            : [];
+    }
+
+    private static IReadOnlyList<string> GetRequiredPropertyListingStageFieldKeys(ProcedureCase procedureCase)
+    {
+        var isRental = IsRentalListingApplication(procedureCase);
+        var approved = IsApprovedDecision(FieldValue(procedureCase, "decisionStatus"));
+
+        return procedureCase.CurrentStageIndex switch
+        {
+            0 => ["customerValidationStatus", "listingValidationStatus"],
+            1 => isRental
+                ? ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "premiumChargeRequired"]
+                : ["availabilityCheck", "commercialReviewStatus", "reservationStatus"],
+            2 => isRental && approved
+                ? ["decisionStatus", "requestedLeaseTerm", "moveInDate"]
+                : ["decisionStatus"],
+            3 => ["legalAgreementReviewStatus"],
+            4 => ["signedAgreementReference", "agreementExecutionStatus", "internalApprovalStatus", "internalSignatureStatus", "finalSignedAgreementReference"],
+            5 => isRental
+                ? ["billingStartDate", "billingStartStatus"]
+                : ["salePaymentStatus", "salePaymentCheckStatus"],
+            6 => isRental
+                ? ["moveInEffectiveStatus"]
+                : ["legalConveyanceStatus", "ownershipTransferStatus"],
+            7 => ["customerNotificationStatus", "applicationStatus"],
+            _ => ["customerNotificationStatus", "applicationStatus"]
+        };
+    }
+
+    private static bool IsProcedureStageFieldSatisfied(ProcedureCase procedureCase, string key)
+    {
+        var value = FieldValue(procedureCase, key);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        if (string.Equals(key, "moveInDate", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(key, "billingStartDate", StringComparison.OrdinalIgnoreCase))
+        {
+            return DateOnly.TryParseExact(
+                value.Trim(),
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out _);
+        }
+
+        return true;
+    }
+
+    private static string ProcedureFieldLabel(ProcedureCase procedureCase, string key)
+        => procedureCase.Fields
+            .FirstOrDefault(field => string.Equals(field.Key, key, StringComparison.OrdinalIgnoreCase))
+            ?.Label
+            ?? ToProcedureFieldLabel(key);
+
+    private static void EnsurePropertyListingPremiumChargeGateReady(ProcedureCase procedureCase)
+    {
+        if (!IsPropertyListingApplication(procedureCase)
+            || !IsRentalListingApplication(procedureCase)
+            || !IsAffirmativeProcedureValue(FieldValue(procedureCase, "premiumChargeRequired")))
+        {
+            return;
+        }
+
+        if (procedureCase.CurrentStageIndex >= 1
+            && !HasPositiveProcedureAmount(FieldValue(procedureCase, "premiumChargeAmount")))
+        {
+            throw new InvalidOperationException("Enter and save the premium charge amount before routing this request forward.");
+        }
+
+        if (procedureCase.CurrentStageIndex >= 2
+            && !ValueIs("Paid", "Waived", "Not required")(FieldValue(procedureCase, "premiumChargePaymentStatus")))
+        {
+            throw new InvalidOperationException("Premium charge payment is pending. Wait for Finance payment confirmation or record an approved waiver before routing this request forward.");
+        }
+    }
+
     private static void EnsurePropertyListingStageReady(ProcedureCase procedureCase)
     {
         if (!IsPropertyListingApplication(procedureCase))
@@ -3426,10 +3573,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private static bool IsRentalListingApplication(ProcedureCase procedureCase)
     {
         var requestType = FieldValue(procedureCase, "requestType") ?? string.Empty;
+        var listingType = FieldValue(procedureCase, "listingType") ?? string.Empty;
         var title = procedureCase.Title ?? string.Empty;
-        return !requestType.Contains("purchase", StringComparison.OrdinalIgnoreCase)
-            && !requestType.Contains("sale", StringComparison.OrdinalIgnoreCase)
+        var transactionText = $"{requestType} {listingType} {title}";
+        return !transactionText.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+            && !transactionText.Contains("sale", StringComparison.OrdinalIgnoreCase)
             && !title.StartsWith("Purchase bid", StringComparison.OrdinalIgnoreCase)
+            && !title.StartsWith("Purchase enquiry", StringComparison.OrdinalIgnoreCase)
             && !title.StartsWith("Sale request", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -4888,6 +5038,20 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         }
     }
 
+    private void EnsureCanModifyDocument(ProcedureCase procedureCase, ProcedureCaseDocument document)
+    {
+        EnsureCanEdit(procedureCase);
+
+        if (!IsDocumentRequiredInCurrentStage(procedureCase, document))
+        {
+            var requiredFrom = string.IsNullOrWhiteSpace(document.RequiredFrom)
+                ? "its configured workflow stage"
+                : document.RequiredFrom.Trim();
+            throw new InvalidOperationException(
+                $"'{document.Name}' can only be uploaded or edited during {requiredFrom}. Current stage is {procedureCase.CurrentStageName}.");
+        }
+    }
+
     private void EnsureCanCreateProcedureCase(string module)
     {
         if (!string.Equals(module, "Legal", StringComparison.OrdinalIgnoreCase) || CanCreateLegalProcedureCase())
@@ -4912,6 +5076,13 @@ public sealed class ProcedureCaseService : IProcedureCaseService
 
         return UserHasAssignedProcedureRole(procedureCase);
     }
+
+    private bool CanModifyDocumentInCurrentStage(ProcedureCase procedureCase, ProcedureCaseDocument document)
+        => CanEdit(procedureCase) && IsDocumentRequiredInCurrentStage(procedureCase, document);
+
+    private static bool IsDocumentRequiredInCurrentStage(ProcedureCase procedureCase, ProcedureCaseDocument document)
+        => string.IsNullOrWhiteSpace(document.RequiredFrom)
+            || string.Equals(document.RequiredFrom.Trim(), procedureCase.CurrentStageName, StringComparison.OrdinalIgnoreCase);
 
     private static (string Title, IReadOnlyList<FieldSeed> Fields, IReadOnlyList<DocumentSeed> Documents)
         BuildDocumentManagementSeed(string entityType)
@@ -5312,6 +5483,8 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     {
         var currentStageFieldKeys = await GetCurrentStageFieldKeysAsync(procedureCase);
         var fields = procedureCase.Fields.OrderBy(item => item.CreatedAt).Select(ToFieldDto).ToList();
+        var documents = procedureCase.Documents.OrderBy(item => item.CreatedAt).ToList();
+        var dmsDocuments = await LoadDmsDocumentSnapshotsAsync(procedureCase.TenantId, documents);
         await AddFacilitiesMaintenanceExecutionStatusFieldsAsync(procedureCase, fields);
         return new(
             procedureCase.Id,
@@ -5334,7 +5507,16 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             currentStageFieldKeys,
             fields,
             procedureCase.ChecklistItems.OrderBy(item => item.StageIndex).ThenBy(item => item.CreatedAt).Select(ToChecklistDto).ToList(),
-            procedureCase.Documents.OrderBy(item => item.CreatedAt).Select(ToDocumentDto).ToList(),
+            documents
+                .Select(document =>
+                {
+                    dmsDocuments.TryGetValue(document.Id, out var dmsDocument);
+                    return ToDocumentDto(
+                        document,
+                        dmsDocument,
+                        CanModifyDocumentInCurrentStage(procedureCase, document));
+                })
+                .ToList(),
             procedureCase.Activities.OrderByDescending(item => item.PerformedAt).Take(20).Select(ToActivityDto).ToList())
         {
             OrganizationLevelId = procedureCase.OrganizationLevelId,
@@ -5532,7 +5714,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
         if (!procedureCase.WorkflowStepId.HasValue)
         {
             return IsPropertyManagementListingApplication(procedureCase)
-                ? GetPropertyListingStageFieldKeys(procedureCase.CurrentStageIndex)
+                ? GetPropertyListingStageFieldKeys(procedureCase)
                 : [];
         }
 
@@ -5557,7 +5739,7 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             return [];
         }
 
-        return GetPropertyListingStageFieldKeys(procedureCase.CurrentStageIndex);
+        return GetPropertyListingStageFieldKeys(procedureCase);
     }
 
     private static bool IsPropertyManagementListingApplication(ProcedureCase procedureCase)
@@ -5566,19 +5748,31 @@ public sealed class ProcedureCaseService : IProcedureCaseService
             "EstatePropertyManagementListingApplication",
             StringComparison.OrdinalIgnoreCase);
 
-    private static IReadOnlyList<string> GetPropertyListingStageFieldKeys(int stageIndex)
-        => stageIndex switch
+    private static IReadOnlyList<string> GetPropertyListingStageFieldKeys(ProcedureCase procedureCase)
+    {
+        var isRental = IsRentalListingApplication(procedureCase);
+
+        return procedureCase.CurrentStageIndex switch
         {
             0 => ["customerValidationStatus", "listingValidationStatus", "applicationStatus", "notes"],
-            1 => ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "premiumChargeRequired", "premiumChargeAmount", "premiumChargeInvoiceReference", "premiumChargePaymentStatus", "notes"],
-            2 => ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "premiumChargePaymentStatus", "notes"],
+            1 => isRental
+                ? ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "premiumChargeRequired", "premiumChargeAmount", "premiumChargeInvoiceReference", "premiumChargePaymentStatus", "notes"]
+                : ["availabilityCheck", "commercialReviewStatus", "reservationStatus", "notes"],
+            2 => isRental
+                ? ["decisionStatus", "requestedLeaseTerm", "agreementTemplateReference", "generatedAgreementReference", "moveInDate", "premiumChargePaymentStatus", "notes"]
+                : ["decisionStatus", "agreementTemplateReference", "generatedAgreementReference", "notes"],
             3 => ["legalAgreementReviewReference", "legalAgreementReviewStatus", "notes"],
             4 => ["signedAgreementReference", "agreementExecutionStatus", "internalApprovalStatus", "internalSignatureStatus", "finalSignedAgreementReference", "notes"],
-            5 => ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "billingStartDate", "billingStartStatus", "notes"],
-            6 => ["legalConveyanceReference", "legalConveyanceStatus", "ownershipTransferStatus", "moveInEffectiveStatus", "notes"],
+            5 => isRental
+                ? ["billingStartDate", "billingStartStatus", "notes"]
+                : ["salesAmountPaid", "salesPaymentReference", "estateRemainingAmount", "salePaymentStatus", "salePaymentCheckStatus", "notes"],
+            6 => isRental
+                ? ["moveInEffectiveStatus", "notes"]
+                : ["legalConveyanceReference", "legalConveyanceStatus", "ownershipTransferStatus", "notes"],
             7 => ["customerNotificationStatus", "applicationStatus", "notes"],
             _ => ["customerNotificationStatus", "applicationStatus", "notes"]
         };
+    }
 
     private static ProcedureCaseFieldDto ToFieldDto(ProcedureCaseField field) =>
         new(field.Id, field.Key, field.Label, field.FieldType, field.Value, ParseOptions(field.OptionsJson));
@@ -5586,7 +5780,145 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private static ProcedureCaseChecklistItemDto ToChecklistDto(ProcedureCaseChecklistItem item) =>
         new(item.Id, item.StageIndex, item.StageName, item.Text, item.IsCompleted, item.CompletedById, item.CompletedAt);
 
-    private static ProcedureCaseDocumentDto ToDocumentDto(ProcedureCaseDocument document) =>
+    private static ProcedureCaseDmsDocument CreateProcedureDocumentRecord(
+        ProcedureCase procedureCase,
+        ProcedureCaseDocument document,
+        string repositoryPath,
+        string fileName,
+        string contentType,
+        long fileSize,
+        Guid tenantId,
+        Guid userId)
+    {
+        var now = DateTime.UtcNow;
+        var record = new CentralDocumentRecord
+        {
+            TenantId = tenantId,
+            DocumentReference = BuildProcedureDocumentReference(),
+            Title = LimitText($"{procedureCase.ReferenceNumber ?? procedureCase.Title} - {document.Name}", 250),
+            SourceModule = LimitText(procedureCase.Module, 120),
+            SourceLabel = LimitText($"Procedure case -> {procedureCase.CurrentStageName}", 500),
+            SourceEntityType = LimitText(procedureCase.EntityType, 150),
+            SourceRecordReference = LimitText(procedureCase.ReferenceNumber ?? procedureCase.Title, 180),
+            SourceRecordId = procedureCase.Id,
+            RepositoryStatus = "Linked",
+            RepositoryPath = repositoryPath,
+            CurrentVersion = "v1.0",
+            VersionStatus = "Current",
+            AnnotationStatus = IsPdfFile(contentType, fileName) ? "PDF preview ready" : "PDF rendition required",
+            CommentStatus = "No comments",
+            AccessProfile = "Module restricted",
+            RetentionStatus = "Current",
+            LifecycleStatus = "Active",
+            PublishedAt = now,
+            PublishedById = userId,
+            Notes = LimitText($"Uploaded from {procedureCase.CurrentStageName} on procedure case {procedureCase.ReferenceNumber ?? procedureCase.Title}.", 1000),
+            CreatedAt = now,
+            CreatedById = userId
+        };
+        var version = new CentralDocumentVersion
+        {
+            TenantId = tenantId,
+            DocumentRecordId = record.Id,
+            VersionNumber = "v1.0",
+            Status = "Current",
+            RepositoryPath = repositoryPath,
+            RenditionPath = IsPdfFile(contentType, fileName) ? repositoryPath : null,
+            FileName = fileName,
+            ContentType = contentType,
+            FileSize = fileSize,
+            CreatedByUserId = userId,
+            PublishedAt = now,
+            PublishedById = userId,
+            ChangeSummary = "Initial case document upload.",
+            CreatedAt = now,
+            CreatedById = userId
+        };
+
+        return new ProcedureCaseDmsDocument(record, version);
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, ProcedureCaseDmsDocumentSnapshot>> LoadDmsDocumentSnapshotsAsync(
+        Guid tenantId,
+        IReadOnlyList<ProcedureCaseDocument> documents)
+    {
+        var links = documents
+            .Select(document => new
+            {
+                DocumentId = document.Id,
+                RecordId = TryParseDocumentManagementRecordId(document.FileUrl)
+            })
+            .Where(link => link.RecordId.HasValue)
+            .ToList();
+
+        if (links.Count == 0)
+        {
+            return new Dictionary<Guid, ProcedureCaseDmsDocumentSnapshot>();
+        }
+
+        var recordIds = links
+            .Select(link => link.RecordId!.Value)
+            .Distinct()
+            .ToList();
+        var records = await _db.CentralDocumentRecords
+            .AsNoTracking()
+            .Include(record => record.Versions.Where(version => !version.IsDeleted))
+            .Include(record => record.AnnotationReviews.Where(review => !review.IsDeleted))
+            .Where(record => record.TenantId == tenantId
+                && recordIds.Contains(record.Id)
+                && !record.IsDeleted)
+            .ToListAsync();
+        var recordsById = records.ToDictionary(record => record.Id);
+        var result = new Dictionary<Guid, ProcedureCaseDmsDocumentSnapshot>();
+
+        foreach (var link in links)
+        {
+            if (!link.RecordId.HasValue || !recordsById.TryGetValue(link.RecordId.Value, out var record))
+            {
+                continue;
+            }
+
+            var currentVersion = ResolveCurrentDocumentVersion(record);
+            var annotationStateJson = currentVersion is null
+                ? null
+                : record.AnnotationReviews
+                    .Where(review => review.DocumentVersionId == currentVersion.Id
+                        && !string.IsNullOrWhiteSpace(review.AnnotationStateJson))
+                    .OrderByDescending(review => review.UpdatedAt ?? review.CreatedAt)
+                    .Select(review => review.AnnotationStateJson)
+                    .FirstOrDefault();
+
+            result[link.DocumentId] = new ProcedureCaseDmsDocumentSnapshot(
+                record.Id,
+                currentVersion?.Id,
+                currentVersion?.VersionNumber ?? record.CurrentVersion,
+                currentVersion is null || string.IsNullOrWhiteSpace(currentVersion.RepositoryPath)
+                    ? null
+                    : DocumentManagementVersionContentUrl(record.Id, currentVersion.Id),
+                currentVersion is null || string.IsNullOrWhiteSpace(currentVersion.RenditionPath)
+                    ? null
+                    : DocumentManagementVersionContentUrl(record.Id, currentVersion.Id),
+                currentVersion?.ContentType,
+                annotationStateJson);
+        }
+
+        return result;
+    }
+
+    private static CentralDocumentVersion? ResolveCurrentDocumentVersion(CentralDocumentRecord record)
+        => record.Versions
+            .Where(version => !version.IsDeleted)
+            .OrderByDescending(version =>
+                string.Equals(version.VersionNumber, record.CurrentVersion, StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(version =>
+                string.Equals(version.Status, "Current", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(version => version.PublishedAt ?? version.CreatedAt)
+            .FirstOrDefault();
+
+    private static ProcedureCaseDocumentDto ToDocumentDto(
+        ProcedureCaseDocument document,
+        ProcedureCaseDmsDocumentSnapshot? dmsDocument,
+        bool canUploadAtCurrentStage) =>
         new(
             document.Id,
             document.Name,
@@ -5599,6 +5931,14 @@ public sealed class ProcedureCaseService : IProcedureCaseService
                 : IsDocumentManagementUrl(document.FileUrl)
                     ? document.FileUrl
                 : $"/api/procedure-cases/{document.ProcedureCaseId}/documents/{document.Id}/content",
+            dmsDocument?.RecordId,
+            dmsDocument?.VersionId,
+            dmsDocument?.VersionNumber,
+            dmsDocument?.RepositoryPath,
+            dmsDocument?.RenditionPath,
+            dmsDocument?.ContentType,
+            dmsDocument?.AnnotationStateJson,
+            canUploadAtCurrentStage,
             document.Notes,
             document.UploadedById,
             document.UploadedAt);
@@ -5606,6 +5946,58 @@ public sealed class ProcedureCaseService : IProcedureCaseService
     private static bool IsDocumentManagementUrl(string fileUrl)
         => fileUrl.StartsWith("/document-management", StringComparison.OrdinalIgnoreCase)
             || Uri.TryCreate(fileUrl, UriKind.Absolute, out _);
+
+    private static Guid? TryParseDocumentManagementRecordId(string? fileUrl)
+    {
+        const string Prefix = "/document-management/records/";
+
+        if (string.IsNullOrWhiteSpace(fileUrl))
+        {
+            return null;
+        }
+
+        var normalized = fileUrl.Trim();
+        if (!normalized.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var recordToken = normalized[Prefix.Length..]
+            .Split(['/', '?', '#'], StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        return Guid.TryParse(Uri.UnescapeDataString(recordToken ?? string.Empty), out var recordId)
+            ? recordId
+            : null;
+    }
+
+    private static string DocumentManagementVersionContentUrl(Guid recordId, Guid versionId)
+        => $"/api/document-management/records/{recordId}/versions/{versionId}/content";
+
+    private static string BuildProcedureDocumentReference()
+        => $"PROC-{DateTime.UtcNow:yyyyMMddHHmmss}-{Guid.NewGuid().ToString("N")[..8]}";
+
+    private static bool IsPdfFile(string? contentType, string? fileName)
+        => contentType?.Contains("pdf", StringComparison.OrdinalIgnoreCase) == true
+            || fileName?.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static string LimitText(string? value, int maxLength)
+    {
+        var text = string.IsNullOrWhiteSpace(value) ? string.Empty : value.Trim();
+        return text.Length <= maxLength ? text : text[..maxLength];
+    }
+
+    private sealed record ProcedureCaseDmsDocument(
+        CentralDocumentRecord Record,
+        CentralDocumentVersion Version);
+
+    private sealed record ProcedureCaseDmsDocumentSnapshot(
+        Guid RecordId,
+        Guid? VersionId,
+        string? VersionNumber,
+        string? RepositoryPath,
+        string? RenditionPath,
+        string? ContentType,
+        string? AnnotationStateJson);
 
     private static ProcedureCaseActivityDto ToActivityDto(ProcedureCaseActivity activity) =>
         new(activity.Id, activity.Action, activity.StageName, activity.Details, activity.PerformedById, activity.PerformedAt);
