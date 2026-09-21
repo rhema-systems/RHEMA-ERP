@@ -65,32 +65,32 @@ namespace ErpSystem.Data.Migrations
             // On a fresh/dev database these legacy tables are empty and this block is a no-op. On a
             // populated pre-port database it HALTS the upgrade (rolls back the transaction) with
             // guidance instead of silently destroying evaluation history. See
-            // docs/hr-port-data-migration.md.
+            // docs/HR/operations/hr-port-data-migration.md.
             migrationBuilder.Sql(@"
 IF OBJECT_ID(N'KpiEvaluationRecords', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM KpiEvaluationRecords)
-    THROW 50000, 'HR-port upgrade halted: KpiEvaluationRecords holds data the performance redesign cannot auto-migrate. Migrate it into AppraisalKpiEvaluationSnapshots per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: KpiEvaluationRecords holds data the performance redesign cannot auto-migrate. Migrate it into AppraisalKpiEvaluationSnapshots per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'EmployeeKpiTargets', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM EmployeeKpiTargets)
-    THROW 50000, 'HR-port upgrade halted: EmployeeKpiTargets holds data the performance redesign cannot auto-migrate. Migrate it into EmployeeGoals per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: EmployeeKpiTargets holds data the performance redesign cannot auto-migrate. Migrate it into EmployeeGoals per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'AppraisalCriterias', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM AppraisalCriterias)
-    THROW 50000, 'HR-port upgrade halted: AppraisalCriterias holds data the performance redesign cannot auto-migrate. Migrate it into PerformanceAppraisalCriterionConfigs/AppraisalCompetencies per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: AppraisalCriterias holds data the performance redesign cannot auto-migrate. Migrate it into PerformanceAppraisalCriterionConfigs/AppraisalCompetencies per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'PositionCriteriaMappings', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM PositionCriteriaMappings)
-    THROW 50000, 'HR-port upgrade halted: PositionCriteriaMappings holds data the performance redesign cannot auto-migrate. Migrate it into PerformanceAppraisalCriterionConfigs per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: PositionCriteriaMappings holds data the performance redesign cannot auto-migrate. Migrate it into PerformanceAppraisalCriterionConfigs per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'MappingGradeRanges', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM MappingGradeRanges)
-    THROW 50000, 'HR-port upgrade halted: MappingGradeRanges holds data the performance redesign cannot auto-migrate. Migrate it into the new criterion/template GradeRanges tables per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: MappingGradeRanges holds data the performance redesign cannot auto-migrate. Migrate it into the new criterion/template GradeRanges tables per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'PerformanceAppraisals', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM PerformanceAppraisals)
-    THROW 50000, 'HR-port upgrade halted: PerformanceAppraisals holds appraisals the redesign cannot auto-migrate (AppealOutcome is dropped, and required AppraisalCycleId/AppraisalTemplateId are added with no legacy source). Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: PerformanceAppraisals holds appraisals the redesign cannot auto-migrate (AppealOutcome is dropped, and required AppraisalCycleId/AppraisalTemplateId are added with no legacy source). Migrate per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF COL_LENGTH('EvaluatorEvaluations', 'EvaluationDate') IS NOT NULL AND EXISTS (SELECT 1 FROM EvaluatorEvaluations WHERE EvaluationDate IS NOT NULL)
-    THROW 50000, 'HR-port upgrade halted: EvaluatorEvaluations.EvaluationDate holds data with no target column in the redesign. Preserve it per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: EvaluatorEvaluations.EvaluationDate holds data with no target column in the redesign. Preserve it per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 -- FK-retarget renames below re-point score/response/attachment id columns at DIFFERENT tables with no
 -- valid legacy mapping (e.g. CriterionScores.CriteriaId -> TemplateItemId, KpiEvaluationRecordId ->
 -- GradeDefinitionId; AppraisalAttachments.AppraisalId -> UploadedById). On populated data that would
 -- create dangling foreign keys, so halt rather than reinterpret. No-op on a fresh/empty database.
 IF OBJECT_ID(N'CriterionScores', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM CriterionScores)
-    THROW 50000, 'HR-port upgrade halted: CriterionScores holds data; CriteriaId/KpiEvaluationRecordId are re-pointed to TemplateItem/GradeDefinition with no legacy mapping. Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: CriterionScores holds data; CriteriaId/KpiEvaluationRecordId are re-pointed to TemplateItem/GradeDefinition with no legacy mapping. Migrate per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'AppraisalEmployeeResponses', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM AppraisalEmployeeResponses)
-    THROW 50000, 'HR-port upgrade halted: AppraisalEmployeeResponses holds data; CriteriaId is re-pointed to TemplateItemId with no legacy mapping. Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: AppraisalEmployeeResponses holds data; CriteriaId is re-pointed to TemplateItemId with no legacy mapping. Migrate per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 IF OBJECT_ID(N'AppraisalAttachments', N'U') IS NOT NULL AND EXISTS (SELECT 1 FROM AppraisalAttachments)
-    THROW 50000, 'HR-port upgrade halted: AppraisalAttachments holds data; AppraisalId is re-pointed to UploadedById (a different entity) with no legacy mapping. Migrate per docs/hr-port-data-migration.md, then re-run.', 1;
+    THROW 50000, 'HR-port upgrade halted: AppraisalAttachments holds data; AppraisalId is re-pointed to UploadedById (a different entity) with no legacy mapping. Migrate per docs/HR/operations/hr-port-data-migration.md, then re-run.', 1;
 ");
 
             migrationBuilder.DropTable(

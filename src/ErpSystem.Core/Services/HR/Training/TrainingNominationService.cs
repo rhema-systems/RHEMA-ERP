@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Training;
@@ -307,22 +307,34 @@ public class TrainingNominationService : ITrainingNominationService
 
         // Configurable workflow: if the tenant has an active approval workflow for TrainingNomination,
         // start it and let it drive the status. Otherwise fall back to the legacy Supervisor→HR chain.
-        var workflowResult = await _workflowIntegration.SubmitAsync(WorkflowEntityType, id);
-        if (workflowResult.ExecutionResult.Success)
+        //
+        // ⚠ The check below used to be `if (SubmitAsync(...).Success)`, which is the wrong
+        // question. The engine answers Success = true AND WorkflowOutcome.Approved when NO
+        // definition is published — that is its "approval is not configured" signal — and the
+        // adapter maps Approved to Approved. So this branch was taken on an unconfigured tenant
+        // too, the nomination approved itself on submission, a service bond was raised against
+        // the employee for a course nobody had agreed to, and the legacy chain below was dead
+        // code. Asking HasActiveApprovalWorkflowAsync first is what the comment always claimed.
+        if (await _workflowIntegration.HasActiveApprovalWorkflowAsync(WorkflowEntityType))
         {
-            var adapter = _adapterRegistry.GetAdapter(WorkflowEntityType);
-            adapter.ApplySubmitOutcome(entity, workflowResult, _currentUser.EmployeeId);
-            entity.UpdatedAt = DateTime.UtcNow;
+            var workflowResult = await _workflowIntegration.SubmitAsync(WorkflowEntityType, id);
+            if (workflowResult.ExecutionResult.Success)
+            {
+                var adapter = _adapterRegistry.GetAdapter(WorkflowEntityType);
+                adapter.ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUser.EmployeeId);
+                entity.UpdatedAt = DateTime.UtcNow;
 
-            await _nominationRepository.UpdateAsync(entity);
-            await _unitOfWork.SaveChangesAsync(cancellationToken);
+                await _nominationRepository.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-            // A single-step / auto-approving workflow can complete on submission.
-            if (entity.Status == NominationStatus.Approved && _currentUser.EmployeeId.HasValue)
-                await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, _currentUser.EmployeeId.Value, cancellationToken);
+                // A single-step workflow can genuinely complete on submission — legitimate here,
+                // because a definition IS published on this path.
+                if (entity.Status == NominationStatus.Approved && _currentUser.EmployeeId.HasValue)
+                    await _bondService.EnsureBondForNominationAsync(entity.Id, entity.TenantId, _currentUser.EmployeeId.Value, cancellationToken);
 
-            _logger.LogInformation("Training nomination {NominationNumber} submitted via configurable workflow", entity.NominationNumber);
-            return await GetByIdAsync(entity.Id, cancellationToken);
+                _logger.LogInformation("Training nomination {NominationNumber} submitted via configurable workflow", entity.NominationNumber);
+                return await GetByIdAsync(entity.Id, cancellationToken);
+            }
         }
 
         // Legacy fallback — no active workflow configured for this entity type.

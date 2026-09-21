@@ -57,6 +57,19 @@ public class CreateJobSubFamilyDto : CreateDtoBase
 
 public class UpdateJobSubFamilyDto : UpdateDtoBase
 {
+    /// <summary>
+    /// The family the caller believes this sub-family belongs to. Optional, and never written.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ The DTO used to carry no family at all, so a caller who sent one to move the sub-family
+    /// got 200 and no move — a silent no-op, which is the worst of the three possible answers. It
+    /// is here so the attempt can be REFUSED: re-filing a sub-family re-classifies every job
+    /// description under it, which is a reclassification rather than an edit, and nothing in the
+    /// product is set up to do it. Sending the sub-family's own family is how a client round-trips
+    /// the record, so that is accepted.
+    /// </remarks>
+    public Guid? JobFamilyId { get; set; }
+
     [MaxLength(50)] public string Code { get; set; } = string.Empty;
     [Required][MaxLength(150)] public string Name { get; set; } = string.Empty;
     [MaxLength(1000)] public string? Description { get; set; }

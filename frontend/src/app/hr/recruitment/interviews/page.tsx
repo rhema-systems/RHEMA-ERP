@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { CalendarDays, Loader2, Users } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -36,6 +37,7 @@ type Mode = 'range' | 'status';
  * the portal by area 25 slice 13b).
  */
 export default function InterviewsPage() {
+  const router = useRouter();
   const [mode, setMode] = useState<Mode>('range');
   const [from, setFrom] = useState(dateOffset(-7));
   const [to, setTo] = useState(dateOffset(30));
@@ -183,7 +185,11 @@ export default function InterviewsPage() {
               </TableHeader>
               <TableBody>
                 {rows.map((interview) => (
-                  <TableRow key={interview.id} className="cursor-pointer">
+                  <TableRow
+                    key={interview.id}
+                    className="cursor-pointer hover:bg-muted/50"
+                    onClick={() => router.push(`/hr/recruitment/interviews/${interview.id}`)}
+                  >
                     <TableCell>
                       <Link
                         href={`/hr/recruitment/interviews/${interview.id}`}

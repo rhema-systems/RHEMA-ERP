@@ -38,6 +38,16 @@ public class EmployeePositionRepository : GenericRepository<EmployeePosition>, I
             .ToListAsync();
     }
 
+    public async Task<IEnumerable<EmployeePosition>> GetByOrganizationUnitsAsync(IReadOnlyCollection<Guid> organizationUnitIds)
+    {
+        var ids = organizationUnitIds.ToList();
+        return await _context.Set<EmployeePosition>()
+            .Where(p => !p.IsDeleted && ids.Contains(p.OrganizationUnitId))
+            .Include(p => p.OrganizationUnit)
+            .OrderBy(p => p.OrganizationUnit!.Name).ThenBy(p => p.Title)
+            .ToListAsync();
+    }
+
     /// <summary>
     /// Get positions by department
     /// </summary>

@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using ErpSystem.Core.Enums;
+using ErpSystem.Core.Entities.HR.Payroll;
 using ErpSystem.Core.DTOs.Maintenance;
 
 namespace ErpSystem.Core.DTOs.HR;
@@ -88,6 +89,9 @@ public class EmployeeDetailDto : EmployeeDto
     /// </summary>
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: the catalogue row, and its name for display.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+    public string? DisabilityTypeName { get; set; }
     public string? Address { get; set; }
 
     /// <summary>⚠ A display snapshot resolved from <c>GeoAreaId</c> when one is set — see the entity.</summary>
@@ -111,6 +115,22 @@ public class EmployeeDetailDto : EmployeeDto
     public string? BusinessNumber { get; set; }
     public string? Extension { get; set; }
     public int ProbationPeriodDays { get; set; }
+
+    /// <summary>Where the probation term came from — the post, the policy, or this person.</summary>
+    /// <remarks>Null on rows created before lane D1; the term is there, its provenance is not.</remarks>
+    public ProbationSource? ProbationSource { get; set; }
+
+    /// <summary>
+    /// When probation is due to end, i.e. <c>DateEmployed + ProbationPeriodDays</c>.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ EXPECTED, not agreed. It is arithmetic over the term, computed on read so it cannot go
+    /// stale, and it is null when the employee has no <c>DateEmployed</c> or no probation. The
+    /// date probation was actually passed is <see cref="ConfirmationDate"/>, and nothing but the
+    /// probation confirm action writes that.
+    /// </remarks>
+    public DateOnly? ExpectedConfirmationDate { get; set; }
+
     public DateOnly? ConfirmationDate { get; set; }
     public DateOnly? RetirementDate { get; set; }
     public string? TaxNumber { get; set; }
@@ -128,6 +148,12 @@ public class EmployeeDetailDto : EmployeeDto
     // Payroll membership — IsOnPayroll itself is on the summary DTO.
     public OffPayrollReason? OffPayrollReason { get; set; }
     public string? OffPayrollNote { get; set; }
+
+    /// <summary>How basic pay is arrived at: the scale, or an amount agreed for this person.</summary>
+    /// <remarks>Written through <c>PUT api/hr/Employees/{id}/pay-basis</c> only — not through the create or the ordinary update.</remarks>
+    public PayBasis PayBasis { get; set; }
+    public string? PayBasisNote { get; set; }
+
     public string? BadgeNumber { get; set; }
     public string? Notes { get; set; }
     public DateTime? LastPromotionDate { get; set; }
@@ -215,6 +241,8 @@ public class CreateEmployeeDto
     /// </summary>
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
     public bool IsFullTime { get; set; } = true;
     public DateOnly? DateEmployed { get; set; }
 
@@ -252,9 +280,47 @@ public class CreateEmployeeDto
 
     // Employment Details
     public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
-    public int ProbationPeriodDays { get; set; } = 90;
+
+    /// <summary>
+    /// The probation term, in days. <b>Leave it null and the server derives it</b> from the
+    /// position, falling back to the company policy default.
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ Nullable since lane D1, and that is the point of the change. It was <c>int</c> with
+    /// a default of 90, so a caller that said nothing about probation was indistinguishable from
+    /// one that asked for ninety days — and 90 is not TDC's number for anybody (junior posts run
+    /// three months, senior and management six). The register's own positions carry the term, 123
+    /// of 146 of them, and every create was quietly overwriting it with a form default.</para>
+    ///
+    /// <para>A value supplied against a position that states its own is REFUSED, not silently
+    /// ignored: the caller is told which post it is and what the post says. Where the position is
+    /// silent, a supplied value stands and is recorded as <c>ProbationSource.Override</c>.</para>
+    /// </remarks>
+    public int? ProbationPeriodDays { get; set; }
+
+    /// <summary>
+    /// The date probation was passed. <b>Accepted on the IMPORT path only.</b>
+    /// </summary>
+    /// <remarks>
+    /// ⚠ For staff whose probation ended before this system existed and who arrive already
+    /// confirmed. The ordinary create refuses it with a sentence — a new hire has not passed a
+    /// probation that has not started, and confirmation is an outcome the probation record records,
+    /// with a letter behind it.
+    /// </remarks>
     public DateOnly? ConfirmationDate { get; set; }
+
     public DateOnly? RetirementDate { get; set; }
+
+    /// <summary>
+    /// Which kind of engagement the employee's first contract is, from the tenant's contract-type
+    /// list. Optional — a tenant that keeps no such list names no kind.
+    /// </summary>
+    /// <remarks>
+    /// The create opens the employee's first <c>EmployeeContractDetail</c> (E-7a), and the kind is
+    /// part of the terms it records: it is what the appointment letter says, and its duration is
+    /// what gives a fixed-term contract its end date.
+    /// </remarks>
+    public Guid? ContractTypeId { get; set; }
 
     [Required]
     public Guid DepartmentId { get; set; }
@@ -327,6 +393,8 @@ public class UpdateEmployeeDto
     /// </summary>
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
     public bool IsFullTime { get; set; }
     public DateOnly? DateEmployed { get; set; }
 
@@ -458,6 +526,15 @@ public class EmployeeContactDto
     public string? Region { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// Where this address sits on the administrative-geography tree. Round 2, lane D2.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ When it is set, <c>City</c> and <c>Region</c> above are SNAPSHOTS the server wrote from
+    /// the tree, not values a caller can decide. The form reads this to re-open the cascade.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
     public bool IsPrimary { get; set; }
 }
 
@@ -487,6 +564,17 @@ public class CreateEmployeeContactDto
     public string? DigitalAddress { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree, and fills in <c>CountryId</c> when none was stated.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ An area outside the stated country is REFUSED — the snapshots would otherwise contradict
+    /// the country on the same row. Silence is not a contradiction: a record with an area and no
+    /// country is given the area's country rather than being refused.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
 
     public bool IsPrimary { get; set; }
 }
@@ -518,6 +606,24 @@ public class UpdateEmployeeContactDto
 
     public Guid? CountryId { get; set; }
 
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree, and fills in <c>CountryId</c> when none was stated.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ An area outside the stated country is REFUSED — the snapshots would otherwise contradict
+    /// the country on the same row. Silence is not a contradiction: a record with an area and no
+    /// country is given the area's country rather than being refused.
+    /// </remarks>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <remarks>
+    /// ⚠ On THIS DTO a null area CLEARS the link, because its address fields are already
+    /// full-replace — <c>City</c>, <c>Region</c> and <c>AddressLine1</c> are all written straight
+    /// from the payload. The guarantor and referee DTOs, whose fields mean "not supplied" when
+    /// null, carry an explicit <c>ClearGeoArea</c> flag instead. The tab sends the whole form on
+    /// every save either way.
+    /// </remarks>
     public bool? IsPrimary { get; set; }
 }
 
@@ -538,11 +644,20 @@ public class EmployeeEmergencyContactDto
     public string? EmailAddress { get; set; }
     public string? Address { get; set; }
     public string? City { get; set; }
+    public string? Region { get; set; }
     public Guid? CountryId { get; set; }
+    public Guid? GeoAreaId { get; set; }
     public string? DigitalAddress { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsActive { get; set; } = true;
     public string? Notes { get; set; }
+
+    /// <summary>The tie, from the relationship catalogue, where one was chosen (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ <c>Relationship</c> above already carries the catalogue row's NAME — the service mirrors it
+    /// on every save. This id is for re-opening the form's dropdown, not for display.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 }
 
 /// <summary>
@@ -560,22 +675,61 @@ public class CreateEmployeeEmergencyContactDto
 
     public string LastName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The tie, as words. Ignored — and overwritten — when <see cref="RelationshipTypeId"/> names a
+    /// catalogue row, so a caller that sends only the id still stores a readable relationship.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Length stated since round 2 lane D2. It had none, while the column was 50 and the screen's
+    /// schema allowed 100 — so a 51-character relationship reached SQL Server and failed as a
+    /// truncation 500. The column is now 100 and this refuses anything longer with a 400.
+    /// </remarks>
     [Required]
+    [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue.</summary>
+    /// <remarks>⚠ A next of kin accepts FAMILIAL and OTHER ties only; a professional one is refused.</remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     public EmergencyContactType ContactType { get; set; }
 
     [Required]
+    [MaxLength(50)]
     public string PhoneNumber { get; set; } = string.Empty;
 
+    [MaxLength(50)]
     public string? AlternatePhoneNumber { get; set; }
+
+    [MaxLength(200)]
+    [EmailAddress]
     public string? EmailAddress { get; set; }
+
+    [MaxLength(500)]
     public string? Address { get; set; }
+
+    [MaxLength(100)]
     public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree, and fills in <c>CountryId</c> when none was stated; an area outside a stated country
+    /// is refused.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
     public bool IsPrimary { get; set; }
     public bool IsActive { get; set; } = true;
+
+    [MaxLength(500)]
     public string? Notes { get; set; }
 }
 
@@ -589,17 +743,48 @@ public class UpdateEmployeeEmergencyContactDto
     public string FirstName { get; set; } = string.Empty;
     public string? MiddleName { get; set; }
     public string LastName { get; set; } = string.Empty;
+
+    [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>
+    /// The tie, from the catalogue. Null CLEARS the link, matching this DTO's other address
+    /// fields, which are full-replace; the free-text <see cref="Relationship"/> then stands alone.
+    /// </summary>
+    public Guid? RelationshipTypeId { get; set; }
+
     public EmergencyContactType? ContactType { get; set; }
+
+    [MaxLength(50)]
     public string? PhoneNumber { get; set; }
+
+    [MaxLength(50)]
     public string? AlternatePhoneNumber { get; set; }
+
+    [MaxLength(200)]
     public string? EmailAddress { get; set; }
+
+    [MaxLength(500)]
     public string? Address { get; set; }
+
+    [MaxLength(100)]
     public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     public Guid? CountryId { get; set; }
+
+    /// <summary>The area. Null clears it — see <see cref="RelationshipTypeId"/>.</summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [MaxLength(50)]
     public string? DigitalAddress { get; set; }
+
     public bool? IsPrimary { get; set; }
     public bool? IsActive { get; set; }
+
+    [MaxLength(500)]
     public string? Notes { get; set; }
 }
 
@@ -645,6 +830,9 @@ public class EmployeeDependentReadDto
     public string? GenderDescription { get; set; }
     public bool HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: the catalogue row, and its name for display.</summary>
+    public Guid? DisabilityTypeId { get; set; }
+    public string? DisabilityTypeName { get; set; }
 
     public string? GhanaCardNumber { get; set; }
     public string? Phone { get; set; }
@@ -701,6 +889,8 @@ public class EmployeeDependentCreateDto
 
     [MaxLength(500)]
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
 
     [MaxLength(50)]
     public string? GhanaCardNumber { get; set; }
@@ -744,6 +934,8 @@ public class EmployeeDependentUpdateDto
     public string? GenderDescription { get; set; }
     public bool? HasDisability { get; set; }
     public string? DisabilityDescription { get; set; }
+    /// <summary>Round 3, lane P2: one of the tenant's live disability types. Only meaningful with HasDisability.</summary>
+    public Guid? DisabilityTypeId { get; set; }
     public string? GhanaCardNumber { get; set; }
     public string? Phone { get; set; }
     public string? DigitalAddress { get; set; }
@@ -945,6 +1137,20 @@ public class EmployeeSkillDto
     public bool IsVerified { get; set; }
     public bool IsCertificationExpired { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>The credential on the employee's certification tab that evidences this skill (round 2, lane C2).</summary>
+    public Guid? EmployeeCertificationId { get; set; }
+    public string? EmployeeCertificationName { get; set; }
+
+    /// <summary>Whether the skill itself requires certification.</summary>
+    public bool RequiresCertification { get; set; }
+
+    /// <summary>
+    /// False when the skill requires certification and nothing valid evidences it — a linked
+    /// credential that is valid or expiring, or the legacy per-skill certification still in date.
+    /// Recording is not gating: the row is allowed and flagged.
+    /// </summary>
+    public bool IsCompliant { get; set; }
 }
 
 /// <summary>
@@ -965,6 +1171,9 @@ public class UpdateEmployeeSkillDto
 
     /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
     public Guid? CertifyingBodyId { get; set; }
+
+    /// <summary>Applied unconditionally, like the certifying body: null clears it.</summary>
+    public Guid? EmployeeCertificationId { get; set; }
 
     public string? Notes { get; set; }
     public bool? IsVerified { get; set; }
@@ -991,6 +1200,9 @@ public class CreateEmployeeSkillDto
     /// <summary>The catalogued certifier. Sits beside the free-text field rather than replacing it.</summary>
     public Guid? CertifyingBodyId { get; set; }
 
+    /// <summary>A credential the employee already holds that evidences this skill.</summary>
+    public Guid? EmployeeCertificationId { get; set; }
+
     public string? Notes { get; set; }
 }
 
@@ -1003,8 +1215,29 @@ public class EmployeeContractDetailDto
     public Guid EmployeeId { get; set; }
     public string ContractNumber { get; set; } = string.Empty;
     public EmploymentType EmploymentType { get; set; }
+
+    /// <summary>The tenant's own name for this kind of engagement, and its id.</summary>
+    public Guid? ContractTypeId { get; set; }
+    public string? ContractTypeName { get; set; }
+
     public DateOnly StartDate { get; set; }
+
+    /// <summary>The day these terms took effect. Ordering and supersession run on it.</summary>
+    /// <remarks>
+    /// ⚠ Reads <c>0001-01-01</c> on every row the manual tab added before lane D1 — the writer
+    /// never set it. Rows created since carry the start date when nothing else was said.
+    /// </remarks>
+    public DateOnly EffectiveDate { get; set; }
+
+    /// <summary>When the engagement actually ended. Null while it is running.</summary>
     public DateOnly? EndDate { get; set; }
+
+    /// <summary>When the engagement is scheduled to end. Null for permanent employment.</summary>
+    public DateOnly? ContractEndDate { get; set; }
+
+    /// <summary>Whether these are the terms in force today. At most one per employee.</summary>
+    public bool IsCurrent { get; set; }
+
     public decimal Salary { get; set; }
     public string PayFrequency { get; set; } = string.Empty;
     public PayFrequency? PayFrequencyType { get; set; }
@@ -1019,8 +1252,8 @@ public class EmployeeContractDetailDto
 
     public ContractStatus? ContractStatus { get; set; }
     public int WorkingHoursPerWeek { get; set; }
-    public int VacationDaysPerYear { get; set; }
-    public int SickDaysPerYear { get; set; }
+
+    // Round 3, lane P3 (D-5): the three leave columns are gone; entitlement is the leave module's.
 
     /// <summary>The probation term, and the date it was passed.</summary>
     /// <remarks>
@@ -1073,8 +1306,23 @@ public class CreateEmployeeContractDetailDto
 
     public EmploymentType EmploymentType { get; set; } = EmploymentType.Permanent;
 
+    /// <summary>Which kind of engagement, from the tenant's contract-type list. Optional.</summary>
+    /// <remarks>
+    /// Naming one with no <see cref="ContractEndDate"/> supplied defaults the end date from the
+    /// kind's duration; a kind whose duration is zero is open-ended and defaults nothing.
+    /// </remarks>
+    public Guid? ContractTypeId { get; set; }
+
     public DateOnly StartDate { get; set; }
+
+    /// <summary>The day these terms take effect. Defaults to <see cref="StartDate"/>.</summary>
+    public DateOnly? EffectiveDate { get; set; }
+
+    /// <summary>When the engagement actually ended — normally left null on a new contract.</summary>
     public DateOnly? EndDate { get; set; }
+
+    /// <summary>When the engagement is scheduled to end. Null for permanent employment.</summary>
+    public DateOnly? ContractEndDate { get; set; }
 
     public decimal Salary { get; set; }
 
@@ -1089,8 +1337,8 @@ public class CreateEmployeeContractDetailDto
     public bool IsTaxExempt { get; set; } = false;
 
     public int WorkingHoursPerWeek { get; set; } = 40;
-    public int VacationDaysPerYear { get; set; } = 15;
-    public int SickDaysPerYear { get; set; } = 10;
+
+    // Round 3, lane P3 (D-5): no leave figures on a contract — they are the leave module's.
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
 
@@ -1129,9 +1377,34 @@ public class UpdateEmployeeContractDetailDto
     [Required]
     public Guid Id { get; set; }
 
+    /// <summary>The contract's reference. Correctable since lane D1.</summary>
+    /// <remarks>
+    /// ⚠ It had to become writable because the create now OPENS a contract and numbers it from the
+    /// sequence — so a load carrying the organisation's own reference for that engagement has to be
+    /// able to put it on the row that exists, rather than adding a second one to hold it.
+    /// </remarks>
+    [MaxLength(50)]
+    public string? ContractNumber { get; set; }
+
     public EmploymentType? EmploymentType { get; set; }
+
+    /// <summary>Which kind of engagement, from the tenant's contract-type list.</summary>
+    public Guid? ContractTypeId { get; set; }
+
     public DateOnly? StartDate { get; set; }
+
+    /// <summary>The day these terms take effect.</summary>
+    public DateOnly? EffectiveDate { get; set; }
+
     public DateOnly? EndDate { get; set; }
+
+    /// <summary>When the engagement is scheduled to end. Null for permanent employment.</summary>
+    /// <remarks>
+    /// ⚠ Was on the entity and on no write DTO before lane D1, so the only rows that ever carried
+    /// a scheduled end were the ones the hire-from-offer path wrote.
+    /// </remarks>
+    public DateOnly? ContractEndDate { get; set; }
+
     public decimal? Salary { get; set; }
     public PayFrequency? PayFrequency { get; set; }
     public TaxTreatmentType? TaxTreatmentType { get; set; }
@@ -1142,8 +1415,8 @@ public class UpdateEmployeeContractDetailDto
     public bool? IsPensionApplicable { get; set; }
     public bool? IsTaxExempt { get; set; }
     public int? WorkingHoursPerWeek { get; set; }
-    public int? VacationDaysPerYear { get; set; }
-    public int? SickDaysPerYear { get; set; }
+
+    // Round 3, lane P3 (D-5): no leave figures on a contract — they are the leave module's.
     public int? ProbationPeriodDays { get; set; }
     public DateOnly? ConfirmationDate { get; set; }
 
@@ -1361,6 +1634,14 @@ public class EmployeeWorkHistoryListDto
 public class EmployeeWorkHistoryDetailDto : EmployeeWorkHistoryListDto
 {
     public string? CompanyAddress { get; set; }
+
+    // ── The employer's address, round 2 lane D2 (register row E-6) ──────────────────────────
+    // ⚠ City and Region are SNAPSHOTS written from GeoAreaId, not values a caller decides.
+    public Guid? CountryId { get; set; }
+    public string? City { get; set; }
+    public string? Region { get; set; }
+    public Guid? GeoAreaId { get; set; }
+
     public string? JobDescription { get; set; }
     public decimal? Salary { get; set; }
     public string? ReasonForLeaving { get; set; }
@@ -1378,8 +1659,31 @@ public class CreateEmployeeWorkHistoryDto
     [MaxLength(200)]
     public string CompanyName { get; set; } = string.Empty;
 
+    /// <summary>
+    /// The employer's street address, as one line.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ 200 — and the screen's schema said 300 until round 2 lane D2 (finding X-5), so a longer
+    /// address passed the form and was refused here with a 400 the user could not have predicted.
+    /// The structured part of the address is the country, area and city below.
+    /// </remarks>
     [MaxLength(200)]
     public string? CompanyAddress { get; set; }
+
+    /// <summary>The country the employer is in. Round 2, lane D2 (register row E-6).</summary>
+    public Guid? CountryId { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// The area the employer sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree and fills in <c>CountryId</c>; an area outside a stated country is refused.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1405,21 +1709,57 @@ public class CreateEmployeeWorkHistoryDto
     public bool CanContact { get; set; } = true;
 }
 
+/// <remarks>
+/// ⚠ Every length here was ADDED in round 2 lane D2 (finding X-5). This DTO carried none, so where
+/// the create refused an over-long value with a 400, the update let it through to SQL Server and
+/// failed as a truncation 500 — the same payload, two different answers, neither of them the
+/// screen's. The numbers match the create DTO and the columns exactly.
+/// </remarks>
 public class UpdateEmployeeWorkHistoryDto
 {
     [Required]
     public Guid Id { get; set; }
 
+    [MaxLength(200)]
     public string? CompanyName { get; set; }
+
+    [MaxLength(200)]
     public string? CompanyAddress { get; set; }
+
+    /// <summary>The country the employer is in. Round 2, lane D2 (register row E-6).</summary>
+    public Guid? CountryId { get; set; }
+
+    [MaxLength(100)]
+    public string? City { get; set; }
+
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
+    /// <summary>
+    /// The area. Null CLEARS the link, matching this DTO's other address fields, which are
+    /// full-replace.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    [MaxLength(100)]
     public string? JobTitle { get; set; }
+
+    [MaxLength(1000)]
     public string? JobDescription { get; set; }
+
     public DateOnly? StartDate { get; set; }
     public DateOnly? EndDate { get; set; }
     public decimal? Salary { get; set; }
+
+    [MaxLength(1000)]
     public string? ReasonForLeaving { get; set; }
+
+    [MaxLength(200)]
     public string? SupervisorName { get; set; }
+
+    [MaxLength(50)]
     public string? SupervisorPhone { get; set; }
+
     public bool? CanContact { get; set; }
 }
 
@@ -1693,6 +2033,50 @@ public class UpdateEmployeePositionHistoryDto
 /// are different facts from different owners: HR says whether the person SHOULD be paid through
 /// the run; payroll's profile says whether they ARE. This read puts both on one screen.
 /// </summary>
+/// <summary>
+/// One payroll allowance/deduction component beside THIS employee's exception on it, if any
+/// (round 3, lane X; decision D-3). The component's defaults are payroll's; the exception is the
+/// per-person override payroll stores in <c>PayrollEmployeeComponents</c>. Read through HR's door;
+/// written only through payroll's own bulk endpoint, one person's row at a time — the probe proved
+/// that save touches only the lines it is sent.
+/// </summary>
+public class EmployeePayrollComponentRowDto
+{
+    public Guid PayrollComponentId { get; set; }
+    public string Code { get; set; } = string.Empty;
+    public string Name { get; set; } = string.Empty;
+    public PayrollComponentType ComponentType { get; set; }
+    public string ComponentTypeName => ComponentType.ToString();
+    public PayrollCalculationType DefaultCalculationType { get; set; }
+    public decimal DefaultAmount { get; set; }
+    public decimal DefaultRate { get; set; }
+    public bool DefaultTaxable { get; set; }
+    public string CurrencyCode { get; set; } = "GHS";
+    /// <summary>Payroll applies the component to everyone unless an exception says otherwise.</summary>
+    public bool AppliesByDefault { get; set; }
+
+    public bool HasException => ExceptionId.HasValue;
+    public Guid? ExceptionId { get; set; }
+    public PayrollCalculationType? CalculationType { get; set; }
+    public decimal? Amount { get; set; }
+    public decimal? Rate { get; set; }
+    public bool? Taxable { get; set; }
+    public bool? Applicable { get; set; }
+    public DateTime? EffectiveFrom { get; set; }
+    public DateTime? EffectiveTo { get; set; }
+}
+
+/// <summary>Every active payroll component with this employee's exception beside it (round 3, lane X).</summary>
+public class EmployeePayrollComponentsDto
+{
+    public Guid EmployeeId { get; set; }
+    public string EmployeeNumber { get; set; } = string.Empty;
+    /// <summary>False when payroll has no profile yet — the rows still list the defaults, but nothing can be saved until it exists.</summary>
+    public bool HasPayrollProfile { get; set; }
+    public Guid? PayrollProfileId { get; set; }
+    public List<EmployeePayrollComponentRowDto> Rows { get; set; } = new();
+}
+
 public class EmployeePayrollStatusDto
 {
     public Guid EmployeeId { get; set; }
@@ -1701,8 +2085,19 @@ public class EmployeePayrollStatusDto
     public OffPayrollReason? OffPayrollReason { get; set; }
     public string? OffPayrollNote { get; set; }
 
-    /// <summary>The HR-side pay basis: the flat salary, or the current grade/notch amount.</summary>
+    /// <summary>Scale or negotiated — decides which figure <see cref="HrMonthlyBasicPay"/> is.</summary>
+    public PayBasis PayBasis { get; set; }
+    public string? PayBasisNote { get; set; }
+
+    /// <summary>
+    /// The HR-side basic pay. On the scale: the notch amount, else the level mid-point, else the flat
+    /// figure on the record. Negotiated: payroll's active basis, else the flat figure.
+    /// </summary>
     public decimal? HrMonthlyBasicPay { get; set; }
+
+    /// <summary>Where <see cref="HrMonthlyBasicPay"/> came from, in words the tab can print beside it.</summary>
+    public string? HrBasicPaySource { get; set; }
+
     public bool HasActiveSalaryAssignment { get; set; }
 
     /// <summary>Payroll's side, read from its employee profile. Null fields = no profile.</summary>
@@ -1726,6 +2121,22 @@ public enum PayrollReconciliationIssue
     StillActiveInPayroll = 3,
     /// <summary>HR says on payroll but has neither a salary nor a graded notch — the run would skip them silently.</summary>
     NoPayBasis = 4,
+    /// <summary>
+    /// On the scale, placed on a notch, and payroll's active basis is a different amount. The run
+    /// pays payroll's figure; HR's placement says another. Not raised for negotiated pay, where
+    /// payroll's figure IS the basis.
+    /// </summary>
+    BasicPayMismatch = 5,
+}
+
+/// <summary>Body of <c>PUT api/hr/Employees/{id}/pay-basis</c>.</summary>
+public class SetEmployeePayBasisDto
+{
+    public PayBasis PayBasis { get; set; }
+
+    /// <summary>Required when negotiated: who agreed what, and when.</summary>
+    [MaxLength(500)]
+    public string? Note { get; set; }
 }
 
 public class PayrollReconciliationRowDto
@@ -1741,7 +2152,10 @@ public class PayrollReconciliationRowDto
     public OffPayrollReason? OffPayrollReason { get; set; }
     public bool HasPayrollProfile { get; set; }
     public bool? PayrollActive { get; set; }
+    public PayBasis PayBasis { get; set; }
     public decimal? HrMonthlyBasicPay { get; set; }
+    /// <summary>Payroll's active basis, so a <see cref="PayrollReconciliationIssue.BasicPayMismatch"/> row shows both figures.</summary>
+    public decimal? PayrollMonthlyBasicSalary { get; set; }
     public PayrollReconciliationIssue Issue { get; set; }
 }
 
@@ -1754,6 +2168,7 @@ public class PayrollReconciliationDto
     public int InactiveInPayroll { get; set; }
     public int StillActiveInPayroll { get; set; }
     public int NoPayBasis { get; set; }
+    public int BasicPayMismatch { get; set; }
     public List<PayrollReconciliationRowDto> Rows { get; set; } = new();
 }
 
@@ -1771,8 +2186,22 @@ public class EmployeeSalaryAssignmentListDto
     public DateTime EffectiveDate { get; set; }
     public DateTime? EffectiveTo { get; set; }
     public string? Reason { get; set; }
+
+    /// <summary>In force TODAY: taken effect, not ended, not withdrawn.</summary>
+    /// <remarks>
+    /// ⚠ Was <c>EffectiveTo == null || EffectiveTo &gt;= today</c>, which never asked whether the
+    /// placement had STARTED — so one dated next month read as active now — and knew nothing of
+    /// withdrawal. Corrected in lane E1b.
+    /// </remarks>
     public bool IsActive { get; set; }
-    
+
+    /// <summary>Takes effect in the future: dated forward, not withdrawn.</summary>
+    public bool IsScheduled { get; set; }
+
+    /// <summary>Withdrawn rather than superseded or run to its end. See the entity's remarks.</summary>
+    public DateTime? WithdrawnAt { get; set; }
+    public string? WithdrawnReason { get; set; }
+
     // Computed/projected amount from Grade/Level/Notch
     public decimal? Amount { get; set; }
 }
@@ -1825,26 +2254,42 @@ public class EmployeeRefereeListDto
     public string? Organization { get; set; }
     public string? PositionOrTitle { get; set; }
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the relationship catalogue, where one was chosen (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ <c>Relationship</c> above already carries the row's NAME — the service mirrors it on every
+    /// save. This id is for re-opening the form's dropdown, not for display.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
     public string PhoneNumber { get; set; } = string.Empty;
     public string? EmailAddress { get; set; }
     public bool IsPrimary { get; set; }
     public bool IsActive { get; set; }
-}
 
-public class EmployeeRefereeDetailDto : EmployeeRefereeListDto
-{
+    /// <summary>
+    /// On the LIST projection, not only the detail: the tab renders a "Contacted" badge off the
+    /// list row, and until round 2 the flag was absent from it, so the badge never showed.
+    /// </summary>
     public bool IsContacted { get; set; }
-    public DateTime? ContactedDate { get; set; }
-    public string? ReferenceNotes { get; set; }
 
     // ── The written reference ─────────────────────────────────────────────────
     // ⚠ Read-side only. There is no way to SET these from a DTO: the letter arrives through the
     // upload endpoint and the gate fills them in. `hasLetter` exists so a screen can show the
     // download affordance without having to reason about which of three ids means "present".
+    //
+    // On the LIST projection since demo feedback round 2 (lane A-4): the tab lists referees from
+    // this shape and needs to show a paperclip per row without a detail read each.
     public bool HasLetter { get; set; }
     public string? LetterFileName { get; set; }
     public string? LetterMimeType { get; set; }
     public long? LetterFileSizeBytes { get; set; }
+}
+
+public class EmployeeRefereeDetailDto : EmployeeRefereeListDto
+{
+    public DateTime? ContactedDate { get; set; }
+    public string? ReferenceNotes { get; set; }
 }
 
 public class CreateEmployeeRefereeDto
@@ -1864,9 +2309,20 @@ public class CreateEmployeeRefereeDto
     [MaxLength(100)]
     public string? PositionOrTitle { get; set; }
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(200)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue.</summary>
+    /// <remarks>
+    /// ⚠ Which values are accepted depends on <see cref="RefereeType"/>: a PERSONAL referee may be
+    /// a relative or a family friend (familial, other); a PROFESSIONAL or ACADEMIC one may not
+    /// (professional, other). The refusal names both the value's category and the kind of referee.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Required]
     [MaxLength(50)]
@@ -1890,6 +2346,18 @@ public class UpdateEmployeeRefereeDto
     public string? Organization { get; set; }
     public string? PositionOrTitle { get; set; }
     public string? Relationship { get; set; }
+
+    /// <summary>
+    /// The tie, from the catalogue. Null means NOT SUPPLIED on this DTO, matching every other field
+    /// on it; send <see cref="ClearRelationshipType"/> to unlink.
+    /// </summary>
+    public Guid? RelationshipTypeId { get; set; }
+
+    /// <summary>
+    /// Unlinks the catalogue row, leaving the free-text <see cref="Relationship"/> standing. Wins
+    /// over <see cref="RelationshipTypeId"/> if both are sent — the <c>ClearNationalIdType</c> shape.
+    /// </summary>
+    public bool ClearRelationshipType { get; set; }
     public string? PhoneNumber { get; set; }
     public string? EmailAddress { get; set; }
     public bool? IsContacted { get; set; }
@@ -1914,6 +2382,22 @@ public class EmployeeGuarantorListDto
     public string? EmailAddress { get; set; }
     public bool IsVerified { get; set; }
     public bool IsActive { get; set; }
+
+    // ── Round 2 (lane A-5/A-6): what the tab needs per ROW without a detail read each ────────
+    /// <summary>Whether a photograph is on the row. Read-side only; it arrives through the gate.</summary>
+    public bool HasPhoto { get; set; }
+    /// <summary>How many documents pertain to this guarantor.</summary>
+    public int DocumentCount { get; set; }
+    /// <summary>The national ID kind from the catalogue, where one was chosen.</summary>
+    public Guid? NationalIdTypeId { get; set; }
+    public string? NationalIdTypeName { get; set; }
+
+    /// <summary>The tie, from the relationship catalogue, where one was chosen (round 2, lane D2).</summary>
+    /// <remarks>
+    /// ⚠ <c>Relationship</c> above already carries the row's NAME — the service mirrors it on every
+    /// save. This id is for re-opening the form's dropdown, not for display.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 }
 
 public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
@@ -1923,9 +2407,13 @@ public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
     public Gender? Gender { get; set; }
     public DateOnly? DateOfBirth { get; set; }
     public string Address { get; set; } = string.Empty;
+
+    // ⚠ City and Region are SNAPSHOTS written from GeoAreaId, not values a caller decides.
     public string? City { get; set; }
+    public string? Region { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+    public Guid? GeoAreaId { get; set; }
 
     public string? JobTitle { get; set; }
     public string? EmployerName { get; set; }
@@ -1942,18 +2430,20 @@ public class EmployeeGuarantorDetailDto : EmployeeGuarantorListDto
     /// <summary>How the guarantor describes their gender, where Gender is Other.</summary>
     public string? GenderDescription { get; set; }
 
-    // The photograph. Read-side only; it arrives through the upload endpoint.
-    public bool HasPhoto { get; set; }
+    // The photograph. Read-side only; it arrives through the upload endpoint. `HasPhoto` itself
+    // sits on the list projection since round 2.
     public string? PhotoFileName { get; set; }
     public string? PhotoMimeType { get; set; }
     public long? PhotoFileSizeBytes { get; set; }
 
+    /// <summary>The free-text kind, for rows recorded before the catalogue link existed.</summary>
     public string? NationalIdType { get; set; }
     public string? NationalIdNumberMasked { get; set; }
     public DateOnly? NationalIdExpiryDate { get; set; }
 
     public bool HasSignedGuarantorForm { get; set; }
     public DateOnly? DateFormSigned { get; set; }
+    /// <summary>LEGACY, read-only. The signed form is now a guarantor document through the gate.</summary>
     public string? GuarantorFormPath { get; set; }
 
     public DateTime? VerificationDate { get; set; }
@@ -1969,9 +2459,20 @@ public class CreateEmployeeGuarantorDto
 
     public bool IsPrimary { get; set; }
 
+    /// <summary>
+    /// The tie, as words. Overwritten when <see cref="RelationshipTypeId"/> names a catalogue row.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
+
+    /// <summary>The tie, from the tenant's relationship catalogue.</summary>
+    /// <remarks>
+    /// ⚠ A guarantor accepts ALL THREE categories, unlike the referee and next-of-kin screens: an
+    /// employer, a brother and a landlord can each stand surety, and refusing any of them would be
+    /// inventing a rule the business does not have.
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
 
     [Required]
     [MaxLength(100)]
@@ -1997,10 +2498,19 @@ public class CreateEmployeeGuarantorDto
     [MaxLength(100)]
     public string? City { get; set; }
 
+    [MaxLength(100)]
+    public string? Region { get; set; }
+
     [MaxLength(50)]
     public string? DigitalAddress { get; set; }
 
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area this address sits in. Supplying it rewrites <c>City</c> and <c>Region</c> from the
+    /// tree and fills in <c>CountryId</c>; an area outside a stated country is refused.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
 
     [MaxLength(50)]
     public string? PhoneNumber { get; set; }
@@ -2023,8 +2533,12 @@ public class CreateEmployeeGuarantorDto
 
     public decimal? MonthlyIncome { get; set; }
 
+    /// <summary>Free-text kind — accepted for rows whose kind is not in the catalogue; prefer the id.</summary>
     [MaxLength(50)]
     public string? NationalIdType { get; set; }
+
+    /// <summary>The kind, from the tenant's identification-type catalogue. Refused if unknown or inactive.</summary>
+    public Guid? NationalIdTypeId { get; set; }
 
     [MaxLength(100)]
     public string? NationalIdNumber { get; set; }
@@ -2034,8 +2548,8 @@ public class CreateEmployeeGuarantorDto
     public bool HasSignedGuarantorForm { get; set; }
     public DateOnly? DateFormSigned { get; set; }
 
-    [MaxLength(500)]
-    public string? GuarantorFormPath { get; set; }
+    // ⚠ No GuarantorFormPath. Removed in round 2 (lane A-6): a caller-supplied file location on a
+    // JSON body. The signed form is uploaded as a guarantor document through the gate.
 
     [MaxLength(1000)]
     public string? Notes { get; set; }
@@ -2073,6 +2587,16 @@ public class UpdateEmployeeGuarantorDto
 
     public bool? IsPrimary { get; set; }
     public string? Relationship { get; set; }
+
+    /// <summary>
+    /// The tie, from the catalogue. Null means NOT SUPPLIED on this DTO; send
+    /// <see cref="ClearRelationshipType"/> to unlink.
+    /// </summary>
+    public Guid? RelationshipTypeId { get; set; }
+
+    /// <summary>Unlinks the catalogue row, leaving the free-text <see cref="Relationship"/> standing.</summary>
+    public bool ClearRelationshipType { get; set; }
+
     public string? FirstName { get; set; }
     public string? MiddleName { get; set; }
     public string? LastName { get; set; }
@@ -2081,8 +2605,21 @@ public class UpdateEmployeeGuarantorDto
     public DateOnly? DateOfBirth { get; set; }
     public string? Address { get; set; }
     public string? City { get; set; }
+    public string? Region { get; set; }
     public string? DigitalAddress { get; set; }
     public Guid? CountryId { get; set; }
+
+    /// <summary>
+    /// The area. Null means NOT SUPPLIED on this DTO; send <see cref="ClearGeoArea"/> to unlink.
+    /// </summary>
+    public Guid? GeoAreaId { get; set; }
+
+    /// <summary>
+    /// Removes the guarantor's area. Wins over <see cref="GeoAreaId"/> if both are sent. The
+    /// snapshot columns are left as they are — the record still has to say where they live.
+    /// </summary>
+    public bool ClearGeoArea { get; set; }
+
     public string? PhoneNumber { get; set; }
     public string? EmailAddress { get; set; }
     public string? JobTitle { get; set; }
@@ -2091,11 +2628,18 @@ public class UpdateEmployeeGuarantorDto
     public string? EmployerPhone { get; set; }
     public decimal? MonthlyIncome { get; set; }
     public string? NationalIdType { get; set; }
+    /// <summary>The catalogue kind. Null means "not supplied"; send <see cref="ClearNationalIdType"/> to unlink.</summary>
+    public Guid? NationalIdTypeId { get; set; }
+    /// <summary>
+    /// Nullable-means-not-supplied is the house convention, so emptying the picker has to say so
+    /// explicitly or the save would succeed and change nothing — the `clearGeoArea` shape.
+    /// </summary>
+    public bool ClearNationalIdType { get; set; }
     public string? NationalIdNumber { get; set; }
     public DateOnly? NationalIdExpiryDate { get; set; }
     public bool? HasSignedGuarantorForm { get; set; }
     public DateOnly? DateFormSigned { get; set; }
-    public string? GuarantorFormPath { get; set; }
+    // ⚠ No GuarantorFormPath — see the create DTO.
     public bool? IsVerified { get; set; }
     public DateTime? VerificationDate { get; set; }
     public Guid? VerifiedByEmployeeId { get; set; }
@@ -2325,6 +2869,12 @@ public class UpdateEmployeeBankDetailDto
 
     public Guid? BranchId { get; set; }
 
+    /// <summary>
+    /// Unlinks the catalogue bank and branch so the typed names stand alone. Needed because a null
+    /// id means "not supplied" on this DTO, the house convention.
+    /// </summary>
+    public bool ClearBankLink { get; set; }
+
     [MaxLength(200)]
     public string? BankName { get; set; }
 
@@ -2482,6 +3032,17 @@ public class EmployeePositionDto
     public int EmployeeCount { get; set; }
     public List<PositionSkillRequirementDto> SkillRequirements { get; set; } = new();
     public List<EmployeePositionBenefitDto> PositionBenefits { get; set; } = new();
+
+    /// <summary>What the post must hold (round 2, lane C2). Filled on the single read and the write responses.</summary>
+    public List<PositionCertificationRequirementDto> CertificationRequirements { get; set; } = new();
+
+    // ── Named sets (round 2, lane C3) ───────────────────────────────────────────────────────
+    // What is ATTACHED. What the post actually requires is the union of these with the individual
+    // collections above — the three effective reads, which is what every consumer now uses.
+    public List<AttachedSetDto> BenefitGroups { get; set; } = new();
+    public List<AttachedSetDto> SkillSets { get; set; } = new();
+    public List<AttachedSetDto> CertificationSets { get; set; } = new();
+
 }
 
 /// <summary>
@@ -2544,6 +3105,22 @@ public class CreateEmployeePositionDto : IValidatableObject
 
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
     public ICollection<CreateEmployeePositionBenefitDto> PositionBenefits { get; set; } = new List<CreateEmployeePositionBenefitDto>();
+
+    /// <summary>
+    /// The required credentials, as the whole set (round 2, lane C2). With RequiresCertification or
+    /// RequiresLicense on, at least one — the switches say "some", these rows say which.
+    /// </summary>
+    public ICollection<CreatePositionCertificationRequirementDto> CertificationRequirements { get; set; } = new List<CreatePositionCertificationRequirementDto>();
+
+    /// <summary>
+    /// Named sets attached to this post (round 2, lane C3). ⚠ Sent as the COMPLETE set on every
+    /// save, like the collections above: an omitted id is a detachment. Null means "leave as they
+    /// are", which is how a caller that predates this lane keeps working.
+    /// </summary>
+    public ICollection<Guid>? BenefitGroupIds { get; set; }
+    public ICollection<Guid>? SkillSetIds { get; set; }
+    public ICollection<Guid>? CertificationSetIds { get; set; }
+
 
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
@@ -2617,6 +3194,22 @@ public class UpdateEmployeePositionDto : IValidatableObject
     public ICollection<CreatePositionSkillRequirementDto> SkillRequirements { get; set; } = new List<CreatePositionSkillRequirementDto>();
     public ICollection<CreateEmployeePositionBenefitDto> PositionBenefits { get; set; } = new List<CreateEmployeePositionBenefitDto>();
 
+    /// <summary>
+    /// The required credentials, as the whole set (round 2, lane C2). With RequiresCertification or
+    /// RequiresLicense on, at least one — the switches say "some", these rows say which.
+    /// </summary>
+    public ICollection<CreatePositionCertificationRequirementDto> CertificationRequirements { get; set; } = new List<CreatePositionCertificationRequirementDto>();
+
+    /// <summary>
+    /// Named sets attached to this post (round 2, lane C3). ⚠ Sent as the COMPLETE set on every
+    /// save, like the collections above: an omitted id is a detachment. Null means "leave as they
+    /// are", which is how a caller that predates this lane keeps working.
+    /// </summary>
+    public ICollection<Guid>? BenefitGroupIds { get; set; }
+    public ICollection<Guid>? SkillSetIds { get; set; }
+    public ICollection<Guid>? CertificationSetIds { get; set; }
+
+
     public IEnumerable<ValidationResult> Validate(ValidationContext validationContext)
     {
         if (MinimumAge.HasValue && MaximumAge.HasValue && MinimumAge.Value > MaximumAge.Value)
@@ -2646,6 +3239,22 @@ public class EmployeePositionLookupDto
 /// <summary>
 /// Employee position benefit assignment (read model).
 /// </summary>
+/// <summary>
+/// A named set attached to a position — enough to name it and link to it, no members. Round 2,
+/// lane C3.
+/// </summary>
+public class AttachedSetDto
+{
+    /// <summary>The attachment row's own id, so a screen can detach exactly this one.</summary>
+    public Guid Id { get; set; }
+
+    public Guid SetId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public string? Code { get; set; }
+    public bool IsActive { get; set; }
+    public int MemberCount { get; set; }
+}
+
 public class EmployeePositionBenefitDto
 {
     public Guid Id { get; set; }
@@ -2657,7 +3266,12 @@ public class EmployeePositionBenefitDto
     [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal? PositionAmount { get; set; }
 
-    public bool IsActive { get; set; } = true;
+    // ⚠ X-3 CLOSED (round 2, lane C3): there was an `IsActive` here with NO column behind it.
+    // `EmployeePositionBenefit` has no such property; the mapper hard-coded `true` on every read,
+    // so the field said "active" about rows that had no such state and about soft-deleted ones
+    // alike. A screen that believed it would have shown a switch nothing could turn off. Removed
+    // rather than backed with a column: the row's presence IS its activeness, and its absence is
+    // the soft delete.
 }
 
 /// <summary>
@@ -2689,6 +3303,9 @@ public class SkillDto
     public string? Category { get; set; }
     public bool RequiresCertification { get; set; }
     public bool IsActive { get; set; }
+
+    /// <summary>The credentials that evidence this skill (round 2, lane C2). Filled on the single read.</summary>
+    public List<SkillCertificationDto> Certifications { get; set; } = new();
 }
 
 /// <summary>
@@ -2719,6 +3336,12 @@ public class CreateSkillDto
     public bool RequiresCertification { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    /// <summary>
+    /// The accepted credentials, as the whole set. Null = the save did not carry them (leave as
+    /// stored); empty = none. A skill that requires certification must name at least one.
+    /// </summary>
+    public ICollection<SkillCertificationInputDto>? Certifications { get; set; }
 }
 
 /// <summary>

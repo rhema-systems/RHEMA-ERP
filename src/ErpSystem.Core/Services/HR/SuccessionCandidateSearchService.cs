@@ -24,6 +24,7 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
     private readonly IGenericRepository<PositionCompetency> _positionCompetencies;
     private readonly IGenericRepository<EmployeeSkill> _employeeSkills;
     private readonly IGenericRepository<PositionSkillRequirement> _positionSkills;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly IGenericRepository<PerformanceAppraisal> _appraisals;
     private readonly IGenericRepository<OrganizationUnit> _orgUnits;
     private readonly IGenericRepository<TalentPoolMember> _poolMembers;
@@ -38,6 +39,7 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         IGenericRepository<PositionCompetency> positionCompetencies,
         IGenericRepository<EmployeeSkill> employeeSkills,
         IGenericRepository<PositionSkillRequirement> positionSkills,
+        IPositionNamedSetService namedSets,
         IGenericRepository<PerformanceAppraisal> appraisals,
         IGenericRepository<OrganizationUnit> orgUnits,
         IGenericRepository<TalentPoolMember> poolMembers,
@@ -51,6 +53,7 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         _positionCompetencies = positionCompetencies;
         _employeeSkills = employeeSkills;
         _positionSkills = positionSkills;
+        _namedSets = namedSets;
         _appraisals = appraisals;
         _orgUnits = orgUnits;
         _poolMembers = poolMembers;
@@ -94,9 +97,12 @@ public class SuccessionCandidateSearchService : ISuccessionCandidateSearchServic
         var requiredCompetencies = await _positionCompetencies.GetQueryable()
             .Where(pc => pc.TenantId == tenantId && pc.PositionId == plan.PositionId && !pc.IsDeleted)
             .ToDictionaryAsync(pc => pc.CompetencyId, pc => pc.RequiredProficiencyLevel, cancellationToken);
-        var requiredSkills = await _positionSkills.GetQueryable()
-            .Where(ps => ps.TenantId == tenantId && ps.PositionId == plan.PositionId && !ps.IsDeleted)
-            .ToDictionaryAsync(ps => ps.SkillId, ps => (int)ps.RequiredLevel, cancellationToken);
+        // ⚠ Round 2, lane C3 — the EFFECTIVE requirement, not the individual table. A skill the
+        // post requires through an attached skill set counts towards a candidate's match exactly as
+        // an individually-listed one does; reading the table directly would have scored candidates
+        // against a shorter list than the post actually has.
+        var requiredSkills = (await _namedSets.GetEffectiveSkillsAsync(plan.PositionId, tenantId, cancellationToken))
+            .ToDictionary(ps => ps.SkillId, ps => (int)ps.RequiredLevel);
 
         var employeeCompetencies = (await _employeeCompetencies.GetQueryable()
                 .Where(ec => ec.TenantId == tenantId && empIds.Contains(ec.EmployeeId) && !ec.IsDeleted)

@@ -4,7 +4,7 @@ import { useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Calculator, Loader2, Plus } from 'lucide-react';
+import { Calculator, Loader2, Pencil, Plus } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -33,6 +33,7 @@ import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { ApplicationDecisionBar } from '@/components/hr/recruitment/ApplicationDecisionBar';
+import { ApplicationSourceDialog } from '@/components/hr/recruitment/ApplicationSourceDialog';
 import { ApplicationReviewsPanel } from '@/components/hr/recruitment/ApplicationReviewsPanel';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, humanizeEnum } from '@/lib/hr/attendance-format';
@@ -64,6 +65,7 @@ export default function ApplicationDetailPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
 
+  const [sourceOpen, setSourceOpen] = useState(false);
   const [addingTest, setAddingTest] = useState(false);
   const [testForm, setTestForm] = useState({
     testType: 'Written' as JobApplicantTestType,
@@ -201,6 +203,11 @@ export default function ApplicationDetailPage() {
         backHref="/hr/recruitment/applications"
         actions={
           <div className="flex flex-wrap items-center gap-2">
+            <ApplicationSourceDialog
+              open={sourceOpen}
+              onOpenChange={setSourceOpen}
+              application={{ id: a.id, jobVacancyId: a.jobVacancyId, source: a.source, jobPostingId: a.jobPostingId ?? null }}
+            />
             <Button variant="outline" onClick={() => rescore.mutate()} disabled={rescore.isPending}>
               {rescore.isPending ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -239,9 +246,14 @@ export default function ApplicationDetailPage() {
             tone: a.scoreIsStale ? 'warning' : 'default',
           },
           {
-            label: 'Panel score',
+            // G-9.5 (2026-09-15): "Panel score" was ambiguous in the one way that matters here.
+            // This is AggregatedReviewScore — the average of finalised ShortlistReview rows, i.e.
+            // the SHORTLISTING panel — and a recruiter reading an application after interviews have
+            // run would reasonably take it for the interview panel's verdict. Two different panels,
+            // two different decisions, one label. The hint below was accurate but never said which.
+            label: 'Shortlisting panel score',
             value: a.aggregatedReviewScore != null ? a.aggregatedReviewScore.toFixed(2) : '—',
-            hint: 'Finalized reviews only',
+            hint: 'Finalized shortlisting reviews only — not the interview panel',
           },
           { label: 'Current stage', value: a.currentStageName ?? 'Not in a stage' },
         ]}
@@ -267,8 +279,22 @@ export default function ApplicationDetailPage() {
             </CardHeader>
             <CardContent className="grid grid-cols-2 gap-x-6">
               <InfoRow label="Applied" value={formatDate(a.applicationDate)} />
-              <InfoRow label="Source" value={humanizeEnum(a.source)} />
-              <InfoRow label="Advert channel" value={a.jobPostingChannel} />
+              <InfoRow
+                label="Source"
+                value={
+                  <span className="inline-flex items-center gap-2">
+                    {humanizeEnum(a.source)}
+                    <button type="button" className="text-xs text-primary hover:underline" onClick={() => setSourceOpen(true)}>
+                      <Pencil className="mr-1 inline h-3 w-3" />
+                      Correct
+                    </button>
+                  </span>
+                }
+              />
+              <InfoRow
+                label="Advert"
+                value={a.jobPostingId ? `${a.jobPostingChannel ? humanizeEnum(a.jobPostingChannel) : ''}${a.jobPostingTitle ? ` · ${a.jobPostingTitle}` : ''}`.trim() || 'Recorded' : 'None — not through an advert'}
+              />
               <InfoRow label="Experience" value={a.yearsOfExperience != null ? `${a.yearsOfExperience} yrs` : null} />
               <InfoRow label="Available from" value={a.availableFrom ? formatDate(a.availableFrom) : null} />
               <InfoRow

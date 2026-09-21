@@ -1,8 +1,8 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { FilterX } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { FilterX, PlusCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -14,11 +14,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
+import { useAuth } from '@/hooks/use-auth';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
+import { HR_ADMIN_ROLES } from '@/components/hr/common/PermissionGate';
 import { UnitChangeLog } from '@/components/hr/organization/UnitChangeLog';
+import { UnitHistoryEntryDialog } from '@/components/hr/organization/UnitHistoryEntryDialog';
 import { organizationUnitHistoryService } from '@/services/hr/organization-unit-history.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
-import type { OrganizationUnitChangeType } from '@/types/hr/organization';
+import type {
+  OrganizationUnitChangeType,
+  OrganizationUnitHistoryEntry,
+} from '@/types/hr/organization';
 
 const PAGE_SIZE = 20;
 const ANY = 'any';
@@ -35,18 +41,22 @@ const CHANGE_TYPES: OrganizationUnitChangeType[] = ['Restructure', 'Leadership C
  *
  * Every filter is applied server-side. Filtering a page of 20 in the browser would answer the
  * question about that page rather than about the organisation.
+ *
+ * Demo feedback round 2: the unit filter is the level-first picker (O-6), and an administrator
+ * can record an entry by hand or correct one's dates from here (O-3b).
  */
 export default function OrganizationUnitHistoryPage() {
+  const queryClient = useQueryClient();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
+  const canAuthorHistory = hasAnyPermission(['HR.Employee.Admin']) || hasAnyRole(HR_ADMIN_ROLES);
+
   const [page, setPage] = useState(1);
-  const [unitId, setUnitId] = useState<string>(ANY);
+  const [unitId, setUnitId] = useState<string>('');
   const [changeType, setChangeType] = useState<string>(ANY);
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
+  const [recording, setRecording] = useState(false);
+  const [correcting, setCorrecting] = useState<OrganizationUnitHistoryEntry | null>(null);
 
   // The server refuses a start after an end with a 400. Holding the query back while the pair is
   // inverted keeps the screen from asking a question it already knows the answer to.
@@ -56,7 +66,7 @@ export default function OrganizationUnitHistoryPage() {
     () => ({
       pageNumber: page,
       pageSize: PAGE_SIZE,
-      ...(unitId !== ANY ? { unitId } : {}),
+      ...(unitId ? { unitId } : {}),
       ...(changeType !== ANY ? { changeType: changeType as OrganizationUnitChangeType } : {}),
       ...(startDate ? { startDate } : {}),
       ...(endDate ? { endDate } : {}),
@@ -70,7 +80,10 @@ export default function OrganizationUnitHistoryPage() {
     enabled: !rangeInverted,
   });
 
-  const filtered = unitId !== ANY || changeType !== ANY || Boolean(startDate) || Boolean(endDate);
+  const refresh = () =>
+    queryClient.invalidateQueries({ queryKey: ['hr', 'organization-unit-history'] });
+
+  const filtered = Boolean(unitId) || changeType !== ANY || Boolean(startDate) || Boolean(endDate);
 
   const onFilterChange = (apply: () => void) => {
     apply();
@@ -78,7 +91,7 @@ export default function OrganizationUnitHistoryPage() {
   };
 
   const clearFilters = () => {
-    setUnitId(ANY);
+    setUnitId('');
     setChangeType(ANY);
     setStartDate('');
     setEndDate('');
@@ -89,7 +102,14 @@ export default function OrganizationUnitHistoryPage() {
     <div className="space-y-6 p-6">
       <PageHeader
         title="Unit Change Log"
-        description="Every recorded restructure and change of unit head, newest first."
+        description="Every recorded creation, restructure and change of unit head, newest first."
+        actions={
+          canAuthorHistory ? (
+            <Button variant="outline" onClick={() => setRecording(true)}>
+              <PlusCircle className="mr-2 h-4 w-4" /> Record an entry
+            </Button>
+          ) : undefined
+        }
       />
 
       <Card>
@@ -101,22 +121,16 @@ export default function OrganizationUnitHistoryPage() {
         </CardHeader>
         <CardContent>
           <div className="grid gap-4 md:grid-cols-5">
-            <div className="space-y-2 md:col-span-2">
-              <Label htmlFor="unit">Unit</Label>
-              <Select value={unitId} onValueChange={(v) => onFilterChange(() => setUnitId(v))}>
-                <SelectTrigger id="unit">
-                  <SelectValue placeholder="Any unit" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ANY}>Any unit</SelectItem>
-                  {(units ?? []).map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.name}
-                      {u.levelName ? ` · ${u.levelName}` : ''}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="md:col-span-2">
+              <OrganizationUnitPicker
+                idPrefix="filter-unit"
+                value={unitId}
+                onChange={(id) => onFilterChange(() => setUnitId(id))}
+                allowNone="Any unit"
+                levelLabel="Level"
+                unitLabel="Unit"
+                className="grid gap-4 sm:grid-cols-2"
+              />
             </div>
 
             <div className="space-y-2">
@@ -192,11 +206,12 @@ export default function OrganizationUnitHistoryPage() {
             entries={data?.items ?? []}
             isLoading={isLoading && !rangeInverted}
             showUnit
+            onEdit={canAuthorHistory ? (entry) => setCorrecting(entry) : undefined}
             emptyTitle={filtered ? 'No changes match these filters' : 'No changes recorded yet'}
             emptyDescription={
               filtered
                 ? 'Widen the date range, or clear the filters to see everything recorded.'
-                : 'Reparenting a unit or changing its head writes an entry here. A rename does not — a log that records everything is one nobody reads.'
+                : 'Creating a unit, reparenting it or changing its head writes an entry here. A rename does not — a log that records everything is one nobody reads.'
             }
           />
 
@@ -225,6 +240,16 @@ export default function OrganizationUnitHistoryPage() {
           )}
         </CardContent>
       </Card>
+
+      <UnitHistoryEntryDialog open={recording} onOpenChange={setRecording} onDone={refresh} />
+      <UnitHistoryEntryDialog
+        open={!!correcting}
+        onOpenChange={(next) => {
+          if (!next) setCorrecting(null);
+        }}
+        entry={correcting}
+        onDone={refresh}
+      />
     </div>
   );
 }

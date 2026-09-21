@@ -21,7 +21,7 @@
  * ⚠ **There is no GL posting anywhere in here.** Travel disburses advances and pays claims with no
  * accounting artifact at all; an unsettled advance is an employee receivable that appears in no
  * trial balance. That is a known, deliberate deferral (decision D-4) to the Finance sweep after the
- * HR module is complete, registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`. Do not invent an
+ * HR module is complete, registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`. Do not invent an
  * HR-side posting mechanism to fill the gap.
  */
 

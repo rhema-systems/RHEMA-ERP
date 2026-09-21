@@ -99,6 +99,29 @@ public class OrganizationLevelRepository : GenericRepository<OrganizationLevel>,
 {
     public OrganizationLevelRepository(ApplicationDbContext context) : base(context) { }
 
+    // ⚠ `OrganizationLevel.IsRootLevel` is [NotMapped] and computed from the STRUCTURE'S OTHER
+    // LEVELS — the lowest active LevelNumber wins. Without `OrganizationStructure.Levels` loaded
+    // it is false for every level, silently. Demo feedback round 2, lane B1, measured it on
+    // DEFAULT: `GET api/OrganizationLevel` reported root=false for all ten levels, the unit form
+    // therefore demanded a parent for a root-level unit, and `OrganizationUnitService.CreateAsync`
+    // — which reads the level through the bare GetByIdAsync — refused every parentless create with
+    // "Root units must be created under a root level". No root unit could be created through the
+    // API at all; the live roots were seeded. The two bare reads now load what the flag needs.
+    private IQueryable<OrganizationLevel> WithRootContext() =>
+        _context.Set<OrganizationLevel>()
+            .Include(ol => ol.OrganizationStructure)
+                .ThenInclude(os => os.Levels.Where(l => l.IsActive && !l.IsDeleted));
+
+    public override async Task<OrganizationLevel?> GetByIdAsync(Guid id)
+    {
+        return await WithRootContext().FirstOrDefaultAsync(ol => ol.Id == id && !ol.IsDeleted);
+    }
+
+    public override async Task<IEnumerable<OrganizationLevel>> GetAllAsync()
+    {
+        return await WithRootContext().Where(ol => !ol.IsDeleted).ToListAsync();
+    }
+
     public async Task<IEnumerable<OrganizationLevel>> GetByStructureIdAsync(Guid structureId)
     {
         return await _context.Set<OrganizationLevel>()

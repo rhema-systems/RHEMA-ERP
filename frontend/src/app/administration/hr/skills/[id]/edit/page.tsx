@@ -37,6 +37,12 @@ export default function EditSkillPage() {
         category: values.category || null,
         description: values.description || null,
         requiresCertification: values.requiresCertification,
+        // The whole set (round 2, lane C2): the server replaces what is stored with this.
+        certifications: values.certifications.map((c) => ({
+          certificationId: c.certificationId,
+          isMandatory: c.isMandatory,
+          notes: c.notes || null,
+        })),
         isActive: values.isActive,
       });
       await queryClient.invalidateQueries({ queryKey: ['hr', 'skills'] });
@@ -74,6 +80,12 @@ export default function EditSkillPage() {
             category: skill.category ?? '',
             description: skill.description ?? '',
             requiresCertification: skill.requiresCertification,
+            // Loading these back is not cosmetic: the server syncs to whatever the save sends.
+            certifications: (skill.certifications ?? []).map((c) => ({
+              certificationId: c.certificationId,
+              isMandatory: c.isMandatory,
+              notes: c.notes ?? '',
+            })),
             isActive: skill.isActive,
           }}
           categories={categories ?? []}

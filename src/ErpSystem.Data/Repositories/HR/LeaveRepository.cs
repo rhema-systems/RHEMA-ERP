@@ -1,6 +1,7 @@
 using ErpSystem.Core.Entities.HR.StaffLeave;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -23,10 +24,21 @@ public class LeaveRepository : GenericRepository<LeaveRequest>, ILeaveRepository
 
     public async Task<IEnumerable<LeaveRequest>> GetEmployeeLeaveHistoryAsync(Guid employeeId, int year)
     {
+        // ⚠ UNREFERENCED — nothing in the solution calls this. The live path is
+        // LeaveService.GetEmployeeLeaveHistoryAsync, which pages and filters by status; this is an
+        // older, narrower duplicate that survived on the interface.
+        //
+        // ⚠ It is therefore left on the CALENDAR year rather than wired to the tenant's leave year
+        // (entitlement plan C1): injecting a settings provider into a repository to serve a method
+        // nobody calls would be the wrong trade. If it is ever revived it must be wired first —
+        // which is why this says so here rather than leaving a silent inconsistency.
+        var yearStart = LeaveYear.StartOf(year, LeaveYear.CalendarStartMonth);
+        var yearEnd = LeaveYear.EndOf(year, LeaveYear.CalendarStartMonth);
+
         return await _dbSet
             .Include(lr => lr.LeaveType)
             .Include(lr => lr.LeaveSubType)
-            .Where(lr => lr.EmployeeId == employeeId && lr.StartDate.Year == year)
+            .Where(lr => lr.EmployeeId == employeeId && lr.StartDate >= yearStart && lr.StartDate <= yearEnd)
             .OrderByDescending(lr => lr.StartDate)
             .ToListAsync();
     }

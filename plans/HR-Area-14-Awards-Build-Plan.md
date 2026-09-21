@@ -170,7 +170,7 @@ surface already do.
   check, per the house authz pattern.
 - `reviews/approval-count` / `reviews/rejection-count` — wrong model, remove with hole 4.
 - `ProcessAwardPayment` and `LongServiceAward.MonetaryAmount` are **money events**. They go in
-  `docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-module sweep. Do **not** invent an HR-side
+  `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-module sweep. Do **not** invent an HR-side
   posting mechanism.
 
 ---
@@ -262,7 +262,7 @@ open-questions list.
 
 **D-7 — Money is recorded, not posted.** Per the standing HR↔Finance split, register
 `ProcessAwardPayment`, `EmployeeAward` monetary amounts and `LongServiceAward.MonetaryAmount` in
-`docs/HR-FINANCE-INTEGRATION-BACKLOG.md` and leave the plain payment fields as they are.
+`docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` and leave the plain payment fields as they are.
 
 **D-9 — the eligibility endpoint gets paging and filters in slice 11, and keeps its reasons.**
 `GET types/{id}/eligible` judges every active employee (5,579 on DEFAULT) and returns the eligible
@@ -277,7 +277,7 @@ complete and slow rather than fast and partial.
 only "define the basis"; the milestones and what each carries are not stated. **Settled with the
 user 2026-08-21:** build the ladder fully configurable through the admin surface, default it to
 **10 / 15 / 20 / 25 / 30 years**, and add the real values to
-`docs/HR-OPEN-QUESTIONS-FOR-TDC.md`. Nothing is hard-coded, so TDC's answer is a data change and
+`docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md`. Nothing is hard-coded, so TDC's answer is a data change and
 not a code change. The deferred `AwardDataSeeder` is waiting on the same answer.
 
 ---
@@ -455,7 +455,7 @@ different nomination. Slice 8 confers awards from nominations and should assert 
 
 **Also done:** the long-service basis, its disciplinary disqualification rule and the two data facts
 behind them (38% `DateEmployed` coverage; one employee at 10 years, none beyond) are written up in
-`docs/HR-OPEN-QUESTIONS-FOR-TDC.md` per decision D-8.
+`docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md` per decision D-8.
 
 ---
 
@@ -1015,7 +1015,7 @@ this slice the two assertions that failed were worth more than the thirty-three 
    it only because the names collided; a slightly different name would have compiled and shipped.
 
 **D-7 honoured.** Every money event — award value, payment, amount paid, long-service value, level
-value, budget, reservation, spend — is registered in `docs/HR-FINANCE-INTEGRATION-BACKLOG.md`, with a
+value, budget, reservation, spend — is registered in `docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md`, with a
 note that the budget figures are the awards desk's own bookkeeping to reconcile against rather than
 entries to import, and that `LongServiceAward.LeaveId` is a hook with no writer. Nothing posts to a
 ledger.
@@ -1245,7 +1245,7 @@ for them.
 **Recorded, not fixed: cross-module defect #4.** `tsc --noEmit` reports **19 errors, all in
 Inventory**, none touched by HR. The cost is not the 19 — it is that a gate which is never green
 stops being a gate, so the twentieth error lands unnoticed. Written up in
-`docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` with the two worth looking at first: a duplicated
+`docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md` with the two worth looking at first: a duplicated
 `isStockingUnit` whose two declarations disagree about optionality, and a dialog that renders three
 fields its item type does not declare.
 
@@ -1381,8 +1381,8 @@ that threw on every call. Declared, implemented, wired, and unreachable.
 **What is still owed, and by whom.** Two answers are TDC's rather than ours: what each long-service
 rung is worth, and whether severity should matter to the disciplinary exemption — the latter needs a
 severity column on `StaffDisciplinaryActions` before it is even expressible. Both are in
-`docs/HR-OPEN-QUESTIONS-FOR-TDC.md`. Every money event is registered in
-`docs/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-module sweep; **nothing in this area posts to a
+`docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md`. Every money event is registered in
+`docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md` for the post-module sweep; **nothing in this area posts to a
 ledger.** `LongServiceAward.LeaveId` remains a hook with no writer.
 
 ---

@@ -416,7 +416,30 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ILeaveEncashmentService, LeaveEncashmentService>();
         services.AddScoped<ILeaveBalanceRecalculationService, LeaveBalanceRecalculationService>();
         services.AddScoped<ILeaveEntitlementService, LeaveEntitlementService>();
+        // Approved leave reaches the attendance register through this. Before it, StaffDailyAttendance
+        // .LeaveRequestId and StaffAttendanceStatus.OnLeave were both written by nothing, so the
+        // payroll export read zero days on leave for everybody (closure plan L-27).
+        services.AddScoped<ILeaveAttendancePostingService, LeaveAttendancePostingService>();
         services.AddScoped<IReasonCodeService, ReasonCodeService>();
+        // Round-2 lane D1 (Q-4): the seeded contract-kind vocabulary, which had no service at all.
+        services.AddScoped<IEmployeeContractTypeService, EmployeeContractTypeService>();
+
+        // The relationship catalogue the referee, guarantor, next-of-kin and candidate-referee
+        // screens pick from (round 2, lane D2).
+        services.AddScoped<IRelationshipTypeService, RelationshipTypeService>();
+        services.AddScoped<IDisabilityTypeService, DisabilityTypeService>(); // round 3, lane P2
+        services.AddScoped<ILanguageService, LanguageService>(); // round 3, lane C1
+
+        // Teams and committees (round 2, lane F).
+        //
+        // ⚠ The access guard is registered FIRST and shared by both slices' services. It holds the
+        // whole authorisation story — HR acts on any team, lead/deputy on their own, a member only
+        // on a task assigned to them — and two copies of an authorisation rule is exactly what
+        // lane D2 measured the cost of.
+        services.AddScoped<ITeamAccessGuard, TeamAccessGuard>();
+        services.AddScoped<ITeamActivityService, TeamActivityService>();   // F1: charter, objectives, tasks
+        services.AddScoped<ITeamMeetingService, TeamMeetingService>();     // F2: meetings, reviews, dashboard
+        services.AddScoped<ITeamReminderService, TeamReminderService>();   // F2: the nightly sweep
         services.AddScoped<IEmployeeRelieverService, EmployeeRelieverService>();
         services.AddScoped<ILeaveYearEndService, LeaveYearEndService>();
         services.AddScoped<IEmolumentService, EmolumentService>();
@@ -428,6 +451,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IEffectiveAppraisalConfigurationService, EffectiveAppraisalConfigurationService>();
         services.AddScoped<IAppraisalSettingsService, AppraisalSettingsService>();
         services.AddScoped<ICompanyHrPolicyProvider, CompanyHrPolicyProvider>();
+        // ⚠ SCOPED is the contract, not a preference: the leave-year start month is cached for
+        // one request and no longer. See ILeaveYearContext (entitlement plan C1).
+        services.AddScoped<ILeaveYearContext, LeaveYearContext>();
         services.AddScoped<ICompanyHrPolicySettingsService, CompanyHrPolicySettingsService>();
         services.AddScoped<IProbationLetterService, ProbationLetterService>();
         services.AddScoped<ICompanyProfileProvider, CompanyProfileProvider>();
@@ -444,6 +470,7 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IPerformanceLinkService, PerformanceLinkService>();
         services.AddScoped<IPerformanceAnalyticsService, PerformanceAnalyticsService>();
         services.AddScoped<ISalaryReviewProposalService, SalaryReviewProposalService>();
+        services.AddScoped<IEmployeeSalaryChangeRequestService, EmployeeSalaryChangeRequestService>();
         services.AddScoped<IEmploymentActionProposalService, EmploymentActionProposalService>();
         services.AddScoped<IPerformanceRatingResolver, PerformanceRatingResolver>();
         services.AddScoped<ITalentRatingSyncService, TalentRatingSyncService>();
@@ -603,6 +630,8 @@ public static class HrModuleServiceRegistration
         services.AddScoped<INHISService, NHISService>();
         services.AddScoped<IMedicalExpenseClaimService, MedicalExpenseClaimService>();
         services.AddScoped<IMedicalDashboardService, MedicalDashboardService>();
+        // Medical boards (residue plan G4). ⚠ Leave and separation READ these; neither writes one.
+        services.AddScoped<IMedicalBoardService, MedicalBoardService>();
         services.AddScoped<IStaffMovementService, StaffMovementService>();
         services.AddScoped<IStaffPromotionService, StaffPromotionService>();
         services.AddScoped<IStaffTransferService, StaffTransferService>();
@@ -699,6 +728,9 @@ public static class HrModuleServiceRegistration
         services.AddScoped<ISeparationReminderService, SeparationReminderService>();
         services.AddScoped<IProbationReminderService, ProbationReminderService>();
         services.AddScoped<IStaffTravelReminderService, StaffTravelReminderService>();
+        // The twelfth HR reminder engine, and the last to be built — for the module with more dates
+        // that matter than any of the others (closure plan R-6 / R-10 / L-23).
+        services.AddScoped<ILeaveReminderService, LeaveReminderService>();
         // Asset reminder engine (area 16 slice 9, AST-1): maintenance due, overdue, and
         // never scheduled. Slice 11 adds insurance expiry and overdue returns to this one
         // rather than starting a seventh.
@@ -709,6 +741,11 @@ public static class HrModuleServiceRegistration
         // Area 12's alias for the same bridge — registered separately so its existing constructor
         // injections resolve unchanged. Retire with the alias.
         services.AddScoped<StaffTravelCurrencyBridge>();
+        // HR → Finance posting (HR finish plan lane 8): the HR side of FIN-INT-001. One adapter for
+        // every HR money event; the store is split out so its contract tests need no EF provider.
+        services.AddScoped<ErpSystem.Core.Services.HR.Finance.IHrFinancePostingStore, ErpSystem.Core.Services.HR.Finance.HrFinancePostingStore>();
+        services.AddScoped<IHrFinancePostingAdapter, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdapter>();
+        services.AddScoped<IHrFinancePostingAdminService, ErpSystem.Core.Services.HR.Finance.HrFinancePostingAdminService>();
         // Resolves the travel policy's spend caps and refuses a booking above them (slice 8).
         services.AddScoped<StaffTravelPolicyGuard>();
         // Rolls a travel budget's committed/actual spend up from its bookings and claims (slice 9).
@@ -733,6 +770,11 @@ public static class HrModuleServiceRegistration
         services.AddScoped<IStaffDisciplineLegalReviewService, StaffDisciplineLegalReviewService>();
         services.AddScoped<IStaffRequisitionService, StaffRequisitionService>();
         services.AddScoped<IPositionVacancyService, PositionVacancyService>();
+        // The recruitment module's only date-driven job (G-2.4, G-6.2). Scoped so the run-now
+        // endpoint and RecruitmentLifecycleSweepBackgroundService share one code path; the hosted
+        // service that actually schedules it is registered in ServiceCollectionExtensions.
+        services.AddScoped<IRecruitmentLifecycleSweepService,
+            ErpSystem.Core.Services.HR.Recruitment.RecruitmentLifecycleSweepService>();
         services.AddScoped<IExternalAssociateRepository, ExternalAssociateRepository>();
         services.AddScoped<IExternalAssociateService, ExternalAssociateService>();
         services.AddScoped<ITrainingVendorRepository, TrainingVendorRepository>();

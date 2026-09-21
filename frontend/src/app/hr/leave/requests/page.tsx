@@ -1,7 +1,7 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import { Plus, CalendarDays, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -41,26 +41,47 @@ const years = [currentYear + 1, currentYear, currentYear - 1, currentYear - 2];
  */
 export default function LeaveRequestsPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user } = useAuth();
-  // 2026-09-03: open the caller's own history first. The API answers self-or-HR.Leave.Read, so a
-  // plain employee who lands here (the leaf is open to all staff) sees their requests instead of
-  // an empty picker and a 403 on whoever they choose; HR still switches employee freely.
-  const [employeeId, setEmployeeId] = useState<string | null>(user?.employeeId ?? null);
+  // The employee profile's Leave tab links here as `?employeeId=…`. The parameter used to be
+  // ignored, so "open in Leave" landed on whoever the picker happened to default to — a different
+  // person's leave, presented as if it were theirs (closure plan L-8). It only seeds the initial
+  // value; the picker stays free afterwards.
+  //
+  // 2026-09-03: without one, open the caller's own history first. The API answers
+  // self-or-HR.Leave.Read, so a plain employee who lands here (the leaf is open to all staff) sees
+  // their requests instead of an empty picker and a 403 on whoever they choose.
+  const linkedEmployeeId = searchParams?.get('employeeId') || null;
+  const [employeeId, setEmployeeId] = useState<string | null>(
+    linkedEmployeeId ?? user?.employeeId ?? null,
+  );
   const selfLabel = user?.employeeId ? [user.firstName, user.lastName].filter(Boolean).join(' ') || 'Me' : null;
   const [year, setYear] = useState<string>(String(currentYear));
   const [status, setStatus] = useState<string>(ALL);
   const [page, setPage] = useState(1);
 
+  // The status filter belongs in the query, not in the browser: filtering the fetched page meant
+  // "the rejected ones that happen to be on page 1", with the unfiltered total beside it (L-7).
   const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['hr', 'leave-requests', 'history', employeeId, year, page],
-    queryFn: () => leaveService.getEmployeeHistory(employeeId ?? '', Number(year), page, 20),
+    queryKey: ['hr', 'leave-requests', 'history', employeeId, year, status, page],
+    queryFn: () =>
+      leaveService.getEmployeeHistory(
+        employeeId ?? '',
+        Number(year),
+        page,
+        20,
+        status === ALL ? undefined : status,
+      ),
     enabled: !!employeeId,
   });
 
-  const rows = useMemo(() => {
-    const items = data?.items ?? [];
-    return status === ALL ? items : items.filter((r) => r.status === status);
-  }, [data, status]);
+  const rows = useMemo(() => data?.items ?? [], [data]);
+
+  // Name whoever the picker is currently pointed at. Arriving by deep link there is no label to
+  // show, so it comes from the rows themselves once they load; without it the filter reads as an
+  // empty search box above somebody else's leave.
+  const pickerLabel =
+    employeeId === user?.employeeId ? selfLabel : rows[0]?.employeeName ?? null;
 
   // Batch workflow summaries so each row can show where it sits in its approval chain.
   const summaries = useWorkflowEntitySummaries(
@@ -91,7 +112,7 @@ export default function LeaveRequestsPage() {
               <label className="text-sm font-medium">Employee</label>
               <EmployeePicker
                 value={employeeId}
-                initialLabel={employeeId === user?.employeeId ? selfLabel : null}
+                initialLabel={pickerLabel}
                 onChange={(v) => {
                   setEmployeeId(v);
                   setPage(1);
@@ -121,7 +142,13 @@ export default function LeaveRequestsPage() {
             </div>
             <div className="space-y-2">
               <label className="text-sm font-medium">Status</label>
-              <Select value={status} onValueChange={setStatus}>
+              <Select
+                value={status}
+                onValueChange={(v) => {
+                  setStatus(v);
+                  setPage(1);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>

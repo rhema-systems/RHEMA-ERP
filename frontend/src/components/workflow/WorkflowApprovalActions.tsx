@@ -51,6 +51,16 @@ export interface WorkflowApprovalActionsProps {
   // Action enablement (defaults based on status if omitted)
   canSubmit?: boolean;
   canApproveReject?: boolean;
+  /**
+   * Whether the current user may withdraw this record from approval.
+   *
+   * Recall is the requester's own act rather than an approver's, so it does not key off
+   * `canApproveReject`. Pass this when the screen can answer "did I raise this?" from data the
+   * workflow instance does not carry; leave it undefined to use the server's
+   * `canCurrentUserRecall` from the entity summary. Either way the endpoint enforces the rule —
+   * this only decides whether to draw a button that would otherwise refuse.
+   */
+  canRecall?: boolean;
   forwardActionsDisabled?: boolean;
   forwardActionsDisabledReason?: string;
 
@@ -58,6 +68,20 @@ export interface WorkflowApprovalActionsProps {
   onSubmit?: () => Promise<void>;
   onApprove?: (comments: string, checklistResponses?: WorkflowApprovalChecklistResponseDto[], signature?: WorkflowSignatureSubmissionDto) => Promise<void>;
   onReject?: (comments: string, checklistResponses?: WorkflowApprovalChecklistResponseDto[]) => Promise<void>;
+  /** Withdraws the record from approval, returning it to Draft. See {@link canRecall}. */
+  onRecall?: (reason: string) => Promise<void>;
+  /**
+   * Which recall dialog to draw.
+   *
+   * `'confirm'` is the long-standing one: a yes/no on stopping the workflow. `'reason'` adds an
+   * optional free-text reason, which the recall endpoint has always accepted and no screen ever
+   * sent — so every recall in the system to date records the literal "Recalled by requester".
+   *
+   * This is a per-module decision, not one the shared component gets to make for everybody, so it
+   * defaults to `'reason'` only where the page wired its own `onRecall`, and `'confirm'` otherwise.
+   * A module owner adopts the reason box by passing `'reason'` on their own screens.
+   */
+  recallPrompt?: 'confirm' | 'reason';
   onAfterAction?: () => Promise<void>;
   onOpenWorkflows?: () => void;
   onCompleteTask?: (request: {
@@ -90,6 +114,22 @@ export function shouldUseApprovalSubmitCopy(
   return !directLifecycle;
 }
 
+/**
+ * Decides which recall dialog a screen gets.
+ *
+ * This component is shared by many screens across modules with different owners, so a change to
+ * the recall dialog reaches all of them at once. The reason box is therefore opt-in per screen: a
+ * module adopts it by passing `recallPrompt`, and anyone who does not pass it keeps the confirm
+ * dialog they have always had. The only implicit adoption is a screen that wired its own
+ * `onRecall`, which is already a deliberate act by that screen's owner.
+ */
+export function resolveRecallPrompt(
+  recallPrompt: 'confirm' | 'reason' | undefined,
+  hasRecallHandler: boolean
+): 'confirm' | 'reason' {
+  return recallPrompt ?? (hasRecallHandler ? 'reason' : 'confirm');
+}
+
 export function WorkflowApprovalActions({
   entityType,
   entityId,
@@ -104,11 +144,14 @@ export function WorkflowApprovalActions({
   loadWorkflowSummary = true,
   canSubmit,
   canApproveReject,
+  canRecall,
   forwardActionsDisabled = false,
   forwardActionsDisabledReason,
   onSubmit,
   onApprove,
   onReject,
+  onRecall,
+  recallPrompt,
   onAfterAction,
   onOpenWorkflows,
   onCompleteTask,
@@ -144,7 +187,6 @@ export function WorkflowApprovalActions({
   const [submitOpen, setSubmitOpen] = React.useState(false);
   const [approvalOpen, setApprovalOpen] = React.useState(false);
   const [approvalMode, setApprovalMode] = React.useState<WorkflowApprovalDialogMode>('approve');
-  const [recallOpen, setRecallOpen] = React.useState(false);
   const [taskOpen, setTaskOpen] = React.useState(false);
   const [taskComments, setTaskComments] = React.useState('');
   const [taskFiles, setTaskFiles] = React.useState<Record<string, File | null>>({});
@@ -153,7 +195,6 @@ export function WorkflowApprovalActions({
   const [taskLocalAttachments, setTaskLocalAttachments] = React.useState<WorkflowTaskAttachmentDto[]>([]);
   const [submitting, setSubmitting] = React.useState(false);
   const [processing, setProcessing] = React.useState(false);
-  const [recalling, setRecalling] = React.useState(false);
   const [taskProcessing, setTaskProcessing] = React.useState(false);
   const [governanceOpen, setGovernanceOpen] = React.useState(false);
   const [governanceMode, setGovernanceMode] = React.useState<'delegate' | 'send-back'>('delegate');
@@ -164,6 +205,9 @@ export function WorkflowApprovalActions({
   const [resubmitOpen, setResubmitOpen] = React.useState(false);
   const [resubmitComments, setResubmitComments] = React.useState('');
   const [resubmitProcessing, setResubmitProcessing] = React.useState(false);
+  const [recallOpen, setRecallOpen] = React.useState(false);
+  const [recallReason, setRecallReason] = React.useState('');
+  const [recallProcessing, setRecallProcessing] = React.useState(false);
 
   const workflowState = useWorkflowSummary({
     entityType, entityId, workflowSummary, workflowSummaryLoading, workflowSummaryError, loadWorkflowSummary,
@@ -244,7 +288,16 @@ export function WorkflowApprovalActions({
   const recallEnabledByStatus =
     hasActiveSummary ||
     ['submitted', 'pendingapproval', 'underreview', 'inreview'].includes(normalizedStatus);
-  const canShowRecall = visibility.known && recallEnabledByStatus && effectiveCanRecallFlag === true && !effectiveCanApprove;
+  // Two ways in: a screen that knows its own recall rule passes `canRecall`, everything else
+  // leans on the server's canCurrentUserRecall. The caller's answer wins when it gives one.
+  // The server-flag path additionally waits for the summary to load (visibility.known), so no
+  // recall control is guessed at before the server has answered; a caller-supplied answer does
+  // not need the summary and is honoured immediately.
+  const recallAllowed = canRecall === undefined
+    ? (visibility.known && effectiveCanRecallFlag === true)
+    : canRecall === true;
+  const canShowRecall = recallEnabledByStatus && recallAllowed && !effectiveCanApprove;
+  const recallPromptMode = resolveRecallPrompt(recallPrompt, !!onRecall);
   const showApproveRejectControls = canShowApprovalActions && !canShowRecall;
   const canCompleteTask = visibility.known && isCurrentTaskStep && effectiveCanCompleteFlag === true && !!effectiveStepInstanceId;
   const normalizedTaskAction = effectiveTaskConfig?.taskActionType?.trim().toLowerCase();
@@ -421,6 +474,45 @@ export function WorkflowApprovalActions({
     }
   };
 
+  /**
+   * Withdraws the record from approval, returning it to draft.
+   *
+   * Uses the screen's own `onRecall` when it wired one, the generic workflow endpoint otherwise.
+   * The reason is optional deliberately: recalling is the requester correcting their own
+   * submission before anybody has ruled on it, which is not an act that needs justifying to the
+   * system. Rejection demands a reason because somebody is ruling against someone else.
+   */
+  const confirmRecall = async () => {
+    // Master #219: never act on a recall the control would not have offered.
+    if (!canShowRecall) return false;
+    const reason = recallReason.trim();
+    try {
+      setRecallProcessing(true);
+      if (onRecall) {
+        await onRecall(reason);
+      } else {
+        await workflowApiService.recallWorkflowEntity(entityType, entityId, reason ? { reason } : {});
+      }
+      const refreshedSummary = await runAfter();
+      toast.success(`${entityLabel} recalled`, {
+        description: buildActionDescription(
+          entityNumber ? `${entityNumber} is back with you as a draft.` : undefined,
+          refreshedSummary,
+        ),
+      });
+      setRecallOpen(false);
+      setRecallReason('');
+      return true;
+    } catch (e: any) {
+      toast.error(`Failed to recall ${entityLabel.toLowerCase()}`, {
+        description: e?.body?.message || e?.message || undefined,
+      });
+      return false;
+    } finally {
+      setRecallProcessing(false);
+    }
+  };
+
   const openApproval = (mode: WorkflowApprovalDialogMode) => {
     if (mode === 'approve' && forwardActionsDisabled) {
       toast.error(forwardActionsDisabledReason || 'Complete all required inputs before approving.');
@@ -481,24 +573,6 @@ export function WorkflowApprovalActions({
       return false;
     } finally {
       setProcessing(false);
-    }
-  };
-
-  const confirmRecall = async () => {
-    if (!canShowRecall) return false;
-    try {
-      setRecalling(true);
-      await workflowApiService.recallWorkflowEntity(entityType, entityId);
-      toast.success(`${entityLabel} recalled`, {
-        description: entityNumber ? `${entityNumber} has been returned to draft.` : undefined,
-      });
-      await runAfter();
-      return true;
-    } catch (e: any) {
-      toast.error(`Failed to recall ${entityLabel.toLowerCase()}`, { description: e?.message || undefined });
-      return false;
-    } finally {
-      setRecalling(false);
     }
   };
 
@@ -741,6 +815,61 @@ export function WorkflowApprovalActions({
     </Dialog>
   );
 
+  const recallDialog = recallPromptMode === 'confirm' ? (
+    <ConfirmationDialog
+      open={recallOpen}
+      onOpenChange={setRecallOpen}
+      title={`Recall ${entityLabel}?`}
+      description={
+        <div className="space-y-2">
+          <div>
+            You are about to recall <strong>{entityNumber || entityLabel}</strong>.
+          </div>
+          <div className="text-xs text-muted-foreground">
+            The active workflow will be stopped and the record will return to draft so it can be edited and resubmitted.
+          </div>
+        </div>
+      }
+      confirmText={recallProcessing ? 'Recalling...' : 'Recall'}
+      cancelText="Cancel"
+      onConfirm={confirmRecall}
+      isLoading={recallProcessing}
+    />
+  ) : (
+    <Dialog open={recallOpen} onOpenChange={setRecallOpen}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Recall {entityLabel.toLowerCase()}</DialogTitle>
+          <DialogDescription>{entityNumber || entityLabel}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            This takes it back from approval and returns it to draft, so you can change it and
+            submit again. Only the person who raised it can do this, and only while nobody has
+            ruled on it yet.
+          </p>
+          <div className="space-y-2">
+            <Label>Reason (optional)</Label>
+            <Textarea
+              value={recallReason}
+              onChange={(event) => setRecallReason(event.target.value)}
+              placeholder="e.g. the start date was wrong"
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setRecallOpen(false)} disabled={recallProcessing}>
+            Cancel
+          </Button>
+          <Button onClick={() => void confirmRecall()} disabled={recallProcessing}>
+            {recallProcessing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Recall
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
   const resubmitCorrection = async () => {
     const correctionId = visibility.showApprovalControls ? effectiveSummary?.currentUserCorrectionId : undefined;
     if (!correctionId) return;
@@ -828,7 +957,7 @@ export function WorkflowApprovalActions({
               event.preventDefault();
               setRecallOpen(true);
             }}
-            disabled={recalling || summaryLoading}
+            disabled={recallProcessing || summaryLoading}
           >
             <RotateCcw className="mr-2 h-4 w-4" />
             Recall
@@ -875,26 +1004,6 @@ export function WorkflowApprovalActions({
           cancelText="Cancel"
           onConfirm={confirmSubmit}
           isLoading={submitting}
-        />
-
-        <ConfirmationDialog
-          open={recallOpen}
-          onOpenChange={setRecallOpen}
-          title={`Recall ${entityLabel}?`}
-          description={
-            <div className="space-y-2">
-              <div>
-                You are about to recall <strong>{entityNumber || entityLabel}</strong>.
-              </div>
-              <div className="text-xs text-muted-foreground">
-                The active workflow will be stopped and the record will return to draft so it can be edited and resubmitted.
-              </div>
-            </div>
-          }
-          confirmText={recalling ? 'Recalling...' : 'Recall'}
-          cancelText="Cancel"
-          onConfirm={confirmRecall}
-          isLoading={recalling}
         />
 
         <WorkflowApprovalCommentDialog
@@ -1125,6 +1234,7 @@ export function WorkflowApprovalActions({
         </Dialog>
         {!hideGovernanceActions && governanceDialogs}
         {resubmitDialog}
+        {recallDialog}
       </>
     );
   }
@@ -1207,7 +1317,7 @@ export function WorkflowApprovalActions({
             variant="outline"
             className="text-amber-600"
             onClick={() => setRecallOpen(true)}
-            disabled={recalling || summaryLoading}
+            disabled={recallProcessing || summaryLoading}
             title={iconOnly ? `Recall ${entityLabel}` : undefined}
             aria-label={iconOnly ? `Recall ${entityLabel}` : undefined}
           >
@@ -1257,26 +1367,6 @@ export function WorkflowApprovalActions({
         cancelText="Cancel"
         onConfirm={confirmSubmit}
         isLoading={submitting}
-      />
-
-      <ConfirmationDialog
-        open={recallOpen}
-        onOpenChange={setRecallOpen}
-        title={`Recall ${entityLabel}?`}
-        description={
-          <div className="space-y-2">
-            <div>
-              You are about to recall <strong>{entityNumber || entityLabel}</strong>.
-            </div>
-            <div className="text-xs text-muted-foreground">
-              The active workflow will be stopped and the record will return to draft so it can be edited and resubmitted.
-            </div>
-          </div>
-        }
-        confirmText={recalling ? 'Recalling...' : 'Recall'}
-        cancelText="Cancel"
-        onConfirm={confirmRecall}
-        isLoading={recalling}
       />
 
       <WorkflowApprovalCommentDialog
@@ -1507,6 +1597,7 @@ export function WorkflowApprovalActions({
       </Dialog>
       {!hideGovernanceActions && governanceDialogs}
       {resubmitDialog}
+      {recallDialog}
     </div>
   );
 }

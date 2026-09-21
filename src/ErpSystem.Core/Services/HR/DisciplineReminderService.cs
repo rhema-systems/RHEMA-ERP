@@ -85,7 +85,7 @@ public class DisciplineReminderService : IDisciplineReminderService
     /// <remarks>
     /// It was a <c>const</c> here. FR-HR-181 names the escalation route and sets no time limit at any
     /// rung, so five days is OUR assumption, raised with TDC in
-    /// <c>docs/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered — which meant their eventual
+    /// <c>docs/HR/programme/HR-OPEN-QUESTIONS-FOR-TDC.md</c> §2 and still unanswered — which meant their eventual
     /// answer would have cost a code change and a deploy. It now costs a settings edit. The same
     /// applies to <c>ConcernTriageChaseDays</c> and <c>GrievanceAgreementChaseDays</c>, added with
     /// the slice-7 sweeps.

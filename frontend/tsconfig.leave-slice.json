@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "next-env.d.ts",
+    "src/types/hr/leave.ts",
+    "src/types/hr/leave-request.ts",
+    "src/services/hr/leave.service.ts",
+    "src/services/hr/leave-type.service.ts",
+    "src/app/hr/leave/**/*.tsx",
+    "src/app/administration/hr/leave-types/**/*.tsx",
+    "src/app/me/leave/**/*.tsx",
+    "src/components/hr/leave/**/*.ts",
+    "src/components/hr/leave/**/*.tsx",
+    "src/components/me/leave/**/*.ts",
+    "src/components/me/leave/**/*.tsx",
+    "src/components/hr/common/ResourceCollectionTab.tsx"
+  ]
+}

@@ -133,8 +133,16 @@ class MovementService {
   // ── Workflow ───────────────────────────────────────────────────────────────
 
   /**
-   * Hands the movement to the workflow engine. Inoperable until a StaffMovement definition is
-   * published for the tenant — approval authority comes from the definition, not from a role.
+   * Hands the movement to the workflow engine.
+   *
+   * ⚠ This used to say "Inoperable until a StaffMovement definition is published for the tenant".
+   * **It was not inoperable — it auto-approved** (corrected 2026-09-15): with no definition the
+   * engine returned `Approved`, the adapter mapped it to `Approved`, and the service recorded the
+   * submitter as the authoriser of their own move. With no definition published, submitting now
+   * lands the movement at `Submitted`; a `HR.Movements.Admin` holder who did not request it then
+   * approves or rejects it. The second half of the old sentence still holds and is the point of
+   * the engine: when a definition *is* published, approval authority comes from the definition and
+   * not from a role.
    */
   submit(id: string, submissionNotes?: string): Promise<void> {
     return apiService.post<void>(`${this.baseUrl}/${id}/submit`, { movementId: id, submissionNotes });

@@ -16,8 +16,8 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { Checkbox } from '@/components/ui/checkbox';
 import { separationService } from '@/services/hr/separation.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import type { ClearanceItemKind } from '@/types/hr/separation';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 /**
  * The tenant's clearance form — the catalogue every leaver's checklist is built from (FR-HR-183).
@@ -60,10 +60,6 @@ export default function ClearanceFormPage() {
     queryFn: () => separationService.getClearanceTemplates(true),
   });
 
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units', 'summary'],
-    queryFn: () => organizationUnitService.getSummary(),
-  });
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ['clearance-templates'] });
 
@@ -164,18 +160,13 @@ export default function ClearanceFormPage() {
 
           <div className="flex flex-wrap items-end gap-3">
             <div className="min-w-[260px] flex-1 space-y-2">
-              <Label>Cleared by</Label>
-              <Select value={owningUnitId} onValueChange={setOwningUnitId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Anyone with clearance rights" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={NO_UNIT}>Anyone with clearance rights</SelectItem>
-                  {(units ?? []).map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OrganizationUnitPicker
+                value={owningUnitId === NO_UNIT ? '' : owningUnitId}
+                onChange={(id) => setOwningUnitId(id || NO_UNIT)}
+                allowNone="Anyone with clearance rights"
+                unitLabel="Cleared by"
+                idPrefix="clearance-unit"
+              />
             </div>
             <div className="flex items-center gap-2 pb-2">
               <Checkbox

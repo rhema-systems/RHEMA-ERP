@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.ComponentModel.DataAnnotations.Schema;
 using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
@@ -500,6 +500,12 @@ public class RecruitmentPipelineStage : TenantEntity
 
     public bool IsActive { get; set; } = true;
 	
+	/// <summary>
+    /// Round 3, lane G (decision D-13): DERIVED — always <c>!CanSkip</c>. The form offers one switch
+    /// ("Can be skipped"); both columns stay so old readers keep working, and the service writes
+    /// them together. Enforced by the pipeline move: a non-skippable stage cannot be jumped over,
+    /// and the final stage refuses an application that never entered a required stage.
+    /// </summary>
 	public bool IsRequired { get; set; } = true;
         
     public int? DefaultTimeToCompleteDays { get; set; }
@@ -694,6 +700,45 @@ public class JobShortlistingCriteria : TenantEntity
     public int Weight { get; set; } = 1;
 	
 	public ShortlistingComparisonOperator? ComparisonOperator { get; set; }
+
+    /// <summary>
+    /// The accepted values (round 3, lane K; register row R-8): catalogue rows, gender members or
+    /// typed text, one row each. <see cref="RequiredValue"/> is kept as the mirrored label list so
+    /// rows written before this lane keep scoring; the engine reads these first and the labels second.
+    /// </summary>
+    public virtual ICollection<JobShortlistingCriteriaValue> Values { get; set; } = new List<JobShortlistingCriteriaValue>();
+}
+
+/// <summary>
+/// One accepted value on a shortlisting criterion (round 3, lane K; register row R-8; plan § 5.4).
+/// </summary>
+/// <remarks>
+/// <para><see cref="Kind"/> says what <see cref="ReferenceId"/> points at — a Skill, Qualification,
+/// Certification or Language catalogue row — or that the value is a Gender member or plain text.
+/// <see cref="Label"/> is ALWAYS filled: the catalogue name mirrored at save time, the enum member's
+/// name, or the typed text — so a criterion stays readable if the catalogue row is renamed or
+/// retired, and the label-second match path has something to read.</para>
+///
+/// <para>The rows are a replace-set on the criterion save: every save carries the whole list, and a
+/// row left out is retired. The parent's <c>RequiredValue</c> is rewritten from the labels on the
+/// same save.</para>
+/// </remarks>
+public class JobShortlistingCriteriaValue : TenantEntity
+{
+    public Guid JobShortlistingCriteriaId { get; set; }
+
+    [ForeignKey(nameof(JobShortlistingCriteriaId))]
+    public virtual JobShortlistingCriteria Criteria { get; set; } = null!;
+
+    public ShortlistingValueKind Kind { get; set; }
+
+    /// <summary>The catalogue row, for a catalogue kind. Null for Gender and Text.</summary>
+    public Guid? ReferenceId { get; set; }
+
+    [MaxLength(200)]
+    public string Label { get; set; } = string.Empty;
+
+    public int SortOrder { get; set; }
 }
 
 // =============================================================================
@@ -878,6 +923,21 @@ public class JobCandidate : TenantEntity
     [MaxLength(100)]
     public string? Nationality { get; set; }
 
+    // ── National identity (round 3, lane C1; decision D-15) ───────────────────
+    // The employee's trio, verbatim, so the hire path copies it across untouched. "Ghana Card"
+    // is a seeded IdentificationType row, not a column: a foreign national with a passport uses
+    // the same three fields.
+
+    public Guid? NationalIdTypeId { get; set; }
+
+    [ForeignKey(nameof(NationalIdTypeId))]
+    public virtual IdentificationType? NationalIdTypeRef { get; set; }
+
+    [MaxLength(50)]
+    public string? NationalIdNumber { get; set; }
+
+    public DateTime? NationalIdExpiryDate { get; set; }
+
     // ── Documents ──────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -982,7 +1042,7 @@ public class JobCandidateWorkHistory : TenantEntity
     public string? ReasonForLeaving { get; set; }
 }
 
-public class JobCandidateReferee : TenantEntity
+public class JobCandidateReferee : TenantEntity, ErpSystem.Core.Entities.HR.IRelationshipTypeConsumer
 {
     public Guid JobCandidateId { get; set; }
  
@@ -1007,7 +1067,23 @@ public class JobCandidateReferee : TenantEntity
 
     [MaxLength(100)]
     public string Relationship { get; set; } = string.Empty;
-	
+
+    /// <summary>
+    /// The tie, from the tenant's relationship catalogue (round 2, lane D2 — register row E-11a).
+    /// </summary>
+    /// <remarks>
+    /// <para>⚠ The free-text <see cref="Relationship"/> above is kept and MIRRORED from this row's
+    /// name whenever the id is set, so candidates recorded before the catalogue keep their wording.</para>
+    ///
+    /// <para>⚠ The referee screen accepts <c>Professional</c> and <c>Other</c> only. A candidate
+    /// may name a pastor or a family friend (both <c>Other</c>); they may not name their mother.
+    /// The rule is the service's, not this column's.</para>
+    /// </remarks>
+    public Guid? RelationshipTypeId { get; set; }
+
+    [ForeignKey(nameof(RelationshipTypeId))]
+    public virtual RelationshipType? RelationshipTypeRef { get; set; }
+
 	public int YearsKnown { get; set; }
 }
 
@@ -1044,6 +1120,18 @@ public class JobCandidateSkill : TenantEntity
 
     [MaxLength(200)]
     public string? CertificationName { get; set; }
+
+    // Round 3, lane C1 (register row R-3d). A certificate is a name, a number, who issued it and
+    // when it lapses; the three below are blank whenever IsCertified is false — the services clear
+    // them, so an unticked skill never carries a stale certificate.
+
+    [MaxLength(100)]
+    public string? CertificationNumber { get; set; }
+
+    [MaxLength(200)]
+    public string? CertifyingBody { get; set; }
+
+    public DateTime? CertificationExpiryDate { get; set; }
 }
 
 /// <summary>
@@ -1056,7 +1144,19 @@ public class JobCandidateLanguage : TenantEntity
     [ForeignKey(nameof(JobCandidateId))]
     public virtual JobCandidate JobCandidate { get; set; } = null!;
 
-    /// <summary>Language name, e.g. "English", "French", "Twi".</summary>
+    /// <summary>
+    /// Link to the HR language catalogue (round 3, lane C1; decision D-16). Null on rows written
+    /// before the catalogue existed and on a one-off language typed under "Other".
+    /// </summary>
+    public Guid? LanguageId { get; set; }
+
+    [ForeignKey(nameof(LanguageId))]
+    public virtual Language? Language { get; set; }
+
+    /// <summary>
+    /// Language name, e.g. "English", "French", "Twi". Mirrored from the catalogue row when one is
+    /// linked, so a rename there does not rewrite what the candidate said.
+    /// </summary>
     [Required]
     [MaxLength(100)]
     public string LanguageName { get; set; } = string.Empty;
@@ -1107,6 +1207,10 @@ public class JobCandidateDocument : TenantEntity
 
     /// <summary>Central-DMS version, once registered.</summary>
     public Guid? DocumentVersionId { get; set; }
+
+    /// <summary>What the file is, in the uploader's words (round 3, lane C1; decision D-17).</summary>
+    [MaxLength(500)]
+    public string? Description { get; set; }
 }
 
 public class JobCandidateNote : TenantEntity
@@ -1141,6 +1245,33 @@ public class CandidateTalentSegment : TenantEntity
     public string? Color { get; set; }
 
     public bool IsActive { get; set; } = true;
+
+    // ── Ownership and intent (round 3, lane V; decision D-6) ──────────────────
+    // The pool is flat and the segment is the working unit, so the segment is where a recruiter's
+    // name, the reason the group exists, and the role it feeds have to live. All four are optional:
+    // the segments that shipped before this lane keep working with none of them.
+
+    /// <summary>The recruiter who works this segment. Optional; no inverse collection on Employee.</summary>
+    public Guid? OwnerEmployeeId { get; set; }
+
+    [ForeignKey(nameof(OwnerEmployeeId))]
+    public virtual Employee? OwnerEmployee { get; set; }
+
+    /// <summary>Why the segment exists — what it is being kept warm for.</summary>
+    [MaxLength(1000)]
+    public string? Purpose { get; set; }
+
+    /// <summary>The position this segment feeds, when it feeds exactly one.</summary>
+    public Guid? TargetPositionId { get; set; }
+
+    [ForeignKey(nameof(TargetPositionId))]
+    public virtual EmployeePosition? TargetPosition { get; set; }
+
+    /// <summary>The job family this segment feeds, when it is broader than a single position.</summary>
+    public Guid? JobFamilyId { get; set; }
+
+    [ForeignKey(nameof(JobFamilyId))]
+    public virtual JobFamily? JobFamily { get; set; }
 
     public virtual ICollection<CandidateSegmentMembership> Memberships { get; set; } = new List<CandidateSegmentMembership>();
 }
@@ -1450,6 +1581,9 @@ public sealed class SnapshotLanguage
     public string NormalisedName { get; init; } = string.Empty;
     public string DisplayName    { get; init; } = string.Empty;
     public int    Proficiency    { get; init; }  // LanguageProficiency enum value
+
+    /// <summary>Catalogue Language ID, when the candidate picked from the catalogue (round 3, lane K — id-first matching).</summary>
+    public Guid? LanguageId { get; init; }
 }
 
 /// <summary>Frozen work-history entry within <see cref="ApplicationCandidateSnapshot"/>.</summary>
@@ -2505,8 +2639,19 @@ public class PreEmploymentCheckItem : TenantEntity
     [MaxLength(200)]
     public string? Name { get; set; }
 
+    /// <summary>
+    /// The provider's name — a SNAPSHOT (round 3, lane G; decision D-14). Mirrored from the
+    /// supplier when <see cref="ServiceProviderSupplierId"/> is set; typed when the provider is not
+    /// a supplier on file.
+    /// </summary>
     [MaxLength(200)]
     public string? ServiceProviderName { get; set; }
+
+    /// <summary>The Procurement supplier providing this check, when it is one (round 3, lane G; D-14).</summary>
+    public Guid? ServiceProviderSupplierId { get; set; }
+
+    [ForeignKey(nameof(ServiceProviderSupplierId))]
+    public virtual ErpSystem.Core.Entities.Procurement.Supplier? ServiceProviderSupplier { get; set; }
  
     public CheckItemStatus Status { get; set; } = CheckItemStatus.Pending;
  
@@ -2605,8 +2750,15 @@ public class PreEmploymentCheckTemplateItem : TenantEntity
 
     public PreEmploymentCheckType CheckType { get; set; }
 
+    /// <summary>The default provider's name — a snapshot, mirrored from the supplier when one is linked (round 3, lane G).</summary>
     [MaxLength(200)]
     public string? DefaultServiceProvider { get; set; }
+
+    /// <summary>The Procurement supplier this template names by default (round 3, lane G; D-14).</summary>
+    public Guid? DefaultServiceProviderSupplierId { get; set; }
+
+    [ForeignKey(nameof(DefaultServiceProviderSupplierId))]
+    public virtual ErpSystem.Core.Entities.Procurement.Supplier? DefaultServiceProviderSupplier { get; set; }
 
     [MaxLength(2000)]
     public string? Instructions { get; set; }
@@ -2618,6 +2770,26 @@ public class PreEmploymentCheckTemplateItem : TenantEntity
 
     /// <summary>Expected number of calendar days to complete this check.</summary>
     public int? ExpectedDays { get; set; }
+}
+
+/// <summary>
+/// Which Procurement suppliers provide which pre-employment checks (round 3, lane G; register row
+/// R-7; decision D-14). The check-type → provider cascade on the check and template screens reads
+/// this; Procurement's supplier record is untouched. One row per (supplier, check type).
+/// </summary>
+public class PreEmploymentCheckProviderService : TenantEntity
+{
+    public Guid SupplierId { get; set; }
+
+    [ForeignKey(nameof(SupplierId))]
+    public virtual ErpSystem.Core.Entities.Procurement.Supplier Supplier { get; set; } = null!;
+
+    public PreEmploymentCheckType CheckType { get; set; }
+
+    [MaxLength(500)]
+    public string? Notes { get; set; }
+
+    public bool IsActive { get; set; } = true;
 }
 
 // =============================================================================

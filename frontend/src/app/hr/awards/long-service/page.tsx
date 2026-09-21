@@ -38,6 +38,7 @@ import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { awardsService } from '@/services/hr/awards.service';
 import type { LongServiceAwardSummary } from '@/types/hr/awards';
 
@@ -215,6 +216,7 @@ export default function LongServiceAwardsPage() {
           <TableHead>Reached</TableHead>
           <TableHead className="text-right">Value</TableHead>
           <TableHead>Presented</TableHead>
+          <TableHead>Finance</TableHead>
           <TableHead />
         </TableRow>
       </TableHeader>
@@ -236,6 +238,9 @@ export default function LongServiceAwardsPage() {
               ) : (
                 <span className="text-muted-foreground">—</span>
               )}
+            </TableCell>
+            <TableCell>
+              <FinancePostingInlineStatus sourceDocumentId={r.id} />
             </TableCell>
             <TableCell className="text-right">
               <Button size="sm" variant="ghost" onClick={() => openEdit(r)}>

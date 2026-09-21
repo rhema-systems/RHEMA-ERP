@@ -18,7 +18,7 @@ namespace ErpSystem.Core.Interfaces.HR;
 /// <para><b>What this deliberately does not do.</b> It deducts nothing. The recovery plan is a
 /// declaration payroll consumes through <see cref="GetPayrollDeductionLinesAsync"/>, and
 /// <see cref="RecordRecoveryAsync"/> records what was actually collected. No GL posting — that is
-/// registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the sweep after the module.</para>
+/// registered in <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> for the sweep after the module.</para>
 /// </remarks>
 public interface IAssetSurchargeService
 {

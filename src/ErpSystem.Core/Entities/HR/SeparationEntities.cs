@@ -70,6 +70,18 @@ public class EmployeeSeparation : TenantEntity
     /// <summary>Why the employee is leaving. Reporting only; <see cref="SeparationType"/> drives behaviour.</summary>
     public TerminationReason? ReasonCategory { get; set; }
 
+    /// <summary>
+    /// The medical board whose recommendation this separation rests on, for a medical retirement
+    /// (residue plan G4).
+    /// </summary>
+    /// <remarks>
+    /// ⚠ A bare <c>Guid</c> across a module boundary — no navigation, no foreign key. The board is
+    /// a Medical-module record; separation READS it and never writes to it. <c>MedicalRetirement</c>
+    /// already existed as a reason; what it never had was anything to point at showing WHO decided
+    /// the employee was unfit and on what finding.
+    /// </remarks>
+    public Guid? MedicalBoardId { get; set; }
+
     [MaxLength(2000)]
     public string? ReasonNotes { get; set; }
 
@@ -541,7 +553,7 @@ public class SeparationClearanceItem : TenantEntity
 /// copy quietly disagrees with the lines under it.</para>
 ///
 /// <para>⚠ <b>Nothing here posts to the general ledger.</b> Per the standing HR↔Finance split every
-/// money event is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> and posted in one
+/// money event is registered in <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> and posted in one
 /// sweep after the whole HR module. This records what is payable; Finance pays it.</para>
 /// </remarks>
 public class SeparationSettlement : TenantEntity

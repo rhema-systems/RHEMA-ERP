@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
@@ -596,13 +596,22 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         await _caseRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
-        var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
+        // Submitting must never approve. With no published definition the engine returns Approved
+        // and the adapter confirms the disciplinary decision outright — a sanction taking effect
+        // with nobody having confirmed it. Defence in depth; a STAFF_DISCIPLINARY_ACTION definition
+        // is seeded. See HrWorkflowFallbackAuthority.
+        //
+        // ⚠ The natural-justice gate — that the employee was queried and heard — is enforced
+        // earlier in this service, on the record, and is untouched by any of this. It is not an
+        // approval rule and must not become one.
+        var (workflowResult, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegrationService, EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the disciplinary decision approval workflow.");
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         await _caseRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -883,6 +892,18 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
 
         var awaiting = await _caseRepository.GetByStatusAsync(tenantId, DisciplinaryStatus.AwaitingDecision);
 
+        // With no definition published there is no instance, so CanUserApproveAsync answers false
+        // about every case and this inbox would come back EMPTY for everyone - while cases sit in
+        // it, because that is where submitting now leaves them. Whoever holds the fallback
+        // authority sees them all; they are the people who can actually decide one.
+        if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            return HrWorkflowFallbackAuthority.CanRuleWithoutWorkflow(
+                       _currentUserProvider, HrPermissions.ApproveDiscipline)
+                ? awaiting.ToSummaryDtoList()
+                : Enumerable.Empty<StaffDisciplinaryActionSummaryDto>();
+        }
+
         var mine = new List<StaffDisciplinaryAction>();
         foreach (var disciplinaryCase in awaiting)
         {
@@ -901,15 +922,12 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (entity.Status != DisciplinaryStatus.AwaitingDecision)
             throw new InvalidOperationException("Only a case whose decision is awaiting confirmation can be approved.");
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, caseId, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, caseId, userId, "Approve", comments);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, caseId, userId,
+            "Approve", comments, "confirm a disciplinary decision", HrPermissions.ApproveDiscipline);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, comments);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId, comments);
 
         await _caseRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -928,15 +946,12 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (entity.Status != DisciplinaryStatus.AwaitingDecision)
             throw new InvalidOperationException("Only a case whose decision is awaiting confirmation can be refused.");
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, caseId, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
-
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, caseId, userId, "Reject", reason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the refusal.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegrationService, _currentUserProvider, EntityType, caseId, userId,
+            "Reject", reason, "refuse a disciplinary decision", HrPermissions.ApproveDiscipline);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, reason);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, reason);
 
         await _caseRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -959,9 +974,8 @@ public class StaffDisciplinaryCaseService : IStaffDisciplinaryCaseService
         if (entity.Status != DisciplinaryStatus.AwaitingDecision)
             throw new InvalidOperationException("Only a decision still awaiting confirmation can be recalled.");
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, caseId, userId, reason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the decision.");
+        // Skipped when nothing is published; the case returns to review either way.
+        await HrWorkflowFallbackAuthority.RecallAsync(_workflowIntegrationService, EntityType, caseId, userId, reason);
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId, reason);
 

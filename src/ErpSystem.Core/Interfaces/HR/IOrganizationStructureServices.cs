@@ -196,14 +196,15 @@ public interface IOrganizationUnitService
     Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Move unit to a new parent (restructure)
+    /// Move unit to a new parent (restructure). <paramref name="stamp"/> carries the caller's
+    /// effective dates and notes for the history row; null means "from today, open-ended".
     /// </summary>
-    Task<bool> MoveUnitAsync(Guid unitId, Guid? newParentId, string changeReason, CancellationToken cancellationToken = default);
+    Task<bool> MoveUnitAsync(Guid unitId, Guid? newParentId, string changeReason, OrganizationUnitHistoryStampDto? stamp = null, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Change unit head employee
+    /// Change unit head employee. <paramref name="stamp"/> as for <see cref="MoveUnitAsync"/>.
     /// </summary>
-    Task<bool> ChangeHeadEmployeeAsync(Guid unitId, Guid? newHeadEmployeeId, string changeReason, CancellationToken cancellationToken = default);
+    Task<bool> ChangeHeadEmployeeAsync(Guid unitId, Guid? newHeadEmployeeId, string changeReason, OrganizationUnitHistoryStampDto? stamp = null, CancellationToken cancellationToken = default);
 }
 
 #endregion
@@ -246,6 +247,17 @@ public interface IOrganizationUnitHistoryService
         int pageSize,
         OrganizationUnitHistoryFilterDto? filter = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records an entry by hand — a change the structure's own writers cannot express. Moves no
+    /// parent and appoints no head, so it classifies as <c>Other</c>.
+    /// </summary>
+    Task<OrganizationUnitHistoryDto> CreateManualEntryAsync(CreateOrganizationUnitHistoryDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Corrects a row's dates, reason and notes. The ids that say what changed are untouched.
+    /// </summary>
+    Task<OrganizationUnitHistoryDto> UpdateEntryAsync(UpdateOrganizationUnitHistoryDto dto, CancellationToken cancellationToken = default);
 }
 
 #endregion

@@ -32,11 +32,6 @@ export default function NewLocationPage() {
     queryFn: () => locationLevelService.getAll(),
   });
 
-  const { data: locations, isLoading: locationsLoading } = useQuery({
-    queryKey: ['hr', 'locations'],
-    queryFn: () => locationService.getAll(),
-  });
-
   const { data: countries } = useQuery({
     queryKey: ['hr', 'countries', 'active'],
     queryFn: () => countryService.getActive(),
@@ -96,7 +91,7 @@ export default function NewLocationPage() {
         backHref="/administration/hr/location/locations"
       />
 
-      {structuresLoading || levelsLoading || locationsLoading ? (
+      {structuresLoading || levelsLoading ? (
         <div className="flex items-center justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
         </div>
@@ -104,7 +99,6 @@ export default function NewLocationPage() {
         <LocationForm
           structures={structures ?? []}
           levels={levels ?? []}
-          locations={locations ?? []}
           countries={countries ?? []}
           zones={zones ?? []}
           defaultValues={emptyLocation}

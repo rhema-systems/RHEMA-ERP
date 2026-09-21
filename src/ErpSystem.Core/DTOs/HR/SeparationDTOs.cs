@@ -725,6 +725,10 @@ public class UpcomingRetirementDto
     public string? PositionTitle { get; set; }
     public string? OrganizationUnitName { get; set; }
 
+    /// <summary>Added round 2b (R2) so a per-unit or per-post rollup can group without a name join.</summary>
+    public Guid? OrganizationUnitId { get; set; }
+    public Guid PositionId { get; set; }
+
     public DateOnly? DateOfBirth { get; set; }
     public int? CurrentAge { get; set; }
 

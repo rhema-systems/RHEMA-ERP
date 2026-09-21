@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.Reference;
 using Microsoft.EntityFrameworkCore;
@@ -139,6 +139,35 @@ public class HrSeedOrchestrator
             "Qualifications",
             ct => _context.Set<Qualification>().AnyAsync(x => x.TenantId == tenantId, ct),
             ct => new QualificationSeeder(_context, Log<QualificationSeeder>()).SeedAsync(tenantId)),
+
+        // The relationship vocabulary the referee, guarantor, next-of-kin and candidate-referee
+        // screens pick from (round 2, lane D2). Depends on nothing. The probe asks for a row THIS
+        // seed creates rather than for a non-empty table — see the job-architecture step below for
+        // why that distinction is not pedantry.
+        new SeedStep(
+            "Relationship types (familial, professional, other)",
+            ct => _context.Set<RelationshipType>()
+                          .AnyAsync(x => x.TenantId == tenantId
+                                      && x.Code == RelationshipTypeSeeder.ProbeCode, ct),
+            ct => new RelationshipTypeSeeder(_context, Log<RelationshipTypeSeeder>()).SeedAsync(tenantId, ct)),
+
+        // Round 3, lane C1: the language catalogue a candidate picks from. Probes on the code
+        // "EN" rather than a non-empty table, like the relationship types above.
+        new SeedStep(
+            "Languages (Ghanaian, regional, international)",
+            ct => _context.Set<Language>()
+                          .AnyAsync(x => x.TenantId == tenantId
+                                      && x.Code == LanguageSeeder.ProbeCode, ct),
+            ct => new LanguageSeeder(_context, Log<LanguageSeeder>()).SeedAsync(tenantId, ct)),
+
+        // Round 3, lane P2: the disability catalogue the employee and dependant forms pick from.
+        // Probes on the code "VISUAL", like the two catalogues above.
+        new SeedStep(
+            "Disability types (census / Act 715 groupings)",
+            ct => _context.Set<DisabilityType>()
+                          .AnyAsync(x => x.TenantId == tenantId
+                                      && x.Code == DisabilityTypeSeeder.ProbeCode, ct),
+            ct => new DisabilityTypeSeeder(_context, Log<DisabilityTypeSeeder>()).SeedAsync(tenantId, ct)),
 
         new SeedStep(
             "Skills",

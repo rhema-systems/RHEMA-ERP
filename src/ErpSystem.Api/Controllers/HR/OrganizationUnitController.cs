@@ -452,7 +452,7 @@ public class OrganizationUnitController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var response = await _organizationUnitService.MoveUnitAsync(unitId, request.NewParentId, request.ChangeReason);
+            var response = await _organizationUnitService.MoveUnitAsync(unitId, request.NewParentId, request.ChangeReason, request.Stamp());
             return Ok(response);
         }
         catch (ArgumentException ex)
@@ -486,7 +486,7 @@ public class OrganizationUnitController : ControllerBase
             if (!ModelState.IsValid)
                 return BadRequest(ModelState);
 
-            var response = await _organizationUnitService.ChangeHeadEmployeeAsync(unitId, request.NewHeadEmployeeId, request.ChangeReason);
+            var response = await _organizationUnitService.ChangeHeadEmployeeAsync(unitId, request.NewHeadEmployeeId, request.ChangeReason, request.Stamp());
             return Ok(response);
         }
         catch (ArgumentException ex)
@@ -510,10 +510,19 @@ public class OrganizationUnitController : ControllerBase
 /// <summary>
 /// Request model for moving an organization unit
 /// </summary>
+/// <remarks>
+/// The three history-stamp fields arrived with demo feedback round 2 (O-3b): the day the move took
+/// effect (today when omitted), the day it ended if already known, and notes beyond the reason.
+/// </remarks>
 public class MoveUnitRequest
 {
     public Guid? NewParentId { get; set; }
     public string ChangeReason { get; set; } = string.Empty;
+    public DateOnly? EffectiveFrom { get; set; }
+    public DateOnly? EffectiveTo { get; set; }
+    public string? Notes { get; set; }
+
+    public OrganizationUnitHistoryStampDto Stamp() => new() { EffectiveFrom = EffectiveFrom, EffectiveTo = EffectiveTo, Notes = Notes };
 }
 
 /// <summary>
@@ -523,4 +532,9 @@ public class ChangeHeadRequest
 {
     public Guid? NewHeadEmployeeId { get; set; }
     public string ChangeReason { get; set; } = string.Empty;
+    public DateOnly? EffectiveFrom { get; set; }
+    public DateOnly? EffectiveTo { get; set; }
+    public string? Notes { get; set; }
+
+    public OrganizationUnitHistoryStampDto Stamp() => new() { EffectiveFrom = EffectiveFrom, EffectiveTo = EffectiveTo, Notes = Notes };
 }

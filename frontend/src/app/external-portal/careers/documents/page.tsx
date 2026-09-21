@@ -6,6 +6,7 @@ import { Download, FileText, Loader2, Trash2, Upload } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -21,6 +22,10 @@ import { candidateService } from '@/services/hr/careers.service';
 
 // JobCandidateDocumentType — HREnums.cs (Resume=1 … Other=9), source-verified: a first draft
 // guessed "CV" and "Reference", neither of which exists.
+//
+// ⚠ ReferenceLetter and IdDocument are deliberately NOT offered here (round 3, lane C2; decision
+// D-17): a reference letter is attached from the referee it vouches for and an ID scan from the
+// identity document, both on the profile page, so each upload already knows what it is.
 const DOCUMENT_TYPES = [
   'Resume',
   'CoverLetter',
@@ -28,8 +33,6 @@ const DOCUMENT_TYPES = [
   'Certificate',
   'License',
   'Portfolio',
-  'ReferenceLetter',
-  'IdDocument',
   'Other',
 ] as const;
 
@@ -41,7 +44,10 @@ export default function CandidateDocumentsPage() {
   const queryClient = useQueryClient();
   const { toast } = useToast();
   const fileInput = useRef<HTMLInputElement>(null);
-  const [documentType, setDocumentType] = useState<string>('CV');
+  // ⚠ Must be a member of the enum above. This defaulted to 'CV' — not a member — so the very
+  // first upload was refused with 400 unless the dropdown had been touched (round 3, lane C2).
+  const [documentType, setDocumentType] = useState<string>('Resume');
+  const [description, setDescription] = useState('');
 
   const documents = useQuery({
     queryKey: ['candidate', 'documents'],
@@ -49,9 +55,10 @@ export default function CandidateDocumentsPage() {
   });
 
   const upload = useMutation({
-    mutationFn: (file: File) => candidateService.uploadDocument(file, documentType),
+    mutationFn: (file: File) => candidateService.uploadDocument(file, documentType, description),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['candidate', 'documents'] });
+      setDescription('');
       toast({ title: 'Document uploaded' });
     },
     onError: (e: any) =>
@@ -87,7 +94,9 @@ export default function CandidateDocumentsPage() {
       <div>
         <h1 className="text-2xl font-semibold">My documents</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          CVs, certificates and anything else you want on file with your applications.
+          CVs, certificates and anything else you want on file with your applications. Reference
+          letters and your ID scan are attached on your profile, beside the referee and the identity
+          document they belong to.
         </p>
       </div>
 
@@ -111,6 +120,16 @@ export default function CandidateDocumentsPage() {
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="min-w-[240px] flex-1 space-y-1.5">
+            <Label htmlFor="doc-description">What it is (optional)</Label>
+            <Input
+              id="doc-description"
+              value={description}
+              maxLength={500}
+              placeholder="e.g. Final-year transcript, University of Ghana"
+              onChange={(e) => setDescription(e.target.value)}
+            />
           </div>
           <input
             ref={fileInput}
@@ -150,6 +169,7 @@ export default function CandidateDocumentsPage() {
                 <TableRow>
                   <TableHead>File</TableHead>
                   <TableHead className="w-36">Type</TableHead>
+                  <TableHead>Description</TableHead>
                   <TableHead className="w-32">Uploaded</TableHead>
                   <TableHead className="w-28 text-right">Actions</TableHead>
                 </TableRow>
@@ -161,6 +181,7 @@ export default function CandidateDocumentsPage() {
                     <TableCell>
                       <Badge variant="secondary">{humanizeEnum(d.documentType)}</Badge>
                     </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">{d.description || '—'}</TableCell>
                     <TableCell className="text-sm">{formatDate(d.uploadDate)}</TableCell>
                     <TableCell>
                       <div className="flex justify-end gap-0.5">

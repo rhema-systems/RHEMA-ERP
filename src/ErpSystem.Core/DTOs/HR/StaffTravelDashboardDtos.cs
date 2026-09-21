@@ -82,7 +82,7 @@ public class StaffTravelMonthlyCountDto
 ///
 /// <para>The totals are <b>not</b> converted to a base currency here, deliberately. Travel does not
 /// invent a rate (slice 6), Finance's conversion is currently inverted
-/// (<c>docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c> §2), and a converted headline would be
+/// (<c>docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c> §2), and a converted headline would be
 /// confidently wrong rather than visibly incomplete. A screen should show the single figure when a
 /// tenant travels in one currency and this breakdown when it does not.</para>
 /// </remarks>

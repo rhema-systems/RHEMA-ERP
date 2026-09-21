@@ -53,6 +53,12 @@ interface UnionFormProps {
   submitting: boolean;
   submitLabel: string;
   onCancel: () => void;
+  /**
+   * Round 3, lane U (decision D-8): once the union has contact rows, the three contact fields are
+   * a mirror of the primary contact — the server rewrites them on every save, whatever the form
+   * sent. Shown read-only then, with a pointer to the Contacts tab.
+   */
+  contactsMirrored?: boolean;
 }
 
 export function UnionForm({
@@ -61,6 +67,7 @@ export function UnionForm({
   submitting,
   submitLabel,
   onCancel,
+  contactsMirrored = false,
 }: UnionFormProps) {
   const form = useForm<UnionFormValues>({
     resolver: zodResolver(unionSchema) as any,
@@ -118,20 +125,44 @@ export function UnionForm({
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-2">
               <Label htmlFor="contactPerson">Contact person</Label>
-              <Input id="contactPerson" placeholder="General Secretary" {...form.register('contactPerson')} />
+              <Input
+                id="contactPerson"
+                placeholder="General Secretary"
+                readOnly={contactsMirrored}
+                className={contactsMirrored ? 'bg-muted' : undefined}
+                {...form.register('contactPerson')}
+              />
             </div>
             <div className="space-y-2">
               <Label htmlFor="contactEmail">Contact email</Label>
-              <Input id="contactEmail" type="email" placeholder="secretary@union.org" {...form.register('contactEmail')} />
+              <Input
+                id="contactEmail"
+                type="email"
+                placeholder="secretary@union.org"
+                readOnly={contactsMirrored}
+                className={contactsMirrored ? 'bg-muted' : undefined}
+                {...form.register('contactEmail')}
+              />
               {form.formState.errors.contactEmail && (
                 <p className="text-sm text-red-500">{form.formState.errors.contactEmail.message}</p>
               )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="contactPhone">Contact phone</Label>
-              <Input id="contactPhone" placeholder="+233 …" {...form.register('contactPhone')} />
+              <Input
+                id="contactPhone"
+                placeholder="+233 …"
+                readOnly={contactsMirrored}
+                className={contactsMirrored ? 'bg-muted' : undefined}
+                {...form.register('contactPhone')}
+              />
             </div>
           </div>
+          <p className="-mt-2 text-xs text-muted-foreground" data-testid="union-contact-mirror-note">
+            {contactsMirrored
+              ? 'Mirrored from the primary contact. Change the person on the Contacts tab — anything typed here is overwritten on save.'
+              : 'Free text until a contact is recorded on the Contacts tab; after that these three fields mirror the primary contact.'}
+          </p>
 
           <div className="flex items-center justify-between rounded-md border p-4">
             <div className="space-y-0.5">

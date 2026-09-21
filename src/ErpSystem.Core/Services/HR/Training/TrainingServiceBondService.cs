@@ -4,6 +4,7 @@ using ErpSystem.Core.Entities.HR.Training;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Finance;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -19,6 +20,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
     private readonly ILogger<TrainingServiceBondService> _logger;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     public TrainingServiceBondService(
         IGenericRepository<TrainingServiceBond> bondRepository,
@@ -28,7 +30,8 @@ public class TrainingServiceBondService : ITrainingServiceBondService
         IGenericRepository<TrainingCompletion> completionRepository,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
-        ILogger<TrainingServiceBondService> logger)
+        ILogger<TrainingServiceBondService> logger,
+        IHrFinancePostingAdapter financePosting)
     {
         _bondRepository = bondRepository;
         _nominationRepository = nominationRepository;
@@ -38,6 +41,7 @@ public class TrainingServiceBondService : ITrainingServiceBondService
         _currentUserProvider = currentUserProvider;
         _unitOfWork = unitOfWork;
         _logger = logger;
+        _financePosting = financePosting;
     }
 
     // The ApplicationDbContext is registered without a tenant, so its global tenant query-filter and
@@ -243,8 +247,15 @@ public class TrainingServiceBondService : ITrainingServiceBondService
         entity.UpdatedAt = DateTime.UtcNow;
         entity.UpdatedBy = userId.ToString();
 
-        await _bondRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        // A breach raises a receivable in Finance; a fulfilled bond posts nothing (lane 8, slice 4).
+        await _financePosting.RunAsync(async ct =>
+        {
+            await _bondRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return entity.Status == TrainingBondStatus.Breached
+                ? HrFinancePostingCommandFactory.TrainingBondBreached(entity)
+                : null;
+        }, userId, cancellationToken);
 
         _logger.LogInformation("Service bond {BondId} exit recorded → {Status}, repayment {Amount}",
             entity.Id, entity.Status, entity.RepaymentAmount);
@@ -258,15 +269,22 @@ public class TrainingServiceBondService : ITrainingServiceBondService
         if (entity.Status is TrainingBondStatus.Settled or TrainingBondStatus.Cancelled or TrainingBondStatus.Fulfilled)
             throw new InvalidOperationException($"A {entity.Status} bond cannot be waived.");
 
-        entity.Status = TrainingBondStatus.Waived;
-        entity.WaivedDate = DateTime.UtcNow;
-        entity.WaivedById = userId;
-        entity.WaiverReason = dto.WaiverReason;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        // Waiving a breached bond writes its receivable off; a bond waived while still active or
+        // pending had no receivable posted and is recorded Skipped (lane 8, slice 4).
+        var breachPosted = await _financePosting.IsPostedAsync(HrFinancePostingEventCatalog.TrainingBondBreached, entity.Id, cancellationToken);
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.Status = TrainingBondStatus.Waived;
+            entity.WaivedDate = DateTime.UtcNow;
+            entity.WaivedById = userId;
+            entity.WaiverReason = dto.WaiverReason;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = userId.ToString();
 
-        await _bondRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _bondRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return HrFinancePostingCommandFactory.TrainingBondWaived(entity, breachPosted);
+        }, userId, cancellationToken);
 
         _logger.LogInformation("Service bond {BondId} waived", entity.Id);
         return await GetByIdAsync(entity.Id, cancellationToken);
@@ -279,15 +297,21 @@ public class TrainingServiceBondService : ITrainingServiceBondService
         if (entity.Status != TrainingBondStatus.Breached)
             throw new InvalidOperationException("Only a breached bond (with repayment owed) can be settled.");
 
-        entity.Status = TrainingBondStatus.Settled;
-        entity.SettledDate = (dto.SettledDate?.Date) ?? DateTime.UtcNow.Date;
-        if (!string.IsNullOrWhiteSpace(dto.Notes))
-            entity.Notes = dto.Notes;
-        entity.UpdatedAt = DateTime.UtcNow;
-        entity.UpdatedBy = userId.ToString();
+        // Settling a breached bond clears its receivable (lane 8, slice 4).
+        var breachPosted = await _financePosting.IsPostedAsync(HrFinancePostingEventCatalog.TrainingBondBreached, entity.Id, cancellationToken);
+        await _financePosting.RunAsync(async ct =>
+        {
+            entity.Status = TrainingBondStatus.Settled;
+            entity.SettledDate = (dto.SettledDate?.Date) ?? DateTime.UtcNow.Date;
+            if (!string.IsNullOrWhiteSpace(dto.Notes))
+                entity.Notes = dto.Notes;
+            entity.UpdatedAt = DateTime.UtcNow;
+            entity.UpdatedBy = userId.ToString();
 
-        await _bondRepository.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+            await _bondRepository.UpdateAsync(entity);
+            await _unitOfWork.SaveChangesAsync(ct);
+            return HrFinancePostingCommandFactory.TrainingBondSettled(entity, breachPosted);
+        }, userId, cancellationToken);
 
         _logger.LogInformation("Service bond {BondId} settled", entity.Id);
         return await GetByIdAsync(entity.Id, cancellationToken);

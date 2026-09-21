@@ -109,6 +109,13 @@ public interface IEmployeeService
 
     // Skills & certifications
     Task<IEnumerable<EmployeeSkillDto>> GetSkillsAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// What the employee's post asks of them, against what they hold - the position's EFFECTIVE
+    /// skills (attached sets unioned with individual rows) set against their skill records
+    /// (round 2, lane C3b).
+    /// </summary>
+    Task<EmployeeSkillRequirementsDto> GetSkillRequirementsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> AddSkillAsync(CreateEmployeeSkillDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeSkillDto> UpdateSkillAsync(UpdateEmployeeSkillDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveSkillAsync(Guid employeeSkillId, CancellationToken cancellationToken = default);
@@ -134,6 +141,26 @@ public interface IEmployeeService
     // Contracts
     Task<IEnumerable<EmployeeContractDetailDto>> GetContractsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto?> GetActiveContractAsync(Guid employeeId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Opens a fresh set of terms when something outside the contract tab changes them, closing the
+    /// terms it replaces. Returns null when nothing changed, or when the employee has no contract.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ For <c>StaffMovementService</c>. A promotion that raises the salary used to update
+    /// <c>Employee.Salary</c>, the career-path row and the position history, and leave the contract
+    /// still quoting the old figure — the document the organisation would actually produce if asked
+    /// what it pays this person. Nothing is opened for an employee who has no contract at all: the
+    /// start date would have to be invented, and the register has thousands of such rows from before
+    /// contracts were written on create.
+    /// </remarks>
+    Task<EmployeeContractDetailDto?> SupersedeCurrentContractAsync(
+        Guid employeeId,
+        DateOnly effectiveDate,
+        decimal? newSalary,
+        EmploymentType? newEmploymentType,
+        string reason,
+        CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> AddContractAsync(CreateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default);
     Task<EmployeeContractDetailDto> UpdateContractAsync(UpdateEmployeeContractDetailDto dto, CancellationToken cancellationToken = default);
     Task<bool> RemoveContractAsync(Guid contractId, CancellationToken cancellationToken = default);
@@ -164,8 +191,28 @@ public interface IEmployeeService
     // Salary assignments
     Task<IEnumerable<EmployeeSalaryAssignmentListDto>> GetSalaryAssignmentsAsync(Guid employeeId, CancellationToken cancellationToken = default);
     Task<EmployeeSalaryAssignmentDetailDto?> GetSalaryAssignmentByIdAsync(Guid id, CancellationToken cancellationToken = default);
-    Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
-    Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default);
+    /// <param name="authority">Round 3, lane S: <c>Direct</c> is refused when the tenant requires approval for pay changes; an approved record passes <c>Approved</c>.</param>
+    Task<EmployeeSalaryAssignmentDetailDto> AssignSalaryAsync(CreateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct);
+    /// <summary>
+    /// The level a placement on <paramref name="gradeId"/> resolves to (round 3, lane H). A notch
+    /// names its level; a two-tier structure's single implicit level is filled in; a notch or level
+    /// of another grade is refused. Callers that build a placement elsewhere (hire, movements) use
+    /// this so every placement resolves the same way.
+    /// </summary>
+    Task<Guid?> ResolvePlacementLevelAsync(Guid gradeId, Guid? levelId, Guid? notchId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Records how this person's basic pay is arrived at — the scale, or an amount agreed for them.
+    /// </summary>
+    /// <remarks>
+    /// Round-2 lane E1 (§ 6.5.2). Negotiated needs the note, because "negotiated" with nothing
+    /// behind it is a figure nobody can defend. Moving to negotiated CLOSES the open placement the
+    /// way going off payroll does — the notch stops being the pay from that day. Moving back to the
+    /// scale closes nothing and places nothing: placement is its own act, and until it happens the
+    /// reconciliation says <c>NoPayBasis</c>.
+    /// </remarks>
+    Task<EmployeeDetailDto> SetPayBasisAsync(Guid employeeId, SetEmployeePayBasisDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct);
+    Task<EmployeeSalaryAssignmentDetailDto> UpdateSalaryAssignmentAsync(UpdateEmployeeSalaryAssignmentDto dto, CancellationToken cancellationToken = default, SalaryChangeAuthority authority = SalaryChangeAuthority.Direct);
     Task<bool> RemoveSalaryAssignmentAsync(Guid id, CancellationToken cancellationToken = default);
 
     // Referees
@@ -331,7 +378,11 @@ public interface IEmployeePositionService
     Task<EmployeePositionDto?> GetByIdAsync(Guid id);
     Task<IEnumerable<EmployeePositionDto>> GetAllAsync();
     Task<IEnumerable<EmployeePositionDto>> GetActivePositionsAsync();
-    Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId);
+    /// <summary>
+    /// Positions in a unit — and, with <paramref name="includeAncestors"/>, in every unit above it.
+    /// The reports-to option source (demo feedback round 2, C1 / § 6.1.4).
+    /// </summary>
+    Task<IEnumerable<EmployeePositionDto>> GetByOrganizationUnitAsync(Guid organizationUnitId, bool includeAncestors = false);
     Task<IEnumerable<EmployeePositionDto>> GetByDepartmentAsync(Guid departmentId);
     Task<EmployeePositionDto?> GetByCodeAsync(string code);
     Task<EmployeePositionDto> CreatePositionAsync(CreateEmployeePositionDto createDto);

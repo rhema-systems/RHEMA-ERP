@@ -31,7 +31,7 @@ namespace ErpSystem.Data.Migrations
     /// <b>No deduction lives here.</b> <c>RecoveryMethod</c>, <c>InstalmentCount</c> and
     /// <c>RecoveryStartDate</c> are a declaration payroll consumes; the recoveries table records
     /// what somebody else collected. No GL posting — registered in
-    /// <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> (16.1–16.5) for the sweep after the module.
+    /// <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> (16.1–16.5) for the sweep after the module.
     /// </para>
     /// <para>
     /// The scaffold was correct as generated — two <c>CreateTable</c> calls, nine indexes and nine

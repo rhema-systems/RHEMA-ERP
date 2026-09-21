@@ -151,6 +151,7 @@ export default function DisciplineCaseDetailPage() {
   // The decision segment of the case runs on the generic workflow engine. The screen never sets a
   // status itself — it refetches and lets the adapter decide, which is the whole contract.
   const workflow = useWorkflowRecord({
+    recallPrompt: 'reason',
     entityType: 'StaffDisciplinaryAction',
     entityId: id,
     entityLabel: 'Disciplinary Decision',

@@ -1,7 +1,8 @@
-using ErpSystem.Core.DTOs.HR;
+﻿using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR.Recruitment;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -16,10 +17,16 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
 {
     private readonly INumberSequenceService _sequences;
 
-    public JobCandidateRepository(ApplicationDbContext context, INumberSequenceService sequences)
+    private readonly ICurrentUserProvider _currentUser;
+
+    public JobCandidateRepository(
+        ApplicationDbContext context,
+        INumberSequenceService sequences,
+        ICurrentUserProvider currentUser)
         : base(context)
     {
         _sequences = sequences;
+        _currentUser = currentUser;
     }
 
     public async Task<JobCandidate?> GetByCandidateNumberAsync(string candidateNumber)
@@ -42,11 +49,15 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
         // replace-set save deleted an interest and the response served it straight back.
         return await _dbSet
             .Include(c => c.Country)
-            .Include(c => c.Qualifications.Where(q => !q.IsDeleted))
+            .Include(c => c.NationalIdTypeRef)
+            // Round 3, lane C2: the catalogue rows behind a qualification and a skill ride along —
+            // no lazy loading here, so without these the mappers' `Qualification?.Name` and
+            // `Skill?.Name` were always null on this read.
+            .Include(c => c.Qualifications.Where(q => !q.IsDeleted)).ThenInclude(q => q.Qualification)
             .Include(c => c.WorkHistories.Where(w => !w.IsDeleted))
             .Include(c => c.Referees.Where(r => !r.IsDeleted))
-            .Include(c => c.Skills.Where(s => !s.IsDeleted))
-            .Include(c => c.Languages.Where(l => !l.IsDeleted))
+            .Include(c => c.Skills.Where(s => !s.IsDeleted)).ThenInclude(s => s.Skill)
+            .Include(c => c.Languages.Where(l => !l.IsDeleted)).ThenInclude(l => l.Language)
             .Include(c => c.Interests.Where(i => !i.IsDeleted))
             .Include(c => c.Documents.Where(d => !d.IsDeleted))
             .Include(c => c.Notes.Where(n => !n.IsDeleted))
@@ -76,18 +87,28 @@ public class JobCandidateRepository : GenericRepository<JobCandidate>, IJobCandi
             .ToListAsync();
     }
 
-    public async Task<string> GetNextCandidateNumberAsync()
-    {
-        // Not year-scoped — the printed number carries no year.
-        var next = await _sequences.NextAsync("CAND");
-        return $"CAND-{next:D6}";
-    }
+    /// <summary>
+    /// Not year-scoped — the printed number carries no year. Checked against the table before it is
+    /// used, so a counter left behind by a seeder or a data load repairs itself instead of failing
+    /// the create on <c>IX_JobCandidate_Tenant_Number</c>. See <see cref="NumberSequenceExtensions"/>.
+    /// </summary>
+    public Task<string> GetNextCandidateNumberAsync()
+        => GetNextCandidateNumberAsync(_currentUser.TenantId);
 
-    public async Task<string> GetNextCandidateNumberAsync(Guid tenantId)
-    {
-        var next = await _sequences.NextAsync("CAND", tenantId);
-        return $"CAND-{next:D6}";
-    }
+    public Task<string> GetNextCandidateNumberAsync(Guid tenantId)
+        // Soft-deleted rows still occupy the unique index, so the probe must see them too.
+        => _sequences.NextUnusedAsync(
+            "CAND",
+            tenantId,
+            year: null,
+            format: value => $"CAND-{value:D6}",
+            isTaken: number => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(c => c.TenantId == tenantId && c.CandidateNumber == number),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(c => c.TenantId == tenantId)
+                    .Select(c => c.CandidateNumber)
+                    .ToListAsync()));
 
     // ── Talent pool — filtered queries ────────────────────────────────────────
 
@@ -214,12 +235,36 @@ public class CandidateTalentSegmentRepository
 {
     public CandidateTalentSegmentRepository(ApplicationDbContext context) : base(context) { }
 
+    // Round 3, lane V. Every segment read goes through this graph: without the Memberships
+    // include the mapper's MemberCount is 0 on every row (it shipped that way), and without the
+    // other three the owner, target position and job family come back as bare ids.
+    private IQueryable<CandidateTalentSegment> WithSegmentGraph() => _dbSet
+        .Include(s => s.Memberships.Where(m => !m.IsDeleted))
+        .Include(s => s.OwnerEmployee)
+        .Include(s => s.TargetPosition)
+        .Include(s => s.JobFamily);
+
+    public async Task<IEnumerable<CandidateTalentSegment>> GetForTenantAsync(Guid tenantId, bool activeOnly)
+    {
+        var query = WithSegmentGraph().Where(s => s.TenantId == tenantId && !s.IsDeleted);
+        if (activeOnly) query = query.Where(s => s.IsActive);
+        return await query.OrderBy(s => s.Name).ToListAsync();
+    }
+
+    public async Task<CandidateTalentSegment?> GetDetailAsync(Guid segmentId)
+    {
+        return await WithSegmentGraph().FirstOrDefaultAsync(s => s.Id == segmentId && !s.IsDeleted);
+    }
+
+    public async Task<int> CountLiveMembersAsync(Guid segmentId)
+    {
+        return await _context.Set<CandidateSegmentMembership>()
+            .CountAsync(m => m.SegmentId == segmentId && !m.IsDeleted);
+    }
+
     public async Task<IEnumerable<CandidateTalentSegment>> GetActiveByTenantAsync(Guid tenantId)
     {
-        return await _dbSet
-            .Where(s => s.TenantId == tenantId && s.IsActive && !s.IsDeleted)
-            .OrderBy(s => s.Name)
-            .ToListAsync();
+        return await GetForTenantAsync(tenantId, activeOnly: true);
     }
 
     public async Task<CandidateTalentSegment?> GetWithMembersAsync(Guid segmentId)

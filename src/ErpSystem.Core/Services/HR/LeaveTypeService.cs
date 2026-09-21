@@ -140,10 +140,19 @@ public class LeaveTypeService : ILeaveTypeService
             CountWeekendsAsLeave = entity.CountWeekendsAsLeave,
             CountHolidaysAsLeave = entity.CountHolidaysAsLeave,
             AllowCashConversion = entity.AllowCashConversion,
+            RequiresMedicalCertificate = entity.RequiresMedicalCertificate,
+            SelfCertificationDays = entity.SelfCertificationDays,
+            MedicalBoardThresholdDays = entity.MedicalBoardThresholdDays,
             RequiresReliever = entity.RequiresReliever,
             MinServiceMonthsToAccess = entity.MinServiceMonthsToAccess,
             CarryOverExpiryMonths = entity.CarryOverExpiryMonths,
             ForfeitUnusedAfterMonths = entity.ForfeitUnusedAfterMonths,
+            // ⚠ This projection is hand-written and is the THIRD place a LeaveType field has to be
+            // listed (entity, mapper, here). Harness finding 13 was exactly this shape: the column,
+            // the entity, the enum, the DTO and the parameter were all correct and the MAPPER was
+            // missed, so the value read back as its default however it was set.
+            YearEndBasis = entity.YearEndBasis,
+            ProRateFirstYearEntitlement = entity.ProRateFirstYearEntitlement,
             MandatoryAnnualLeave = entity.MandatoryAnnualLeave,
             EncashmentRateBasis = entity.EncashmentRateBasis,
             EncashmentRatePerDay = entity.EncashmentRatePerDay,
@@ -213,10 +222,18 @@ public class LeaveTypeService : ILeaveTypeService
         entity.CountWeekendsAsLeave = dto.CountWeekendsAsLeave;
         entity.CountHolidaysAsLeave = dto.CountHolidaysAsLeave;
         entity.AllowCashConversion = dto.AllowCashConversion;
+        entity.RequiresMedicalCertificate = dto.RequiresMedicalCertificate;
+        entity.SelfCertificationDays = dto.SelfCertificationDays;
+        entity.MedicalBoardThresholdDays = dto.MedicalBoardThresholdDays;
         entity.RequiresReliever = dto.RequiresReliever;
         entity.MinServiceMonthsToAccess = dto.MinServiceMonthsToAccess;
         entity.CarryOverExpiryMonths = dto.CarryOverExpiryMonths;
         entity.ForfeitUnusedAfterMonths = dto.ForfeitUnusedAfterMonths;
+        entity.YearEndBasis = dto.YearEndBasis;
+        // ⚠ The other door: pro-rating switched on for a type that already accrues incrementally.
+        await RefuseProrationWithIncrementalAccrualAsync(
+            id, tenantId, dto.ProRateFirstYearEntitlement);
+        entity.ProRateFirstYearEntitlement = dto.ProRateFirstYearEntitlement;
         entity.MandatoryAnnualLeave = dto.MandatoryAnnualLeave;
         entity.EncashmentRateBasis = dto.EncashmentRateBasis;
         entity.EncashmentRatePerDay = dto.EncashmentRatePerDay;
@@ -229,28 +246,65 @@ public class LeaveTypeService : ILeaveTypeService
         return entity.ToDto();
     }
 
-    /// <summary>Replaces the leave type's allowance-component links with the supplied set.</summary>
-    private async Task SyncAllowanceLinksAsync(Guid leaveTypeId, List<Guid> componentIds)
+    /// <summary>
+    /// Replaces the leave type's allowance-component links with the supplied set.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ <b><paramref name="componentIds"/> of <c>null</c> means DO NOTHING</b>, and an empty list
+    /// means remove them all. The two are different requests and used to be indistinguishable
+    /// (finding L-13): an update that simply did not mention allowances deleted every one of them,
+    /// silently changing what a day of encashed leave is worth.
+    /// </remarks>
+    private async Task SyncAllowanceLinksAsync(Guid leaveTypeId, List<Guid>? componentIds)
     {
+        // ⚠ Not `?? new()`. That is precisely the bug: it turns "unmentioned" into "clear them".
+        if (componentIds is null) return;
+
         var tenantId = GetTenantId();
+
+        // ⚠ INCLUDING DELETED, and that is load-bearing. The unique index
+        // IX_LeaveTypeAllowance_Tenant_LeaveType_Component is NOT filtered on IsDeleted, while
+        // GetQueryable() hides soft-deleted rows — so a link removed earlier still holds its slot
+        // invisibly, and re-adding the same allowance threw a 500 on the index. Once an allowance
+        // was taken off a leave type it could never be put back, which quietly caps what a day of
+        // encashed leave can be worth. Found by slice 9 while proving L-13.
         var existing = await _leaveTypeAllowanceRepository
-            .GetQueryable()
-            .Where(la => la.TenantId == tenantId && la.LeaveTypeId == leaveTypeId)
+            .GetQueryableIncludingDeleted(la => la.TenantId == tenantId && la.LeaveTypeId == leaveTypeId)
             .ToListAsync();
 
-        var desired = (componentIds ?? new List<Guid>()).Distinct().ToList();
+        var desired = componentIds.Distinct().ToList();
 
-        foreach (var stale in existing.Where(e => !desired.Contains(e.PayComponentId)))
-            await _leaveTypeAllowanceRepository.DeleteAsync(stale);
+        foreach (var stale in existing.Where(e => !e.IsDeleted && !desired.Contains(e.PayComponentId)))
+        {
+            // ⚠ HARD delete, for the reason above: a soft delete leaves an invisible row holding
+            // the index slot. These are join rows carrying no human input — there is nothing to
+            // preserve, and the same reasoning governs LeaveAttendancePostingService's reversal.
+            await _leaveTypeAllowanceRepository.HardDeleteAsync(stale);
+        }
 
-        var existingIds = existing.Select(e => e.PayComponentId).ToHashSet();
-        foreach (var add in desired.Where(d => !existingIds.Contains(d)))
+        var liveIds = existing.Where(e => !e.IsDeleted).Select(e => e.PayComponentId).ToHashSet();
+
+        foreach (var add in desired.Where(d => !liveIds.Contains(d)))
+        {
+            // A row soft-deleted by the OLD code still occupies the slot. Revive it rather than
+            // inserting a duplicate that the index would refuse.
+            var buried = existing.FirstOrDefault(e => e.IsDeleted && e.PayComponentId == add);
+            if (buried is not null)
+            {
+                buried.IsDeleted = false;
+                buried.DeletedAt = null;
+                buried.DeletedBy = null;
+                await _leaveTypeAllowanceRepository.UpdateAsync(buried);
+                continue;
+            }
+
             await _leaveTypeAllowanceRepository.AddAsync(new LeaveTypeAllowance
             {
                 TenantId = tenantId,
                 LeaveTypeId = leaveTypeId,
                 PayComponentId = add
             });
+        }
     }
 
     public async Task DeactivateLeaveTypeAsync(Guid id)
@@ -265,16 +319,25 @@ public class LeaveTypeService : ILeaveTypeService
 
     // ─── Sub Types ───────────────────────────────────────────────────────────
 
-    public async Task<IEnumerable<LeaveSubTypeDto>> GetSubTypesAsync(Guid leaveTypeId)
+    /// <summary>
+    /// Sub-types of a leave type. <paramref name="activeOnly"/> defaults to false so the rulebook
+    /// tab keeps showing retired rows (they are what the Status column is for); the request forms
+    /// pass true, because <c>LeaveSubType.IsActive</c> was honoured by nothing and a retired
+    /// sub-type stayed pickable for ever (closure plan L-34).
+    /// </summary>
+    public async Task<IEnumerable<LeaveSubTypeDto>> GetSubTypesAsync(Guid leaveTypeId, bool activeOnly = false)
     {
         await GetOwnedLeaveTypeAsync(leaveTypeId);
         var tenantId = GetTenantId();
-        var items = await _leaveSubTypeRepository
+        var query = _leaveSubTypeRepository
             .GetQueryable()
             .Include(st => st.LeaveType)
-            .Where(st => st.TenantId == tenantId && st.LeaveTypeId == leaveTypeId)
-            .OrderBy(st => st.SubTypeName)
-            .ToListAsync();
+            .Where(st => st.TenantId == tenantId && st.LeaveTypeId == leaveTypeId);
+
+        if (activeOnly)
+            query = query.Where(st => st.IsActive);
+
+        var items = await query.OrderBy(st => st.SubTypeName).ToListAsync();
         return items.ToDtoList();
     }
 
@@ -437,10 +500,115 @@ public class LeaveTypeService : ILeaveTypeService
         return items.ToDtoList();
     }
 
+    /// <summary>
+    /// ⚠ <b>A leave type may have ONE active accrual policy, and this is what enforces it.</b>
+    /// </summary>
+    /// <remarks>
+    /// <para>Entitlement plan A2. <c>LeaveEntitlementService</c> selects the policy with
+    /// <c>FirstOrDefault</c> over the active ones — so a second policy did not produce an error, it
+    /// produced a <b>non-deterministic accrual figure</b> that could differ between two reads of the
+    /// same balance.</para>
+    ///
+    /// <para>⚠ <b>The natural thing an administrator wants here is a different rate per staff
+    /// level</b>, and the natural thing to try is a second policy. Until that is built (plan B4) the
+    /// honest answer is a refusal that says so, rather than silently accepting a row that makes the
+    /// answer depend on row order.</para>
+    /// </remarks>
+    private async Task RefuseSecondActiveAccrualPolicyAsync(
+        Guid leaveTypeId, Guid tenantId, Guid? exceptId = null)
+    {
+        var existing = await _accrualPolicyRepository
+            .GetQueryable()
+            .Where(a => a.TenantId == tenantId
+                     && a.LeaveTypeId == leaveTypeId
+                     && a.IsActive
+                     && (exceptId == null || a.Id != exceptId))
+            .Select(a => a.Id)
+            .FirstOrDefaultAsync();
+
+        if (existing != Guid.Empty)
+            throw new InvalidOperationException(
+                "This leave type already has an active accrual policy, and a leave type may only have one. "
+                + "Edit the existing policy, or remove it first. "
+                + "(An accrual rate that varies by staff level is not supported yet — a second policy "
+                + "would make the accrued figure depend on which row the database returned first.)");
+    }
+
+    /// <summary>
+    /// ⚠ <b><c>PerPayPeriod</c> is retired</b> (entitlement plan B5, decision D-6).
+    /// </summary>
+    /// <remarks>
+    /// <para>The accrual engine maps it to <b>twelve periods a year</b> and counts elapsed
+    /// <i>months</i> for it — so on a fortnightly or weekly payroll it is simply wrong, while its
+    /// name is an active claim that it is not. It was a synonym for <c>Monthly</c> wearing a more
+    /// specific label.</para>
+    ///
+    /// <para><b>Retired rather than implemented, on purpose.</b> How often a tenant pays is
+    /// <b>payroll's fact</b>, and modelling it here would create a second rulebook for something
+    /// another module owns — the shape <c>HR-PAYROLL-BOUNDARY.md</c> exists to prevent. If a client
+    /// needs real pay-period accrual, it is a cross-module contract, not an HR setting.</para>
+    ///
+    /// <para>⚠ <b>The enum value stays.</b> Rows already carrying it still read and still accrue
+    /// exactly as they did; what is refused is choosing it anew. Deleting the value would break
+    /// stored data to tidy a picker.</para>
+    /// </remarks>
+    private static void RefusePerPayPeriod(AccrualFrequency frequency)
+    {
+        if (frequency == AccrualFrequency.PerPayPeriod)
+            throw new InvalidOperationException(
+                "Accrual per pay period is not available. It was only ever a synonym for Monthly — the "
+                + "engine credits one period a month whatever the payroll cycle is — so choose Monthly "
+                + "if that is what you mean. Accruing on a real fortnightly or weekly cycle needs the "
+                + "pay calendar, which payroll owns.");
+    }
+
+    /// <summary>
+    /// ⚠ <b>First-year pro-rating and incremental accrual cannot both be on</b> (entitlement plan
+    /// B3). Refused at both doors, because either one can be switched on second.
+    /// </summary>
+    /// <remarks>
+    /// <para>Incremental accrual already limits a joiner to the part of the year they were present
+    /// for — it opens the accrual window at their hire date. Scaling the entitlement as well deducts
+    /// for the same months a second time, and because the derived per-period rate is
+    /// <i>entitlement ÷ periods</i>, a third. A joiner on 1 October entitled to 12 days would end
+    /// the year with <b>0.75</b> days instead of 3.</para>
+    ///
+    /// <para><b>Refused rather than silently ignored</b>, which is this plan's whole premise: a
+    /// setting that saves and does not bind is worse than one that was never offered.</para>
+    /// </remarks>
+    private async Task RefuseProrationWithIncrementalAccrualAsync(
+        Guid leaveTypeId, Guid tenantId, bool proRateFirstYear,
+        AccrualMode? incomingMode = null, Guid? ignorePolicyId = null)
+    {
+        if (!proRateFirstYear) return;
+
+        var hasIncremental = incomingMode == AccrualMode.AccrueIncrementally
+            || await _accrualPolicyRepository
+                .GetQueryable()
+                .AnyAsync(a => a.TenantId == tenantId
+                            && a.LeaveTypeId == leaveTypeId
+                            && a.IsActive
+                            && a.Frequency != AccrualFrequency.None
+                            && a.Mode == AccrualMode.AccrueIncrementally
+                            && (ignorePolicyId == null || a.Id != ignorePolicyId));
+
+        if (hasIncremental)
+            throw new InvalidOperationException(
+                "First-year pro-rating cannot be combined with incremental accrual. Accrual already "
+                + "limits a joiner to the part of the year they were here for, so scaling the "
+                + "entitlement as well would deduct for the same months twice over. Use one or the "
+                + "other: pro-rating for leave that is granted, accrual for leave that is earned.");
+    }
+
     public async Task<LeaveAccrualPolicyDto> CreateAccrualPolicyAsync(CreateLeaveAccrualPolicyDto dto)
     {
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = GetTenantId();
+        RefusePerPayPeriod(dto.Frequency);
+        await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId);
+        var owner = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        await RefuseProrationWithIncrementalAccrualAsync(
+            dto.LeaveTypeId, tenantId, owner.ProRateFirstYearEntitlement, dto.Mode);
         var entity = dto.ToEntity();
         entity.TenantId = tenantId;
         await _accrualPolicyRepository.AddAsync(entity);
@@ -455,6 +623,19 @@ public class LeaveTypeService : ILeaveTypeService
         var entity = await GetOwnedAccrualPolicyAsync(id);
         await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
         var tenantId = entity.TenantId;
+
+        // ⚠ Only when the edit CHANGES it: a row already carrying PerPayPeriod must stay editable,
+        // or retiring the option would strand the policies that have it — which is the opposite of
+        // what "the enum value stays" is for.
+        if (dto.Frequency != entity.Frequency) RefusePerPayPeriod(dto.Frequency);
+
+        // ⚠ The payload carries a leave type, so an edit can MOVE a policy onto a type that already
+        // has one. Same rule as create, excluding this row from its own check.
+        await RefuseSecondActiveAccrualPolicyAsync(dto.LeaveTypeId, tenantId, id);
+
+        var target = await GetOwnedLeaveTypeAsync(dto.LeaveTypeId);
+        await RefuseProrationWithIncrementalAccrualAsync(
+            dto.LeaveTypeId, tenantId, target.ProRateFirstYearEntitlement, dto.Mode, id);
 
         entity.LeaveTypeId = dto.LeaveTypeId;
         entity.Frequency = dto.Frequency;

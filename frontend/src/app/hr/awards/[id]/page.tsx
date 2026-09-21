@@ -12,6 +12,7 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { PageHeader } from '@/components/hr/common/PageHeader';
+import { FinancePostingCard } from '@/components/hr/common/FinancePostingCard';
 import { awardsService } from '@/services/hr/awards.service';
 import { PerformanceAttachmentsPanel } from '@/components/hr/performance/PerformanceAttachmentsPanel';
 
@@ -260,6 +261,9 @@ export default function AwardDetailPage() {
           )}
         </CardContent>
       </Card>
+
+      {/* What Finance holds for this award: recognition on conferral, settlement on payment. */}
+      <FinancePostingCard sourceDocumentId={id} invalidateKeys={[['award', id]]} />
 
       {/* ⚠ Ledger D-39. The award's own files — the certificate, the photograph taken at the
           presentation — had no upload surface at all, and the endpoint behind this took a

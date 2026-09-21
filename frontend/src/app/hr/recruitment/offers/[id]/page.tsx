@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, HandCoins, Loader2, Pencil, Send, ShieldCheck, Split, Trash2, UserCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -37,6 +37,7 @@ import { PreEmploymentChecksPanel } from '@/components/hr/recruitment/PreEmploym
 import { WorkflowApprovalActions } from '@/components/workflow/WorkflowApprovalActions';
 import { WorkflowTabContent, WorkflowTabTrigger } from '@/components/workflow/WorkflowRecordTab';
 import { useWorkflowRecord } from '@/hooks/useWorkflowRecord';
+import { useAuth } from '@/hooks/use-auth';
 import { useToast } from '@/hooks/use-toast';
 import { formatDate, formatDateTime, formatMoney, humanizeEnum } from '@/lib/hr/attendance-format';
 import { jobHireService, jobOfferService } from '@/services/hr/offers.service';
@@ -64,11 +65,17 @@ function InfoCard({ title, children }: { title: string; children: React.ReactNod
 
 type DialogAction = 'issue' | 'recordResponse' | 'acceptConditionally' | 'revoke' | 'revise' | 'delete';
 
+/** Tabs `?tab=` may select. Anything else falls back to Overview rather than showing nothing. */
+const ALLOWED_TABS = ['overview', 'benefits', 'checks', 'letter', 'notes'];
+
 export default function JobOfferDetailPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
+  const requestedTab = searchParams?.get('tab') ?? 'overview';
   const id = (params?.id as string) ?? '';
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const { toast } = useToast();
 
   const [action, setAction] = useState<DialogAction | null>(null);
@@ -119,8 +126,18 @@ export default function JobOfferDetailPage() {
 
   /**
    * Submit, approve, reject and recall come from the generic engine, same as every other
-   * workflow-driven HR record. ⚠ Inoperable until a `JobOffer` workflow definition is published and
-   * entity-types are re-seeded — the actions surface the engine's own error until then.
+   * workflow-driven HR record.
+   *
+   * ⚠ **This comment used to say "Inoperable until a `JobOffer` workflow definition is published",
+   * and that was exactly backwards** (G-10.1, corrected 2026-09-15). With no definition published
+   * the engine returned `Approved`, and `JobOfferWorkflowStatusAdapter` mapped that to
+   * `OfferStatus.Approved` *and stamped `ApprovedDate`* — so Submit took an offer Draft → Approved
+   * in one step and immediately unlocked **Issue to candidate**. That is the step which authorises
+   * sending salary, start date, notice and probation terms to someone outside the organisation.
+   *
+   * What happens now, with no definition published: Submit lands the offer at **PendingApproval**
+   * — which nothing could previously produce, so `canApproveReject` below was unreachable —
+   * and Approve requires a recruitment administrator who did not prepare the offer.
    */
   const workflow = useWorkflowRecord({
     entityType: 'JobOffer',
@@ -130,11 +147,20 @@ export default function JobOfferDetailPage() {
     status: offer?.offerStatus ?? 'Draft',
     canSubmit: offer?.offerStatus === 'Draft' || offer?.offerStatus === 'Rejected',
     canApproveReject: offer?.offerStatus === 'PendingApproval',
+    // G-10.4: the preparer taking their own offer back before anybody has ruled. The second
+    // instance of the identical gap — the endpoint, the adapter and the client method all existed,
+    // and nothing called any of them. Only reachable now that Submit lands at PendingApproval
+    // instead of Approved (G-10.1): an approved offer is past recalling.
+    canRecall:
+      offer?.offerStatus === 'PendingApproval' &&
+      !!user?.employeeId &&
+      offer?.preparedById === user.employeeId,
     enabled: !!offer,
     commands: {
       submit: () => jobOfferService.submit(id),
       approve: (ctx) => jobOfferService.approve(id, ctx.comments || null),
       reject: (ctx) => jobOfferService.reject(id, ctx.comments || 'Rejected'),
+      recall: () => jobOfferService.recall(id),
       afterAction: async () => {
         await refresh();
       },
@@ -333,7 +359,10 @@ export default function JobOfferDetailPage() {
         }
       />
 
-      <Tabs defaultValue="overview">
+      {/* G-11.4 (2026-09-15): `?tab=checks` deep-links here from the clearance queue, which used to
+          land on Overview and leave the user to find the tab themselves — three clicks to reach the
+          thing the queue had just pointed at. The vacancy page already took a `tab` param this way. */}
+      <Tabs defaultValue={ALLOWED_TABS.includes(requestedTab) ? requestedTab : 'overview'}>
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="benefits">Benefits</TabsTrigger>
@@ -352,12 +381,19 @@ export default function JobOfferDetailPage() {
             <InfoRow label="Employment type" value={humanizeEnum(offer.employmentType)} />
             <InfoRow label="Work mode" value={humanizeEnum(offer.workMode)} />
             <InfoRow label="Location" value={offer.locationName} />
+            {/* G-10.5 (2026-09-15): say when the band check did not run. `EnsureSalaryWithinBand`
+                returns early when SalaryGradeMax <= 0 or the band is inverted — correct defensive
+                behaviour — but the band comes from the position's salary grade, and a position
+                with no grade has no band. For those posts an offer can carry ANY base salary, with
+                nothing on screen saying the guardrail was absent. Given § 3.2's finding that most
+                positions are not even established, it is likely most are ungraded too, so silence
+                here reads as "checked and fine" on the majority of offers. */}
             <InfoRow
               label="Grade band"
               value={
-                offer.salaryGradeMin != null || offer.salaryGradeMax != null
-                  ? `${offer.salaryGradeMin != null ? formatMoney(offer.salaryGradeMin, offer.currencyCode ?? 'GHS') : '—'} to ${offer.salaryGradeMax != null ? formatMoney(offer.salaryGradeMax, offer.currencyCode ?? 'GHS') : '—'}`
-                  : '—'
+                (offer.salaryGradeMax ?? 0) > 0
+                  ? `${offer.salaryGradeMin != null ? formatMoney(offer.salaryGradeMin, offer.currencyCode ?? 'GHS') : '—'} to ${formatMoney(offer.salaryGradeMax!, offer.currencyCode ?? 'GHS')}`
+                  : 'No band on this position — the salary was not checked against one'
               }
             />
           </InfoCard>
@@ -442,7 +478,12 @@ export default function JobOfferDetailPage() {
         </TabsContent>
 
         <TabsContent value="checks" className="pt-4">
-          <PreEmploymentChecksPanel offerId={id} offerIsConditional={offer.isConditional} canManage />
+          <PreEmploymentChecksPanel
+            offerId={id}
+            offerIsConditional={offer.isConditional}
+            canManage
+            candidateId={offer.candidateId}
+          />
         </TabsContent>
 
         <TabsContent value="letter" className="pt-4">

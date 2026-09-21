@@ -1,4 +1,4 @@
-using ErpSystem.Core.Entities;
+﻿using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.DocumentManagement;
 using ErpSystem.Core.Entities.Finance;
 using ErpSystem.Core.Entities.Finance.FixedAssets;
@@ -520,9 +520,58 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
     public DbSet<EmployeePositionBenefit> EmployeePositionBenefits { get; set; }
     public DbSet<Skill> Skills { get; set; }
     public DbSet<PositionSkillRequirement> PositionSkillRequirements { get; set; }
+
+    // Named sets — round 2, lane C3 (plan § 6.4). Three masters, three member tables, three
+    // position attachments; one shape each.
+    public DbSet<BenefitGroup> BenefitGroups { get; set; }
+    public DbSet<BenefitGroupMember> BenefitGroupMembers { get; set; }
+    public DbSet<SkillSet> SkillSets { get; set; }
+    public DbSet<SkillSetMember> SkillSetMembers { get; set; }
+    public DbSet<CertificationSet> CertificationSets { get; set; }
+    public DbSet<CertificationSetMember> CertificationSetMembers { get; set; }
+    public DbSet<EmployeePositionBenefitGroup> EmployeePositionBenefitGroups { get; set; }
+    public DbSet<PositionSkillSet> PositionSkillSets { get; set; }
+    public DbSet<PositionCertificationSet> PositionCertificationSets { get; set; }
     public DbSet<StaffLevel> StaffLevels { get; set; }
     public DbSet<WorkStation> WorkStations { get; set; }
     public DbSet<EmployeeContractType> EmployeeContractTypes { get; set; }
+
+    /// <summary>How one person is tied to another — the catalogue four free-text columns
+    /// used to spell out separately (round 2, lane D2).</summary>
+    public DbSet<RelationshipType> RelationshipTypes { get; set; }
+    /// <summary>Round 3, lane P2: the disability catalogue the employee and dependant forms pick from.</summary>
+    public DbSet<DisabilityType> DisabilityTypes { get; set; }
+
+    // ── Teams and committees: the activity sub-module (round 2, lane F1) ────────────────────
+    //
+    // ⚠ THESE DbSets ARE LOAD-BEARING, not decoration. An entity that EF first discovers inside
+    // `ConfigureHrModule` is discovered AFTER `ConfigureGlobalTenantRelationships` has run, so its
+    // Tenant foreign key is minted by convention afterwards and keeps the convention's CASCADE.
+    // For a table that also cascades from a parent — a checklist item from its task — that is two
+    // cascade paths to Tenants, and SQL Server refuses the constraint outright:
+    //
+    //     Introducing FOREIGN KEY constraint 'FK_TeamTaskChecklistItems_Tenants_TenantId' ...
+    //     may cause cycles or multiple cascade paths.
+    //
+    // A DbSet makes EF discover the entity before OnModelCreating's body runs, so the global pass
+    // catches it and sets Restrict. The same omission also made the first scaffold name the tables
+    // in the SINGULAR, after the entity rather than the set. Both symptoms, one cause.
+    public DbSet<TeamTermsOfReference> TeamTermsOfReferences { get; set; }
+    public DbSet<TeamObjective> TeamObjectives { get; set; }
+    public DbSet<TeamTask> TeamTasks { get; set; }
+    public DbSet<TeamTaskChecklistItem> TeamTaskChecklistItems { get; set; }
+    public DbSet<TeamTaskAttachment> TeamTaskAttachments { get; set; }
+
+    // Slice F2 — the minute book, the reviews, and the sweep's own record. Same reason as above:
+    // without a DbSet these are discovered after ConfigureGlobalTenantRelationships and their
+    // tenant FK keeps CASCADE, which SQL Server rejects wherever a parent already cascades.
+    public DbSet<TeamMeeting> TeamMeetings { get; set; }
+    public DbSet<TeamMeetingAttendee> TeamMeetingAttendees { get; set; }
+    public DbSet<TeamMeetingDecision> TeamMeetingDecisions { get; set; }
+    public DbSet<TeamReview> TeamReviews { get; set; }
+    public DbSet<TeamReviewLine> TeamReviewLines { get; set; }
+    public DbSet<TeamReminderRun> TeamReminderRuns { get; set; }
+    public DbSet<TeamReminderDispatchLog> TeamReminderDispatchLogs { get; set; }
 
     public DbSet<OrganizationStructure> OrganizationStructures { get; set; }
     public DbSet<OrganizationLevel> OrganizationLevels { get; set; }
@@ -635,6 +684,14 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
 
     /// <summary>Catalogued bodies that certify a skill, replacing free-text certifier names.</summary>
     public DbSet<CertifyingBody> CertifyingBodies { get; set; }
+
+    // Demo feedback round 2, lane C2 — the certification model.
+    public DbSet<Certification> Certifications { get; set; }
+    public DbSet<SkillCertification> SkillCertifications { get; set; }
+    public DbSet<PositionCertificationRequirement> PositionCertificationRequirements { get; set; }
+    public DbSet<EmployeeCertification> EmployeeCertifications { get; set; }
+    public DbSet<CertificationExpiryReminderRun> CertificationExpiryReminderRuns { get; set; }
+    public DbSet<CertificationExpiryDispatchLog> CertificationExpiryDispatchLogs { get; set; }
 
     /// <summary>Per-register staff-number formats. One row per employee register per tenant.</summary>
     public DbSet<StaffNumberFormat> StaffNumberFormats { get; set; }

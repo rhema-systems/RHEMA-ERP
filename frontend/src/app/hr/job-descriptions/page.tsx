@@ -2,12 +2,14 @@
 
 import { useMemo, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useQuery } from '@tanstack/react-query';
 import {
   AlertTriangle,
   ClipboardList,
   FileText,
   Loader2,
+  Pencil,
   Plus,
   Search,
   Users,
@@ -33,8 +35,14 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import { HR_ROLES } from '@/components/hr/common/PermissionGate';
+import { useAuth } from '@/hooks/use-auth';
 import { jobArchitectureService } from '@/services/hr/job-architecture.service';
-import type { JobDescription, JobDescriptionStatus } from '@/types/hr/job-architecture';
+import {
+  AUTHORABLE_JOB_DESCRIPTION_STATUSES,
+  type JobDescription,
+  type JobDescriptionStatus,
+} from '@/types/hr/job-architecture';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 
@@ -60,12 +68,27 @@ const STATUS_LABEL: Record<JobDescriptionStatus, string> = {
 };
 
 export default function JobDescriptionsPage() {
+  const router = useRouter();
+  const { hasAnyPermission, hasAnyRole } = useAuth();
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState<JobDescriptionStatus | 'all'>('all');
 
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ['job-descriptions', 'paged'],
-    queryFn: () => jobArchitectureService.getJobDescriptionsPaged({ pageNumber: 1, pageSize: 200 }),
+  // Same fallback the server keeps (HrPermissions.RoleGrants): permission OR role, so a tenant
+  // provisioned before the seeder ran is not locked out of its own register.
+  const canWrite =
+    hasAnyPermission(['HR.JobArchitecture.Write', 'HR.JobArchitecture.Admin']) || hasAnyRole(HR_ROLES);
+
+  /**
+   * ⚠ The search box filters what has been LOADED, not what exists. The register asks for one page
+   * and every filter below runs in the browser, so a tenant past this page size has records the
+   * search cannot reach and gives no sign of it — DEFAULT held 355 job descriptions in August. The
+   * count under the table is what makes that visible, and the button beside it is the way out.
+   */
+  const [pageSize, setPageSize] = useState(200);
+
+  const { data, isLoading, isError, isFetching } = useQuery({
+    queryKey: ['job-descriptions', 'paged', pageSize],
+    queryFn: () => jobArchitectureService.getJobDescriptionsPaged({ pageNumber: 1, pageSize }),
   });
 
   // Coverage sits on the register rather than a separate dashboard: the useful question about job
@@ -203,23 +226,36 @@ export default function JobDescriptionsPage() {
                   <TableHead className="text-right">Version</TableHead>
                   <TableHead>Effective</TableHead>
                   <TableHead>Status</TableHead>
+                  <TableHead className="w-0" />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {rows.map((jd: JobDescription) => {
                   const s = (jd.statusName ?? jd.status) as JobDescriptionStatus;
+                  const authorable = AUTHORABLE_JOB_DESCRIPTION_STATUSES.includes(s);
                   return (
-                    <TableRow key={jd.id} className="cursor-pointer">
+                    /*
+                      ⚠ The WHOLE row opens the record. It carried `cursor-pointer` from the day it
+                      was written while only two of its eight cells were links, so a click on the
+                      position, the family, the version or the status — most of the row — did
+                      nothing at all, and the cursor promised otherwise. The number stays a real
+                      anchor so the row can still be opened in a new tab.
+                    */
+                    <TableRow
+                      key={jd.id}
+                      className="cursor-pointer"
+                      onClick={() => router.push(`/hr/job-descriptions/${jd.id}`)}
+                    >
                       <TableCell className="font-mono text-xs">
-                        <Link href={`/hr/job-descriptions/${jd.id}`} className="hover:underline">
+                        <Link
+                          href={`/hr/job-descriptions/${jd.id}`}
+                          className="hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
                           {jd.jobDescriptionNumber}
                         </Link>
                       </TableCell>
-                      <TableCell className="font-medium">
-                        <Link href={`/hr/job-descriptions/${jd.id}`} className="hover:underline">
-                          {jd.jobTitle}
-                        </Link>
-                      </TableCell>
+                      <TableCell className="font-medium">{jd.jobTitle}</TableCell>
                       <TableCell>{jd.positionTitle || '—'}</TableCell>
                       <TableCell>{jd.jobFamilyName || '—'}</TableCell>
                       <TableCell>{jd.jobLevelName || '—'}</TableCell>
@@ -230,11 +266,48 @@ export default function JobDescriptionsPage() {
                           {STATUS_LABEL[s] ?? s}
                         </Badge>
                       </TableCell>
+                      <TableCell className="text-right">
+                        {/* Only where the API would accept the write: it refuses an update to an
+                            approved description outright. */}
+                        {canWrite && authorable && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              router.push(`/hr/job-descriptions/${jd.id}/edit`);
+                            }}
+                          >
+                            <Pencil className="mr-2 h-4 w-4" />
+                            Edit
+                          </Button>
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
               </TableBody>
             </Table>
+          )}
+
+          {data && data.items.length > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 text-sm text-muted-foreground">
+              <span>
+                Showing {rows.length} of {data.items.length} loaded
+                {data.totalCount > data.items.length ? ` · ${data.totalCount} in total` : ''}
+              </span>
+              {data.totalCount > data.items.length && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={isFetching}
+                  onClick={() => setPageSize((n) => n + 200)}
+                >
+                  {isFetching && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Load more
+                </Button>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

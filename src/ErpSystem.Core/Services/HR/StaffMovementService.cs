@@ -6,6 +6,7 @@ using ErpSystem.Core.Entities.HR.PromotionTransfer;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -28,6 +29,10 @@ public class StaffMovementService : IStaffMovementService
     private readonly IWorkflowStatusAdapterRegistry _workflowStatusAdapterRegistry;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IUnitOfWork _unitOfWork;
+
+    // Terms of employment are the employee service's to write — one door, one supersede rule.
+    private readonly IEmployeeService _employees;
+
     private readonly ILogger<StaffMovementService> _logger;
 
     /// <summary>
@@ -47,6 +52,7 @@ public class StaffMovementService : IStaffMovementService
         IWorkflowStatusAdapterRegistry workflowStatusAdapterRegistry,
         ICurrentUserProvider currentUserProvider,
         IUnitOfWork unitOfWork,
+        IEmployeeService employees,
         ILogger<StaffMovementService> logger)
     {
         _movementRepo   = movementRepo;
@@ -58,6 +64,7 @@ public class StaffMovementService : IStaffMovementService
         _workflowStatusAdapterRegistry = workflowStatusAdapterRegistry;
         _currentUserProvider = currentUserProvider;
         _unitOfWork     = unitOfWork;
+        _employees      = employees;
         _logger         = logger;
     }
 
@@ -463,16 +470,37 @@ public class StaffMovementService : IStaffMovementService
         var previousStatus = entity.Status;
         entity.RequestSubmissionDate = DateTime.UtcNow;
 
+        // ── Submitting must never approve (2026-09-15) ─────────────────────────────────────────
+        // WorkflowIntegrationService.SubmitAsync returns WorkflowOutcome.Approved whenever no
+        // active definition exists for the entity type, and StaffMovementWorkflowStatusAdapter
+        // maps Approved to Approved (or EmployeeAcceptancePending) and stamps AuthorizationDate.
+        // ⚠ Corrected 2026-09-16: this said "No StaffMovement definition is seeded anywhere in the
+        // solution". It IS seeded, published and active by EnsureHrWorkflowsSeededAsync, so on a
+        // seeded tenant this path never ran. Kept as defence in depth for an unseeded tenant — see
+        // HrWorkflowFallbackAuthority. Where it DID run, pressing Submit took
+        // a promotion or transfer Draft → Approved in one step with nobody having reviewed it —
+        // and the block below then wrote AuthorizedById = the submitter, recording the person who
+        // asked for the move as the person who authorised it. That is a false audit fact, not just
+        // a missing gate.
+        //
+        // Found through recruitment's G-4.1/G-10.1; see HrWorkflowFallbackAuthority for the full
+        // mechanism and why approve, reject and recall below needed changing at the same time.
+        var hasWorkflow = await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType);
+
         var workflowResult = await _workflowIntegrationService.SubmitAsync(EntityType, entity.Id);
         if (!workflowResult.ExecutionResult.Success)
             throw new InvalidOperationException(
                 workflowResult.ExecutionResult.Message ?? "Failed to start the movement approval workflow.");
 
+        var submitOutcome = hasWorkflow ? workflowResult.Outcome : WorkflowOutcome.Pending;
+
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplySubmitOutcome(entity, workflowResult.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         // A definition with one step approves on submission, so the authoriser has to be stamped
         // here too — the adapter only knows the ApplicationUser id, and this column is an Employee FK.
+        // Reachable only on the configured path now: with no definition the movement lands at
+        // Submitted, so there is no authoriser yet to stamp.
         if (entity.Status == StaffMovementStatus.Approved)
             entity.AuthorizedById = submittedByEmployeeId;
 
@@ -521,6 +549,18 @@ public class StaffMovementService : IStaffMovementService
 
         var submitted = await _movementRepo.GetPendingApprovalAsync(tenantId);
 
+        // With no definition published there is no instance, so CanUserApproveAsync answers false
+        // about every movement and this inbox would come back EMPTY for everyone - while movements
+        // sit in it, because that is where submitting now leaves them. Whoever holds the fallback
+        // authority sees them all; they are the people who can actually decide one.
+        if (!await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            return HrWorkflowFallbackAuthority.CanRuleWithoutWorkflow(
+                       _currentUserProvider, HrPermissions.ApproveMovements)
+                ? submitted.ToSummaryDtoList()
+                : Enumerable.Empty<StaffMovementSummaryDto>();
+        }
+
         var mine = new List<StaffMovement>();
         foreach (var movement in submitted)
         {
@@ -536,17 +576,40 @@ public class StaffMovementService : IStaffMovementService
         var entity = await GetOwnedMovementAsync(movementId);
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, movementId, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        // Segregation of duties. RequestedById and approvingEmployeeId are both Employee ids, so
+        // this compares like with like. It runs on both paths: a published definition's
+        // preventInitiatorApproval covers the same ground by ApplicationUser, and this one still
+        // catches a requester approving through a second login.
+        if (entity.RequestedById == approvingEmployeeId)
+            throw new InvalidOperationException("You cannot approve a movement that you requested yourself.");
 
         var previousStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, movementId, userId, "Approve", comments);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+        // Two paths — see HrWorkflowFallbackAuthority. With no definition published the engine has
+        // no instance to answer about: CanUserApproveAsync returns false and ProcessApprovalAsync
+        // has nothing to process, so a movement submitted on an unconfigured tenant would be
+        // unapprovable. Authority then falls to the movements administer tier.
+        WorkflowOutcome approvalOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, movementId, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(EntityType, movementId, userId, "Approve", comments);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the approval.");
+
+            approvalOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "approve a staff movement", HrPermissions.ApproveMovements);
+            approvalOutcome = WorkflowOutcome.Approved;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         // ⚠ EmployeeAcceptancePending counts as cleared, and leaving it out meant a movement that
         // requires employee acceptance NEVER recorded who authorised it. This condition read
@@ -582,9 +645,19 @@ public class StaffMovementService : IStaffMovementService
 
         var previousStatus = entity.Status;
 
-        var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, movementId, userId, reason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the movement.");
+        // Skipped when nothing is published: RecallWorkflowAsync answers "No active workflow found"
+        // without an instance. On the configured path the engine enforces requester-only; on the
+        // unconfigured one that rule has to be made here, against the Employee id the caller passed.
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            var workflowResult = await _workflowIntegrationService.RecallAsync(EntityType, movementId, userId, reason);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to recall the movement.");
+        }
+        else if (entity.RequestedById != recallingEmployeeId)
+        {
+            throw new InvalidOperationException("Only the person who requested a movement can recall it.");
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType).ApplyRecallOutcome(entity, userId, reason);
 
@@ -677,16 +750,32 @@ public class StaffMovementService : IStaffMovementService
         var previousStatus = entity.Status;
         var userId = RequireUserId();
 
-        if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, dto.MovementId, userId))
-            throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
+        // Same two paths as ApproveAsync. Note that the docstring above — "every rejection goes
+        // through the engine, so the instance is closed" — describes the configured path; with no
+        // definition there is no instance to close, and without this branch a submitted movement
+        // could be neither approved nor rejected nor recalled.
+        WorkflowOutcome rejectionOutcome;
+        if (await _workflowIntegrationService.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            if (!await _workflowIntegrationService.CanUserApproveAsync(EntityType, dto.MovementId, userId))
+                throw new UnauthorizedAccessException("You are not assigned as an approver for the current workflow step.");
 
-        var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
-            EntityType, dto.MovementId, userId, "Reject", dto.RejectionReason);
-        if (!workflowResult.ExecutionResult.Success)
-            throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+            var workflowResult = await _workflowIntegrationService.ProcessApprovalAsync(
+                EntityType, dto.MovementId, userId, "Reject", dto.RejectionReason);
+            if (!workflowResult.ExecutionResult.Success)
+                throw new InvalidOperationException(workflowResult.ExecutionResult.Message ?? "Failed to process the rejection.");
+
+            rejectionOutcome = workflowResult.Outcome;
+        }
+        else
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserProvider, "reject a staff movement", HrPermissions.ApproveMovements);
+            rejectionOutcome = WorkflowOutcome.Rejected;
+        }
 
         _workflowStatusAdapterRegistry.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, workflowResult.Outcome, userId, dto.RejectionReason);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, dto.RejectionReason);
 
         entity.RejectedById    = rejectedByEmployeeId;
         entity.RejectionReason = dto.RejectionReason;
@@ -709,6 +798,12 @@ public class StaffMovementService : IStaffMovementService
 
         // Cancelling a movement that is out for approval must take its workflow instance with it,
         // or the approvers keep a live task pointing at a cancelled record.
+        //
+        // No HasActiveApprovalWorkflowAsync guard here, unlike recall: with nothing published there
+        // is no instance, and SimpleWorkflowService.CancelWorkflowAsync answers Success = false /
+        // "No active workflow found" rather than throwing. The result is deliberately discarded, so
+        // the cancellation goes through either way. (It would throw only if the WorkflowEntityType
+        // row itself were missing, which is a misconfiguration, not the unseeded-definition case.)
         if (entity.Status == StaffMovementStatus.Submitted)
             await _workflowIntegrationService.CancelWorkflowAsync(
                 EntityType, entity.Id, dto.CancellationReason ?? "Movement cancelled");
@@ -819,6 +914,31 @@ public class StaffMovementService : IStaffMovementService
         employee.UpdatedAt = DateTime.UtcNow;
         employee.UpdatedBy = actorEmployeeId.ToString();
         await _unitOfWork.Repository<Employee>().UpdateAsync(employee);
+
+        // Coming back is a change of terms as much as going was: an acting appointment that paid an
+        // allowance ends, and the contract has to say so from the day they return. Same helper, so
+        // the return cannot leave the pair of rows in a state the outward move could not.
+        if (movement.CurrentSalary > 0 && employee.IsOnPayroll)
+            await _employees.SupersedeCurrentContractAsync(
+                movement.EmployeeId,
+                DateOnly.FromDateTime(returnDate),
+                movement.CurrentSalary,
+                newEmploymentType: null,
+                $"{movement.MovementNumber}: returned from temporary assignment",
+                cancellationToken);
+
+        // The placement goes back too (round 3, lane H): the acting grade ends on the return date
+        // and the grade they held before — snapshotted at implementation — resumes the day after.
+        // Someone since taken off payroll or moved to a negotiated amount is left as that change
+        // left them, for the same reason the salary above is.
+        if (movement.NewSalaryGradeId.HasValue && employee.IsOnPayroll && employee.PayBasis == PayBasis.SalaryScale)
+        {
+            if (movement.CurrentSalaryGradeId is { } backGradeId)
+                await PlaceOnScaleAsync(movement, employee, backGradeId, movement.CurrentSalaryLevelId, movement.CurrentSalaryNotchId,
+                    returnDate.AddDays(1), $"{movement.MovementNumber}: returned from temporary assignment", cancellationToken);
+            else
+                await EndMovementPlacementAsync(movement, returnDate, cancellationToken);
+        }
 
         var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();
         var openStep = await careerRepo
@@ -986,6 +1106,89 @@ public class StaffMovementService : IStaffMovementService
         if (employee != null && !employee.IsOnPayroll)
             throw new InvalidOperationException(
                 $"{employee.EmployeeNumber} is not on payroll, so a movement cannot set a salary or a salary grade for them. Put them on payroll first, or raise the movement without pay details.");
+
+        // Round 3, lane H. A movement that names a grade is a placement on the scale, and the two
+        // rules every placement obeys apply at raise time: not for somebody paid a negotiated
+        // amount, and the notch/level must belong to the grade. The resolver is the one the Salary
+        // tab's own placement door uses, so a movement cannot say something the tab would refuse.
+        if (movement.NewSalaryGradeId is { } gradeId)
+        {
+            if (employee != null && employee.PayBasis == PayBasis.Negotiated)
+                throw new InvalidOperationException(NegotiatedSentence(employee));
+            await _employees.ResolvePlacementLevelAsync(gradeId, movement.NewSalaryLevelId, movement.NewSalaryNotchId, cancellationToken);
+        }
+        else if (movement.NewSalaryLevelId.HasValue || movement.NewSalaryNotchId.HasValue)
+        {
+            throw new InvalidOperationException("A salary level or notch on a movement needs its grade. Choose the grade as well.");
+        }
+    }
+
+    private static string NegotiatedSentence(Employee employee) =>
+        $"{employee.EmployeeNumber} is paid a negotiated amount, so a movement cannot place them on the salary scale. Change their pay basis to the scale first, or raise the movement with a salary figure only.";
+
+    /// <summary>
+    /// The movement's CURRENT grade/level/notch snapshot is what a temporary assignment returns to.
+    /// The form rarely fills it (it reads the employee header, which has no placement), so it is
+    /// taken here, at implementation, from the placement in force on the day — before the new one
+    /// is written over it.
+    /// </summary>
+    private async Task SnapshotCurrentPlacementAsync(StaffMovement movement, CancellationToken cancellationToken)
+    {
+        if (movement.CurrentSalaryGradeId.HasValue) return;
+
+        var today = DateTime.UtcNow.Date;
+        var inForce = await _unitOfWork.Repository<EmployeeSalaryAssignment>().GetQueryable()
+            .Where(a => a.EmployeeId == movement.EmployeeId && !a.IsDeleted && a.WithdrawnAt == null
+                     && a.EffectiveDate <= today && (a.EffectiveTo == null || a.EffectiveTo >= today))
+            .OrderByDescending(a => a.EffectiveDate)
+            .FirstOrDefaultAsync(cancellationToken);
+        if (inForce == null) return;
+
+        movement.CurrentSalaryGradeId = inForce.GradeId;
+        movement.CurrentSalaryLevelId = inForce.LevelId;
+        movement.CurrentSalaryNotchId = inForce.NotchId;
+    }
+
+    /// <summary>
+    /// Writes the placement a movement names, through the same door as the Salary tab — so it
+    /// inherits the level resolver, the withdrawal rule for a placement that has not started, and
+    /// the payroll gate. The reason carries the movement number so the return path can find it.
+    /// </summary>
+    private async Task PlaceOnScaleAsync(
+        StaffMovement movement, Employee employee, Guid gradeId, Guid? levelId, Guid? notchId,
+        DateTime effective, string reason, CancellationToken cancellationToken)
+    {
+        if (employee.PayBasis == PayBasis.Negotiated)
+            throw new InvalidOperationException(NegotiatedSentence(employee));
+
+        await _employees.AssignSalaryAsync(new CreateEmployeeSalaryAssignmentDto
+        {
+            EmployeeId = movement.EmployeeId,
+            GradeId = gradeId,
+            LevelId = levelId,
+            NotchId = notchId,
+            EffectiveDate = effective,
+            AssignmentReason = reason,
+        }, cancellationToken, SalaryChangeAuthority.Approved);
+    }
+
+    /// <summary>
+    /// A temporary assignment with no outgoing placement to return to (nobody was placed before it)
+    /// simply ends the placement the movement opened, on the return date.
+    /// </summary>
+    private async Task EndMovementPlacementAsync(StaffMovement movement, DateTime returnDate, CancellationToken cancellationToken)
+    {
+        var repo = _unitOfWork.Repository<EmployeeSalaryAssignment>();
+        var prefix = movement.MovementNumber + ":";
+        var open = await repo.GetQueryable()
+            .Where(a => a.EmployeeId == movement.EmployeeId && !a.IsDeleted && a.WithdrawnAt == null
+                     && a.EffectiveTo == null && a.AssignmentReason.StartsWith(prefix))
+            .ToListAsync(cancellationToken);
+        foreach (var a in open)
+        {
+            a.EffectiveTo = returnDate;
+            await repo.UpdateAsync(a);
+        }
     }
 
     private async Task ApplyMovementToEmployeeAsync(
@@ -995,6 +1198,7 @@ public class StaffMovementService : IStaffMovementService
             ?? throw new ArgumentException($"The employee for movement {movement.MovementNumber} was not found.");
 
         var effective = movement.EffectiveDate.Date;
+        var vacatedPositionId = employee.PositionId;
 
         // ── The live employee record ──────────────────────────────────────────
         employee.PositionId = movement.NewPositionId;
@@ -1016,6 +1220,62 @@ public class StaffMovementService : IStaffMovementService
         employee.UpdatedAt = DateTime.UtcNow;
         employee.UpdatedBy = actorEmployeeId.ToString();
         await _unitOfWork.Repository<Employee>().UpdateAsync(employee);
+
+        // G-3.2: the post they came FROM is now a seat short. This is the promotion/transfer half
+        // of the guarantee PositionVacancy's documentation made and nothing kept — and it is the
+        // half most likely to be missed, because unlike a termination nobody has left the company,
+        // so no exit process runs. Skipped when the movement does not actually change post (a
+        // salary-only or reporting-line movement), which would otherwise log a phantom vacancy on
+        // a seat still occupied by the same person.
+        if (vacatedPositionId != Guid.Empty && vacatedPositionId != movement.NewPositionId)
+        {
+            await PositionVacancyLog.LogDepartureAsync(
+                _unitOfWork,
+                movement.TenantId,
+                employee.Id,
+                vacatedPositionId,
+                movement.MovementType == StaffMovementType.Promotion
+                    ? VacancyReason.Promotion
+                    : VacancyReason.Transfer,
+                effective,
+                _currentUserProvider.UserId,
+                note: $"Vacated by movement {movement.MovementNumber}.",
+                cancellationToken: cancellationToken);
+        }
+
+        // ── The terms of employment ───────────────────────────────────────────
+        //
+        // E-7d. New pay is new terms. Until lane D1 a promotion updated Employee.Salary, the career
+        // path and the position history, and left the CONTRACT still quoting the old figure — the
+        // one document the organisation would produce if asked what it pays this person.
+        //
+        // ⚠ A conversion between employment types (contract → permanent, the case the feedback
+        // named) cannot be driven from here: StaffMovement carries no NewEmploymentType, only a new
+        // position, unit, location, supervisor and pay. Converting somebody today means changing the
+        // employment type on the employee header, which writes through to the current contract. A
+        // column on the movement is a schema change, and is recorded as owed rather than smuggled in.
+        await _employees.SupersedeCurrentContractAsync(
+            movement.EmployeeId,
+            DateOnly.FromDateTime(effective),
+            movement.NewSalary > 0 ? movement.NewSalary : null,
+            newEmploymentType: null,
+            $"{movement.MovementNumber}: {movement.Reason}",
+            cancellationToken);
+
+        // ── The grade placement (round 3, lane H — owed since round 2) ────────
+        //
+        // Until now a promotion moved the position, the unit, the manager, Employee.Salary and the
+        // contract, and left EmployeeSalaryAssignment saying the OLD grade — whose notch HrBasicPay
+        // quotes first, so the person read as promoted everywhere except in what they were paid.
+        // The movement's grade/level/notch landed only in the career-path row, which no pay
+        // resolver reads. The movement is approved by the time it is implemented, so it writes the
+        // placement itself rather than raising a salary change request (round-3 D-1).
+        if (movement.NewSalaryGradeId is { } newGradeId)
+        {
+            await SnapshotCurrentPlacementAsync(movement, cancellationToken);
+            await PlaceOnScaleAsync(movement, employee, newGradeId, movement.NewSalaryLevelId, movement.NewSalaryNotchId,
+                effective, $"{movement.MovementNumber}: {movement.MovementType}", cancellationToken);
+        }
 
         // ── Career path: close the open step, open the new one ────────────────
         var careerRepo = _unitOfWork.Repository<EmployeeCareerPath>();

@@ -35,7 +35,7 @@ namespace ErpSystem.Data.Migrations
     /// Finance does not hold.</para>
     ///
     /// <para>⚠ <b>Nothing here posts to the general ledger.</b> Per the standing HR↔Finance split
-    /// the money event is registered in <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c> and posted in
+    /// the money event is registered in <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c> and posted in
     /// one sweep after the whole HR module.</para>
     ///
     /// <para>Scaffolded by the user, rewritten here into guarded SQL, listed in

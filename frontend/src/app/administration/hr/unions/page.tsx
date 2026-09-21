@@ -29,6 +29,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
+import { GatedPhoto } from '@/components/hr/common/PhotoDialog';
 import { unionService } from '@/services/hr/union.service';
 import type { Union } from '@/types/hr/union';
 
@@ -142,15 +143,38 @@ export default function UnionsPage() {
                       onClick={() => router.push(`/administration/hr/unions/${union.id}`)}
                     >
                       <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{union.name}</span>
-                          {union.code && (
-                            <span className="text-xs text-muted-foreground">{union.code}</span>
-                          )}
+                        <div className="flex items-center gap-3">
+                          {/* Round 3, lane U: the logo is a gated image — fetched with the token, never an <img src> URL. */}
+                          <GatedPhoto
+                            endpoint={unionService.logoEndpoint(union.id)}
+                            enabled={union.hasLogo}
+                            alt={`${union.name} logo`}
+                            className="h-9 w-9"
+                          />
+                          <div className="flex flex-col">
+                            <span className="font-medium">{union.name}</span>
+                            {union.code && (
+                              <span className="text-xs text-muted-foreground">{union.code}</span>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">
-                        {union.contactPerson || union.contactEmail || union.contactPhone ? (
+                        {/* The primary contact row when one exists (D-8); the legacy trio mirrors it anyway. */}
+                        {union.primaryContact ? (
+                          <div className="flex flex-col">
+                            <span>
+                              {union.primaryContact.displayName}
+                              <span className="text-xs"> · {union.primaryContact.role}</span>
+                            </span>
+                            {union.primaryContact.email && (
+                              <span className="text-xs">{union.primaryContact.email}</span>
+                            )}
+                            {!union.primaryContact.email && union.primaryContact.phone && (
+                              <span className="text-xs">{union.primaryContact.phone}</span>
+                            )}
+                          </div>
+                        ) : union.contactPerson || union.contactEmail || union.contactPhone ? (
                           <div className="flex flex-col">
                             {union.contactPerson && <span>{union.contactPerson}</span>}
                             {union.contactEmail && (

@@ -5,7 +5,7 @@ backend actually reachable by a user?**
 
 Run them from anywhere; they locate the repo root themselves and write JSON to
 `scripts/hr-coverage/out/`. That directory is intermediate output and is already covered by the
-root `.gitignore`'s `out/` rule — the committed artefact is `docs/HR-CLOSURE-LEDGER.md`, which
+root `.gitignore`'s `out/` rule — the committed artefact is `docs/HR/programme/HR-CLOSURE-LEDGER.md`, which
 `04_build_ledger.py` builds from it.
 
 ```bash

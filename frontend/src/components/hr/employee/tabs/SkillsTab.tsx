@@ -1,13 +1,16 @@
 'use client';
 
+import { useState } from 'react';
 import { z } from 'zod';
 import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
 import { skillService } from '@/services/hr/skill.service';
 import { referenceDimensionService } from '@/services/hr/lookup.service';
 import { employeeService } from '@/services/hr/employee.service';
+import { certificationService } from '@/services/hr/certification.service';
 import { SKILL_LEVEL_OPTIONS } from '@/types/hr/position';
 import type { EmployeeSkill } from '@/types/hr/employee-subresources';
+import { PositionSkillsCard } from '@/components/hr/employee/PositionSkillsCard';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
 import { DateField, FieldRow, SelectField, TextField, TextareaField } from './fields';
 
@@ -27,6 +30,8 @@ const schema = z.object({
    */
   certifyingBodyId: z.string().optional().or(z.literal('')),
   certifyingBody: z.string().max(200).optional().or(z.literal('')),
+  /** A credential on the certification tab that evidences this skill (round 2, lane C2). */
+  employeeCertificationId: z.string().optional().or(z.literal('')),
   notes: z.string().max(1000).optional().or(z.literal('')),
 });
 
@@ -41,10 +46,15 @@ const empty: FormValues = {
   certificationNumber: '',
   certifyingBodyId: '',
   certifyingBody: '',
+  employeeCertificationId: '',
   notes: '',
 };
 
 export function SkillsTab({ employeeId }: { employeeId: string }) {
+  // Round 2, lane C3b. One-shot: set to open the add dialog pre-filled from the gap card, cleared
+  // by the tab once it has been consumed so the dialog does not reopen on every render.
+  const [prefill, setPrefill] = useState<FormValues | null>(null);
+
   const { data: skills } = useQuery({
     queryKey: ['hr', 'skills', 'active'],
     queryFn: () => skillService.getActive(),
@@ -66,11 +76,41 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
     label: b.abbreviation ? `${b.name} (${b.abbreviation})` : b.name,
   }));
 
+  // The credentials this employee holds — what a skill that requires certification is evidenced
+  // by (round 2, lane C2). Recording a skill without one is allowed; the row is flagged.
+  const { data: credentials } = useQuery({
+    queryKey: ['hr', 'employees', employeeId, 'certifications'],
+    queryFn: () => certificationService.getEmployeeCertifications(employeeId),
+  });
+  const credentialOptions = (credentials ?? [])
+    .filter((c) => !c.isRevoked)
+    .map((c) => ({
+      value: c.id,
+      label: `${c.certificationName}${c.certificateNumber ? ` · ${c.certificateNumber}` : ''}${
+        c.status === 'Expired' ? ' (expired)' : ''
+      }`,
+    }));
+
   return (
+    <div className="space-y-4">
+      {/*
+        What the post asks for, ahead of what the person happens to have recorded (register row
+        S-4). The tab used to list every skill in the catalogue and never mention the job.
+      */}
+      <PositionSkillsCard
+        employeeId={employeeId}
+        onAddSkill={(line) =>
+          setPrefill({ ...empty, skillId: line.skillId, skillLevel: line.requiredLevel })
+        }
+      />
+
     <EmployeeSubResourceTab<EmployeeSkill, FormValues>
       employeeId={employeeId}
+      prefill={prefill}
+      onPrefillConsumed={() => setPrefill(null)}
       title="skills"
       singular="skill"
+      itemLabel={(s) => s.skillName}
       queryKey="skills"
       getId={(s) => s.id}
       list={employeeService.getEmployeeSkills.bind(employeeService)}
@@ -85,6 +125,7 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
           certificationNumber: v.certificationNumber || null,
           certifyingBodyId: v.certifyingBodyId || null,
           certifyingBody: v.certifyingBody || null,
+          employeeCertificationId: v.employeeCertificationId || null,
           notes: v.notes || null,
         })
       }
@@ -101,6 +142,8 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
           // chosen body can be cleared. Every other field here treats null as "unchanged".
           certifyingBodyId: v.certifyingBodyId || null,
           certifyingBody: v.certifyingBody || null,
+          // Same rule as the body: always sent, so it can be cleared.
+          employeeCertificationId: v.employeeCertificationId || null,
           notes: v.notes || null,
         })
       }
@@ -119,10 +162,10 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
         { header: 'Category', cell: (s) => s.skillCategory || '—' },
         { header: 'Level', cell: (s) => s.skillLevel },
         {
-          header: 'Certifying body',
-          // The catalogued name where there is one, the free text otherwise. Showing only the
-          // former would blank every row recorded before the catalogue existed.
-          cell: (s) => s.certifyingBodyName || s.certifyingBody || '—',
+          header: 'Evidence',
+          // The linked credential where there is one; the legacy per-skill certifier otherwise.
+          // Showing only the former would blank every row recorded before the catalogue existed.
+          cell: (s) => s.employeeCertificationName || s.certifyingBodyName || s.certifyingBody || '—',
         },
         {
           header: 'Certification expiry',
@@ -138,9 +181,13 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
         {
           header: 'Status',
           cell: (s) => (
-            <div className="flex gap-1">
+            <div className="flex flex-wrap gap-1">
               {s.isVerified && <Badge variant="secondary">Verified</Badge>}
               {s.isCertificationExpired && <Badge variant="outline">Expired</Badge>}
+              {/* Flagged, not refused: the skill needs a credential and none valid evidences it. */}
+              {s.requiresCertification && !s.isCompliant && (
+                <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">Certification missing</Badge>
+              )}
             </div>
           ),
         },
@@ -156,6 +203,7 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
         certificationNumber: s.certificationNumber ?? '',
         certifyingBodyId: s.certifyingBodyId ?? '',
         certifyingBody: s.certifyingBody ?? '',
+        employeeCertificationId: s.employeeCertificationId ?? '',
         notes: s.notes ?? '',
       })}
       renderFields={(form) => (
@@ -197,9 +245,18 @@ export function SkillsTab({ employeeId }: { employeeId: string }) {
             name="certifyingBody"
             label="Certifying body (if not catalogued)"
           />
+          <SelectField
+            form={form}
+            name="employeeCertificationId"
+            label="Evidenced by (a credential on the Certifications tab)"
+            options={credentialOptions}
+            allowEmpty
+            emptyLabel="None"
+          />
           <TextareaField form={form} name="notes" label="Notes" />
         </>
       )}
     />
+    </div>
   );
 }

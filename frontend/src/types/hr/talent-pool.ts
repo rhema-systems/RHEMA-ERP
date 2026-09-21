@@ -55,6 +55,14 @@ export interface CandidateTalentSegment {
   color?: string | null;
   isActive: boolean;
   memberCount: number;
+  /** Round 3 lane V (D-6) - who works the segment, why it exists, and the role it feeds. */
+  ownerEmployeeId?: string | null;
+  ownerEmployeeName?: string | null;
+  purpose?: string | null;
+  targetPositionId?: string | null;
+  targetPositionTitle?: string | null;
+  jobFamilyId?: string | null;
+  jobFamilyName?: string | null;
   createdAt: string;
   updatedAt?: string | null;
 }
@@ -65,6 +73,11 @@ export interface CandidateTalentSegmentForm {
   color?: string | null;
   /** Update only — the create defaults it true server-side. */
   isActive?: boolean;
+  /** Lane V. Sent every save: null CLEARS the field, it does not mean "leave it alone". */
+  ownerEmployeeId?: string | null;
+  purpose?: string | null;
+  targetPositionId?: string | null;
+  jobFamilyId?: string | null;
 }
 
 export interface CandidateSegmentMembership {

@@ -1,7 +1,8 @@
-using ErpSystem.Core.Entities.HR.Requisition;
+﻿using ErpSystem.Core.Entities.HR.Requisition;
 using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Data.Services;
 using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Data.Repositories.HR;
@@ -52,14 +53,24 @@ public class StaffRequisitionRepository : GenericRepository<StaffRequisition>, I
     /// and <c>jobVacancyNumber</c> came back null on every single read even when both were set. The
     /// second one matters most: <c>link-vacancy</c> exists to tie a requisition to its vacancy, and
     /// the detail screen could never show that it had worked.</para>
+    ///
+    /// <para>Round 3 (demo feedback, lane Q): the same shape a second time. <c>LocationLevel</c>,
+    /// <c>OrganizationLevel</c>, <c>ReplacementForEmployee</c> and <c>CancelledBy</c> were still
+    /// absent, so the replacement's name and the whole cancellation block on the detail screen had
+    /// never once rendered. The list below is now the DTO's navigation list, in the DTO's order —
+    /// when a navigation is added to <c>StaffRequisitionDto</c>, add it here in the same commit.</para>
     /// </summary>
     private IQueryable<StaffRequisition> WithSummaryNavigations() =>
         _dbSet
-            .Include(r => r.Position)
-            .Include(r => r.OrganizationUnit)
+            .Include(r => r.LocationLevel)
             .Include(r => r.Location)
-            .Include(r => r.RequestedBy)
+            .Include(r => r.OrganizationLevel)
+            .Include(r => r.OrganizationUnit)
+            .Include(r => r.Position)
             .Include(r => r.JobDescription)
+            .Include(r => r.ReplacementForEmployee)
+            .Include(r => r.RequestedBy)
+            .Include(r => r.CancelledBy)
             .Include(r => r.JobVacancy);
 
     public async Task<StaffRequisition?> GetWithSummaryNavAsync(Guid id)
@@ -225,8 +236,27 @@ public class StaffRequisitionRepository : GenericRepository<StaffRequisition>, I
     /// </summary>
     public async Task<int> GetNextSequenceNumberAsync(Guid tenantId)
     {
-        var next = await _sequences.NextAsync("REQ", DateTime.UtcNow.Year);
-        return (int)next;
+        // The caller prints REQ-{year}-{seq:D5}; the probe has to assemble the same string to ask
+        // whether the register already holds it. See NumberSequenceExtensions for why it asks at all.
+        var year = DateTime.UtcNow.Year;
+        var prefix = $"REQ-{year}-";
+
+        // The counter resets each January, so the high-water mark is this year's numbers only —
+        // last year's REQ-2025-00312 must not push 2026 up to 312.
+        var number = await _sequences.NextUnusedAsync(
+            "REQ",
+            tenantId,
+            year,
+            format: value => $"{prefix}{value:D5}",
+            isTaken: candidate => _dbSet.IgnoreQueryFilters()
+                .AnyAsync(r => r.TenantId == tenantId && r.RequisitionNumber == candidate),
+            highestIssued: async () => NumberSequenceExtensions.HighestIssued(
+                await _dbSet.IgnoreQueryFilters()
+                    .Where(r => r.TenantId == tenantId && r.RequisitionNumber.StartsWith(prefix))
+                    .Select(r => r.RequisitionNumber)
+                    .ToListAsync()));
+
+        return int.Parse(number[prefix.Length..]);
     }
 
     public IQueryable<StaffRequisition> GetSummaryQueryable()
@@ -255,7 +285,7 @@ public class StaffRequisitionCostRepository : GenericRepository<StaffRequisition
     public async Task<IEnumerable<StaffRequisitionCost>> GetByRequisitionIdAsync(Guid requisitionId)
     {
         return await _dbSet
-            .Include(c => c.RecordedBy)
+            .Include(c => c.RecordedBy).Include(c => c.Supplier).Include(c => c.ApprovedBy)
             .Where(c => c.RequisitionId == requisitionId && !c.IsDeleted)
             .OrderBy(c => c.RecordedDate)
             .ToListAsync();

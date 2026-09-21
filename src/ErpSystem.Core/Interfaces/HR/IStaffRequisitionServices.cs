@@ -127,6 +127,12 @@ public interface IStaffRequisitionService
     /// </summary>
     Task<RequisitionBudgetCheckDto> CheckBudgetAsync(Guid requisitionId, CancellationToken cancellationToken = default);
 
+    /// <summary>The same check for a requisition that does not exist yet — the form's live preview (round 2b, R5).</summary>
+    Task<RequisitionBudgetCheckDto> PreviewBudgetCheckAsync(RequisitionBudgetCheckPreviewDto dto, CancellationToken cancellationToken = default);
+
+    /// <summary>"Out of the recruitment budget you can be raising requisitions": a Draft drawing down what a line has left (R5).</summary>
+    Task<StaffRequisitionDto> CreateFromBudgetLineAsync(Guid lineId, Guid requestedByUserId, CancellationToken cancellationToken = default);
+
     // ── Cost operations ───────────────────────────────────────────────────────
 
     /// <summary>Records a new cost entry against a requisition.</summary>
@@ -137,6 +143,12 @@ public interface IStaffRequisitionService
 
     /// <summary>Returns the total base-currency cost recorded against a requisition.</summary>
     Task<decimal> GetTotalCostAsync(Guid requisitionId, CancellationToken cancellationToken = default);
+
+    /// <summary>The stored base-currency total, optionally only costs in one status (round 2b, R7).</summary>
+    Task<decimal> GetTotalCostAsync(Guid requisitionId, StaffRequisitionCostStatus? status, CancellationToken cancellationToken = default);
+
+    /// <summary>HR approves or rejects a recorded cost; the recorder may not decide their own (R7).</summary>
+    Task<StaffRequisitionCostDto> DecideCostAsync(Guid costId, bool approve, string? note, Guid actorEmployeeId, CancellationToken cancellationToken = default);
 
     /// <summary>Returns cost entries for the given requisition filtered by category.</summary>
     Task<IEnumerable<StaffRequisitionCostDto>> GetCostsByCategoryAsync(Guid requisitionId, StaffRequisitionCostCategory category, CancellationToken cancellationToken = default);

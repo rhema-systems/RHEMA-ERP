@@ -39,6 +39,10 @@ import {
 import { trainingNominationService } from '@/services/hr/training-nomination.service';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { EmptyState } from '@/components/hr/common/EmptyState';
+import {
+  FinancePostingCard,
+  FinancePostingInlineStatus,
+} from '@/components/hr/common/FinancePostingCard';
 import { MetricTiles } from '@/components/hr/common/MetricTiles';
 import { StatusBadge } from '@/components/hr/common/StatusBadge';
 import { useToast } from '@/hooks/use-toast';
@@ -321,6 +325,9 @@ export default function ServiceBondsPage() {
                     <TableHead className="text-right">Bond</TableHead>
                     <TableHead>Obligation</TableHead>
                     <TableHead>Status</TableHead>
+                    {/* What Finance holds for the bond: the receivable on breach, then its
+                        settlement or write-off. */}
+                    <TableHead className="w-[1%] whitespace-nowrap">Finance</TableHead>
                     <TableHead className="text-right">Owed</TableHead>
                     <TableHead className="w-48" />
                   </TableRow>
@@ -358,6 +365,9 @@ export default function ServiceBondsPage() {
                             Accepted {formatDate(bond.acceptedDate)}
                           </div>
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <FinancePostingInlineStatus sourceDocumentId={bond.id} />
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
                         {bond.repaymentAmount != null
@@ -601,6 +611,12 @@ export default function ServiceBondsPage() {
                 <Textarea id="bondNotes" rows={2} value={editing.notes}
                   onChange={(e) => setEditing({ ...editing, notes: e.target.value })} />
               </div>
+              {/* The bond's own money events — breach, repayment, waiver. The card says nothing
+                  until one of them has fired, so a bond nobody has breached shows no Finance. */}
+              <FinancePostingCard
+                sourceDocumentId={editing.id}
+                invalidateKeys={[['hr', 'service-bonds']]}
+              />
             </div>
           )}
           <DialogFooter>

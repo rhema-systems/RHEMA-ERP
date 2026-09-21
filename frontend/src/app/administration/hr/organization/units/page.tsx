@@ -11,6 +11,7 @@ import {
   Building2,
   ArrowRightLeft,
   UserCog,
+  History,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -94,9 +95,20 @@ export default function OrganizationUnitsPage() {
         title="Organization Units"
         description="Manage the nodes of your organization hierarchy and how they roll up."
         actions={
-          <Button onClick={() => router.push('/administration/hr/organization/units/new')}>
-            <Plus className="mr-2 h-4 w-4" /> New Unit
-          </Button>
+          <div className="flex items-center gap-2">
+            {/* The org-wide audit trail of these units. It used to be a peer card in the
+                setup grid, which read as a fourth thing to configure; it is a view of what
+                is configured here, so it hangs off this screen. */}
+            <Button
+              variant="outline"
+              onClick={() => router.push('/administration/hr/organization/unit-history')}
+            >
+              <History className="mr-2 h-4 w-4" /> Change Log
+            </Button>
+            <Button onClick={() => router.push('/administration/hr/organization/units/new')}>
+              <Plus className="mr-2 h-4 w-4" /> New Unit
+            </Button>
+          </div>
         }
       />
 

@@ -239,6 +239,16 @@ public class JobArchitectureService : IJobArchitectureService
     public async Task<JobSubFamilyDto> UpdateSubFamilyAsync(UpdateJobSubFamilyDto dto, CancellationToken ct = default)
     {
         var e = await GetOwnedSubFamilyAsync(dto.Id);
+
+        // ⚠ A sub-family cannot change families. Until the DTO carried one this was not a rule, it
+        // was an accident of shape: the family in the body was simply not read, so the caller got
+        // 200 and nothing moved. Refusing says what silence could not — that re-filing a sub-family
+        // reclassifies every job description under it, and that is not an edit.
+        if (dto.JobFamilyId.HasValue && dto.JobFamilyId.Value != e.JobFamilyId)
+            throw JobArchitectureException.Invalid(
+                "A sub-family cannot be moved to another job family. Create it under the family it belongs to, " +
+                "and reclassify the job descriptions filed under this one.");
+
         await RequireSubFamilyCodeFreeAsync(dto.Code, dto.Id, ct);
         dto.UpdateEntity(e);
         await _subFamilyRepo.UpdateAsync(e);

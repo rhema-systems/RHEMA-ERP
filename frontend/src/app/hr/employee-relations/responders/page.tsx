@@ -23,7 +23,7 @@ import { EmptyState } from '@/components/hr/common/EmptyState';
 import { EmployeePicker } from '@/components/hr/common/EmployeePicker';
 import { useToast } from '@/hooks/use-toast';
 import { employeeRelationsResponderService } from '@/services/hr/employee-relations-admin.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 import {
   GRIEVANCE_LADDER,
   type GrievanceEscalationLevel, type EmployeeRelationsResponder, type UpsertResponderRequest,
@@ -33,6 +33,8 @@ import {
 const ALL_UNITS = '__default__';
 /** Every scope at once. Not a server concept: this is the only view that uses `getAll`. */
 const EVERY_SCOPE = '__everything__';
+/** The list's third choice: a unit, picked level → unit below the select (lane B3). */
+const UNIT_SCOPE = '__unit__';
 
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : '—');
 const levelLabel = (v: string) => GRIEVANCE_LADDER.find((l) => l.value === v)?.label ?? v;
@@ -64,12 +66,8 @@ export default function ResponderMatrixPage() {
   const [fNotes, setFNotes] = useState('');
 
   const everything = scope === EVERY_SCOPE;
-  const unitId = scope === ALL_UNITS || everything ? null : scope;
+  const unitId = scope === ALL_UNITS || everything || scope === UNIT_SCOPE ? null : scope;
 
-  const { data: units } = useQuery({
-    queryKey: ['hr', 'organization-units'],
-    queryFn: () => organizationUnitService.getAll(),
-  });
 
   // Filtered on the SERVER, not in the browser: `getForScope` is what the scope view means, and
   // filtering `getAll` client-side would quietly answer a different question — it cannot tell a
@@ -131,7 +129,6 @@ export default function ResponderMatrixPage() {
     });
   };
 
-  const unitList = units ?? [];
   const scopeRows = rows ?? [];
 
   return (
@@ -150,17 +147,26 @@ export default function ResponderMatrixPage() {
       <div className="flex flex-wrap items-end gap-2">
         <div>
           <Label className="text-xs text-muted-foreground">Scope</Label>
-          <Select value={scope} onValueChange={setScope}>
+          <Select value={scope === EVERY_SCOPE || scope === ALL_UNITS ? scope : UNIT_SCOPE} onValueChange={setScope}>
             <SelectTrigger className="w-80"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value={EVERY_SCOPE}>Every scope (the whole matrix)</SelectItem>
               <SelectItem value={ALL_UNITS}>All units (the default fallback)</SelectItem>
-              {unitList.map((u) => (
-                <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-              ))}
+              <SelectItem value={UNIT_SCOPE}>One unit…</SelectItem>
             </SelectContent>
           </Select>
         </div>
+        {scope !== EVERY_SCOPE && scope !== ALL_UNITS && (
+          <OrganizationUnitPicker
+            value={scope === UNIT_SCOPE ? '' : scope}
+            onChange={(id) => setScope(id || UNIT_SCOPE)}
+            allowNone="Choose a unit"
+            levelLabel="Level"
+            unitLabel="Unit"
+            idPrefix="responder-scope"
+            className="flex flex-wrap items-end gap-2"
+          />
+        )}
       </div>
 
       {!everything && (
@@ -299,16 +305,13 @@ export default function ResponderMatrixPage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1">
-              <Label>Scope</Label>
-              <Select value={fScope} onValueChange={setFScope}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_UNITS}>All units (the default fallback)</SelectItem>
-                  {unitList.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <OrganizationUnitPicker
+                value={fScope === ALL_UNITS ? '' : fScope}
+                onChange={(id) => setFScope(id || ALL_UNITS)}
+                allowNone="All units (the default fallback)"
+                unitLabel="Scope"
+                idPrefix="responder-form-scope"
+              />
             </div>
             <div className="space-y-1">
               <Label>Rung</Label>

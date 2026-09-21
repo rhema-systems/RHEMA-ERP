@@ -520,13 +520,19 @@ public class ProbationService : IProbationService
                 "No confirming authority covers this employee, so there is nobody to send the confirmation to. "
                 + "Set one under Administration → HR → Probation before submitting.");
 
-        var result = await _workflowIntegration.SubmitAsync(WorkflowEntityType, probationId);
+        // Submitting must never confirm. With no published definition the engine returns Approved
+        // and the adapter maps it to confirmed — making someone's employment permanent with nobody
+        // having decided, which is exactly the outcome FR-HR-032's chain (system → head confirms →
+        // HR issues the letter) exists to prevent. Defence in depth; a PROBATION_PERIOD definition
+        // is seeded. See HrWorkflowFallbackAuthority.
+        var (result, submitOutcome) =
+            await HrWorkflowFallbackAuthority.SubmitAsync(_workflowIntegration, WorkflowEntityType, probationId);
         if (!result.ExecutionResult.Success)
             throw ProbationWorkflowException.InvalidState(
                 result.ExecutionResult.Message ?? "Failed to start the probation confirmation workflow.");
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
-            .ApplySubmitOutcome(entity, result.Outcome, _currentUserProvider.UserId);
+            .ApplySubmitOutcome(entity, submitOutcome, _currentUserProvider.UserId);
 
         await _probationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -545,17 +551,17 @@ public class ProbationService : IProbationService
         var entity = await GetOwnedProbationAsync(probationId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, probationId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
-        var result = await _workflowIntegration.ProcessApprovalAsync(WorkflowEntityType, probationId, userId, "Approve");
-        if (!result.ExecutionResult.Success)
-            throw ProbationWorkflowException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the confirmation approval.");
+        // ⚠ HR.Probation.Approve is NOT granted to the HR desk — see HrStaffGrants. Confirming
+        // probation decides whether employment becomes permanent, and the permission map warns
+        // against making that "reachable by anyone HR-shaped". On an unseeded tenant this stalls
+        // until SuperAdmin/TenantAdmin acts or a definition names the confirming authority, which
+        // is the documented intent rather than an oversight.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, WorkflowEntityType, probationId, userId,
+            "Approve", null, "confirm a probation", HrPermissions.ApproveProbation);
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         await _probationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -570,18 +576,12 @@ public class ProbationService : IProbationService
         var entity = await GetOwnedProbationAsync(probationId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, probationId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
-        var result = await _workflowIntegration.ProcessApprovalAsync(
-            WorkflowEntityType, probationId, userId, "Reject", reason);
-        if (!result.ExecutionResult.Success)
-            throw ProbationWorkflowException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the rejection.");
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, WorkflowEntityType, probationId, userId,
+            "Reject", reason, "refuse a probation confirmation", HrPermissions.ApproveProbation);
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId, reason);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, reason);
 
         await _probationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -599,11 +599,9 @@ public class ProbationService : IProbationService
             throw ProbationWorkflowException.InvalidState(
                 "Only a probation awaiting confirmation can be recalled.");
 
-        var result = await _workflowIntegration.RecallAsync(
-            WorkflowEntityType, probationId, _currentUserProvider.UserId, reason);
-        if (!result.ExecutionResult.Success)
-            throw ProbationWorkflowException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to recall the confirmation request.");
+        // Skipped when nothing is published; the probation returns to Draft either way.
+        await HrWorkflowFallbackAuthority.RecallAsync(
+            _workflowIntegration, WorkflowEntityType, probationId, _currentUserProvider.UserId, reason);
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
             .ApplyRecallOutcome(entity, _currentUserProvider.UserId, reason);

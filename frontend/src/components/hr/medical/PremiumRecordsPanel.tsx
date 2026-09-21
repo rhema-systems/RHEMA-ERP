@@ -16,6 +16,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
 import { ResourceCollectionTab } from '@/components/hr/common/ResourceCollectionTab';
+import { FinancePostingInlineStatus } from '@/components/hr/common/FinancePostingCard';
 import { DateField, FieldRow, NumberField, SelectField, TextareaField } from '@/components/hr/employee/tabs/fields';
 import { useToast } from '@/hooks/use-toast';
 import { medicalInsuranceService } from '@/services/hr/medical-reference.service';
@@ -213,6 +214,8 @@ export function PremiumRecordsPanel({
               </div>
             ),
           },
+          // The posting source is the premium BILL: what Finance holds for this period's cover.
+          { header: 'Finance', cell: (r) => <FinancePostingInlineStatus sourceDocumentId={r.id} /> },
         ]}
         schema={schema}
         emptyForm={empty}

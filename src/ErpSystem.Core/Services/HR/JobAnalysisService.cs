@@ -6,6 +6,8 @@ using ErpSystem.Core.Enums;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Shared;
+using ErpSystem.Core.Interfaces.HR.Services;
 using ErpSystem.Core.Services.HR.Extensions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
@@ -30,6 +32,7 @@ public class JobDescriptionService : IJobDescriptionService
     private readonly IJobMedicalRequirementRepository _medicalRequirementRepository;
     private readonly IJobResponsibilityKpiRepository _kpiRepository;
     private readonly ISalaryGradeRepository _salaryGradeRepository;
+    private readonly IPositionNamedSetService _namedSets;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
@@ -51,6 +54,7 @@ public class JobDescriptionService : IJobDescriptionService
         IJobMedicalRequirementRepository medicalRequirementRepository,
         IJobResponsibilityKpiRepository kpiRepository,
         ISalaryGradeRepository salaryGradeRepository,
+        IPositionNamedSetService namedSets,
         ICurrentUserProvider currentUserProvider,
         IWorkflowIntegrationService workflowIntegration,
         IWorkflowStatusAdapterRegistry workflowAdapters,
@@ -71,6 +75,7 @@ public class JobDescriptionService : IJobDescriptionService
         _medicalRequirementRepository = medicalRequirementRepository;
         _kpiRepository = kpiRepository;
         _salaryGradeRepository = salaryGradeRepository;
+        _namedSets = namedSets;
         _currentUserProvider = currentUserProvider;
         _workflowIntegration = workflowIntegration;
         _workflowAdapters = workflowAdapters;
@@ -130,6 +135,34 @@ public class JobDescriptionService : IJobDescriptionService
                 "changed. Raise a new version to revise it.");
 
         return entity;
+    }
+
+    /// <summary>
+    /// A qualification or competency may hang off a responsibility of its OWN job description, and
+    /// no other. Null is legitimate — the row then belongs to the document as a whole.
+    /// </summary>
+    /// <remarks>
+    /// ⚠ Nothing checked this. `JobResponsibilityId` is a plain nullable Guid on the create DTO, so
+    /// any responsibility id in the tenant was accepted — including one belonging to a different
+    /// job description, which silently files a requirement under another document's accountability
+    /// and makes the valuation group it there. The FK is satisfied, so nothing failed.
+    /// </remarks>
+    private async Task RequireResponsibilityOfAsync(
+        Guid? responsibilityId, Guid jobDescriptionId, CancellationToken cancellationToken)
+    {
+        if (responsibilityId == null) return;
+
+        var tenantId = GetTenantId();
+        var belongs = await _responsibilityRepository.GetQueryable()
+            .AnyAsync(r => r.Id == responsibilityId.Value
+                        && r.TenantId == tenantId
+                        && !r.IsDeleted
+                        && r.JobDescriptionId == jobDescriptionId, cancellationToken);
+
+        if (!belongs)
+            throw JobArchitectureException.Invalid(
+                "That responsibility belongs to a different job description. A qualification or " +
+                "competency can only be attached to a responsibility of its own job description.");
     }
 
     /// <summary>The same gate for a KPI, which reaches its job description through its responsibility.</summary>
@@ -449,6 +482,7 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobDescriptionDto> CreateAsync(CreateJobDescriptionDto createDto, Guid preparedById, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+        await EnsureProposedGradeAsync(createDto.ProposedSalaryGradeId, GetTenantId(), cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         await RequireCoherentClassificationAsync(
@@ -572,9 +606,19 @@ public class JobDescriptionService : IJobDescriptionService
         if (entity.Status == JobDescriptionStatus.Approved)
             throw JobArchitectureException.InvalidState("Cannot update an approved job description. Create a new version instead.");
 
+        // ⚠ An edit does not move the status, and a caller who thinks it does is told so rather
+        // than left to believe it worked. Sending the record's current status is how a client
+        // round-trips the whole document (the update is a replace), so that is accepted; anything
+        // else is an attempted transition through the wrong door.
+        if (updateDto.Status.HasValue && updateDto.Status.Value != entity.Status)
+            throw JobArchitectureException.Invalid(
+                $"A job description's status is not changed by editing it. This one is {entity.Status}; " +
+                "use submit, review or approve to move it.");
+
         await RequireCoherentClassificationAsync(
             updateDto.JobFamilyId, updateDto.JobSubFamilyId, updateDto.JobLevelId, cancellationToken);
 
+        await EnsureProposedGradeAsync(updateDto.ProposedSalaryGradeId, tenantId, cancellationToken);
         updateDto.UpdateEntity(entity);
 
         await _jobDescriptionRepository.UpdateAsync(entity);
@@ -656,31 +700,36 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
-        var result = await _workflowIntegration.ProcessApprovalAsync(WorkflowEntityType, jobDescriptionId, userId, "Approve");
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the job description approval.");
+        // ⚠ Submit above already handles the no-definition case correctly — it sets PendingReview
+        // directly rather than letting the engine's Approved through. But nothing handled it HERE,
+        // so a job description submitted on an unseeded tenant reached PendingReview and could
+        // then never be approved: CanUserApproveAsync answers false with no workflow instance to
+        // name an approver. The record was stranded. That is the failure this programme's helper
+        // exists to prevent, and it was already present in this service.
+        //
+        // ⚠ HR.JobArchitecture.Approve is NOT granted to the HR desk — see HrStaffGrants. FR-HR-134:
+        // an approved job description carries the job valuation and the suggested salary grade.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, WorkflowEntityType, jobDescriptionId, userId,
+            "Approve", null, "approve a job description", HrPermissions.ApproveJobArchitecture);
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         // ⚠ The consequences, which the adapter cannot apply because it sees only this one entity.
         // Superseding matters beyond tidiness: OfferLetterService selects a position's job
         // description by SupersededByVersionId == null, so two unsuperseded approved versions make
         // an offer letter ambiguous. Only run when the engine actually approved — an intermediate
-        // step returns Pending, and a mid-chain approval must not retire anything.
-        if (result.Outcome == WorkflowOutcome.Approved)
+        // step returns Pending, and a mid-chain approval must not retire anything. On the
+        // no-workflow branch there is no chain, so the single approval is the whole of it.
+        if (approvalOutcome == WorkflowOutcome.Approved)
             await ApplyApprovalConsequencesAsync(entity, approvedById, cancellationToken);
 
         await _jobDescriptionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Job description {Number} approval step processed: {Outcome}",
-            entity.JobDescriptionNumber, result.Outcome);
+            entity.JobDescriptionNumber, approvalOutcome);
 
         return true;
     }
@@ -691,19 +740,14 @@ public class JobDescriptionService : IJobDescriptionService
         var entity = await GetOwnedJobDescriptionAsync(jobDescriptionId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(WorkflowEntityType, jobDescriptionId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
-        var result = await _workflowIntegration.ProcessApprovalAsync(
-            WorkflowEntityType, jobDescriptionId, userId, "Reject", rejectionText);
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the job description rejection.");
+
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, WorkflowEntityType, jobDescriptionId, userId,
+            "Reject", rejectionText, "reject a job description", HrPermissions.ApproveJobArchitecture);
 
         _workflowAdapters.GetAdapter(WorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _jobDescriptionRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -875,7 +919,7 @@ public class JobDescriptionService : IJobDescriptionService
                     JobDescriptionId = newVersion.Id,
                     JobResponsibilityId = newResp.Id,
                     Type = qual.Type,
-                    QualificationId = qual.QualificationId,
+                    QualificationId = qual.QualificationId, CertificationId = qual.CertificationId,
                     Title = qual.Title,
                     Description = qual.Description,
                     IsRequired = qual.IsRequired,
@@ -975,7 +1019,7 @@ public class JobDescriptionService : IJobDescriptionService
         return newVersion.ToDto();
     }
 
-    public async Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, CancellationToken cancellationToken = default)
+    public async Task<JobDescriptionDto> CloneAsync(Guid id, Guid? preparedById, Guid? targetPositionId = null, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var src = await _jobDescriptionRepository.GetQueryable()
@@ -996,14 +1040,27 @@ public class JobDescriptionService : IJobDescriptionService
         var competencies = (await _competencyRepository.GetByJobDescriptionIdAsync(id))
             .Where(c => c.TenantId == tenantId).ToList();
 
+        // Round 3, lane J1: a copy onto ANOTHER position. The title is kept (it is the job's, not
+        // the post's), the staff level is the target's, the version line is the target's own, and
+        // the reporting relationships — who this post answers to and supervises — are not carried,
+        // because they are facts about the original post.
+        EmployeePosition? target = null;
+        if (targetPositionId is { } wantedPositionId && wantedPositionId != src.PositionId)
+        {
+            target = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+                .FirstOrDefaultAsync(p => p.Id == wantedPositionId && p.TenantId == tenantId && !p.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.NotFound($"Position with ID '{wantedPositionId}' not found.");
+        }
+        var positionId = target?.Id ?? src.PositionId;
+
         var clone = new JobDescription
         {
             TenantId = tenantId,
             JobDescriptionNumber = await GenerateJobDescriptionNumberAsync(cancellationToken),
-            PositionId = src.PositionId,
-            JobTitle = src.JobTitle + " (Copy)",
+            PositionId = positionId,
+            JobTitle = target == null ? src.JobTitle + " (Copy)" : src.JobTitle,
             JobSummary = src.JobSummary,
-            VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(src.PositionId),
+            VersionNumber = await _jobDescriptionRepository.GetNextVersionNumberAsync(positionId),
             EffectiveDate = DateTime.Today,
             ReviewCycleMonths = src.ReviewCycleMonths,
             Status = JobDescriptionStatus.Draft,
@@ -1019,7 +1076,7 @@ public class JobDescriptionService : IJobDescriptionService
             DecisionMakingScope = src.DecisionMakingScope,
             FinancialAuthorityLimit = src.FinancialAuthorityLimit,
             ApprovalAuthorityNotes = src.ApprovalAuthorityNotes,
-            StaffLevelId = src.StaffLevelId,
+            StaffLevelId = target != null ? target.StaffLevelId : src.StaffLevelId,
             IntendedEmploymentType = src.IntendedEmploymentType,
             IsBargainingUnitRole = src.IsBargainingUnitRole,
             UnionId = src.UnionId,
@@ -1049,7 +1106,7 @@ public class JobDescriptionService : IJobDescriptionService
         }
 
         foreach (var q in qualifications)
-            await _qualificationRepository.AddAsync(new JobQualification { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = q.JobResponsibilityId.HasValue && respMap.TryGetValue(q.JobResponsibilityId.Value, out var rid) ? rid : null, Type = q.Type, QualificationId = q.QualificationId, Title = q.Title, Description = q.Description, IsRequired = q.IsRequired, JobSpecificRequirements = q.JobSpecificRequirements, MonetaryValue = q.MonetaryValue });
+            await _qualificationRepository.AddAsync(new JobQualification { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = q.JobResponsibilityId.HasValue && respMap.TryGetValue(q.JobResponsibilityId.Value, out var rid) ? rid : null, Type = q.Type, QualificationId = q.QualificationId, CertificationId = q.CertificationId, Title = q.Title, Description = q.Description, IsRequired = q.IsRequired, JobSpecificRequirements = q.JobSpecificRequirements, MonetaryValue = q.MonetaryValue });
 
         foreach (var c in competencies)
             await _competencyRepository.AddAsync(new JobCompetency { TenantId = tenantId, JobDescriptionId = clone.Id, JobResponsibilityId = c.JobResponsibilityId.HasValue && respMap.TryGetValue(c.JobResponsibilityId.Value, out var rid) ? rid : null, SkillId = c.SkillId, CompetencyId = c.CompetencyId, CompetencyName = c.CompetencyName, Description = c.Description, Type = c.Type, RequiredLevel = c.RequiredLevel, IsCritical = c.IsCritical, MonetaryValue = c.MonetaryValue });
@@ -1072,8 +1129,9 @@ public class JobDescriptionService : IJobDescriptionService
                 await _equipmentTrainingRepository.AddAsync(new JobEquipmentTraining { TenantId = tenantId, JobEquipmentToolId = ne.Id, TrainingProgramId = t.TrainingProgramId, RequirementText = t.RequirementText, IsMandatory = t.IsMandatory });
         }
 
-        foreach (var rr in src.ReportingRelationships)
-            await _reportingRelationshipRepository.AddAsync(new JobReportingRelationship { TenantId = tenantId, JobDescriptionId = clone.Id, RelationshipType = rr.RelationshipType, TitleOrRole = rr.TitleOrRole, EmployeeOrPositionId = rr.EmployeeOrPositionId, Description = rr.Description, NumberOfDirectReports = rr.NumberOfDirectReports, IsPrimarySupervisor = rr.IsPrimarySupervisor });
+        if (target == null)
+            foreach (var rr in src.ReportingRelationships)
+                await _reportingRelationshipRepository.AddAsync(new JobReportingRelationship { TenantId = tenantId, JobDescriptionId = clone.Id, RelationshipType = rr.RelationshipType, TitleOrRole = rr.TitleOrRole, EmployeeOrPositionId = rr.EmployeeOrPositionId, Description = rr.Description, NumberOfDirectReports = rr.NumberOfDirectReports, IsPrimarySupervisor = rr.IsPrimarySupervisor });
 
         foreach (var m in src.MedicalRequirements)
             await _medicalRequirementRepository.AddAsync(new JobMedicalRequirement { TenantId = tenantId, JobDescriptionId = clone.Id, Category = m.Category, RequirementDescription = m.RequirementDescription, Rationale = m.Rationale, Contraindications = m.Contraindications, IsMandatory = m.IsMandatory });
@@ -1162,17 +1220,149 @@ public class JobDescriptionService : IJobDescriptionService
 
     #region Qualification Operations
 
+    /// <summary>
+    /// Round 3, lane J1 — "a catalogue id or a title". A row linked to the qualification or the
+    /// certification catalogue takes the catalogue's name when its title is blank (the mirror keeps
+    /// the NOT NULL column honest and the row readable without a join); a row with no link must be
+    /// titled. A certification link also settles the type when the caller left an education type.
+    /// </summary>
+    private async Task ResolveQualificationIdentityAsync(JobQualification q, CancellationToken cancellationToken)
+    {
+        q.Title = (q.Title ?? string.Empty).Trim();
+        var tenantId = GetTenantId();
+
+        if (q.CertificationId is { } certificationId)
+        {
+            var cert = await _unitOfWork.Repository<Certification>().GetQueryable()
+                .FirstOrDefaultAsync(c => c.Id == certificationId && c.TenantId == tenantId && !c.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The certification chosen does not exist.");
+            if (q.Title.Length == 0) q.Title = cert.Name;
+            if (q.Type is not (QualificationType.Certification or QualificationType.License))
+                q.Type = cert.Kind == CertificationKind.Licence ? QualificationType.License : QualificationType.Certification;
+        }
+
+        if (q.QualificationId is { } qualificationId)
+        {
+            var qual = await _unitOfWork.Repository<Qualification>().GetQueryable()
+                .FirstOrDefaultAsync(x => x.Id == qualificationId && x.TenantId == tenantId && !x.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The qualification chosen does not exist.");
+            if (q.Title.Length == 0) q.Title = qual.Name;
+        }
+
+        if (q.Title.Length == 0)
+            throw JobArchitectureException.Invalid(
+                "Give the qualification a title, or pick one from the catalogue — a qualification or a certification.");
+    }
+
+    /// <summary>Same rule for a competency row: a skill or a competency from the catalogue names it; otherwise it must be named.</summary>
+    private async Task ResolveCompetencyIdentityAsync(JobCompetency c, CancellationToken cancellationToken)
+    {
+        c.CompetencyName = (c.CompetencyName ?? string.Empty).Trim();
+        var tenantId = GetTenantId();
+
+        if (c.CompetencyId is { } competencyId)
+        {
+            var master = await _unitOfWork.Repository<Competency>().GetQueryable()
+                .FirstOrDefaultAsync(x => x.Id == competencyId && x.TenantId == tenantId && !x.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The competency chosen does not exist.");
+            if (c.CompetencyName.Length == 0) c.CompetencyName = master.Name;
+        }
+
+        if (c.SkillId is { } skillId)
+        {
+            var skill = await _unitOfWork.Repository<Skill>().GetQueryable()
+                .FirstOrDefaultAsync(x => x.Id == skillId && x.TenantId == tenantId && !x.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The skill chosen does not exist.");
+            if (c.CompetencyName.Length == 0) c.CompetencyName = skill.Name;
+        }
+
+        if (c.CompetencyName.Length == 0)
+            throw JobArchitectureException.Invalid(
+                "Name the competency, or pick a skill or a competency from the catalogue.");
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionRequirementsImportResultDto> ImportPositionRequirementsAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        var jd = await RequireAuthorableJobDescriptionAsync(jobDescriptionId);
+        var tenantId = GetTenantId();
+
+        // The EFFECTIVE requirements: individual rows and named sets together (round 2, lane C3a —
+        // a reader of the individual table alone goes on ignoring sets).
+        var skills = await _namedSets.GetEffectiveSkillsAsync(jd.PositionId, tenantId, cancellationToken);
+        var certifications = await _namedSets.GetEffectiveCertificationsAsync(jd.PositionId, tenantId, cancellationToken);
+
+        var existingSkillIds = (await _competencyRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
+            .Where(c => c.TenantId == tenantId && c.SkillId.HasValue).Select(c => c.SkillId!.Value).ToHashSet();
+        var existingCertIds = (await _qualificationRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
+            .Where(q => q.TenantId == tenantId && q.CertificationId.HasValue).Select(q => q.CertificationId!.Value).ToHashSet();
+
+        var result = new PositionRequirementsImportResultDto();
+        foreach (var s in skills)
+        {
+            if (!existingSkillIds.Add(s.SkillId)) { result.AlreadyPresent++; continue; }
+            await _competencyRepository.AddAsync(new JobCompetency
+            {
+                TenantId = tenantId,
+                JobDescriptionId = jobDescriptionId,
+                SkillId = s.SkillId,
+                CompetencyName = s.SkillName,
+                Type = CompetencyType.Technical,
+                RequiredLevel = MapSkillLevel(s.RequiredLevel),
+                IsCritical = s.IsRequired,
+                Description = "From the position's skill requirements.",
+            });
+            result.CompetenciesAdded++;
+        }
+        foreach (var c in certifications)
+        {
+            if (!existingCertIds.Add(c.CertificationId)) { result.AlreadyPresent++; continue; }
+            await _qualificationRepository.AddAsync(new JobQualification
+            {
+                TenantId = tenantId,
+                JobDescriptionId = jobDescriptionId,
+                CertificationId = c.CertificationId,
+                Title = c.CertificationName,
+                Type = QualificationType.Certification,
+                IsRequired = c.IsMandatory,
+                Description = string.IsNullOrWhiteSpace(c.CertifyingBodyName)
+                    ? "From the position's certification requirements."
+                    : $"From the position's certification requirements ({c.CertifyingBodyName}).",
+            });
+            result.QualificationsAdded++;
+        }
+
+        if (result.CompetenciesAdded + result.QualificationsAdded > 0)
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation("Job description {Id}: imported {C} competencies and {Q} qualifications from position {PositionId} ({Skipped} already present).",
+            jobDescriptionId, result.CompetenciesAdded, result.QualificationsAdded, jd.PositionId, result.AlreadyPresent);
+        return result;
+    }
+
+    /// <summary>The skill scale has three steps, the competency scale five; the floor of each maps onto the other's.</summary>
+    private static ProficiencyLevel MapSkillLevel(SkillLevel level) => level switch
+    {
+        SkillLevel.Beginner => ProficiencyLevel.Basic,
+        SkillLevel.Intermediate => ProficiencyLevel.WorkingKnowledge,
+        SkillLevel.Advanced => ProficiencyLevel.Advanced,
+        _ => ProficiencyLevel.Basic,
+    };
+
     public async Task<JobQualificationDto> AddQualificationAsync(CreateJobQualificationDto createDto, CancellationToken cancellationToken = default)
     {
         await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            createDto.JobResponsibilityId, createDto.JobDescriptionId, cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+        await ResolveQualificationIdentityAsync(entity, cancellationToken);
 
         await _qualificationRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _qualificationRepository.GetQueryable()
             .Include(q => q.Qualification)
+            .Include(q => q.Certification)
             .FirstOrDefaultAsync(q => q.Id == entity.Id, cancellationToken);
 
         _logger.LogInformation("Qualification added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
@@ -1192,20 +1382,29 @@ public class JobDescriptionService : IJobDescriptionService
     {
         var entity = await _qualificationRepository.GetQueryable()
             .Include(q => q.Qualification)
+            .Include(q => q.Certification)
             .FirstOrDefaultAsync(q => q.Id == updateDto.Id, cancellationToken);
 
         if (entity == null || entity.TenantId != GetTenantId())
             throw JobArchitectureException.NotFound("Qualification not found");
 
         await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            updateDto.JobResponsibilityId, entity.JobDescriptionId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
+        await ResolveQualificationIdentityAsync(entity, cancellationToken);
 
         await _qualificationRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Qualification updated: {QualificationId}", updateDto.Id);
 
+        // Re-read: a changed catalogue link's navigation is not loaded on the tracked entity.
+        entity = await _qualificationRepository.GetQueryable()
+            .Include(q => q.Qualification)
+            .Include(q => q.Certification)
+            .FirstOrDefaultAsync(q => q.Id == entity.Id, cancellationToken) ?? entity;
         return entity.ToDto();
     }
 
@@ -1233,14 +1432,20 @@ public class JobDescriptionService : IJobDescriptionService
     public async Task<JobCompetencyDto> AddCompetencyAsync(CreateJobCompetencyDto createDto, CancellationToken cancellationToken = default)
     {
         await RequireAuthorableJobDescriptionAsync(createDto.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            createDto.JobResponsibilityId, createDto.JobDescriptionId, cancellationToken);
         var entity = createDto.ToEntity();
         entity.TenantId = GetTenantId();
+        await ResolveCompetencyIdentityAsync(entity, cancellationToken);
 
         await _competencyRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Competency added to job description: {JobDescriptionId}", createDto.JobDescriptionId);
 
+        entity = await _competencyRepository.GetQueryable()
+            .Include(c => c.Skill).Include(c => c.Competency)
+            .FirstOrDefaultAsync(c => c.Id == entity.Id, cancellationToken) ?? entity;
         return entity.ToDto();
     }
 
@@ -1260,14 +1465,20 @@ public class JobDescriptionService : IJobDescriptionService
             throw JobArchitectureException.NotFound("Competency not found");
 
         await RequireAuthorableJobDescriptionAsync(entity.JobDescriptionId);
+        await RequireResponsibilityOfAsync(
+            updateDto.JobResponsibilityId, entity.JobDescriptionId, cancellationToken);
 
         updateDto.UpdateEntity(entity);
+        await ResolveCompetencyIdentityAsync(entity, cancellationToken);
 
         await _competencyRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Competency updated: {CompetencyId}", updateDto.Id);
 
+        entity = await _competencyRepository.GetQueryable()
+            .Include(c => c.Skill).Include(c => c.Competency)
+            .FirstOrDefaultAsync(c => c.Id == entity.Id, cancellationToken) ?? entity;
         return entity.ToDto();
     }
 
@@ -1678,11 +1889,135 @@ public class JobDescriptionService : IJobDescriptionService
 
     #region Job Evaluation / Valuation
 
-    public async Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    /// <summary>Works out what the role is worth and returns it. Changes nothing.</summary>
+    /// <remarks>
+    /// ⚠ This used to persist what it computed, which made a GET a write. Everything in an HTTP
+    /// stack assumes a GET is safe and repeats it freely — a retry on a dropped connection, a cache
+    /// revalidation, a client refetching on window focus, a health probe — and every one of those
+    /// became an UPDATE. The values were at least deterministic, so nothing corrupted; what it did
+    /// cost was real all the same: <c>SaveChanges</c> stamps <c>UpdatedAt</c> on any modified row,
+    /// so reading a valuation bumped the job description's last-modified date, on an approved and
+    /// in-force document as readily as on a draft. Persisting now belongs to
+    /// <see cref="RecalculateValuationAsync"/>, which is a POST, is gated on Write, and refuses an
+    /// approved record.
+    /// </remarks>
+    public Task<JobValuationSummaryDto> GetValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+        => ValueRoleAsync(jobDescriptionId, persist: false, cancellationToken);
+
+    /// <summary>Works the valuation out and STORES it on the job description.</summary>
+    public async Task<JobValuationSummaryDto> RecalculateValuationAsync(Guid jobDescriptionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var status = await _jobDescriptionRepository.GetQueryable()
+            .Where(x => x.Id == jobDescriptionId && x.TenantId == tenantId)
+            .Select(x => (JobDescriptionStatus?)x.Status)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (status == null)
+            throw JobArchitectureException.NotFound($"Job description with ID '{jobDescriptionId}' not found.");
+
+        // The same rule the rest of the document follows: an approved description is the one in
+        // force for its position, and its stored figures are part of what was approved. Re-valuing
+        // it would rewrite them with no new version and no trace.
+        if (status == JobDescriptionStatus.Approved)
+            throw JobArchitectureException.InvalidState(
+                "Cannot re-value an approved job description. Create a new version instead.");
+
+        return await ValueRoleAsync(jobDescriptionId, persist: true, cancellationToken);
+    }
+
+    /// <summary>The author's proposed grade (round 3, lane J2; D-11). Null clears it back to the suggestion.</summary>
+    public async Task<JobValuationSummaryDto> SetProposedSalaryGradeAsync(
+        Guid jobDescriptionId, SetProposedSalaryGradeDto dto, CancellationToken cancellationToken = default)
+    {
+        var entity = await RequireAuthorableJobDescriptionAsync(jobDescriptionId);
+        await EnsureProposedGradeAsync(dto.ProposedSalaryGradeId, entity.TenantId, cancellationToken);
+        entity.ProposedSalaryGradeId = dto.ProposedSalaryGradeId ?? entity.SuggestedSalaryGradeId;
+        entity.ProposedSalaryGradeNote = string.IsNullOrWhiteSpace(dto.ProposedSalaryGradeNote) ? null : dto.ProposedSalaryGradeNote.Trim();
+        entity.StampUpdated(_currentUserProvider);
+        await _jobDescriptionRepository.UpdateAsync(entity);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        return await ValueRoleAsync(jobDescriptionId, persist: false, cancellationToken);
+    }
+
+    /// <summary>A proposed grade must be one of the tenant's live grades — payroll's projection, read here.</summary>
+    private async Task EnsureProposedGradeAsync(Guid? gradeId, Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (gradeId is not { } id) return;
+        var grades = await _salaryGradeRepository.GetAllAsync(tenantId, includeInactive: false, cancellationToken);
+        if (grades.All(g => g.Id != id))
+            throw JobArchitectureException.Invalid("That salary grade is not one of this organisation's live grades.");
+    }
+
+    /// <summary>A grade and the range it answers for: its own band when one is set, else its notch amounts.</summary>
+    private sealed record GradeBand(SalaryGrade Grade, decimal Min, decimal Max, string Basis)
+    {
+        public decimal Midpoint => (Min + Max) / 2m;
+        public decimal Width => Max - Min;
+    }
+
+    /// <summary>
+    /// Every live grade with a usable range (round 3, lane J2). Step 0 of the lane read the dev
+    /// tenant: the projected grades DO carry bands (M1 32,110–51,332 … S3 2,707–5,145), several of
+    /// them overlapping, plus harness litter with identical 50,000–80,000 bands — so "first band
+    /// that contains the midpoint" and "nearest by MIN" were both wrong for different reasons. A
+    /// grade whose band is blank (0..0) falls back to the min and max of its notch amounts; one
+    /// with neither is not a candidate.
+    /// </summary>
+    private async Task<List<GradeBand>> LoadGradeBandsAsync(Guid tenantId, CancellationToken cancellationToken)
+    {
+        var grades = await _salaryGradeRepository.GetAllAsync(tenantId, includeInactive: false, cancellationToken);
+        var gradeIds = grades.Select(g => g.Id).ToList();
+        var notchRanges = await _unitOfWork.Repository<SalaryLevel>().GetQueryable().AsNoTracking()
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && gradeIds.Contains(l.SalaryGradeId))
+            .SelectMany(l => l.Notches.Where(n => !n.IsDeleted).Select(n => new { l.SalaryGradeId, n.SalaryAmount }))
+            .GroupBy(x => x.SalaryGradeId)
+            .Select(g => new { GradeId = g.Key, Min = g.Min(x => x.SalaryAmount), Max = g.Max(x => x.SalaryAmount) })
+            .ToListAsync(cancellationToken);
+        var byGrade = notchRanges.ToDictionary(x => x.GradeId, x => (x.Min, x.Max));
+
+        var bands = new List<GradeBand>();
+        foreach (var g in grades)
+        {
+            if (g.MaxSalary > 0 && g.MaxSalary >= g.MinSalary)
+                bands.Add(new GradeBand(g, g.MinSalary, g.MaxSalary, "Band"));
+            else if (byGrade.TryGetValue(g.Id, out var r) && r.Max > 0)
+                bands.Add(new GradeBand(g, r.Min, r.Max, "Notches"));
+        }
+        return bands;
+    }
+
+    /// <summary>
+    /// The band that contains the midpoint — when several do (the bands overlap at their edges),
+    /// the one the midpoint sits most centrally in, then the narrower, then by code so the answer is
+    /// stable. When none does there is NO suggestion: the nearest band is returned as information
+    /// only, and the proposal is the author's to make.
+    /// </summary>
+    private static (GradeBand? Match, GradeBand? Nearest) MatchGrade(decimal midpoint, IReadOnlyList<GradeBand> bands)
+    {
+        if (midpoint <= 0 || bands.Count == 0) return (null, null);
+        var match = bands
+            .Where(b => b.Min <= midpoint && midpoint <= b.Max)
+            .OrderBy(b => Math.Abs(b.Midpoint - midpoint))
+            .ThenBy(b => b.Width)
+            .ThenBy(b => b.Grade.Code)
+            .FirstOrDefault();
+        if (match != null) return (match, null);
+        var nearest = bands
+            .OrderBy(b => midpoint < b.Min ? b.Min - midpoint : midpoint - b.Max)
+            .ThenBy(b => b.Grade.Code)
+            .First();
+        return (null, nearest);
+    }
+
+    private async Task<JobValuationSummaryDto> ValueRoleAsync(
+        Guid jobDescriptionId, bool persist, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
         var jd = await _jobDescriptionRepository.GetQueryable()
             .Include(x => x.SuggestedSalaryGrade)
+            .Include(x => x.ProposedSalaryGrade)
+            .Include(x => x.Position).ThenInclude(p => p.SalaryGrade)
             .FirstOrDefaultAsync(x => x.Id == jobDescriptionId && x.TenantId == tenantId, cancellationToken);
         if (jd == null)
             throw JobArchitectureException.NotFound($"Job description with ID '{jobDescriptionId}' not found.");
@@ -1692,12 +2027,13 @@ public class JobDescriptionService : IJobDescriptionService
         var competencies = (await _competencyRepository.GetByJobDescriptionIdAsync(jobDescriptionId))
             .Where(c => c.TenantId == tenantId).ToList();
 
+        // D-9: the intrinsic value IS the sum of what the job's own rows are worth. The figure an
+        // author once typed into RoleIntrinsicValue is reported but no longer counted.
         var totalQual = qualifications.Sum(q => q.MonetaryValue ?? 0m);
         var totalComp = competencies.Sum(c => c.MonetaryValue ?? 0m);
-        var roleValue = jd.RoleIntrinsicValue ?? 0m;
-        var totalEstimated = totalQual + totalComp + roleValue;
+        var totalEstimated = totalQual + totalComp;
 
-        // Midpoint blends the computed value with any external industry benchmark.
+        // Midpoint blends the derived value with any external industry benchmark.
         decimal midpoint;
         if (jd.IndustryBenchmarkSalary.HasValue && jd.IndustryBenchmarkSalary.Value > 0 && totalEstimated > 0)
             midpoint = (totalEstimated + jd.IndustryBenchmarkSalary.Value) / 2m;
@@ -1709,21 +2045,34 @@ public class JobDescriptionService : IJobDescriptionService
         decimal? low = midpoint > 0 ? Math.Round(midpoint * 0.9m, 2) : (decimal?)null;
         decimal? high = midpoint > 0 ? Math.Round(midpoint * 1.1m, 2) : (decimal?)null;
 
-        // Match a salary grade whose band contains the midpoint (tenant-scoped); else nearest by min salary.
-        SalaryGrade? suggestedGrade = null;
-        if (midpoint > 0)
+        var bands = midpoint > 0 ? await LoadGradeBandsAsync(jd.TenantId, cancellationToken) : new List<GradeBand>();
+        var (match, nearest) = MatchGrade(midpoint, bands);
+        string? note = midpoint <= 0
+            ? "Nothing to match yet: value the qualifications and competencies, or enter a benchmark."
+            : match != null
+                ? $"{match.Grade.Name} ({match.Grade.Code}) contains the midpoint of {midpoint:N2} — band {match.Min:N2}–{match.Max:N2}, read from the grade's {(match.Basis == "Band" ? "own band" : "notch amounts")}."
+                : nearest != null
+                    ? $"No grade band contains the midpoint of {midpoint:N2}. The nearest is {nearest.Grade.Name} ({nearest.Grade.Code}, {nearest.Min:N2}–{nearest.Max:N2}); the proposed grade is yours to set."
+                    : "No grade carries a usable band or notch range yet, so nothing can be matched.";
+
+        // Only when asked. The read path computes the same figures and leaves the record alone.
+        if (persist)
         {
-            var grades = await _salaryGradeRepository.GetAllAsync(jd.TenantId, includeInactive: false, cancellationToken);
-            suggestedGrade = grades.FirstOrDefault(g => g.MinSalary <= midpoint && midpoint <= g.MaxSalary)
-                          ?? grades.OrderBy(g => Math.Abs(g.MinSalary - midpoint)).FirstOrDefault();
+            jd.EstimatedSalaryLow = low;
+            jd.EstimatedSalaryHigh = high;
+            jd.SuggestedSalaryGradeId = match?.Grade.Id;
+            // D-11: the proposal defaults to the suggestion until the author sets it.
+            if (jd.ProposedSalaryGradeId == null && match != null)
+            {
+                jd.ProposedSalaryGradeId = match.Grade.Id;
+                jd.ProposedSalaryGrade = match.Grade;
+            }
+            await _jobDescriptionRepository.UpdateAsync(jd);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
         }
 
-        // Persist the computed estimate + suggested grade on the JD.
-        jd.EstimatedSalaryLow = low;
-        jd.EstimatedSalaryHigh = high;
-        jd.SuggestedSalaryGradeId = suggestedGrade?.Id;
-        await _jobDescriptionRepository.UpdateAsync(jd);
-        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        var proposedName = jd.ProposedSalaryGrade?.Name
+            ?? bands.FirstOrDefault(b => b.Grade.Id == jd.ProposedSalaryGradeId)?.Grade.Name;
 
         return new JobValuationSummaryDto
         {
@@ -1731,15 +2080,26 @@ public class JobDescriptionService : IJobDescriptionService
             JobTitle = jd.JobTitle,
             TotalQualificationValue = totalQual,
             TotalCompetencyValue = totalComp,
-            RoleIntrinsicValue = roleValue,
+            LegacyTypedIntrinsicValue = jd.RoleIntrinsicValue,
             RoleCriticality = jd.RoleCriticality,
             IndustryBenchmarkSalary = jd.IndustryBenchmarkSalary,
             EstimatedSalaryLow = low,
             EstimatedSalaryHigh = high,
-            SuggestedSalaryGradeId = suggestedGrade?.Id,
-            SuggestedSalaryGradeName = suggestedGrade?.Name,
-            SuggestedGradeMinSalary = suggestedGrade?.MinSalary,
-            SuggestedGradeMaxSalary = suggestedGrade?.MaxSalary,
+            SuggestedSalaryGradeId = match?.Grade.Id,
+            SuggestedSalaryGradeName = match?.Grade.Name,
+            SuggestedGradeMinSalary = match?.Min,
+            SuggestedGradeMaxSalary = match?.Max,
+            SuggestedGradeBasis = match?.Basis,
+            SuggestedGradeNote = note,
+            NearestSalaryGradeId = nearest?.Grade.Id,
+            NearestSalaryGradeName = nearest?.Grade.Name,
+            NearestGradeMinSalary = nearest?.Min,
+            NearestGradeMaxSalary = nearest?.Max,
+            ProposedSalaryGradeId = jd.ProposedSalaryGradeId,
+            ProposedSalaryGradeName = proposedName,
+            ProposedSalaryGradeNote = jd.ProposedSalaryGradeNote,
+            PositionSalaryGradeId = jd.Position?.SalaryGradeId,
+            PositionSalaryGradeName = jd.Position?.SalaryGrade?.Name,
             ValuationNotes = jd.ValuationNotes,
             QualificationLines = qualifications
                 .Select(q => new JobValuationLineDto { Id = q.Id, Name = q.Title, MonetaryValue = q.MonetaryValue })
@@ -1850,6 +2210,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
     private readonly IWorkflowIntegrationService _workflowIntegration;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
     private readonly IUnitOfWork _unitOfWork;
+    private readonly ICompanyHrPolicyProvider _policyProvider;
     private readonly ILogger<ManpowerBudgetService> _logger;
 
     public ManpowerBudgetService(
@@ -1859,6 +2220,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         IWorkflowIntegrationService workflowIntegration,
         IWorkflowStatusAdapterRegistry workflowAdapters,
         IUnitOfWork unitOfWork,
+        ICompanyHrPolicyProvider policyProvider,
         ILogger<ManpowerBudgetService> logger)
     {
         _budgetRepository = budgetRepository;
@@ -1867,6 +2229,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         _workflowIntegration = workflowIntegration;
         _workflowAdapters = workflowAdapters;
         _unitOfWork = unitOfWork;
+        _policyProvider = policyProvider;
         _logger = logger;
     }
 
@@ -2000,6 +2363,22 @@ public class ManpowerBudgetService : IManpowerBudgetService
     public async Task<ManpowerBudgetDto> CreateAsync(CreateManpowerBudgetDto createDto, CancellationToken cancellationToken = default)
     {
         var tenantId = GetTenantId();
+
+        // Round 2b, R1: the unit must be this tenant's, and the level follows the unit when the
+        // caller names none — the flat dropdown never sent a level, so every budget in the table
+        // carried a unit and no level. Same rule as UpdateAsync.
+        if (createDto.OrganizationUnitId.HasValue)
+        {
+            var unit = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .FirstOrDefaultAsync(u => u.Id == createDto.OrganizationUnitId.Value
+                                       && u.TenantId == tenantId && !u.IsDeleted, cancellationToken);
+            if (unit is null)
+                throw JobArchitectureException.Invalid(
+                    "The organisation unit named for this budget does not exist in this organisation.");
+            if (!createDto.OrganizationLevelId.HasValue)
+                createDto.OrganizationLevelId = unit.OrganizationLevelId;
+        }
+
         var entity = createDto.ToEntity();
         entity.TenantId = tenantId;
         entity.BudgetNumber = await GenerateBudgetNumberAsync(cancellationToken);
@@ -2025,7 +2404,9 @@ public class ManpowerBudgetService : IManpowerBudgetService
 
         _logger.LogInformation("Manpower budget created: {BudgetNumber}", entity.BudgetNumber);
 
-        return entity.ToDto();
+        // Re-read so the response carries the unit and level NAMES (the entity was built from the
+        // DTO and has no navigations loaded — the lane F2 shape).
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<ManpowerBudgetDto> UpdateAsync(UpdateManpowerBudgetDto updateDto, CancellationToken cancellationToken = default)
@@ -2039,27 +2420,61 @@ public class ManpowerBudgetService : IManpowerBudgetService
         if (entity == null)
             throw JobArchitectureException.NotFound($"Manpower budget with ID '{updateDto.Id}' not found.");
 
-        if (entity.Status == ManpowerBudgetStatus.Approved)
-            throw JobArchitectureException.InvalidState("Cannot update an approved budget.");
+        // ⚠ Was "refuse Approved only", which let a budget be corrected WHILE it was out for
+        // approval — the three approvers of FR-HR-135's chain reading a moving target. A budget is
+        // its author's while Draft or Rejected and the approvers' from Submitted on (round 2b, R1).
+        if (entity.Status != ManpowerBudgetStatus.Draft && entity.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState(
+                $"A {entity.Status} budget cannot be corrected. Only a Draft or Rejected budget can be " +
+                "edited: one out for approval is what its approvers are reading, and an approved one is the record.");
+
+        // The scope (year, unit, level) is editable here too — null on the DTO means unchanged. A
+        // unit must exist in this tenant; the level follows the unit unless the caller names one.
+        if (updateDto.OrganizationUnitId.HasValue && updateDto.OrganizationUnitId != entity.OrganizationUnitId)
+        {
+            var unit = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+                .FirstOrDefaultAsync(u => u.Id == updateDto.OrganizationUnitId.Value
+                                       && u.TenantId == tenantId && !u.IsDeleted, cancellationToken);
+            if (unit is null)
+                throw JobArchitectureException.Invalid(
+                    "The organisation unit named for this budget does not exist in this organisation.");
+            if (!updateDto.OrganizationLevelId.HasValue)
+                updateDto.OrganizationLevelId = unit.OrganizationLevelId;
+        }
+
+        // A correction does not move the budget through its chain — submit, approve and reject do.
+        // A caller who sends the current status is round-tripping the record and is fine; one who
+        // sends a different status is told, rather than left believing the transition happened.
+        if (updateDto.Status.HasValue && updateDto.Status.Value != entity.Status)
+            throw JobArchitectureException.Invalid(
+                $"A manpower budget's status is not changed by correcting it. This one is {entity.Status}; " +
+                "use submit, approve or reject to move it.");
 
         updateDto.UpdateEntity(entity);
         entity.TotalBudget = updateDto.SalaryBudget + updateDto.BenefitsBudget + updateDto.RecruitmentBudget + updateDto.TrainingBudget;
-        entity.Variance = entity.TotalBudget - updateDto.ActualSpent;
+        // Against the stored actuals, which nothing in HR writes — not a caller-supplied figure.
+        entity.Variance = entity.TotalBudget - entity.ActualSpent;
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Manpower budget updated: {BudgetNumber}", entity.BudgetNumber);
 
-        return entity.ToDto();
+        // Re-read: the tracked entity still carries the OLD unit/level navigations after a scope
+        // change, and mapping it would answer with the previous unit's name (the lane F2 lesson).
+        return await GetByIdAsync(entity.Id, cancellationToken);
     }
 
     public async Task<bool> SubmitForApprovalAsync(Guid budgetId, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(budgetId);
 
-        if (entity.Status != ManpowerBudgetStatus.Draft)
-            throw JobArchitectureException.InvalidState("Only draft budgets can be submitted for approval.");
+        // A Rejected budget is resubmittable on purpose (round 2b, R1): correct-and-resubmit is the
+        // loop that status exists for. Until R1 it could only be deleted — and a rejected budget
+        // cannot be deleted either (Draft only), so it was simply stuck.
+        if (entity.Status != ManpowerBudgetStatus.Draft && entity.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState(
+                "Only a Draft or Rejected budget can be submitted for approval.");
 
         // ⚠ Refuse an empty budget before troubling anyone with it. A manpower budget with no lines
         // authorises no posts, so sending one up FR-HR-135's three-step chain wastes three people's
@@ -2130,22 +2545,24 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var entity = await GetOwnedBudgetAsync(budgetId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
-        var result = await _workflowIntegration.ProcessApprovalAsync(BudgetWorkflowEntityType, budgetId, userId, "Approve");
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the manpower budget approval.");
+        // Same strand as the job description above: submit already lands at Submitted with no
+        // definition, and this could then never approve it.
+        //
+        // ⚠ HR.ManpowerBudget.Approve is NOT granted to the HR desk — see HrStaffGrants. Approving
+        // sets the approved establishment, which gates whether a vacancy may be approved at all
+        // under FR-HR-136.
+        var approvalOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, BudgetWorkflowEntityType, budgetId, userId,
+            "Approve", null, "approve a manpower budget", HrPermissions.ApproveManpowerBudget);
 
         _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId);
+            .ApplyApprovalOutcome(entity, approvalOutcome, userId);
 
         // ⚠ Only when the chain actually completes. FR-HR-135 has three steps, and a Department
         // Head approving the first must not stamp the budget as approved — the engine returns
         // Pending for a mid-chain step, and an approver is not the approver until the last one.
-        if (result.Outcome == WorkflowOutcome.Approved)
+        // With no definition there is no chain, so the single approval completes it.
+        if (approvalOutcome == WorkflowOutcome.Approved)
         {
             entity.ApprovedById = approvedById;
             // Only now. A department head approving step 1 of 3 has authorised nothing yet, and
@@ -2158,7 +2575,7 @@ public class ManpowerBudgetService : IManpowerBudgetService
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Manpower budget {Number} approval step processed: {Outcome}",
-            entity.BudgetNumber, result.Outcome);
+            entity.BudgetNumber, approvalOutcome);
 
         return true;
     }
@@ -2169,19 +2586,14 @@ public class ManpowerBudgetService : IManpowerBudgetService
         var entity = await GetOwnedBudgetAsync(budgetId);
         var userId = _currentUserProvider.UserId;
 
-        if (!await _workflowIntegration.CanUserApproveAsync(BudgetWorkflowEntityType, budgetId, userId))
-            throw new UnauthorizedAccessException(
-                "You are not assigned as an approver for the current workflow step.");
-
         var rejectionText = string.IsNullOrWhiteSpace(reason) ? "Rejected" : reason.Trim();
-        var result = await _workflowIntegration.ProcessApprovalAsync(
-            BudgetWorkflowEntityType, budgetId, userId, "Reject", rejectionText);
-        if (!result.ExecutionResult.Success)
-            throw JobArchitectureException.InvalidState(
-                result.ExecutionResult.Message ?? "Failed to process the manpower budget rejection.");
+
+        var rejectionOutcome = await HrWorkflowFallbackAuthority.ProcessApprovalAsync(
+            _workflowIntegration, _currentUserProvider, BudgetWorkflowEntityType, budgetId, userId,
+            "Reject", rejectionText, "reject a manpower budget", HrPermissions.ApproveManpowerBudget);
 
         _workflowAdapters.GetAdapter(BudgetWorkflowEntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, userId, rejectionText);
+            .ApplyApprovalOutcome(entity, rejectionOutcome, userId, rejectionText);
 
         await _budgetRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
@@ -2457,6 +2869,689 @@ public class ManpowerBudgetService : IManpowerBudgetService
         return true;
     }
 
+    // ── The planning baseline (round 2b, R2) ─────────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<ManpowerPlanningBaselineDto> GetPlanningBaselineAsync(
+        Guid organizationUnitId, DateOnly periodStart, DateOnly periodEnd, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        if (periodEnd < periodStart)
+            throw JobArchitectureException.Invalid("The planning period must end after it starts.");
+
+        // The subtree, walked over ParentUnitId in memory: one read of the tenant's units rather
+        // than a query per level, and `Path` cannot be trusted on seeded rows (lane B1).
+        var units = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable()
+            .AsNoTracking()
+            .Where(u => u.TenantId == tenantId && !u.IsDeleted)
+            .Select(u => new { u.Id, u.ParentUnitId, u.Name })
+            .ToListAsync(cancellationToken);
+        var root = units.FirstOrDefault(u => u.Id == organizationUnitId)
+            ?? throw JobArchitectureException.NotFound("The organisation unit does not exist in this organisation.");
+
+        var childrenOf = units.Where(u => u.ParentUnitId != null)
+            .GroupBy(u => u.ParentUnitId!.Value)
+            .ToDictionary(g => g.Key, g => g.Select(u => u.Id).ToList());
+        var unitIds = new List<Guid>();
+        var queue = new Queue<Guid>();
+        queue.Enqueue(root.Id);
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            if (unitIds.Contains(id)) continue;
+            unitIds.Add(id);
+            if (childrenOf.TryGetValue(id, out var kids))
+                foreach (var kid in kids) queue.Enqueue(kid);
+        }
+        var unitName = units.ToDictionary(u => u.Id, u => u.Name);
+
+        // Everyone on strength in the subtree — one predicate (HrServingEmployees).
+        var employees = await _unitOfWork.Repository<Employee>().GetQueryable()
+            .AsNoTracking()
+            .Include(e => e.Position)
+            .Where(e => e.TenantId == tenantId
+                     && e.OrganizationUnitId != null && unitIds.Contains(e.OrganizationUnitId.Value))
+            .Where(HrServingEmployees.Predicate)
+            .ToListAsync(cancellationToken);
+        var employeeIds = employees.Select(e => e.Id).ToList();
+
+        // The placement in force today, per person — the same predicate the pay resolvers use.
+        var today = DateTime.Today;
+        var placements = await _unitOfWork.Repository<EmployeeSalaryAssignment>().GetQueryable()
+            .AsNoTracking()
+            .Include(a => a.Grade).Include(a => a.Level).Include(a => a.Notch)
+            .Where(a => a.TenantId == tenantId && !a.IsDeleted
+                     && employeeIds.Contains(a.EmployeeId)
+                     && a.WithdrawnAt == null
+                     && a.EffectiveDate <= today
+                     && (a.EffectiveTo == null || a.EffectiveTo >= today))
+            .ToListAsync(cancellationToken);
+        var placementOf = placements
+            .GroupBy(a => a.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(a => a.EffectiveDate).First());
+
+        decimal salaryCost = 0m;
+        var withoutPay = 0;
+        var payByPosition = new Dictionary<Guid, (decimal Sum, int Count)>();
+        foreach (var e in employees)
+        {
+            placementOf.TryGetValue(e.Id, out var placement);
+            var (amount, _) = HrBasicPay.ResolveForPlanning(e, placement);
+            if (amount is > 0m)
+            {
+                salaryCost += amount.Value;
+                payByPosition.TryGetValue(e.PositionId, out var acc);
+                payByPosition[e.PositionId] = (acc.Sum + amount.Value, acc.Count + 1);
+            }
+            else withoutPay++;
+        }
+
+        // Exits due in the period.
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var todayDate = DateOnly.FromDateTime(today);
+
+        var separations = await _unitOfWork.Repository<EmployeeSeparation>().GetQueryable()
+            .AsNoTracking()
+            .Where(s => s.TenantId == tenantId && !s.IsDeleted
+                     && employeeIds.Contains(s.EmployeeId)
+                     && s.Status != SeparationStatus.Cancelled
+                     && s.Status != SeparationStatus.Rejected
+                     && s.Status != SeparationStatus.Completed)
+            .Select(s => new { s.Id, s.EmployeeId, s.SeparationNumber, s.Status, s.LastWorkingDay, s.EffectiveDate, s.InitiatedOn })
+            .ToListAsync(cancellationToken);
+        var separationOf = separations.GroupBy(s => s.EmployeeId).ToDictionary(g => g.Key, g => g.First());
+
+        var contractEnds = await _unitOfWork.Repository<EmployeeContractDetail>().GetQueryable()
+            .AsNoTracking()
+            .Where(c => c.TenantId == tenantId && !c.IsDeleted && c.IsCurrent
+                     && employeeIds.Contains(c.EmployeeId)
+                     && c.ContractEndDate != null
+                     && c.ContractEndDate <= periodEnd)
+            .Select(c => new { c.EmployeeId, c.ContractEndDate })
+            .ToListAsync(cancellationToken);
+        var contractEndOf = contractEnds.GroupBy(c => c.EmployeeId)
+            .ToDictionary(g => g.Key, g => g.Min(c => c.ContractEndDate!.Value));
+
+        ManpowerPlanningExitDto Exit(Employee e, string kind, DateOnly? date)
+        {
+            separationOf.TryGetValue(e.Id, out var sep);
+            return new ManpowerPlanningExitDto
+            {
+                EmployeeId = e.Id,
+                EmployeeName = $"{e.FirstName} {e.LastName}".Trim(),
+                EmployeeNumber = e.EmployeeNumber,
+                PositionId = e.PositionId,
+                PositionTitle = e.Position?.Title,
+                OrganizationUnitId = e.OrganizationUnitId,
+                OrganizationUnitName = e.OrganizationUnitId is { } uid && unitName.TryGetValue(uid, out var n) ? n : null,
+                Kind = kind,
+                Date = date,
+                IsOverdue = date is { } d && d < todayDate,
+                HasSeparation = sep != null,
+                SeparationNumber = sep?.SeparationNumber,
+                SeparationStatus = sep?.Status.ToString(),
+            };
+        }
+
+        var retirements = new List<ManpowerPlanningExitDto>();
+        var expiries = new List<ManpowerPlanningExitDto>();
+        var inFlight = new List<ManpowerPlanningExitDto>();
+        foreach (var e in employees)
+        {
+            // A retirement date in the period — or already past for someone still on strength,
+            // which is an exit the plan must expect just as much.
+            if (HrPolicyCalculations.RetirementDate(settings, e) is { } retire && retire <= periodEnd
+                && (retire >= periodStart || retire < todayDate))
+                retirements.Add(Exit(e, "Retirement", retire));
+
+            if (contractEndOf.TryGetValue(e.Id, out var end) && (end >= periodStart || end < todayDate))
+                expiries.Add(Exit(e, "ContractExpiry", end));
+
+            if (separationOf.TryGetValue(e.Id, out var sep))
+                inFlight.Add(Exit(e, "Separation", sep.LastWorkingDay ?? sep.EffectiveDate ?? sep.InitiatedOn));
+        }
+        var exitingIds = retirements.Concat(expiries).Concat(inFlight).Select(x => x.EmployeeId).Distinct().ToList();
+
+        // Every live post in the subtree, against its establishment.
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable()
+            .AsNoTracking()
+            // A position's unit is a non-nullable Guid (an employee's is nullable) - hence the two shapes.
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted && p.IsActive
+                     && unitIds.Contains(p.OrganizationUnitId))
+            .Select(p => new { p.Id, p.Title, p.Code, p.OrganizationUnitId, p.SalaryGradeId, p.ExpectedHeadcount, p.EstablishmentApprovedOn })
+            .ToListAsync(cancellationToken);
+        var filledOf = employees.GroupBy(e => e.PositionId).ToDictionary(g => g.Key, g => g.Count());
+        var exitsOf = employees.Where(e => exitingIds.Contains(e.Id))
+            .GroupBy(e => e.PositionId).ToDictionary(g => g.Key, g => g.Count());
+
+        var positionRows = positions.Select(p =>
+        {
+            filledOf.TryGetValue(p.Id, out var filled);
+            exitsOf.TryGetValue(p.Id, out var exits);
+            payByPosition.TryGetValue(p.Id, out var pay);
+            var established = p.EstablishmentApprovedOn != null;
+            int? gap = established ? Math.Max(0, p.ExpectedHeadcount - filled) : null;
+            return new ManpowerPlanningPositionDto
+            {
+                CurrentSalaryCost = pay.Sum,
+                CurrentAverageSalary = pay.Count == 0 ? 0m : Math.Round(pay.Sum / pay.Count, 2),
+                PositionId = p.Id,
+                Title = p.Title,
+                Code = p.Code,
+                OrganizationUnitId = p.OrganizationUnitId,
+                OrganizationUnitName = unitName.TryGetValue(p.OrganizationUnitId, out var n) ? n : null,
+                SalaryGradeId = p.SalaryGradeId,
+                Filled = filled,
+                ExpectedHeadcount = p.ExpectedHeadcount,
+                IsEstablished = established,
+                Gap = gap,
+                ExitsDue = exits,
+                SuggestedNewHires = (gap ?? 0) + exits,
+            };
+        })
+        .OrderBy(p => p.OrganizationUnitName).ThenBy(p => p.Title)
+        .ToList();
+
+        return new ManpowerPlanningBaselineDto
+        {
+            OrganizationUnitId = root.Id,
+            OrganizationUnitName = root.Name,
+            PeriodStart = periodStart,
+            PeriodEnd = periodEnd,
+            UnitIds = unitIds,
+            CurrentHeadcount = employees.Count,
+            CurrentSalaryCost = salaryCost,
+            EmployeesWithoutPay = withoutPay,
+            SalaryCostNote = withoutPay == 0
+                ? "Monthly basic pay of everyone on strength, from their placement on the salary scale (notch, else level mid-point) or the flat figure on their record."
+                : $"Monthly basic pay of everyone on strength, from their placement on the salary scale or the flat figure on their record. {withoutPay} of {employees.Count} have no figure on record and contribute nothing — an estimate, not payroll's number.",
+            RetirementsDue = retirements.OrderBy(x => x.Date).ToList(),
+            ContractExpiriesDue = expiries.OrderBy(x => x.Date).ToList(),
+            SeparationsInFlight = inFlight.OrderBy(x => x.Date).ToList(),
+            ExitsDueTotal = exitingIds.Count,
+            Positions = positionRows,
+        };
+    }
+
+    // ── From the establishment (round 2b, R4a) ───────────────────────────────────────────
+
+    /// <inheritdoc />
+    public async Task<ManpowerBudgetDetailDto> CreateFromEstablishmentAsync(
+        CreateManpowerBudgetFromEstablishmentDto dto, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var baseline = await GetPlanningBaselineAsync(dto.OrganizationUnitId, dto.PeriodStart, dto.PeriodEnd, cancellationToken);
+
+        // One live budget per unit and year. A second draft would be two answers to one question;
+        // a correction goes into the existing one (Draft/Rejected are editable since R1).
+        var clash = await _budgetRepository.GetQueryable().AsNoTracking()
+            .Where(b => b.TenantId == tenantId && !b.IsDeleted
+                     && b.OrganizationUnitId == dto.OrganizationUnitId && b.FiscalYear == dto.FiscalYear
+                     && (b.Status == ManpowerBudgetStatus.Draft || b.Status == ManpowerBudgetStatus.Submitted
+                      || b.Status == ManpowerBudgetStatus.UnderReview || b.Status == ManpowerBudgetStatus.Rejected))
+            .Select(b => new { b.BudgetNumber, b.Status })
+            .FirstOrDefaultAsync(cancellationToken);
+        if (clash != null)
+            throw JobArchitectureException.Conflict(
+                $"{baseline.OrganizationUnitName} already has a {clash.Status} budget for {dto.FiscalYear} ({clash.BudgetNumber}). Edit that one, or add posts to it from the establishment.");
+
+        var unit = await _unitOfWork.Repository<OrganizationUnit>().GetQueryable().AsNoTracking()
+            .FirstAsync(u => u.Id == dto.OrganizationUnitId && u.TenantId == tenantId, cancellationToken);
+
+        var positions = baseline.Positions.Where(p => dto.IncludeUnestablished || p.IsEstablished).ToList();
+        var lines = new List<ManpowerBudgetLine>();
+        foreach (var p in positions)
+            lines.Add(await BuildLineFromBaselineAsync(p, tenantId, cancellationToken));
+
+        var budget = new ManpowerBudget
+        {
+            TenantId = tenantId,
+            BudgetNumber = await GenerateBudgetNumberAsync(cancellationToken),
+            FiscalYear = dto.FiscalYear,
+            OrganizationUnitId = unit.Id,
+            OrganizationLevelId = unit.OrganizationLevelId,
+            Status = ManpowerBudgetStatus.Draft,
+            PeriodStartDate = dto.PeriodStart.ToDateTime(TimeOnly.MinValue),
+            PeriodEndDate = dto.PeriodEnd.ToDateTime(TimeOnly.MinValue),
+            CurrentHeadcount = baseline.CurrentHeadcount,
+            CurrentSalaryCost = baseline.CurrentSalaryCost,
+            PlannedTerminations = baseline.ExitsDueTotal,
+            PlannedHeadcount = lines.Sum(l => l.PlannedCount),
+            PlannedNewHires = lines.Sum(l => l.PlannedNewPositions),
+            PlannedSalaryCost = lines.Sum(l => l.PlannedTotalCost),
+            // The four budgets are the holder's to type: the establishment says how many posts and
+            // what they cost on the scale, not what the organisation will spend on benefits,
+            // recruitment or training. Zero here is "not yet decided", and the screen says so.
+            BusinessJustification = dto.BusinessJustification ??
+                $"Drafted from the establishment of {baseline.OrganizationUnitName} on {DateTime.UtcNow:dd MMM yyyy}: " +
+                $"{positions.Count} post(s), {positions.Sum(p => p.Gap ?? 0)} below establishment, {baseline.ExitsDueTotal} exit(s) due in the period.",
+        };
+        budget.TotalBudget = 0m;
+
+        await _budgetRepository.AddAsync(budget);
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+        foreach (var line in lines)
+        {
+            line.ManpowerBudgetId = budget.Id;
+            await _budgetLineRepository.AddAsync(line);
+        }
+        await _unitOfWork.SaveChangesAsync(cancellationToken);
+
+        _logger.LogInformation("Manpower budget {Number} drafted from the establishment of unit {UnitId} with {Lines} line(s)",
+            budget.BudgetNumber, unit.Id, lines.Count);
+
+        return await GetDetailByIdAsync(budget.Id, cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<AddLinesFromEstablishmentResultDto> AddLinesFromEstablishmentAsync(
+        Guid budgetId, bool includeUnestablished, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        if (budget.Status != ManpowerBudgetStatus.Draft && budget.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState("Posts can be added from the establishment only while the budget is Draft or Rejected.");
+        if (budget.OrganizationUnitId is null)
+            throw JobArchitectureException.InvalidState("This budget names no organisation unit, so there is no establishment to read.");
+
+        var baseline = await GetPlanningBaselineAsync(budget.OrganizationUnitId.Value,
+            DateOnly.FromDateTime(budget.PeriodStartDate), DateOnly.FromDateTime(budget.PeriodEndDate), cancellationToken);
+        var existing = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted)
+            .Select(l => l.PositionId)
+            .ToListAsync(cancellationToken);
+        var existingSet = existing.ToHashSet();
+
+        var result = new AddLinesFromEstablishmentResultDto();
+        foreach (var p in baseline.Positions)
+        {
+            // ⚠ Never overwrites: a line already on the budget is the holder's figure.
+            if (existingSet.Contains(p.PositionId)) { result.AlreadyOnBudget++; continue; }
+            if (!includeUnestablished && !p.IsEstablished) { result.SkippedUnestablished++; continue; }
+            var line = await BuildLineFromBaselineAsync(p, tenantId, cancellationToken);
+            line.ManpowerBudgetId = budget.Id;
+            await _budgetLineRepository.AddAsync(line);
+            result.Added++;
+        }
+        if (result.Added > 0)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            var all = await _budgetLineRepository.GetByBudgetIdAsync(budget.Id);
+            budget.PlannedHeadcount = all.Sum(l => l.PlannedCount);
+            budget.PlannedNewHires = all.Sum(l => l.PlannedNewPositions);
+            budget.PlannedSalaryCost = all.Sum(l => l.PlannedTotalCost);
+            await _budgetRepository.UpdateAsync(budget);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+        }
+        result.Lines = (await _budgetLineRepository.GetByBudgetIdAsync(budget.Id)).Where(l => l.TenantId == tenantId).ToDtoList();
+        return result;
+    }
+
+    /// <summary>
+    /// One line from one baseline row. Posts authorised = filled + gap (the establishment, where
+    /// one exists; the people in post where none does); new posts = the gap plus the exits due;
+    /// the salary from the post's grade on the scale, else the mean pay of the people in it.
+    /// </summary>
+    private async Task<ManpowerBudgetLine> BuildLineFromBaselineAsync(
+        ManpowerPlanningPositionDto p, Guid tenantId, CancellationToken cancellationToken)
+    {
+        var line = new ManpowerBudgetLine
+        {
+            TenantId = tenantId,
+            PositionId = p.PositionId,
+            CurrentCount = p.IsEstablished ? p.ExpectedHeadcount : p.Filled,
+            CurrentFilled = p.Filled,
+            CurrentVacant = p.Gap ?? 0,
+            CurrentAverageSalary = p.CurrentAverageSalary,
+            CurrentTotalCost = p.CurrentSalaryCost,
+            PlannedCount = p.Filled + (p.Gap ?? 0),
+            PlannedNewPositions = p.SuggestedNewHires,
+            PlannedEliminations = 0,
+            Priority = BudgetPriority.Medium,
+            IsCritical = false,
+            Notes = p.IsEstablished
+                ? $"From the establishment: {p.Filled} in post of {p.ExpectedHeadcount} authorised, {p.ExitsDue} exit(s) due."
+                : $"From the establishment: {p.Filled} in post, not established (no gap can be stated), {p.ExitsDue} exit(s) due.",
+        };
+        await ApplyLineSalaryAsync(line, p.SalaryGradeId, null, null,
+            p.SalaryGradeId is null ? p.CurrentAverageSalary : null, tenantId, cancellationToken);
+        return line;
+    }
+
+    private static string NotchLabel(SalaryNotch n) =>
+        $"{n.Level.Grade.Code} · {n.Level.Code} · notch {n.NotchNumber} ({n.SalaryAmount:N2})";
+
+    /// <inheritdoc />
+    public async Task<ManpowerBudgetWorkbookModelDto> GetEstablishmentWorkbookModelAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        if (budget.OrganizationUnitId is null)
+            throw JobArchitectureException.InvalidState("This budget names no organisation unit, so there is no establishment to export.");
+
+        var baseline = await GetPlanningBaselineAsync(budget.OrganizationUnitId.Value,
+            DateOnly.FromDateTime(budget.PeriodStartDate), DateOnly.FromDateTime(budget.PeriodEndDate), cancellationToken);
+        var lines = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Include(l => l.Position)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch).ThenInclude(n => n!.Level).ThenInclude(l => l.Grade)
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var notches = await _unitOfWork.Repository<SalaryNotch>().GetQueryable().AsNoTracking()
+            .Include(n => n.Level).ThenInclude(l => l.Grade)
+            .Where(n => n.TenantId == tenantId && !n.IsDeleted && n.IsActive && !n.Level.IsDeleted && !n.Level.Grade.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var gradeCodes = await _unitOfWork.Repository<SalaryGrade>().GetQueryable().AsNoTracking()
+            .Where(g => g.TenantId == tenantId && !g.IsDeleted)
+            .Select(g => new { g.Id, g.Code })
+            .ToDictionaryAsync(g => g.Id, g => g.Code, cancellationToken);
+
+        var model = new ManpowerBudgetWorkbookModelDto
+        {
+            BudgetId = budget.Id,
+            BudgetNumber = budget.BudgetNumber,
+            FiscalYear = budget.FiscalYear,
+            StatusName = budget.Status.ToString(),
+            OrganizationUnitName = baseline.OrganizationUnitName,
+            PeriodStart = baseline.PeriodStart,
+            PeriodEnd = baseline.PeriodEnd,
+            Editable = budget.Status == ManpowerBudgetStatus.Draft || budget.Status == ManpowerBudgetStatus.Rejected,
+            Notches = notches
+                .OrderBy(n => n.Level.Grade.Code).ThenBy(n => n.Level.Sequence).ThenBy(n => n.NotchNumber)
+                .Select(n => new ManpowerBudgetWorkbookNotchDto
+                {
+                    Id = n.Id, Label = NotchLabel(n), GradeCode = n.Level.Grade.Code, LevelCode = n.Level.Code,
+                    NotchNumber = n.NotchNumber, Amount = n.SalaryAmount,
+                }).ToList(),
+        };
+
+        var byPosition = lines.ToDictionary(l => l.PositionId);
+        void Fill(ManpowerBudgetWorkbookRowDto row, ManpowerBudgetLine l)
+        {
+            row.OnBudget = true;
+            row.LineId = l.Id;
+            row.PlannedCount = l.PlannedCount;
+            row.PlannedNewPositions = l.PlannedNewPositions;
+            row.PlannedAverageSalary = l.PlannedAverageSalary;
+            row.PlannedSalarySourceName = l.PlannedSalarySource.ToString();
+            row.SalaryNotchId = l.SalaryNotchId;
+            row.NotchLabel = l.SalaryNotch != null ? NotchLabel(l.SalaryNotch) : null;
+            row.Quarter = l.Quarter;
+            row.PriorityName = l.Priority.ToString();
+            row.IsCritical = l.IsCritical;
+            row.Notes = l.Notes;
+            row.GradeCode = l.SalaryGrade?.Code ?? row.GradeCode;
+        }
+
+        foreach (var p in baseline.Positions.OrderBy(p => p.OrganizationUnitName).ThenBy(p => p.Title))
+        {
+            var row = new ManpowerBudgetWorkbookRowDto
+            {
+                PositionId = p.PositionId, Code = p.Code, Title = p.Title, OrganizationUnitName = p.OrganizationUnitName,
+                IsEstablished = p.IsEstablished, ExpectedHeadcount = p.ExpectedHeadcount, Filled = p.Filled, Gap = p.Gap,
+                ExitsDue = p.ExitsDue, SuggestedNewHires = p.SuggestedNewHires,
+                GradeCode = p.SalaryGradeId.HasValue ? gradeCodes.GetValueOrDefault(p.SalaryGradeId.Value) : null,
+            };
+            if (byPosition.TryGetValue(p.PositionId, out var line)) Fill(row, line);
+            model.Rows.Add(row);
+        }
+        // A line whose post has since left the subtree (moved unit, deleted) is still the holder's
+        // figure: exported after the establishment rows, with no establishment columns.
+        var inBaseline = baseline.Positions.Select(p => p.PositionId).ToHashSet();
+        foreach (var l in lines.Where(l => !inBaseline.Contains(l.PositionId)).OrderBy(l => l.Position.Title))
+        {
+            var row = new ManpowerBudgetWorkbookRowDto { PositionId = l.PositionId, Code = l.Position.Code, Title = l.Position.Title, Filled = l.CurrentFilled, ExpectedHeadcount = l.CurrentCount };
+            Fill(row, l);
+            model.Rows.Add(row);
+        }
+        return model;
+    }
+
+    /// <inheritdoc />
+    public async Task<ManpowerBudgetWorkbookImportResultDto> ImportEstablishmentWorkbookAsync(
+        Guid budgetId, ManpowerBudgetWorkbookImportDto import, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        if (import.BudgetId != budget.Id)
+            throw JobArchitectureException.Invalid(
+                $"This workbook was exported from a different budget, not {budget.BudgetNumber}. Export the establishment from {budget.BudgetNumber} and edit that file.");
+        if (budget.Status != ManpowerBudgetStatus.Draft && budget.Status != ManpowerBudgetStatus.Rejected)
+            throw JobArchitectureException.InvalidState($"{budget.BudgetNumber} is {budget.Status}: a workbook can be imported only while the budget is Draft or Rejected.");
+        if (budget.OrganizationUnitId is null)
+            throw JobArchitectureException.InvalidState("This budget names no organisation unit, so there is no establishment to import against.");
+
+        var baseline = await GetPlanningBaselineAsync(budget.OrganizationUnitId.Value,
+            DateOnly.FromDateTime(budget.PeriodStartDate), DateOnly.FromDateTime(budget.PeriodEndDate), cancellationToken);
+        var inScope = baseline.Positions.ToDictionary(p => p.PositionId);
+        var lines = await _budgetLineRepository.GetQueryable()
+            .Include(l => l.Position)
+            .Where(l => l.ManpowerBudgetId == budget.Id && !l.IsDeleted)
+            .ToListAsync(cancellationToken);
+        var byPosition = lines.ToDictionary(l => l.PositionId);
+        var notches = await _unitOfWork.Repository<SalaryNotch>().GetQueryable().AsNoTracking()
+            .Include(n => n.Level).ThenInclude(l => l.Grade)
+            .Where(n => n.TenantId == tenantId && !n.IsDeleted)
+            .ToDictionaryAsync(n => n.Id, cancellationToken);
+
+        var result = new ManpowerBudgetWorkbookImportResultDto();
+        result.Errors.AddRange(import.ReadErrors);
+        void Err(int row, string? column, string message) =>
+            result.Errors.Add(new ManpowerBudgetWorkbookRowErrorDto { Row = row, Column = column, Message = message });
+
+        // ── pass 1: every row is checked before anything is written ──
+        var seen = new HashSet<Guid>();
+        var plan = new List<(ManpowerBudgetWorkbookImportRowDto Row, ManpowerBudgetLine? Line, ManpowerPlanningPositionDto? Post)>();
+        foreach (var row in import.Rows)
+        {
+            if (row.PositionId is null)
+            {
+                Err(row.RowNumber, "Position Id", "The hidden Position Id is missing, so this row was not exported from the system. Add a post through the application; the workbook edits posts, it does not add them.");
+                continue;
+            }
+            var pid = row.PositionId.Value;
+            if (!seen.Add(pid)) { Err(row.RowNumber, "Position", $"'{row.PositionText}' appears more than once in the file."); continue; }
+            var line = byPosition.GetValueOrDefault(pid);
+            var post = inScope.GetValueOrDefault(pid);
+            if (line == null && post == null)
+            {
+                Err(row.RowNumber, "Position", $"'{row.PositionText}' is not a post in {baseline.OrganizationUnitName} or the units under it.");
+                continue;
+            }
+            if (line == null && !row.HasEntries) { result.Skipped++; continue; }
+
+            if (row.PlannedCount is < 0) Err(row.RowNumber, "Planned posts", "Cannot be negative.");
+            if (row.PlannedNewPositions is < 0) Err(row.RowNumber, "Planned new hires", "Cannot be negative.");
+            if (row.PlannedAverageSalary is < 0) Err(row.RowNumber, "Average salary", "Cannot be negative.");
+            if (row.Quarter is < 1 or > 4) Err(row.RowNumber, "Quarter", "Must be 1 to 4.");
+            if (row.PriorityText != null && !Enum.TryParse<BudgetPriority>(row.PriorityText, true, out _))
+                Err(row.RowNumber, "Priority", $"'{row.PriorityText}' is not one of {string.Join(", ", Enum.GetNames<BudgetPriority>())}.");
+            if (row.NotchText != null && row.SalaryNotchId is null)
+                Err(row.RowNumber, "Notch", $"'{row.NotchText}' is not a notch on the Lists sheet. Pick one from the list, or leave the cell blank to keep the line's salary.");
+            if (row.SalaryNotchId is { } nid && !notches.ContainsKey(nid))
+                Err(row.RowNumber, "Notch", "The notch named is not on this organisation's salary scale any more.");
+            if (line == null && row.PlannedCount is null)
+                Err(row.RowNumber, "Planned posts", $"'{row.PositionText}' is not on the budget yet: give it Planned posts to add it.");
+            var count = row.PlannedCount ?? line?.PlannedCount ?? 0;
+            var newPosts = row.PlannedNewPositions ?? line?.PlannedNewPositions ?? 0;
+            if (newPosts > count)
+                Err(row.RowNumber, "Planned new hires", $"{newPosts} new hire(s) is more than the {count} post(s) authorised.");
+            if (line == null && post != null && row.PlannedAverageSalary is null && row.SalaryNotchId is null
+                && post.SalaryGradeId is null && post.CurrentAverageSalary <= 0)
+                Err(row.RowNumber, "Average salary", $"'{row.PositionText}' has no grade and nobody in post: give it an Average salary or a Notch.");
+            plan.Add((row, line, post));
+        }
+
+        if (result.Errors.Count > 0)
+        {
+            result.Applied = false;
+            result.Message = $"{result.Errors.Count} problem(s) found. Nothing was written — fix the rows named and import the file again.";
+            return result;
+        }
+
+        // ── pass 2: apply ──
+        foreach (var (row, existing, post) in plan)
+        {
+            ManpowerBudgetLine line;
+            if (existing == null)
+            {
+                line = await BuildLineFromBaselineAsync(post!, tenantId, cancellationToken);
+                line.ManpowerBudgetId = budget.Id;
+                await ApplyRowAsync(line, row, notches, tenantId, cancellationToken);
+                await _budgetLineRepository.AddAsync(line);
+                result.Created++;
+                continue;
+            }
+            line = existing;
+            var before = Snapshot(line);
+            await ApplyRowAsync(line, row, notches, tenantId, cancellationToken);
+            if (Snapshot(line) == before) { result.Unchanged++; continue; }
+            line.UpdatedAt = DateTime.UtcNow;
+            await _budgetLineRepository.UpdateAsync(line);
+            result.Updated++;
+        }
+
+        if (result.Created + result.Updated > 0)
+        {
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            var all = await _budgetLineRepository.GetByBudgetIdAsync(budget.Id);
+            budget.PlannedHeadcount = all.Sum(l => l.PlannedCount);
+            budget.PlannedNewHires = all.Sum(l => l.PlannedNewPositions);
+            budget.PlannedSalaryCost = all.Sum(l => l.PlannedTotalCost);
+            await _budgetRepository.UpdateAsync(budget);
+            await _unitOfWork.SaveChangesAsync(cancellationToken);
+            _logger.LogInformation("Manpower budget {Number}: establishment workbook applied — {Created} created, {Updated} updated, {Unchanged} unchanged",
+                budget.BudgetNumber, result.Created, result.Updated, result.Unchanged);
+        }
+
+        result.Applied = true;
+        result.Message = $"{result.Created} line(s) added, {result.Updated} updated, {result.Unchanged} unchanged, {result.Skipped} row(s) left alone.";
+        result.Lines = (await _budgetLineRepository.GetByBudgetIdAsync(budget.Id)).Where(l => l.TenantId == tenantId).ToDtoList();
+        return result;
+
+        static (int, int, decimal, Guid?, Guid?, Guid?, int?, BudgetPriority, bool, string?) Snapshot(ManpowerBudgetLine l) =>
+            (l.PlannedCount, l.PlannedNewPositions, l.PlannedAverageSalary, l.SalaryGradeId, l.SalaryLevelId, l.SalaryNotchId, l.Quarter, l.Priority, l.IsCritical, l.Notes);
+    }
+
+    /// <summary>
+    /// One workbook row onto one line. A blank cell means "leave it" — never "clear it". The
+    /// salary: a notch picked from the list reads the amount from the scale (D-1); an amount typed
+    /// that differs from the notch's is kept as Manual on that notch; an amount with no notch is
+    /// Manual on whatever grade the line already names.
+    /// </summary>
+    private async Task ApplyRowAsync(
+        ManpowerBudgetLine line, ManpowerBudgetWorkbookImportRowDto row, IReadOnlyDictionary<Guid, SalaryNotch> notches,
+        Guid tenantId, CancellationToken cancellationToken)
+    {
+        if (row.PlannedCount.HasValue) line.PlannedCount = row.PlannedCount.Value;
+        if (row.PlannedNewPositions.HasValue) line.PlannedNewPositions = row.PlannedNewPositions.Value;
+        if (row.Quarter.HasValue) line.Quarter = row.Quarter.Value;
+        if (row.PriorityText != null && Enum.TryParse<BudgetPriority>(row.PriorityText, true, out var priority)) line.Priority = priority;
+        if (row.IsCritical.HasValue) line.IsCritical = row.IsCritical.Value;
+        if (row.Notes != null) line.Notes = row.Notes;
+
+        if (row.SalaryNotchId.HasValue || row.PlannedAverageSalary.HasValue)
+        {
+            var notchId = row.SalaryNotchId ?? line.SalaryNotchId;
+            decimal? typed = row.PlannedAverageSalary;
+            if (typed.HasValue && notchId.HasValue && notches.TryGetValue(notchId.Value, out var notch) && notch.SalaryAmount == typed.Value)
+                typed = null; // the scale's own figure: from the notch, not Manual
+            await ApplyLineSalaryAsync(line,
+                notchId.HasValue ? null : line.SalaryGradeId,
+                notchId.HasValue ? null : line.SalaryLevelId,
+                notchId, typed, tenantId, cancellationToken);
+        }
+        line.PlannedTotalCost = line.PlannedAverageSalary * line.PlannedCount;
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<PositionEstablishmentResultDto>> GetEstablishmentListAsync(
+        Guid? organizationUnitId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var positions = await _unitOfWork.Repository<EmployeePosition>().GetQueryable().AsNoTracking()
+            .Where(p => p.TenantId == tenantId && !p.IsDeleted
+                     && (organizationUnitId == null || p.OrganizationUnitId == organizationUnitId.Value))
+            .Select(p => new { p.Id, p.Title, p.ExpectedHeadcount, p.EstablishmentApprovedOn, p.EstablishmentSourceBudgetId })
+            .ToListAsync(cancellationToken);
+        var ids = positions.Select(p => p.Id).ToList();
+        // The same count the per-position read and the enforcement paths use.
+        var occupied = await _unitOfWork.Repository<Employee>().GetQueryable().AsNoTracking()
+            .Where(e => e.TenantId == tenantId && ids.Contains(e.PositionId) && e.IsActive)
+            .GroupBy(e => e.PositionId).Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(g => g.Key, g => g.Count, cancellationToken);
+        var sourceIds = positions.Where(p => p.EstablishmentSourceBudgetId != null).Select(p => p.EstablishmentSourceBudgetId!.Value).Distinct().ToList();
+        var sources = sourceIds.Count == 0
+            ? new Dictionary<Guid, string>()
+            : await _budgetRepository.GetQueryable().AsNoTracking()
+                .Where(b => sourceIds.Contains(b.Id)).Select(b => new { b.Id, b.BudgetNumber })
+                .ToDictionaryAsync(b => b.Id, b => b.BudgetNumber, cancellationToken);
+        return positions.Select(p =>
+        {
+            occupied.TryGetValue(p.Id, out var filled);
+            return new PositionEstablishmentResultDto
+            {
+                PositionId = p.Id,
+                PositionTitle = p.Title,
+                ExpectedHeadcount = p.ExpectedHeadcount,
+                CurrentlyFilled = filled,
+                EstablishmentApprovedOn = p.EstablishmentApprovedOn,
+                EstablishmentSourceBudgetId = p.EstablishmentSourceBudgetId,
+                EstablishmentSourceBudgetNumber = p.EstablishmentSourceBudgetId is { } sid && sources.TryGetValue(sid, out var n) ? n : null,
+                IsEstablished = p.EstablishmentApprovedOn != null,
+            };
+        }).OrderBy(r => r.PositionTitle).ToList();
+    }
+
+    /// <inheritdoc />
+    public async Task<RecruitmentSpendDto> GetRecruitmentSpendAsync(Guid budgetId, CancellationToken cancellationToken = default)
+    {
+        var budget = await GetOwnedBudgetAsync(budgetId);
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        // Every cost on every requisition drawing down from one of this budget's lines. Cancelled
+        // and Rejected requisitions are out of the envelope with their costs; a Rejected COST is
+        // out too; a Recorded one is pending.
+        var costs = await _unitOfWork.Repository<Entities.HR.Requisition.StaffRequisitionCost>().GetQueryable().AsNoTracking()
+            .Where(c => c.TenantId == budget.TenantId && !c.IsDeleted
+                     && c.Requisition != null && !c.Requisition.IsDeleted
+                     && c.Requisition.Status != StaffRequisitionStatus.Cancelled
+                     && c.Requisition.Status != StaffRequisitionStatus.Rejected
+                     && c.Requisition.ManpowerBudgetLine != null
+                     && c.Requisition.ManpowerBudgetLine.ManpowerBudgetId == budget.Id
+                     && c.Status != StaffRequisitionCostStatus.Rejected)
+            .Select(c => new
+            {
+                c.RequisitionId,
+                c.Requisition!.RequisitionNumber,
+                PositionTitle = c.Requisition.Position != null ? c.Requisition.Position.Title : null,
+                c.Status,
+                c.AmountBaseCurrency,
+            })
+            .ToListAsync(cancellationToken);
+
+        var rows = costs.GroupBy(c => new { c.RequisitionId, c.RequisitionNumber, c.PositionTitle })
+            .Select(g => new RecruitmentSpendByRequisitionDto
+            {
+                RequisitionId = g.Key.RequisitionId,
+                RequisitionNumber = g.Key.RequisitionNumber,
+                PositionTitle = g.Key.PositionTitle,
+                Approved = g.Where(c => c.Status == StaffRequisitionCostStatus.Approved).Sum(c => c.AmountBaseCurrency),
+                Pending = g.Where(c => c.Status == StaffRequisitionCostStatus.Recorded).Sum(c => c.AmountBaseCurrency),
+            })
+            .OrderBy(r => r.RequisitionNumber)
+            .ToList();
+
+        return new RecruitmentSpendDto
+        {
+            BudgetId = budget.Id,
+            BudgetNumber = budget.BudgetNumber,
+            RecruitmentBudget = budget.RecruitmentBudget,
+            Approved = rows.Sum(r => r.Approved),
+            Pending = rows.Sum(r => r.Pending),
+            Mode = settings.BudgetEnforcementMode,
+            ByRequisition = rows,
+        };
+    }
+
     public async Task<bool> DeleteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var entity = await GetOwnedBudgetAsync(id);
@@ -2477,14 +3572,19 @@ public class ManpowerBudgetService : IManpowerBudgetService
     public async Task<ManpowerBudgetLineDto> AddBudgetLineAsync(CreateManpowerBudgetLineDto createDto, CancellationToken cancellationToken = default)
     {
         await GetOwnedBudgetAsync(createDto.ManpowerBudgetId);
+        var tenantId = GetTenantId();
         var entity = createDto.ToEntity();
-        entity.TenantId = GetTenantId();
+        entity.TenantId = tenantId;
+
+        await ApplyLineSalaryAsync(entity, createDto.SalaryGradeId, createDto.SalaryLevelId, createDto.SalaryNotchId,
+            createDto.PlannedAverageSalary, tenantId, cancellationToken);
 
         await _budgetLineRepository.AddAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         entity = await _budgetLineRepository.GetQueryable()
             .Include(l => l.Position)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch)
             .FirstOrDefaultAsync(l => l.Id == entity.Id, cancellationToken);
 
         _logger.LogInformation("Budget line added to budget: {BudgetId}", createDto.ManpowerBudgetId);
@@ -2497,7 +3597,62 @@ public class ManpowerBudgetService : IManpowerBudgetService
         await GetOwnedBudgetAsync(budgetId);
         var tenantId = GetTenantId();
         var entities = await _budgetLineRepository.GetByBudgetIdAsync(budgetId);
-        return entities.Where(l => l.TenantId == tenantId).ToDtoList();
+        var dtos = entities.Where(l => l.TenantId == tenantId).ToDtoList();
+        await DecorateDrawdownAsync(dtos, cancellationToken);
+        return dtos;
+    }
+
+    /// <summary>D-8: posts on live requisitions per line, and what each line has left (round 2b, R5).</summary>
+    private async Task DecorateDrawdownAsync(List<ManpowerBudgetLineDto> lines, CancellationToken cancellationToken)
+    {
+        if (lines.Count == 0) return;
+        var ids = lines.Select(l => l.Id).ToList();
+        var drawn = await _unitOfWork.Repository<Entities.HR.Requisition.StaffRequisition>().GetQueryable().AsNoTracking()
+            .Where(r => r.ManpowerBudgetLineId != null && ids.Contains(r.ManpowerBudgetLineId.Value) && !r.IsDeleted
+                     && r.Status != StaffRequisitionStatus.Cancelled && r.Status != StaffRequisitionStatus.Rejected)
+            .GroupBy(r => r.ManpowerBudgetLineId!.Value)
+            .Select(g => new { LineId = g.Key, Posts = g.Sum(r => r.NumberOfPositions) })
+            .ToDictionaryAsync(g => g.LineId, g => g.Posts, cancellationToken);
+        foreach (var l in lines)
+        {
+            drawn.TryGetValue(l.Id, out var posts);
+            var budgeted = l.PlannedNewPositions > 0 ? l.PlannedNewPositions : Math.Max(0, l.PlannedCount - l.CurrentFilled);
+            l.RequisitionedCount = posts;
+            l.Remaining = budgeted - posts;
+        }
+    }
+
+    /// <inheritdoc />
+    public async Task<IEnumerable<BudgetLineForRequisitionDto>> GetLinesForPositionAsync(Guid positionId, int? fiscalYear, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var lines = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Include(l => l.ManpowerBudget).ThenInclude(b => b.OrganizationUnit)
+            .Where(l => l.TenantId == tenantId && !l.IsDeleted && l.PositionId == positionId
+                     && l.ManpowerBudget != null && !l.ManpowerBudget.IsDeleted
+                     && (l.ManpowerBudget.Status == ManpowerBudgetStatus.Approved || l.ManpowerBudget.Status == ManpowerBudgetStatus.Active)
+                     && (fiscalYear == null || l.ManpowerBudget.FiscalYear == fiscalYear.Value))
+            .ToListAsync(cancellationToken);
+        var dtos = lines.Select(l => l.ToDto()).ToList();
+        await DecorateDrawdownAsync(dtos, cancellationToken);
+        return lines.Select(l =>
+        {
+            var d = dtos.First(x => x.Id == l.Id);
+            return new BudgetLineForRequisitionDto
+            {
+                LineId = l.Id,
+                BudgetId = l.ManpowerBudgetId,
+                BudgetNumber = l.ManpowerBudget!.BudgetNumber,
+                FiscalYear = l.ManpowerBudget.FiscalYear,
+                BudgetStatus = l.ManpowerBudget.Status.ToString(),
+                OrganizationUnitName = l.ManpowerBudget.OrganizationUnit?.Name,
+                PlannedCount = l.PlannedCount,
+                PlannedNewPositions = l.PlannedNewPositions,
+                RequisitionedCount = d.RequisitionedCount,
+                Remaining = d.Remaining,
+                PlannedAverageSalary = l.PlannedAverageSalary,
+            };
+        }).OrderByDescending(x => x.FiscalYear).ThenBy(x => x.BudgetNumber).ToList();
     }
 
     public async Task<ManpowerBudgetLineDto> UpdateBudgetLineAsync(UpdateManpowerBudgetLineDto updateDto, CancellationToken cancellationToken = default)
@@ -2510,13 +3665,121 @@ public class ManpowerBudgetService : IManpowerBudgetService
             throw JobArchitectureException.NotFound("Budget line not found");
 
         updateDto.UpdateEntity(entity);
+        await ApplyLineSalaryAsync(entity, updateDto.SalaryGradeId, updateDto.SalaryLevelId, updateDto.SalaryNotchId,
+            updateDto.PlannedAverageSalary, entity.TenantId, cancellationToken);
 
         await _budgetLineRepository.UpdateAsync(entity);
         await _unitOfWork.SaveChangesAsync(cancellationToken);
 
         _logger.LogInformation("Budget line updated: {LineId}", updateDto.Id);
 
+        // Re-read with the scale navigations: a changed grade/level/notch id would otherwise be
+        // mapped with the OLD rows' names (the F2 shape again).
+        entity = await _budgetLineRepository.GetQueryable().AsNoTracking()
+            .Include(l => l.Position)
+            .Include(l => l.SalaryGrade).Include(l => l.SalaryLevel).Include(l => l.SalaryNotch)
+            .FirstAsync(l => l.Id == updateDto.Id, cancellationToken);
         return entity.ToDto();
+    }
+
+    /// <summary>
+    /// Round 2b, R3 (D-1): checks the place on the scale a line names and resolves its planned
+    /// average salary from it — notch amount, else level mid-point, else grade minimum — unless
+    /// the caller typed a figure, which is kept and marked <c>Manual</c>. The total is always
+    /// average × planned count, so the two cannot drift.
+    /// </summary>
+    private async Task ApplyLineSalaryAsync(
+        ManpowerBudgetLine line, Guid? gradeId, Guid? levelId, Guid? notchId, decimal? typedAmount,
+        Guid tenantId, CancellationToken cancellationToken)
+    {
+        SalaryGrade? grade = null;
+        SalaryLevel? level = null;
+        SalaryNotch? notch = null;
+
+        if (notchId.HasValue)
+        {
+            notch = await _unitOfWork.Repository<SalaryNotch>().GetQueryable().AsNoTracking()
+                .Include(n => n.Level).ThenInclude(l => l.Grade)
+                .FirstOrDefaultAsync(n => n.Id == notchId.Value && n.TenantId == tenantId && !n.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The salary notch named does not exist in this organisation's scale.");
+            level = notch.Level;
+            grade = notch.Level.Grade;
+            if (levelId.HasValue && levelId.Value != level.Id)
+                throw JobArchitectureException.Invalid($"Notch {notch.NotchNumber} is not on the level named; it belongs to level {level.Code} of grade {grade.Code}.");
+            if (gradeId.HasValue && gradeId.Value != grade.Id)
+                throw JobArchitectureException.Invalid($"Notch {notch.NotchNumber} is not on the grade named; it belongs to grade {grade.Code}.");
+        }
+        else if (levelId.HasValue)
+        {
+            level = await _unitOfWork.Repository<SalaryLevel>().GetQueryable().AsNoTracking()
+                .Include(l => l.Grade)
+                .FirstOrDefaultAsync(l => l.Id == levelId.Value && l.TenantId == tenantId && !l.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The salary level named does not exist in this organisation's scale.");
+            grade = level.Grade;
+            if (gradeId.HasValue && gradeId.Value != grade.Id)
+                throw JobArchitectureException.Invalid($"Level {level.Code} is not on the grade named; it belongs to grade {grade.Code}.");
+        }
+        else if (gradeId.HasValue)
+        {
+            grade = await _unitOfWork.Repository<SalaryGrade>().GetQueryable().AsNoTracking()
+                .FirstOrDefaultAsync(g => g.Id == gradeId.Value && g.TenantId == tenantId && !g.IsDeleted, cancellationToken)
+                ?? throw JobArchitectureException.Invalid("The salary grade named does not exist in this organisation's scale.");
+        }
+
+        line.SalaryGradeId = grade?.Id;
+        line.SalaryLevelId = level?.Id;
+        line.SalaryNotchId = notch?.Id;
+
+        if (typedAmount.HasValue)
+        {
+            line.PlannedAverageSalary = typedAmount.Value;
+            line.PlannedSalarySource = PlannedSalarySource.Manual;
+        }
+        else if (notch != null)
+        {
+            line.PlannedAverageSalary = notch.SalaryAmount;
+            line.PlannedSalarySource = PlannedSalarySource.Notch;
+        }
+        else if (level != null)
+        {
+            line.PlannedAverageSalary = level.MidSalary;
+            line.PlannedSalarySource = PlannedSalarySource.LevelMidpoint;
+        }
+        else if (grade != null)
+        {
+            line.PlannedAverageSalary = grade.MinSalary;
+            line.PlannedSalarySource = PlannedSalarySource.GradeMinimum;
+        }
+        else
+        {
+            throw JobArchitectureException.Invalid(
+                "Give the line an average salary, or choose the grade (and notch) on the scale it should be read from.");
+        }
+
+        line.PlannedTotalCost = line.PlannedAverageSalary * line.PlannedCount;
+    }
+
+    /// <inheritdoc />
+    public async Task<PositionSalaryReferenceDto> GetPositionSalaryReferenceAsync(Guid positionId, CancellationToken cancellationToken = default)
+    {
+        var tenantId = GetTenantId();
+        var position = await _unitOfWork.Repository<EmployeePosition>().GetQueryable().AsNoTracking()
+            .Include(p => p.SalaryGrade)
+            .FirstOrDefaultAsync(p => p.Id == positionId && p.TenantId == tenantId && !p.IsDeleted, cancellationToken)
+            ?? throw JobArchitectureException.NotFound("The position does not exist in this organisation.");
+        var settings = await _policyProvider.GetAsync(cancellationToken);
+        var grade = position.SalaryGrade is { IsDeleted: false } g ? g : null;
+        return new PositionSalaryReferenceDto
+        {
+            PositionId = position.Id,
+            PositionTitle = position.Title,
+            SalaryGradeId = grade?.Id,
+            GradeCode = grade?.Code,
+            GradeName = grade?.Name,
+            MinSalary = grade?.MinSalary,
+            MaxSalary = grade?.MaxSalary,
+            Tiers = settings.SalaryStructureTiers,
+        };
     }
 
     public async Task<bool> DeleteBudgetLineAsync(Guid lineId, CancellationToken cancellationToken = default)
@@ -2546,14 +3809,32 @@ public class ManpowerBudgetService : IManpowerBudgetService
 
     #region Helper Methods
 
+    /// <summary>The next budget number for the current year: <c>MPB-{year}-{seq:D4}</c>.</summary>
+    /// <remarks>
+    /// ⚠ Rewritten in round 2b, R4a. The old body counted budgets whose <b>fiscal year</b> equalled
+    /// the current calendar year and stamped the current year on the number — so every budget for
+    /// any other fiscal year got the same <c>MPB-2026-0001</c> (four harness budgets for 2045–2048
+    /// did, and the register would have shown it at the demo). Area 17 § 3.6 had recorded that
+    /// this generator "counts rows". It now issues one past the highest sequence already used for
+    /// the year's prefix, <b>deleted rows included</b> (the lane-4 lesson: a scan that ignores
+    /// deleted rows re-issues their numbers). There is no unique index on <c>BudgetNumber</c>; a
+    /// sequence service would be the next step if concurrency ever bites.
+    /// </remarks>
     private async Task<string> GenerateBudgetNumberAsync(CancellationToken cancellationToken)
     {
         var year = DateTime.UtcNow.Year;
         var tenantId = GetTenantId();
-        var count = await _budgetRepository.GetQueryable()
-            .CountAsync(b => b.TenantId == tenantId && b.FiscalYear == year, cancellationToken);
-
-        return $"MPB-{year}-{(count + 1):D4}";
+        var prefix = $"MPB-{year}-";
+        var numbers = await _budgetRepository.GetQueryable()
+            .IgnoreQueryFilters()
+            .Where(b => b.TenantId == tenantId && b.BudgetNumber.StartsWith(prefix))
+            .Select(b => b.BudgetNumber)
+            .ToListAsync(cancellationToken);
+        var highest = 0;
+        foreach (var n in numbers)
+            if (n.Length > prefix.Length && int.TryParse(n[prefix.Length..], out var seq) && seq > highest)
+                highest = seq;
+        return $"{prefix}{(highest + 1):D4}";
     }
 
     #endregion

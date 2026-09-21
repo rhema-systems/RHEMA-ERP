@@ -12,15 +12,18 @@ namespace ErpSystem.Core.Services.HR;
 public sealed class SkillService : ISkillService
 {
     private readonly ISkillRepository _skillRepository;
+    private readonly ICertificationService _certifications;
     private readonly ICurrentUserProvider _currentUserProvider;
     private readonly ILogger<SkillService> _logger;
 
     public SkillService(
         ISkillRepository skillRepository,
+        ICertificationService certifications,
         ICurrentUserProvider currentUserProvider,
         ILogger<SkillService> logger)
     {
         _skillRepository = skillRepository;
+        _certifications = certifications;
         _currentUserProvider = currentUserProvider;
         _logger = logger;
     }
@@ -39,7 +42,11 @@ public sealed class SkillService : ISkillService
     public async Task<SkillDto?> GetByIdAsync(Guid id)
     {
         var skill = await _skillRepository.GetByIdAsync(id);
-        return skill == null ? null : MapToDto(skill);
+        if (skill == null) return null;
+        var dto = MapToDto(skill);
+        // The accepted credentials ride on the single read only; the list stays lean.
+        dto.Certifications = (await _certifications.GetSkillCertificationsAsync(id)).ToList();
+        return dto;
     }
 
     public async Task<IEnumerable<SkillDto>> GetAllAsync()
@@ -94,11 +101,16 @@ public sealed class SkillService : ISkillService
         };
 
         await _skillRepository.AddAsync(entity);
+        // Round 2, lane C2: the accepted credentials, and the rule that a skill requiring
+        // certification names at least one. Runs before the save, so a refusal stores nothing.
+        await _certifications.SyncSkillCertificationsAsync(entity, createDto.Certifications ?? new List<SkillCertificationInputDto>());
         await _skillRepository.SaveChangesAsync();
 
         _logger.LogInformation("Skill created: {SkillId} ({Name})", entity.Id, entity.Name);
 
-        return MapToDto(entity);
+        var created = MapToDto(entity);
+        created.Certifications = (await _certifications.GetSkillCertificationsAsync(entity.Id)).ToList();
+        return created;
     }
 
     public async Task<SkillDto> UpdateSkillAsync(Guid id, CreateSkillDto updateDto)
@@ -120,12 +132,18 @@ public sealed class SkillService : ISkillService
         entity.RequiresCertification = updateDto.RequiresCertification;
         entity.IsActive = updateDto.IsActive;
 
+        // Null = the caller did not send the set (an older client); the rule is still checked
+        // against what is stored.
+        await _certifications.SyncSkillCertificationsAsync(entity, updateDto.Certifications);
+
         await _skillRepository.UpdateAsync(entity);
         await _skillRepository.SaveChangesAsync();
 
         _logger.LogInformation("Skill updated: {SkillId} ({Name})", entity.Id, entity.Name);
 
-        return MapToDto(entity);
+        var updated = MapToDto(entity);
+        updated.Certifications = (await _certifications.GetSkillCertificationsAsync(entity.Id)).ToList();
+        return updated;
     }
 
     public async Task<bool> DeleteSkillAsync(Guid id)

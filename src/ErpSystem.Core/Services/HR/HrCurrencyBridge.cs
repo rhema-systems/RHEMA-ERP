@@ -87,7 +87,13 @@ public class HrCurrencyBridge
     /// conversion changes, travel changes with it, and a trip can never be worth one thing on a
     /// travel screen and another on a financial report.</para>
     ///
-    /// <para>⚠ <b>Finance's conversion is currently INVERTED, and this deliberately inherits that.</b>
+    /// <para>⚠ <b>RESOLVED 2026-09-10.</b> Finance PR #99 (<c>finance-fx-seed-contract</c>) transposed
+    /// the seed and documented the contract; <c>GET /api/finance/exchange-rates/current/USD</c> now
+    /// reads <c>rate 12.5, inverseRate 0.08</c> and this bridge answers 12.5 GHS per USD (asserted
+    /// by <c>hr-jobarch/run-r7.mjs</c>). The paragraphs below are kept as the record of what was
+    /// wrong and why this class inherited it rather than working around it.</para>
+    ///
+    /// <para><b>Finance's conversion WAS inverted, and this deliberately inherited that.</b>
     /// Measured 2026-08-17: <c>GET /api/finance/currencies/convert</c> answers
     /// <c>1 USD = 0.08 GHS</c> and <c>1 GHS = 12.5 USD</c> — reciprocals of the truth. The cause is
     /// in Finance, not here: <c>FinanceDataSeeder</c> writes <c>Rate = 0.08</c> meaning "1 GHS =
@@ -98,7 +104,7 @@ public class HrCurrencyBridge
     /// <para>Reading <c>InverseRate</c> here would make travel numerically right today and put it
     /// in open disagreement with every other module — two truths about the same trip, which is
     /// worse than one shared, fixable error. Reported instead: see
-    /// <c>docs/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c> §2. Fixing Finance fixes travel with no
+    /// <c>docs/HR/integration/CROSS-MODULE-DEFECTS-FOR-FINALIZATION.md</c> §2. Fixing Finance fixes travel with no
     /// change here.</para>
     /// </remarks>
     public async Task<decimal> GetRateToBaseAsync(

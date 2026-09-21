@@ -432,6 +432,7 @@ public class CandidateController : ControllerBase
     public async Task<IActionResult> UploadDocument(
         IFormFile file,
         [FromForm] JobCandidateDocumentType documentType,
+        [FromForm] string? description,
         CancellationToken ct)
     {
         if (file == null || file.Length == 0)
@@ -485,7 +486,8 @@ public class CandidateController : ControllerBase
         {
             var result = await _portalService.AddDocumentAsync(
                 user.Id, documentType, document.OriginalFileName, string.Empty, tenantId, ct,
-                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId);
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                description);
             return Ok(result);
         }
         catch (Exception ex)

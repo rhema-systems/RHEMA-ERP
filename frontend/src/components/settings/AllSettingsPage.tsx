@@ -30,6 +30,8 @@ export interface SettingsLink {
   icon: NavItem['icon'];
   trail: string[];
   searchPath: string;
+  /** What the screen is for. Falls back to the ancestor path when a nav item does not carry one. */
+  description?: string;
   group?: string;
 }
 
@@ -166,7 +168,8 @@ function flattenSettingsLinks(item: NavItem, trail: string[] = []): SettingsLink
     href: item.href,
     icon: item.icon,
     trail: nextTrail,
-    searchPath: nextTrail.join(' '),
+    searchPath: [...nextTrail, item.description ?? ''].join(' '),
+    description: item.description,
   }];
 }
 

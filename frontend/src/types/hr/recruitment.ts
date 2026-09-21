@@ -33,6 +33,23 @@ export type StaffRequisitionType = (typeof STAFF_REQUISITION_TYPES)[number];
 export const STAFF_REQUISITION_PRIORITIES = ['Low', 'Medium', 'High', 'Urgent'] as const;
 export type StaffRequisitionPriority = (typeof STAFF_REQUISITION_PRIORITIES)[number];
 
+/**
+ * `StaffReplacementReason` on the server (round 3, lane Q). The form used to offer a free-text
+ * "Why they left" box against this ENUM, so a Replacement requisition typed any way other than an
+ * exact member name was refused with the middleware's canned 400 — from the screen, always.
+ */
+export const STAFF_REPLACEMENT_REASONS = [
+  'Resignation',
+  'Retirement',
+  'Termination',
+  'Promotion',
+  'Transfer',
+  'LongTermLeave',
+  'Death',
+  'Other',
+] as const;
+export type StaffReplacementReason = (typeof STAFF_REPLACEMENT_REASONS)[number];
+
 export const JOB_VACANCY_STATUSES = [
   'Draft',
   'PendingApproval',
@@ -93,16 +110,27 @@ export const VACANCY_CLOSURE_REASONS = [
 ] as const;
 export type VacancyClosureReason = (typeof VACANCY_CLOSURE_REASONS)[number];
 
+/**
+ * ⚠ Mirrors `StaffRequisitionCostCategory` on the server — ALL TEN members, in the server's
+ * spelling. The previous list here had seven names, three of which (`Advertising`, `AgencyFees`,
+ * `Travel`) were not members at all, so the form's default and three of its options could never
+ * be saved (round 2b, R7).
+ */
 export const REQUISITION_COST_CATEGORIES = [
-  'Advertising',
-  'AgencyFees',
-  'Assessment',
-  'Travel',
-  'Relocation',
+  'RecruitmentAgencyFee',
+  'JobAdvertising',
   'BackgroundCheck',
+  'Assessment',
+  'Relocation',
+  'OnboardingMaterials',
+  'TrainingAndInduction',
+  'MedicalExamination',
+  'TravelAndInterview',
   'Other',
 ] as const;
 export type RequisitionCostCategory = (typeof REQUISITION_COST_CATEGORIES)[number];
+
+export type RequisitionCostStatus = 'Recorded' | 'Approved' | 'Rejected';
 
 // ── staff requisition ──────────────────────────────────────────────────────
 
@@ -149,8 +177,17 @@ export interface StaffRequisition {
   businessJustification: string;
   impactIfNotFilled?: string | null;
 
+  /** Derived from `manpowerBudgetLineId` since round 2b, R5; `budgetCode` is the budget's number. */
   isBudgeted: boolean;
   budgetCode?: string | null;
+  manpowerBudgetLineId?: string | null;
+  exceptionJustification?: string | null;
+  /** The establishment as it stood at submit (D-2). */
+  establishmentSnapshotOn?: string | null;
+  establishmentSnapshotIsEstablished?: boolean | null;
+  establishmentSnapshotExpected?: number | null;
+  establishmentSnapshotFilled?: number | null;
+  establishmentSnapshotSourceBudgetNumber?: string | null;
 
   allowInternalCandidates: boolean;
   allowExternalCandidates: boolean;
@@ -225,14 +262,56 @@ export interface CreateStaffRequisition {
   targetStartDateReason?: string | null;
   businessJustification: string;
   impactIfNotFilled?: string | null;
-  isBudgeted: boolean;
+  /** ⚠ Ignored by the server since R5 — both are derived from `manpowerBudgetLineId`. */
+  isBudgeted?: boolean;
   budgetCode?: string | null;
+  /** The approved budget line to draw down from, or null (R5). */
+  manpowerBudgetLineId?: string | null;
+  /** Required at submit when the check says `exceptionRequired` and enforcement is not Block (D-4). */
+  exceptionJustification?: string | null;
   allowInternalCandidates: boolean;
   allowExternalCandidates: boolean;
   notes?: string | null;
 }
 
 export type UpdateStaffRequisition = CreateStaffRequisition & { id: string };
+
+/** The establishment half of the check (R5): what used to be thrown at submit and never shown. */
+export interface RequisitionEstablishmentCheck {
+  mode: 'Off' | 'Warn' | 'Block';
+  isEstablished: boolean;
+  expectedHeadcount?: number | null;
+  filled: number;
+  gap?: number | null;
+  sourceBudgetNumber?: string | null;
+  wouldExceed: boolean;
+  wouldBlock: boolean;
+  message: string;
+}
+
+/** The form's live preview input (R5): the same check for a requisition not yet saved. */
+export interface RequisitionBudgetCheckPreview {
+  positionId: string;
+  numberOfPositions: number;
+  desiredStartDate?: string | null;
+  manpowerBudgetLineId?: string | null;
+  excludeRequisitionId?: string | null;
+}
+
+/** An approved budget line a requisition may draw down from — the picker's rows (R5). */
+export interface BudgetLineForRequisition {
+  lineId: string;
+  budgetId: string;
+  budgetNumber: string;
+  fiscalYear: number;
+  budgetStatus: string;
+  organizationUnitName?: string | null;
+  plannedCount: number;
+  plannedNewPositions: number;
+  requisitionedCount: number;
+  remaining: number;
+  plannedAverageSalary: number;
+}
 
 /**
  * The result of checking a requisition against its position's approved manpower budget.
@@ -251,6 +330,19 @@ export interface RequisitionBudgetCheck {
   isOverBudget: boolean;
   wouldBlock: boolean;
   message: string;
+  // ── round 2b, R5 ──
+  isLinked: boolean;
+  linkedLineId?: string | null;
+  linkedBudgetId?: string | null;
+  linkedBudgetNumber?: string | null;
+  linkedBudgetStatus?: string | null;
+  budgetedNewPosts?: number | null;
+  /** Posts on OTHER live requisitions drawing down from the same line (D-8). */
+  drawdown: number;
+  remaining?: number | null;
+  establishment?: RequisitionEstablishmentCheck | null;
+  exceptionRequired: boolean;
+  exceptionReason?: string | null;
 }
 
 export interface RequisitionCost {
@@ -261,12 +353,31 @@ export interface RequisitionCost {
   purpose: string;
   amount: number;
   currency: string;
+  /** Finance's rate for the cost date, read by the server (R7) — never typed. */
   exchangeRate: number;
   description?: string | null;
+  /** Still a typed record until the Finance AP hand-off (R8). */
   paymentVoucherNumber?: string | null;
   recordedById: string;
   recordedByName: string;
   recordedDate: string;
+  // ── round 2b, R7 ──
+  costDate: string;
+  amountBaseCurrency: number;
+  supplierId?: string | null;
+  supplierName?: string | null;
+  payeeName?: string | null;
+  status: RequisitionCostStatus;
+  statusName?: string;
+  approvedById?: string | null;
+  approvedByName?: string | null;
+  approvedOn?: string | null;
+  approvalNote?: string | null;
+  // ── round 2b, R6: set on a WRITE response only ──
+  /** The budget whose recruitment envelope this cost counts against, when the requisition is linked. */
+  budgetNumber?: string | null;
+  /** Present when the cost takes the envelope past its limit under Warn (recording never refuses; approval refuses under Block). */
+  budgetWarning?: string | null;
 }
 
 export interface RequisitionCostForm {
@@ -274,7 +385,11 @@ export interface RequisitionCostForm {
   purpose: string;
   amount: number;
   currency: string;
-  exchangeRate: number;
+  /** `YYYY-MM-DD`; the day the money moved. The rate is Finance's for this date. */
+  costDate?: string | null;
+  supplierId?: string | null;
+  /** Required when there is no supplier. */
+  payeeName?: string | null;
   description?: string | null;
   paymentVoucherNumber?: string | null;
 }
@@ -363,6 +478,31 @@ export interface JobVacancy {
   shortlistApprovalStatus?: string | null;
   shortlistSubmittedByName?: string | null;
   shortlistApprovedByName?: string | null;
+  /**
+   * The vacancy's own auto-shortlist threshold, set on the form (round 3, lane K: the screening
+   * dialog now starts from it — nothing read it before).
+   */
+  autoShortlistMinScore?: number | null;
+  autoShortlistRequireAllMandatory?: boolean;
+  /** Derived on the read (round 3, lane K; D-7): a Gender or Age criterion is on this vacancy. */
+  usesProtectedCharacteristicCriterion?: boolean;
+
+  /** See `testScoreWeight` on {@link CreateJobVacancy} — both are settable since 2026-09-15. */
+  testScoreWeight?: number;
+  internalCandidateBoostPoints?: number;
+
+  /**
+   * The statuses this vacancy may legally move to from where it is now, computed server-side from
+   * the same `AllowedTransitions` map the write path guards with.
+   *
+   * ⚠ G-5.7: the "Advance to…" picker used to hold a hardcoded list of the five hiring stages and
+   * offer all of them minus the current one, from any non-terminal status — so a Draft vacancy was
+   * offered *Filled* and a Published one *Interviewing*, and the only way to discover that was to
+   * click and read the refusal. Sending the map beats mirroring it: a mirrored constant is a second
+   * source of truth that drifts the first time the real one changes, and the real one just did
+   * (`OnHold` became reachable, G-5.3).
+   */
+  allowedNextStatuses?: JobVacancyStatus[];
 }
 
 export interface JobVacancySummary {
@@ -420,6 +560,20 @@ export interface CreateJobVacancy {
   isBlindScreeningEnabled: boolean;
   autoShortlistMinScore?: number | null;
   autoShortlistRequireAllMandatory: boolean;
+
+  /**
+   * Weight (0–100) given to test scores in the composite shortlist score; 0 ignores them.
+   *
+   * ⚠ G-5.2: this and `internalCandidateBoostPoints` existed on the **read** DTO alone until
+   * 2026-09-15 — neither write DTO carried them and no frontend file mentioned either name — so
+   * both sat at 0 permanently and the two branches of the scoring algorithm that depend on them
+   * could never execute. The *Requires a written test* / *Requires a practical test* checkboxes
+   * recorded a requirement whose results could not affect any score.
+   */
+  testScoreWeight: number;
+
+  /** Flat bonus (0–20) added to an internal candidate's composite score; 0 disables it. */
+  internalCandidateBoostPoints: number;
 }
 
 export type UpdateJobVacancy = Omit<CreateJobVacancy, 'staffRequisitionId'> & { id: string };
@@ -479,6 +633,54 @@ export const SHORTLISTING_COMPARISON_OPERATORS = [
 ] as const;
 export type ShortlistingComparisonOperator = (typeof SHORTLISTING_COMPARISON_OPERATORS)[number];
 
+/** HREnums.cs `ShortlistingValueKind` — what one accepted value refers to (round 3, lane K). */
+export const SHORTLISTING_VALUE_KINDS = [
+  'Text',
+  'Skill',
+  'Qualification',
+  'Certification',
+  'Language',
+  'Gender',
+] as const;
+export type ShortlistingValueKind = (typeof SHORTLISTING_VALUE_KINDS)[number];
+
+/** One accepted value on a criterion: a catalogue row (name mirrored), a gender member, or typed text. */
+export interface ShortlistingCriteriaValue {
+  id: string;
+  kind: ShortlistingValueKind;
+  kindName: string;
+  referenceId?: string | null;
+  label: string;
+  sortOrder: number;
+}
+
+/** The value on the save: a catalogue id (the server mirrors its name) or a typed label. */
+export interface ShortlistingCriteriaValueInput {
+  referenceId?: string | null;
+  label?: string | null;
+}
+
+/**
+ * What a criterion type is made of — `GET api/job-vacancies/criteria/shapes` (round 3, lane K).
+ * The server's table, so the panel no longer carries a hand-copied map that drifts from the engine.
+ */
+export interface ShortlistingCriteriaShape {
+  type: ShortlistingCriteriaType;
+  typeName: string;
+  label: string;
+  valueKind?: ShortlistingValueKind | null;
+  valueKindName?: string | null;
+  isList: boolean;
+  isNumeric: boolean;
+  requiresValues: boolean;
+  allowsMandatory: boolean;
+  isProtectedCharacteristic: boolean;
+  isAutoEvaluated: boolean;
+  operators: ShortlistingComparisonOperator[];
+  hint: string;
+  mandatoryRefusal?: string | null;
+}
+
 export interface ShortlistingCriteria {
   id: string;
   jobVacancyId: string;
@@ -505,6 +707,8 @@ export interface ShortlistingCriteria {
   weight: number;
   comparisonOperator?: ShortlistingComparisonOperator | null;
   comparisonOperatorName?: string | null;
+  /** The accepted values, one row each (round 3, lane K); `requiredValue` mirrors their labels. */
+  values: ShortlistingCriteriaValue[];
 }
 
 export interface VacancyAttachment {
@@ -550,6 +754,11 @@ export interface ShortlistingCriteriaForm {
   requiredQualificationId?: string | null;
   weight: number;
   comparisonOperator?: ShortlistingComparisonOperator | null;
+  /**
+   * The accepted values as the WHOLE set (round 3, lane K). Omitted (undefined) keeps the legacy
+   * comma-separated `requiredValue`; an empty list on a type that needs values is refused (422).
+   */
+  values?: ShortlistingCriteriaValueInput[];
 }
 
 // ── pipeline stage assignments (stage owners) ──────────────────────────────
@@ -631,6 +840,8 @@ export interface JobPosting {
 
 export interface JobPostingSummary {
   id: string;
+  jobVacancyId: string;
+  vacancyNumber?: string | null;
   channel: JobPostingChannel;
   title: string;
   status: JobPostingStatus;
@@ -673,11 +884,20 @@ export type PositionVacancyStatus = (typeof POSITION_VACANCY_STATUSES)[number];
 export interface PositionEstablishment {
   positionId: string;
   positionTitle: string;
+  positionCode?: string | null;
   organizationUnitId?: string | null;
   organizationUnitName?: string | null;
+  /** ⚠ Meaningless unless `isEstablished` — the column default is 1 (round 2b, R4a). */
   expectedHeadcount: number;
   filledCount: number;
+  /** 0 for an unestablished post: no gap can be stated. Read `gapKnown` first. */
   vacantCount: number;
+  isEstablished: boolean;
+  gapKnown: boolean;
+  isOverEstablishment: boolean;
+  establishmentApprovedOn?: string | null;
+  establishmentSourceBudgetId?: string | null;
+  establishmentSourceBudgetNumber?: string | null;
   openVacancyId?: string | null;
 }
 
@@ -756,6 +976,13 @@ export interface HrPagedResult<T> {
  * ⚠ `salaryRangeMin`/`salaryRangeMax`/`salaryCurrencyCode` are **null unless `isSalaryVisible`**.
  * The server nulls them; the screen must not assume a range exists.
  */
+export interface PublicVacancyPosting {
+  id: string;
+  channel: JobPostingChannel;
+  channelName: string;
+  title: string;
+}
+
 export interface PublicVacancy {
   id: string;
   vacancyNumber: string;
@@ -782,4 +1009,6 @@ export interface PublicVacancy {
   requiresPracticalTest: boolean;
   /** The advert body, from the requisition's job description. The board's whole point. */
   jobDescription?: string | null;
+  /** The live adverts (round 3, lane A) — a posting link names one with `?posting=`. */
+  postings: PublicVacancyPosting[];
 }

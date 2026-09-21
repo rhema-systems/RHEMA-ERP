@@ -249,6 +249,11 @@ public static class LocationStructureMappingExtensions
             Name = entity.Name,
             Code = entity.Code,
             LevelName = entity.LocationLevel?.Name,
+            StructureId = entity.StructureId,
+            LocationLevelId = entity.LocationLevelId,
+            LevelNumber = entity.LocationLevel?.LevelNumber ?? 0,
+            ParentLocationId = entity.ParentLocationId,
+            Path = entity.Path,
             City = entity.City,
             CountryName = entity.Country?.Name,
             IsActive = entity.IsActive

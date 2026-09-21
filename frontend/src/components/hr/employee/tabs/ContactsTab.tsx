@@ -1,9 +1,7 @@
 'use client';
 
 import { z } from 'zod';
-import { useQuery } from '@tanstack/react-query';
 import { Badge } from '@/components/ui/badge';
-import { countryService } from '@/services/hr/country.service';
 import { employeeService } from '@/services/hr/employee.service';
 import {
   EMPLOYEE_CONTACT_TYPE_OPTIONS,
@@ -11,7 +9,8 @@ import {
   type EmployeeContactType,
 } from '@/types/hr/employee-subresources';
 import { EmployeeSubResourceTab } from './EmployeeSubResourceTab';
-import { FieldRow, SelectField, SwitchField, TextField } from './fields';
+import { AddressCascadeField } from './address-fields';
+import { SelectField, SwitchField, TextField } from './fields';
 
 const schema = z.object({
   contactType: z.enum(['Home', 'Postal', 'Temporary', 'Other']),
@@ -21,6 +20,7 @@ const schema = z.object({
   region: z.string().max(100).optional().or(z.literal('')),
   digitalAddress: z.string().max(30).optional().or(z.literal('')),
   countryId: z.string().optional().or(z.literal('')),
+  geoAreaId: z.string().optional().or(z.literal('')),
   isPrimary: z.boolean(),
 });
 
@@ -34,6 +34,7 @@ const empty: FormValues = {
   region: '',
   digitalAddress: '',
   countryId: '',
+  geoAreaId: '',
   isPrimary: false,
 };
 
@@ -46,22 +47,19 @@ const toPayload = (employeeId: string, v: FormValues) => ({
   region: v.region || null,
   digitalAddress: v.digitalAddress || null,
   countryId: v.countryId || null,
+  // ⚠ Null CLEARS the link on the update DTO, which is what emptying the cascade has to mean —
+  // this DTO's address fields are all full-replace.
+  geoAreaId: v.geoAreaId || null,
   isPrimary: v.isPrimary,
 });
 
 export function ContactsTab({ employeeId }: { employeeId: string }) {
-  const { data: countries } = useQuery({
-    queryKey: ['hr', 'countries', 'active'],
-    queryFn: () => countryService.getActive(),
-  });
-
-  const countryOptions = (countries ?? []).map((c) => ({ value: c.id, label: c.name }));
-
   return (
     <EmployeeSubResourceTab<EmployeeContact, FormValues>
       employeeId={employeeId}
       title="addresses"
       singular="address"
+      itemLabel={(c) => c.contactType}
       queryKey="contacts"
       getId={(c) => c.id}
       list={employeeService.getContacts.bind(employeeService)}
@@ -101,8 +99,10 @@ export function ContactsTab({ employeeId }: { employeeId: string }) {
         region: c.region ?? '',
         digitalAddress: c.digitalAddress ?? '',
         countryId: c.countryId ?? '',
+        geoAreaId: c.geoAreaId ?? '',
         isPrimary: c.isPrimary,
       })}
+      dialogClassName="sm:max-w-[640px]"
       renderFields={(form) => (
         <>
           <SelectField
@@ -114,25 +114,29 @@ export function ContactsTab({ employeeId }: { employeeId: string }) {
           />
           <TextField form={form} name="addressLine1" label="Address line 1" />
           <TextField form={form} name="addressLine2" label="Address line 2" />
-          <FieldRow>
-            <TextField form={form} name="city" label="City" />
-            <TextField form={form} name="region" label="Region" />
-          </FieldRow>
-          <FieldRow>
+          {/*
+            The address cascade. Its dropdown LABELS come from the selected country's scheme —
+            Region / District / Town / Community for Ghana — so this block carries no
+            country-specific code and never should.
+
+            ⚠ City and Region are only editable when the country has no scheme loaded. With one,
+            the server rewrites both from the chosen area on every save, so an editable box would
+            be a field that silently discards what you type.
+          */}
+          <AddressCascadeField
+            form={form}
+            countryName="countryId"
+            geoAreaName="geoAreaId"
+            cityName="city"
+            regionName="region"
+          >
             <TextField
               form={form}
               name="digitalAddress"
               label="Digital address"
               placeholder="GA-123-4567"
             />
-            <SelectField
-              form={form}
-              name="countryId"
-              label="Country"
-              options={countryOptions}
-              allowEmpty
-            />
-          </FieldRow>
+          </AddressCascadeField>
           <SwitchField
             form={form}
             name="isPrimary"

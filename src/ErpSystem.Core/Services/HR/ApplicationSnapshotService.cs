@@ -49,6 +49,7 @@ public sealed class ApplicationSnapshotService : IApplicationSnapshotService
                 NormalisedName = l.LanguageName.Trim().ToLowerInvariant(),
                 DisplayName    = l.LanguageName.Trim(),
                 Proficiency    = (int)l.Proficiency,
+                LanguageId     = l.LanguageId,
             })
             .Where(l => l.NormalisedName.Length > 0)
             .ToList();

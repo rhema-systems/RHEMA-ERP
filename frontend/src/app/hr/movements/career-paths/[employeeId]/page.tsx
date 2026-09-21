@@ -28,7 +28,6 @@ import { employeeService } from '@/services/hr/employee.service';
 import { movementService } from '@/services/hr/movement.service';
 import { careerPathService } from '@/services/hr/career-path.service';
 import { employeePositionService } from '@/services/hr/employee-position.service';
-import { organizationUnitService } from '@/services/hr/organization-unit.service';
 import {
   Select,
   SelectContent,
@@ -43,6 +42,7 @@ const money = (v?: number | null) =>
   v === null || v === undefined ? '—' : v.toLocaleString(undefined, { minimumFractionDigits: 2 });
 
 import type { CareerPathStep } from '@/services/hr/career-path.service';
+import { OrganizationUnitPicker } from '@/components/hr/common/OrganizationUnitPicker';
 
 /**
  * One employee's career history: every position they have held, in order, with the movement that
@@ -98,11 +98,6 @@ export default function CareerPathPage() {
     enabled: adding !== null,
   });
 
-  const { data: units = [] } = useQuery({
-    queryKey: ['hr', 'organization-units', 'all'],
-    queryFn: () => organizationUnitService.getAll(),
-    enabled: adding !== null,
-  });
 
   const add = useMutation({
     mutationFn: () => {
@@ -385,16 +380,12 @@ export default function CareerPathPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Organisation unit</Label>
-                <Select value={adding.organizationUnitId}
-                  onValueChange={(v) => setAdding({ ...adding, organizationUnitId: v })}>
-                  <SelectTrigger><SelectValue placeholder="Choose a unit" /></SelectTrigger>
-                  <SelectContent>
-                    {units.map((u: any) => (
-                      <SelectItem key={u.id} value={u.id}>{u.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <OrganizationUnitPicker
+                  value={adding.organizationUnitId}
+                  onChange={(id) => setAdding({ ...adding, organizationUnitId: id })}
+                  unitLabel="Organisation unit"
+                  idPrefix="career-step-unit"
+                />
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">

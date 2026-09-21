@@ -111,6 +111,69 @@ public class JobCandidateController : ControllerBase
             inline: true, ct);
     }
 
+    /// <summary>
+    /// Sets a candidate's profile photograph from HR (round 3, lane C2).
+    /// </summary>
+    /// <remarks>
+    /// The careers side has uploaded photographs through the gate since the documents commit, but a
+    /// candidate HR records by hand — a walk-in, a referral — had no door at all, and the HR screens
+    /// never rendered the photograph either way. Same category as the careers upload
+    /// (<c>hr-candidate-photos</c>), no DMS registration (an avatar carries no retention value), and
+    /// the same two writes on the record. Answers the same shape as the careers door: the gated
+    /// route to fetch the image, never a public URL.
+    /// </remarks>
+    [HttpPost("{id:guid}/photo")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> UploadPhoto(Guid id, IFormFile file, CancellationToken ct = default)
+    {
+        if (file == null || file.Length == 0)
+            return BadRequest(new { message = "No file provided." });
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+        if (!Guid.TryParse(_currentUser.UserId, out var userId))
+            return BadRequest("The signed-in user could not be resolved.");
+
+        // Owned by the tenant before any bytes are stored — a miss is a 404, not an orphaned upload.
+        var candidate = await LoadCandidateAsync(id, tenantId, ct);
+        if (candidate is null)
+            return NotFound();
+
+        HrControlledDocument document;
+        try
+        {
+            document = await _hrDocuments.UploadAsync(new HrDocumentUploadRequest
+            {
+                TenantId = tenantId,
+                ActorUserId = userId,
+                ActorName = _currentUser.UserName ?? "hr",
+                Category = ControlledFileUploadCategories.HrCandidatePhotos,
+                File = file,
+                Registration = null,
+            }, ct);
+        }
+        catch (ControlledFileUploadException ex)
+        {
+            return StatusCode(ex.StatusCode, new { code = ex.Code, message = ex.Message });
+        }
+
+        try
+        {
+            await _service.SetProfilePhotoAsync(id, document.FileUploadRecordId, userId, ct);
+        }
+        catch (Exception ex)
+        {
+            await _hrDocuments.RollbackAsync(document, tenantId, userId, ct);
+            if (ex is ArgumentException)
+                return NotFound(new { message = ex.Message });
+            throw;
+        }
+
+        return Ok(new { url = Url.Action(nameof(DownloadPhoto), new { id }), hasPhoto = true });
+    }
+
     /// <summary>Streams one of a candidate's uploaded documents.</summary>
     [HttpGet("{id:guid}/documents/{documentId:guid}/download")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
@@ -156,8 +219,11 @@ public class JobCandidateController : ControllerBase
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
     public async Task<ActionResult<PagedResult<JobCandidateSummaryDto>>> GetPaged(
         [FromQuery] int pageNumber = 1,
-        [FromQuery] int pageSize = 20)
-        => Ok(await _service.GetPagedAsync(pageNumber, pageSize));
+        [FromQuery] int pageSize = 20,
+        // G-7.6: name, email, phone, headline, current title or employer. The register's only
+        // lookup used to be an exact-email match.
+        [FromQuery] string? search = null)
+        => Ok(await _service.GetPagedAsync(pageNumber, pageSize, search));
 
     [HttpGet("all")]
     [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
@@ -242,29 +308,15 @@ public class JobCandidateController : ControllerBase
     // TALENT POOL
     // =========================================================================
 
-    [HttpPost("{id:guid}/add-to-talent-pool")]
-    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
-    public async Task<IActionResult> AddToTalentPool(Guid id)
-    {
-        var employeeId = _currentUser.EmployeeId;
-        if (employeeId == null)
-            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        await _service.AddToTalentPoolAsync(id, employeeId.Value);
-        return Ok(new { message = "Candidate added to talent pool." });
-    }
-
-    [HttpPost("{id:guid}/remove-from-talent-pool")]
-    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
-    public async Task<IActionResult> RemoveFromTalentPool(Guid id)
-    {
-        var employeeId = _currentUser.EmployeeId;
-        if (employeeId == null)
-            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
-
-        await _service.RemoveFromTalentPoolAsync(id, employeeId.Value);
-        return Ok(new { message = "Candidate removed from talent pool." });
-    }
+    // ⚠ POST {id}/add-to-talent-pool and POST {id}/remove-from-talent-pool were RETIRED here on
+    // 2026-09-15 (G-7.4). Both were superseded by the richer TalentPoolController endpoints the UI
+    // now uses, and neither had a caller left — but leaving a live door onto them mattered, because
+    // the old pair set IsInTalentPool with **no source, no reason and no review date**, which is
+    // exactly the data loss the replacement was written to stop. An endpoint that silently
+    // downgrades a record is worse than one that does not exist.
+    //
+    // Entry to and exit from the pool now go through TalentPoolController, which records who put
+    // the candidate there, why, and when they should next be looked at.
 
     // =========================================================================
     // QUALIFICATIONS
@@ -471,6 +523,57 @@ public class JobCandidateController : ControllerBase
     }
 
     // =========================================================================
+    // LANGUAGES (round 3, lane C1)
+    // =========================================================================
+
+    [HttpGet("{candidateId:guid}/languages")]
+    [Authorize(Policy = HrPermissions.RecruitmentReadPolicy)]
+    public async Task<ActionResult<IEnumerable<JobCandidateLanguageDto>>> GetLanguages(Guid candidateId)
+        => Ok(await _service.GetLanguagesAsync(candidateId));
+
+    [HttpPost("{candidateId:guid}/languages")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<JobCandidateLanguageDto>> AddLanguage(
+        Guid candidateId, [FromBody] CreateJobCandidateLanguageDto dto)
+    {
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var tenantId = _currentUser.TenantId;
+        var employeeId = _currentUser.EmployeeId;
+
+        if (tenantId == null)
+            return BadRequest("Tenant context could not be resolved.");
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        dto.JobCandidateId = candidateId;
+        return Ok(await _service.AddLanguageAsync(dto, tenantId.Value, employeeId.Value));
+    }
+
+    [HttpPut("{candidateId:guid}/languages/{languageId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentWritePolicy)]
+    public async Task<ActionResult<JobCandidateLanguageDto>> UpdateLanguage(
+        Guid candidateId, Guid languageId, [FromBody] UpdateJobCandidateLanguageDto dto)
+    {
+        if (languageId != dto.Id) return BadRequest("ID mismatch.");
+        if (!ModelState.IsValid) return BadRequest(ModelState);
+
+        var employeeId = _currentUser.EmployeeId;
+        if (employeeId == null)
+            return BadRequest("Your user account is not linked to an employee record. Please contact your administrator.");
+
+        return Ok(await _service.UpdateLanguageAsync(dto, employeeId.Value));
+    }
+
+    [HttpDelete("languages/{languageId:guid}")]
+    [Authorize(Policy = HrPermissions.RecruitmentAdminPolicy)]
+    public async Task<IActionResult> DeleteLanguage(Guid languageId)
+    {
+        await _service.DeleteLanguageAsync(languageId);
+        return NoContent();
+    }
+
+    // =========================================================================
     // INTERESTS
     // =========================================================================
 
@@ -572,7 +675,8 @@ public class JobCandidateController : ControllerBase
             persist: (uploadedById, document) => _service.AddDocumentAsync(
                 candidateId, documentType, document.OriginalFileName,
                 tenantId, uploadedById, ct,
-                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId),
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                description),
             cancellationToken: ct,
             category: ControlledFileUploadCategories.HrRecruitmentAttachments);
     }

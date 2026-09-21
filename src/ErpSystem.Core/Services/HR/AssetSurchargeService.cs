@@ -1,4 +1,4 @@
-using ErpSystem.Application.HR.Extensions;
+﻿using ErpSystem.Application.HR.Extensions;
 using ErpSystem.Core.DTOs.Common;
 using ErpSystem.Core.DTOs.HR;
 // The exit register, for the one question this service asks of it: has a charge's balance already
@@ -6,9 +6,11 @@ using ErpSystem.Core.DTOs.HR;
 using ErpSystem.Core.Entities.HR;
 using ErpSystem.Core.Entities.HR.Assets;
 using ErpSystem.Core.Enums;
+using ErpSystem.Shared;
 using ErpSystem.Core.Exceptions;
 using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.HR;
+using ErpSystem.Core.Services.HR.Finance;
 
 // ⚠ An ALIAS, not `using ErpSystem.Core.Interfaces.Finance`. That namespace declares its own
 // `IAssetTransferService`, and so does `ErpSystem.Core.Interfaces.HR` — importing it whole is what
@@ -40,7 +42,7 @@ namespace ErpSystem.Core.Services.HR;
 /// <para><b>Where this stops.</b> It deducts nothing and posts nothing.
 /// <see cref="GetPayrollDeductionLinesAsync"/> is a read-only projection payroll consumes;
 /// <see cref="RecordRecoveryAsync"/> records what somebody else collected. See the payroll
-/// ownership boundary, decision D2, and <c>docs/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
+/// ownership boundary, decision D2, and <c>docs/HR/integration/HR-FINANCE-INTEGRATION-BACKLOG.md</c>.</para>
 /// </remarks>
 public class AssetSurchargeService : IAssetSurchargeService
 {
@@ -52,6 +54,7 @@ public class AssetSurchargeService : IAssetSurchargeService
     private readonly ICurrentUserService _currentUserService;
     private readonly IWorkflowIntegrationService _workflow;
     private readonly IWorkflowStatusAdapterRegistry _workflowAdapters;
+    private readonly IHrFinancePostingAdapter _financePosting;
 
     /// <summary>
     /// ⚠ <c>HrAssetSurcharge</c>, not <c>AssetSurcharge</c>. The workflow entity-type keys are a
@@ -78,7 +81,8 @@ public class AssetSurchargeService : IAssetSurchargeService
         IUnitOfWork unitOfWork,
         ICurrentUserService currentUserService,
         IWorkflowIntegrationService workflow,
-        IWorkflowStatusAdapterRegistry workflowAdapters)
+        IWorkflowStatusAdapterRegistry workflowAdapters,
+        IHrFinancePostingAdapter financePosting)
     {
         _surchargeRepo = surchargeRepo;
         _recoveryRepo = recoveryRepo;
@@ -88,6 +92,7 @@ public class AssetSurchargeService : IAssetSurchargeService
         _currentUserService = currentUserService;
         _workflow = workflow;
         _workflowAdapters = workflowAdapters;
+        _financePosting = financePosting;
     }
 
     // ── plumbing ─────────────────────────────────────────────────────────────
@@ -538,12 +543,17 @@ public class AssetSurchargeService : IAssetSurchargeService
             entity.ProceededWithoutResponseReason = dto.ProceedWithoutResponseReason.Trim();
         }
 
+        // The engine reports "approval is not configured" as WorkflowOutcome.Approved, and every HR
+        // adapter maps that to its approved status - so submitting used to approve the record
+        // outright. Pending instead lands it at the module's own awaiting-approval status.
+        var configured = await _workflow.HasActiveApprovalWorkflowAsync(EntityType);
         var result = await AssetRequisitionService.RunWorkflowAsync(
             () => _workflow.SubmitAsync(EntityType, entity.Id),
             "start the surcharge approval workflow");
+        var submitOutcome = configured ? result.Outcome : WorkflowOutcome.Pending;
 
         var actingUserId = RequireCallerUserId();
-        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, result.Outcome, actingUserId);
+        _workflowAdapters.GetAdapter(EntityType).ApplySubmitOutcome(entity, submitOutcome, actingUserId);
         Stamp(entity);
 
         await _surchargeRepo.UpdateAsync(entity);
@@ -561,9 +571,12 @@ public class AssetSurchargeService : IAssetSurchargeService
                 $"Only a charge awaiting approval can be recalled; this one is {entity.Status}.");
 
         var actingUserId = RequireCallerUserId();
-        var result = await AssetRequisitionService.RunWorkflowAsync(
-            () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
-            "recall the surcharge");
+        // Nothing to recall when no definition is published - RecallWorkflowAsync would answer
+        // "No active workflow found". The record returns to Draft because the rules above say so.
+        if (await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+            await AssetRequisitionService.RunWorkflowAsync(
+                () => _workflow.RecallAsync(EntityType, entity.Id, actingUserId, reason),
+                "recall the surcharge");
 
         _workflowAdapters.GetAdapter(EntityType).ApplyRecallOutcome(entity, actingUserId, reason);
         Stamp(entity);
@@ -605,15 +618,15 @@ public class AssetSurchargeService : IAssetSurchargeService
                     + "shown and given the chance to answer. Reject this charge and raise a new one.");
         }
 
-        var result = await ProcessApprovalAsync(entity, "Approve", dto.ApprovalComments);
+        var outcome = await ProcessApprovalAsync(entity, "Approve", dto.ApprovalComments);
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId);
+            .ApplyApprovalOutcome(entity, outcome, actingUserId);
 
         // Stamped only once the chain has actually finished — a two-step definition leaves the
         // record Submitted after the first signature, and naming an approver there would name one
         // signatory as *the* approver of something not yet approved.
-        if (result.Outcome == WorkflowOutcome.Approved)
+        if (outcome == WorkflowOutcome.Approved)
         {
             entity.ApprovedById = approverId;
             entity.ApprovalDate = DateTime.UtcNow;
@@ -626,8 +639,23 @@ public class AssetSurchargeService : IAssetSurchargeService
 
         Stamp(entity);
 
-        await _surchargeRepo.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
+        // The completed approval and Finance's receivable commit together (HR finish plan lane 8,
+        // slice 4). A first signature of a two-step chain posts nothing.
+        try
+        {
+            await _financePosting.RunAsync(async ct =>
+            {
+                await _surchargeRepo.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return outcome == WorkflowOutcome.Approved
+                    ? HrFinancePostingCommandFactory.AssetSurchargeApproved(entity)
+                    : null;
+            }, actingUserId);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw AssetsWorkflowException.InvalidState(ex.Message);
+        }
     }
 
     public async Task RejectAsync(Guid id, RejectAssetSurchargeDto dto)
@@ -641,10 +669,10 @@ public class AssetSurchargeService : IAssetSurchargeService
         RequireNotTheSubject(entity, approverId, "reject");
 
         var reason = string.IsNullOrWhiteSpace(dto.RejectionReason) ? "Rejected" : dto.RejectionReason.Trim();
-        var result = await ProcessApprovalAsync(entity, "Reject", reason);
+        var outcome = await ProcessApprovalAsync(entity, "Reject", reason);
 
         _workflowAdapters.GetAdapter(EntityType)
-            .ApplyApprovalOutcome(entity, result.Outcome, actingUserId, reason);
+            .ApplyApprovalOutcome(entity, outcome, actingUserId, reason);
 
         entity.RejectionReason = reason;
         Stamp(entity);
@@ -722,16 +750,30 @@ public class AssetSurchargeService : IAssetSurchargeService
         // ⚠ Added through its own repository rather than onto `entity.Recoveries`. Adding to a
         // tracked navigation collection on an edit path turns the parent into an UPDATE of the whole
         // graph — the EF tracked-graph trap this repo has recorded before.
-        await _recoveryRepo.AddAsync(recovery);
+        // The recovery row, the balance and Finance's clearing of the receivable commit together
+        // (lane 8, slice 4). Payroll and exit-settlement recoveries are recorded Skipped: those
+        // journals credit the receivable themselves.
+        try
+        {
+            await _financePosting.RunAsync(async ct =>
+            {
+                await _recoveryRepo.AddAsync(recovery);
 
-        entity.AmountRecovered += dto.Amount;
-        entity.Status = entity.AmountRecovered >= entity.AssessedAmount
-            ? AssetSurchargeStatus.Recovered
-            : AssetSurchargeStatus.Recovering;
-        Stamp(entity);
+                entity.AmountRecovered += dto.Amount;
+                entity.Status = entity.AmountRecovered >= entity.AssessedAmount
+                    ? AssetSurchargeStatus.Recovered
+                    : AssetSurchargeStatus.Recovering;
+                Stamp(entity);
 
-        await _surchargeRepo.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
+                await _surchargeRepo.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return HrFinancePostingCommandFactory.AssetSurchargeRecovered(entity, recovery);
+            }, userId);
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw AssetsWorkflowException.InvalidState(ex.Message);
+        }
 
         return (await _surchargeRepo.GetWithDetailsAsync(id))!.ToDto();
     }
@@ -758,14 +800,29 @@ public class AssetSurchargeService : IAssetSurchargeService
             throw AssetsWorkflowException.InvalidState(
                 $"This charge is already closed ({entity.Status}).");
 
-        entity.Status = AssetSurchargeStatus.Waived;
-        entity.WaivedById = waivedById;
-        entity.WaivedAt = DateTime.UtcNow;
-        entity.WaiverReason = dto.WaiverReason.Trim();
-        Stamp(entity);
+        // Forgiving the balance writes the receivable off in Finance (lane 8, slice 4) — only if
+        // the approval ever posted; a charge waived while still WithEmployee or Submitted has no
+        // receivable behind it and is recorded Skipped.
+        var approvalPosted = await _financePosting.IsPostedAsync(HrFinancePostingEventCatalog.AssetSurchargeApproved, entity.Id);
+        try
+        {
+            await _financePosting.RunAsync(async ct =>
+            {
+                entity.Status = AssetSurchargeStatus.Waived;
+                entity.WaivedById = waivedById;
+                entity.WaivedAt = DateTime.UtcNow;
+                entity.WaiverReason = dto.WaiverReason.Trim();
+                Stamp(entity);
 
-        await _surchargeRepo.UpdateAsync(entity);
-        await _unitOfWork.SaveChangesAsync();
+                await _surchargeRepo.UpdateAsync(entity);
+                await _unitOfWork.SaveChangesAsync(ct);
+                return HrFinancePostingCommandFactory.AssetSurchargeWaived(entity, approvalPosted);
+            }, RequireCallerUserId());
+        }
+        catch (HrFinancePostingException ex)
+        {
+            throw AssetsWorkflowException.InvalidState(ex.Message);
+        }
 
         return (await _surchargeRepo.GetWithDetailsAsync(id))!.ToDto();
     }
@@ -819,17 +876,34 @@ public class AssetSurchargeService : IAssetSurchargeService
             $"You cannot {verb} a surcharge raised against you.");
     }
 
-    private async Task<WorkflowIntegrationResult> ProcessApprovalAsync(
+    private async Task<WorkflowOutcome> ProcessApprovalAsync(
         AssetSurcharge entity, string action, string? comments)
     {
         var actingUserId = RequireCallerUserId();
+
+        // With no definition published there is no instance, so CanUserApproveAsync answers false
+        // for everybody and the surcharge could not be decided at all. Authority falls to the module's
+        // approve tier. The subject rule above is the stronger half of the gate and runs either way.
+        if (!await _workflow.HasActiveApprovalWorkflowAsync(EntityType))
+        {
+            HrWorkflowFallbackAuthority.EnsureCanRuleWithoutWorkflow(
+                _currentUserService.Roles,
+                $"{action.ToLowerInvariant()} an asset surcharge",
+                HrPermissions.ApproveAssets);
+
+            return string.Equals(action, "Reject", StringComparison.OrdinalIgnoreCase)
+                ? WorkflowOutcome.Rejected
+                : WorkflowOutcome.Approved;
+        }
 
         if (!await _workflow.CanUserApproveAsync(EntityType, entity.Id, actingUserId))
             throw new UnauthorizedAccessException(
                 "You are not assigned as an approver for the current step of this surcharge's approval workflow.");
 
-        return await AssetRequisitionService.RunWorkflowAsync(
+        var result = await AssetRequisitionService.RunWorkflowAsync(
             () => _workflow.ProcessApprovalAsync(EntityType, entity.Id, actingUserId, action, comments),
             $"process the {action.ToLowerInvariant()}");
+
+        return result.Outcome;
     }
 }

@@ -1,16 +1,6 @@
 'use client';
 
-import {
-  CalendarDays,
-  CheckCircle2,
-  Scale,
-  SlidersHorizontal,
-  CalendarRange,
-  Banknote,
-  ShieldCheck,
-  CalendarCog,
-  Settings,
-} from 'lucide-react';
+import { Banknote, CalendarCog, CalendarDays, CalendarRange, CheckCircle2, ClipboardList, Scale, Settings, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 import { PageHeader } from '@/components/hr/common/PageHeader';
 import { NavCardGrid } from '@/components/hr/common/NavCardGrid';
 
@@ -33,8 +23,20 @@ export default function LeaveHomePage() {
               icon: CalendarDays,
             },
             {
+              title: 'Calendar',
+              description: 'Who is away, and when.',
+              href: '/hr/leave/calendar',
+              icon: CalendarDays,
+            },
+            {
+              title: 'Register',
+              description: 'Every request across the organisation, with export.',
+              href: '/hr/leave/register',
+              icon: ClipboardList,
+            },
+            {
               title: 'Approvals',
-              description: "Requests waiting on a manager's decision.",
+              description: 'Requests waiting on your decision.',
               href: '/hr/leave/approvals',
               icon: CheckCircle2,
             },

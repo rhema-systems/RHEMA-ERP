@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces;
 using ErpSystem.Core.Interfaces.DocumentManagement;
 using ErpSystem.Core.Interfaces.HR;
 using ErpSystem.Core.Interfaces.HR.Services;
+using ErpSystem.Core.Services.HR;
 using ErpSystem.Data;
 using ErpSystem.Shared;
 using Microsoft.AspNetCore.Authorization;
@@ -34,6 +35,7 @@ namespace ErpSystem.Api.Controllers.HR;
 public class EmployeeDocumentsController : ControllerBase
 {
     private readonly IEmployeeDocumentService _service;
+    private readonly ICertificationService _certifications;
     private readonly IHrControlledDocumentService _hrDocuments;
     private readonly ICentralDocumentRepositoryFileService _centralDocuments;
     private readonly IFileStorageService _fileStorage;
@@ -43,6 +45,7 @@ public class EmployeeDocumentsController : ControllerBase
 
     public EmployeeDocumentsController(
         IEmployeeDocumentService service,
+        ICertificationService certifications,
         IHrControlledDocumentService hrDocuments,
         ICentralDocumentRepositoryFileService centralDocuments,
         IFileStorageService fileStorage,
@@ -51,6 +54,7 @@ public class EmployeeDocumentsController : ControllerBase
         ILogger<EmployeeDocumentsController> logger)
     {
         _service = service;
+        _certifications = certifications;
         _hrDocuments = hrDocuments;
         _centralDocuments = centralDocuments;
         _fileStorage = fileStorage;
@@ -410,6 +414,137 @@ public class EmployeeDocumentsController : ControllerBase
             // Inline: a photograph is looked AT, not filed away, and forcing a download to view a
             // face is the kind of friction that stops people attaching them at all.
             inline: true, ct);
+    }
+
+    // ── Documents that pertain to a guarantor (round 2, lane A-6) ──────────────────────────────
+    //
+    // Many per guarantor, each with a kind from the employee document vocabulary. The photograph
+    // above is one-per-row; these are the papers — the signed form, an ID scan, a payslip.
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("guarantors/{guarantorId:guid}/documents")]
+    public async Task<ActionResult<IEnumerable<EmployeeGuarantorDocumentDto>>> GetGuarantorDocuments(
+        Guid guarantorId, CancellationToken ct = default)
+    {
+        var guarantor = await _service.GetGuarantorAsync(guarantorId, ct);
+        if (guarantor is null) return NotFound(new { message = $"Guarantor '{guarantorId}' was not found." });
+        return Ok(await _service.GetGuarantorDocumentsAsync(guarantorId, ct));
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("guarantors/{guarantorId:guid}/documents")]
+    [RequestSizeLimit(50_000_000)]
+    public async Task<IActionResult> UploadGuarantorDocument(
+        Guid guarantorId,
+        IFormFile? file,
+        [FromForm] Guid documentTypeId,
+        [FromForm] string? title = null,
+        [FromForm] string? description = null,
+        [FromForm] DateOnly? issuedOn = null,
+        [FromForm] DateOnly? expiresOn = null,
+        CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        // Entitlement first, storage second.
+        var guarantor = await _service.GetGuarantorAsync(guarantorId, ct);
+        if (guarantor is null) return NotFound(new { message = $"Guarantor '{guarantorId}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.EmployeeGuarantorDocument),
+            sourceRecordId: guarantorId,
+            sourceLabel: "Guarantor document",
+            documentType: "GuarantorDocument",
+            description: description,
+            persist: (_, document) => _service.AttachGuarantorDocumentAsync(
+                guarantorId, documentTypeId, title, description, issuedOn, expiresOn,
+                document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                document.OriginalFileName, document.ContentType, document.FileSize,
+                _currentUser.EmployeeId, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("guarantor-documents/{id:guid}/download")]
+    public async Task<IActionResult> DownloadGuarantorDocument(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var document = await _service.GetGuarantorDocumentEntityAsync(id, ct);
+        if (document is null) return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            document.DocumentRecordId, document.DocumentVersionId,
+            document.FileUploadRecordId,
+            legacyPath: null,
+            document.FileName ?? "guarantor-document",
+            fallbackContentType: document.MimeType,
+            inline: false, ct);
+    }
+
+    /// <summary>Admin tier, the same bar as removing an employee document.</summary>
+    [Authorize(Policy = HrPermissions.EmployeeAdminPolicy)]
+    [HttpDelete("guarantor-documents/{id:guid}")]
+    public async Task<IActionResult> DeleteGuarantorDocument(Guid id, CancellationToken ct = default)
+    {
+        try { await _service.DeleteGuarantorDocumentAsync(id, ct); }
+        catch (ArgumentException ex) { return NotFound(new { message = ex.Message }); }
+        return NoContent();
+    }
+
+    // ── Evidence for a credential on the employee's certification tab (round 2, lane C2) ──────
+    //
+    // One file per credential — the certificate itself — through the same gate as every other HR
+    // attachment. The row lives with the certification model; only the file door is here, so the
+    // scan, the storage and the download stay in one place.
+
+    [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]
+    [HttpPost("employee-certifications/{id:guid}/evidence")]
+    [RequestSizeLimit(20_000_000)]
+    public async Task<IActionResult> UploadCertificationEvidence(Guid id, IFormFile? file, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid) return BadRequest("Tenant context could not be resolved.");
+
+        var credential = await _certifications.GetEmployeeCertificationEntityAsync(id, ct);
+        if (credential is null) return NotFound(new { message = $"Employee certification '{id}' was not found." });
+
+        return await HrAttachmentUpload.ExecuteAsync(
+            this, _hrDocuments, _currentUser, _logger, file,
+            sourceEntityType: nameof(Core.Entities.HR.EmployeeCertification),
+            sourceRecordId: id,
+            sourceLabel: "Certification evidence",
+            documentType: "CertificationEvidence",
+            description: null,
+            persist: (_, document) => _certifications.AttachEvidenceAsync(
+                id, document.FileUploadRecordId, document.DocumentRecordId, document.DocumentVersionId,
+                document.OriginalFileName, document.ContentType, document.FileSize, ct),
+            cancellationToken: ct,
+            category: ControlledFileUploadCategories.HrEmployeeDocuments);
+    }
+
+    [Authorize(Policy = HrPermissions.EmployeeReadPolicy)]
+    [HttpGet("employee-certifications/{id:guid}/evidence")]
+    public async Task<IActionResult> DownloadCertificationEvidence(Guid id, CancellationToken ct = default)
+    {
+        if (_currentUser.TenantId is not Guid tenantId)
+            return BadRequest("Tenant context could not be resolved.");
+
+        var credential = await _certifications.GetEmployeeCertificationEntityAsync(id, ct);
+        if (credential?.EvidenceFileUploadRecordId is null && credential?.EvidenceDocumentRecordId is null)
+            return NotFound();
+
+        return await HrDocumentDownload.ServeAsync(
+            this, _centralDocuments, _fileStorage, _db, tenantId,
+            credential.EvidenceDocumentRecordId, credential.EvidenceDocumentVersionId,
+            credential.EvidenceFileUploadRecordId,
+            legacyPath: null,
+            credential.EvidenceFileName ?? "certification-evidence",
+            fallbackContentType: credential.EvidenceMimeType,
+            inline: false, ct);
     }
 
     [Authorize(Policy = HrPermissions.EmployeeWritePolicy)]

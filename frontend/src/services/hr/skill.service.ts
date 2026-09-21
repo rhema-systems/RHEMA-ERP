@@ -1,5 +1,6 @@
 import { apiService } from '../api.service';
 import type { Skill, SkillRequest } from '@/types/hr/skill';
+import type { SkillCertification } from '@/types/hr/certification';
 
 /**
  * CRUD for skills (an HR reference lookup, optionally grouped by category).
@@ -22,6 +23,11 @@ class SkillService {
 
   getById(id: string): Promise<Skill> {
     return apiService.get<Skill>(`${this.baseUrl}/${id}`);
+  }
+
+  /** The credentials that evidence a skill (round 2, lane C2). Written with the skill save. */
+  getCertifications(id: string): Promise<SkillCertification[]> {
+    return apiService.get<SkillCertification[]>(`${this.baseUrl}/${id}/certifications`);
   }
 
   create(data: SkillRequest): Promise<Skill> {
