@@ -207,6 +207,29 @@ function Invoke-Native([string]$filePath, [string[]]$arguments) {
     }
 }
 
+function Move-AtomicEvidenceFile([string]$sourcePath, [string]$destinationPath, [bool]$replaceExisting = $false) {
+    # The three-argument File.Move overload is unavailable in Windows
+    # PowerShell's .NET Framework runtime. File.Replace preserves the atomic
+    # replacement boundary when an existing evidence file is deliberately updated.
+    if (-not $replaceExisting) {
+        [System.IO.File]::Move($sourcePath, $destinationPath)
+        return
+    }
+    if (Test-Path -LiteralPath $destinationPath -PathType Leaf) {
+        $rollbackPath = $destinationPath + '.' + [Guid]::NewGuid().ToString('N') + '.replace-backup'
+        try {
+            [System.IO.File]::Replace($sourcePath, $destinationPath, $rollbackPath)
+        }
+        finally {
+            if (Test-Path -LiteralPath $rollbackPath -PathType Leaf) {
+                [System.IO.File]::Delete($rollbackPath)
+            }
+        }
+        return
+    }
+    [System.IO.File]::Move($sourcePath, $destinationPath)
+}
+
 function Write-AtomicNativeCommandEvidence([string]$evidenceFile, [string[]]$sanitizedOutput,
     [string]$commandName, [int]$exitCode, [bool]$allowFailure) {
     $evidenceDirectory = Split-Path -Parent $evidenceFile
@@ -231,7 +254,7 @@ function Write-AtomicNativeCommandEvidence([string]$evidenceFile, [string[]]$san
             finally { $writer.Dispose() }
         }
         finally { if ($null -ne $stream) { $stream.Dispose() } }
-        [System.IO.File]::Move($temporaryFile, $evidenceFile, $false)
+        Move-AtomicEvidenceFile $temporaryFile $evidenceFile $false
     }
     finally {
         if (Test-Path -LiteralPath $temporaryFile) { Remove-Item -LiteralPath $temporaryFile -Force }
@@ -736,8 +759,7 @@ function Write-AtomicTextFile([string]$path, [string]$content, [bool]$replaceExi
             finally { $writer.Dispose() }
         }
         finally { if ($null -ne $stream) { $stream.Dispose() } }
-        if ($replaceExisting) { [System.IO.File]::Move($temporaryPath, $path, $true) }
-        else { [System.IO.File]::Move($temporaryPath, $path, $false) }
+        Move-AtomicEvidenceFile $temporaryPath $path $replaceExisting
     }
     finally {
         if (Test-Path -LiteralPath $temporaryPath -PathType Leaf) { Remove-Item -LiteralPath $temporaryPath -Force }
