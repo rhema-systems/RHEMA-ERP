@@ -197,6 +197,9 @@ public class EstateLandDemarcation : TenantEntity
     public decimal? AllocatedCost { get; set; }
     public decimal? CostPerAcre { get; set; }
     public decimal? TargetSalePrice { get; set; }
+    public decimal? GroundRentPayable { get; set; }
+    public decimal? GroundRentRatePerAcre { get; set; }
+    public decimal? GroundRentComputed { get; set; }
     [MaxLength(120)] public string? ParentLandAssetReference { get; set; }
     [MaxLength(120)] public string? ParentFixedAssetReference { get; set; }
     [MaxLength(120)] public string? ChildFixedAssetReference { get; set; }

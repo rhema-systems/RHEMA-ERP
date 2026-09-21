@@ -2996,11 +2996,6 @@ export const navigationItems: NavItem[] = [
             icon: Landmark,
           },
           {
-            title: 'Partially Serviced',
-            href: '/estate/EstateLandsPartiallyServiced',
-            icon: Home,
-          },
-          {
             title: 'Housing / HOS',
             href: '/estate/EstateHousingHomeOwnership',
             icon: Building2,
@@ -3009,11 +3004,6 @@ export const navigationItems: NavItem[] = [
             title: 'Traditional Lands',
             href: '/estate/EstateTraditionalLands',
             icon: Landmark,
-          },
-          {
-            title: 'Regularisation',
-            href: '/estate/EstateTenancyRegularisation',
-            icon: Award,
           },
           {
             title: 'Reporting Controls',

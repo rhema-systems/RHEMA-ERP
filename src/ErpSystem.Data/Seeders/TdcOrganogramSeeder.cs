@@ -1,5 +1,6 @@
 using ErpSystem.Core.Entities;
 using ErpSystem.Core.Entities.HR;
+using ErpSystem.Core.Entities.Procedures;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -23,7 +24,7 @@ namespace ErpSystem.Data.Seeders;
 ///
 /// SAFE BY CONSTRUCTION:
 ///   1. Runs only when invoked explicitly via a seed CLI argument; never on normal startup.
-///   2. Idempotent: returns immediately if the "TDC" structure already exists for the tenant.
+///   2. Idempotent: updates only known seed-owned gaps when the "TDC" structure already exists.
 ///   3. Creates structure / levels / grades / units / positions only — no employees.
 /// </summary>
 public class TdcOrganogramSeeder
@@ -50,10 +51,15 @@ public class TdcOrganogramSeeder
 
         var tenantId = tenant.Id;
 
-        // Idempotency guard — never duplicate, never touch a previous run.
-        if (await _context.Set<OrganizationStructure>().AnyAsync(s => s.Code == "TDC" && s.TenantId == tenantId))
+        // Idempotency guard — never duplicate the full structure; only repair seed-owned additions.
+        var existingStructure = await _context.Set<OrganizationStructure>()
+            .FirstOrDefaultAsync(s => s.Code == "TDC" && s.TenantId == tenantId);
+        if (existingStructure is not null)
         {
-            _logger.LogInformation("TDC organisation structure already seeded for the DEFAULT tenant. Skipping.");
+            await EnsureSalesDepartmentUnitAsync(tenantId, existingStructure.Id);
+            await EnsureMarketingUnitAsync(tenantId, existingStructure.Id);
+            await BackfillProcedureCaseOrganizationScopesAsync(tenantId);
+            _logger.LogInformation("TDC organisation structure already seeded for the DEFAULT tenant. Repair pass complete.");
             return;
         }
 
@@ -257,6 +263,7 @@ public class TdcOrganogramSeeder
         }
 
         await _context.SaveChangesAsync();
+        await BackfillProcedureCaseOrganizationScopesAsync(tenantId);
         _logger.LogInformation(
             "TDC structure seeded into the DEFAULT tenant: {Levels} levels, {Grades} grades, {Units} units, {Positions} positions.",
             levelDefs.Length, GradeDefs.Length, unitDefs.Count, positionDefs.Count);
@@ -312,6 +319,7 @@ public class TdcOrganogramSeeder
         new("DEPT-DEV",  "Development Department",   "DIR-OPS", "DEPT", "Core department"),
         new("UNIT-DC",   "Development Control Unit", "DIR-OPS", "DEPT", "Unit"),
         new("DEPT-EST",  "Estates Department",       "DIR-OPS", "DEPT", "Core department"),
+        new("DEPT-SALES","Sales Department",         "DIR-OPS", "DEPT", "Core department"),
         new("UNIT-MKT",  "Marketing Unit",           "DIR-OPS", "DEPT", "Business unit"),
         // Task Force appears only in the staff records — not on the organogram or in the questionnaire.
         new("UNIT-TF",   "Task Force",               "DIR-OPS", "DEPT", "Unit"),
@@ -529,4 +537,325 @@ public class TdcOrganogramSeeder
         new("MS-CT",  "Computer Technician",                  "UNIT-MIS", "MS-SA",  "S1"),
         new("MS-WD",  "Website Developer",                    "UNIT-MIS", "HMIS",   "M5"),
     };
+
+    private async Task EnsureSalesDepartmentUnitAsync(Guid tenantId, Guid structureId)
+    {
+        const string by = "TdcOrganogramSeeder";
+        var now = DateTime.UtcNow;
+
+        var departmentLevel = await _context.Set<OrganizationLevel>()
+            .FirstOrDefaultAsync(level =>
+                level.TenantId == tenantId &&
+                level.StructureId == structureId &&
+                level.Code == "DEPT");
+
+        var operationsDirectorate = await _context.Set<OrganizationUnit>()
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId &&
+                unit.Code == "DIR-OPS");
+
+        if (departmentLevel is null || operationsDirectorate is null)
+        {
+            _logger.LogWarning(
+                "Cannot ensure Sales Department because the TDC department level or Operations Directorate is missing.");
+            return;
+        }
+
+        var salesDepartment = await _context.Set<OrganizationUnit>()
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId &&
+                unit.Code == "DEPT-SALES");
+
+        if (salesDepartment is not null)
+        {
+            var changed = false;
+
+            if (salesDepartment.Name != "Sales Department")
+            {
+                salesDepartment.Name = "Sales Department";
+                changed = true;
+            }
+
+            if (salesDepartment.Description != "Core department")
+            {
+                salesDepartment.Description = "Core department";
+                changed = true;
+            }
+
+            if (salesDepartment.OrganizationLevelId != departmentLevel.Id)
+            {
+                salesDepartment.OrganizationLevelId = departmentLevel.Id;
+                changed = true;
+            }
+
+            if (salesDepartment.ParentUnitId != operationsDirectorate.Id)
+            {
+                salesDepartment.ParentUnitId = operationsDirectorate.Id;
+                changed = true;
+            }
+
+            if (!salesDepartment.IsActive)
+            {
+                salesDepartment.IsActive = true;
+                changed = true;
+            }
+
+            if (salesDepartment.IsDeleted)
+            {
+                salesDepartment.IsDeleted = false;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                _logger.LogInformation("Sales Department already exists in the TDC organisation structure.");
+                return;
+            }
+
+            salesDepartment.UpdatedAt = now;
+            salesDepartment.UpdatedBy = by;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Updated Sales Department in the TDC organisation structure.");
+            return;
+        }
+
+        var nextSequence = await _context.Set<OrganizationUnit>()
+            .Where(unit =>
+                unit.TenantId == tenantId &&
+                unit.ParentUnitId == operationsDirectorate.Id)
+            .Select(unit => (int?)unit.Sequence)
+            .MaxAsync() ?? 0;
+
+        _context.Add(new OrganizationUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            OrganizationLevelId = departmentLevel.Id,
+            ParentUnitId = operationsDirectorate.Id,
+            Name = "Sales Department",
+            Code = "DEPT-SALES",
+            Description = "Core department",
+            Sequence = nextSequence + 1,
+            Path = string.Empty,
+            IsActive = true,
+            CreatedAt = now,
+            CreatedBy = by
+        });
+
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("Added Sales Department to the TDC organisation structure.");
+    }
+
+    private async Task EnsureMarketingUnitAsync(Guid tenantId, Guid structureId)
+    {
+        const string by = "TdcOrganogramSeeder";
+        var now = DateTime.UtcNow;
+
+        var departmentLevel = await _context.Set<OrganizationLevel>()
+            .FirstOrDefaultAsync(level =>
+                level.TenantId == tenantId &&
+                level.StructureId == structureId &&
+                level.Code == "DEPT");
+
+        var operationsDirectorate = await _context.Set<OrganizationUnit>()
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId &&
+                unit.Code == "DIR-OPS");
+
+        if (departmentLevel is null || operationsDirectorate is null)
+        {
+            _logger.LogWarning(
+                "Cannot ensure Marketing Unit because the TDC department level or Operations Directorate is missing.");
+            return;
+        }
+
+        var marketingUnit = await _context.Set<OrganizationUnit>()
+            .FirstOrDefaultAsync(unit =>
+                unit.TenantId == tenantId &&
+                unit.Code == "UNIT-MKT");
+
+        if (marketingUnit is not null)
+        {
+            var changed = false;
+
+            if (marketingUnit.Name != "Marketing Unit")
+            {
+                marketingUnit.Name = "Marketing Unit";
+                changed = true;
+            }
+
+            if (marketingUnit.Description != "Business unit")
+            {
+                marketingUnit.Description = "Business unit";
+                changed = true;
+            }
+
+            if (marketingUnit.OrganizationLevelId != departmentLevel.Id)
+            {
+                marketingUnit.OrganizationLevelId = departmentLevel.Id;
+                changed = true;
+            }
+
+            if (marketingUnit.ParentUnitId != operationsDirectorate.Id)
+            {
+                marketingUnit.ParentUnitId = operationsDirectorate.Id;
+                changed = true;
+            }
+
+            if (!marketingUnit.IsActive)
+            {
+                marketingUnit.IsActive = true;
+                changed = true;
+            }
+
+            if (marketingUnit.IsDeleted)
+            {
+                marketingUnit.IsDeleted = false;
+                changed = true;
+            }
+
+            if (!changed)
+            {
+                _logger.LogInformation("Marketing Unit already exists in the TDC organisation structure.");
+                return;
+            }
+
+            marketingUnit.UpdatedAt = now;
+            marketingUnit.UpdatedBy = by;
+            await _context.SaveChangesAsync();
+            _logger.LogInformation("Updated Marketing Unit in the TDC organisation structure.");
+            return;
+        }
+
+        var nextSequence = await _context.Set<OrganizationUnit>()
+            .Where(unit =>
+                unit.TenantId == tenantId &&
+                unit.ParentUnitId == operationsDirectorate.Id)
+            .Select(unit => (int?)unit.Sequence)
+            .MaxAsync() ?? 0;
+
+        _context.Add(new OrganizationUnit
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            OrganizationLevelId = departmentLevel.Id,
+            ParentUnitId = operationsDirectorate.Id,
+            Name = "Marketing Unit",
+            Code = "UNIT-MKT",
+            Description = "Business unit",
+            Sequence = nextSequence + 1,
+            Path = string.Empty,
+            IsActive = true,
+            CreatedAt = now,
+            CreatedBy = by
+        });
+
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("Added Marketing Unit to the TDC organisation structure.");
+    }
+
+    private async Task BackfillProcedureCaseOrganizationScopesAsync(Guid tenantId)
+    {
+        var unitCodes = new[] { "DEPT-SALES", "DEPT-LEG", "DEPT-EST", "SEC-EST-FM", "SEC-HRA-REG" };
+        var units = await _context.Set<OrganizationUnit>()
+            .AsNoTracking()
+            .Where(unit =>
+                unit.TenantId == tenantId &&
+                unitCodes.Contains(unit.Code) &&
+                !unit.IsDeleted)
+            .Select(unit => new
+            {
+                unit.Code,
+                unit.Id,
+                unit.OrganizationLevelId
+            })
+            .ToDictionaryAsync(unit => unit.Code, StringComparer.OrdinalIgnoreCase);
+
+        if (units.Count == 0)
+        {
+            _logger.LogWarning("Cannot backfill procedure case organisation scopes because TDC organisation units were not found.");
+            return;
+        }
+
+        var cases = await _context.Set<ProcedureCase>()
+            .Where(procedureCase =>
+                procedureCase.TenantId == tenantId &&
+                !procedureCase.IsDeleted &&
+                (procedureCase.OrganizationUnitId == null || procedureCase.OrganizationLevelId == null) &&
+                (procedureCase.Module == "Estate" ||
+                 procedureCase.Module == "PropertyManagement" ||
+                 procedureCase.Module == "Facilities" ||
+                 procedureCase.Module == "Legal" ||
+                 procedureCase.Module == "DocumentManagement"))
+            .ToListAsync();
+
+        var updated = 0;
+        foreach (var procedureCase in cases)
+        {
+            var code = ResolveProcedureCaseOrganizationUnitCode(
+                procedureCase.Module,
+                procedureCase.EntityType,
+                procedureCase.SourceDepartment);
+
+            if (code is null || !units.TryGetValue(code, out var unit))
+            {
+                continue;
+            }
+
+            procedureCase.OrganizationLevelId = unit.OrganizationLevelId;
+            procedureCase.OrganizationUnitId = unit.Id;
+            updated++;
+        }
+
+        if (updated == 0)
+        {
+            _logger.LogInformation("No procedure case organisation scopes needed backfilling.");
+            return;
+        }
+
+        await _context.SaveChangesAsync();
+        _logger.LogInformation("Backfilled organisation scopes for {Count} procedure cases.", updated);
+    }
+
+    private static string? ResolveProcedureCaseOrganizationUnitCode(
+        string module,
+        string entityType,
+        string? sourceDepartment)
+    {
+        var haystack = $"{module} {entityType} {sourceDepartment}".ToLowerInvariant();
+
+        if (haystack.Contains("sales", StringComparison.Ordinal))
+        {
+            return "DEPT-SALES";
+        }
+
+        if (haystack.Contains("legal", StringComparison.Ordinal))
+        {
+            return "DEPT-LEG";
+        }
+
+        if (haystack.Contains("documentmanagement", StringComparison.Ordinal) ||
+            haystack.Contains("document management", StringComparison.Ordinal) ||
+            haystack.Contains("central dms", StringComparison.Ordinal))
+        {
+            return "SEC-HRA-REG";
+        }
+
+        if (haystack.Contains("facilit", StringComparison.Ordinal) ||
+            haystack.Contains("maintenance", StringComparison.Ordinal))
+        {
+            return "SEC-EST-FM";
+        }
+
+        if (haystack.Contains("propertymanagement", StringComparison.Ordinal) ||
+            haystack.Contains("property management", StringComparison.Ordinal) ||
+            haystack.Contains("estate", StringComparison.Ordinal) ||
+            haystack.Contains("land", StringComparison.Ordinal) ||
+            haystack.Contains("demarc", StringComparison.Ordinal))
+        {
+            return "DEPT-EST";
+        }
+
+        return null;
+    }
 }

@@ -2,7 +2,14 @@
 
 import React from 'react';
 import dynamic from 'next/dynamic';
-import { Download, ExternalLink, FileWarning, RefreshCw } from 'lucide-react';
+import {
+  Download,
+  ExternalLink,
+  FileWarning,
+  Loader2,
+  RefreshCw,
+  Save,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -15,6 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { apiService as rawApiService } from '@/services/api.service';
 import { documentManagementService } from '@/services/document-management.service';
+import type { CentralDocumentPdfViewerHandle } from '@/components/document-management/CentralDocumentPdfViewer';
 
 const CentralDocumentPdfViewer = dynamic(
   () => import('@/components/document-management/CentralDocumentPdfViewer'),
@@ -35,6 +43,7 @@ export interface CentralDocumentViewerFile {
   version?: string | null;
   /** Already generated PDF bytes. Never used to override a protected/linked document source. */
   pdfData?: Uint8Array | null;
+  annotationStateJson?: string | null;
 }
 
 interface CentralDocumentViewerDialogProps {
@@ -49,6 +58,11 @@ interface CentralDocumentViewerDialogProps {
     file: CentralDocumentViewerFile,
     format: 'pdf' | 'word'
   ) => Promise<void>;
+  onSaveAnnotations?: (
+    file: CentralDocumentViewerFile,
+    annotationStateJson: string | null,
+    annotatedPdfBlob: Blob | null
+  ) => Promise<CentralDocumentViewerFile | null | void>;
 }
 
 function isPdfSource(file: CentralDocumentViewerFile, path?: string | null) {
@@ -130,8 +144,12 @@ export function CentralDocumentViewerDialog({
   enableAnnotations = true,
   onGenerateRendition,
   onDownload,
+  onSaveAnnotations,
 }: CentralDocumentViewerDialogProps) {
   const annotationsEnabled = enableAnnotations;
+  const pdfViewerRef = React.useRef<CentralDocumentPdfViewerHandle | null>(
+    null
+  );
   const [localFile, setLocalFile] =
     React.useState<CentralDocumentViewerFile | null>(file);
   const [previewData, setPreviewData] = React.useState<Uint8Array | null>(
@@ -143,6 +161,7 @@ export function CentralDocumentViewerDialog({
     'pdf' | 'word' | null
   >(null);
   const [openingSource, setOpeningSource] = React.useState(false);
+  const [isSavingAnnotations, setIsSavingAnnotations] = React.useState(false);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
 
@@ -167,6 +186,10 @@ export function CentralDocumentViewerDialog({
   const canDownloadVersion =
     Boolean(localFile?.documentRecordId && localFile?.versionId) &&
     Boolean(onDownload);
+  const canSaveAnnotations =
+    annotationsEnabled &&
+    Boolean(localFile?.documentRecordId && localFile?.versionId) &&
+    Boolean(onSaveAnnotations);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -290,6 +313,35 @@ export function CentralDocumentViewerDialog({
     }
   };
 
+  const handleSaveAnnotations = async () => {
+    if (!localFile || !onSaveAnnotations) return;
+
+    setIsSavingAnnotations(true);
+    setDownloadError(null);
+    try {
+      const annotationStateJson =
+        (await pdfViewerRef.current?.exportAnnotationState()) ?? null;
+      const annotatedPdfBlob =
+        (await pdfViewerRef.current?.exportAnnotatedPdfBlob()) ?? null;
+      const updatedFile = await onSaveAnnotations(
+        localFile,
+        annotationStateJson,
+        annotatedPdfBlob
+      );
+      if (updatedFile) {
+        setLocalFile(updatedFile);
+      }
+    } catch (error) {
+      setDownloadError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to save the document annotations.'
+      );
+    } finally {
+      setIsSavingAnnotations(false);
+    }
+  };
+
   const handleOpenSourceFile = async () => {
     if (!localFile || !view.originalUrl) return;
 
@@ -374,6 +426,22 @@ export function CentralDocumentViewerDialog({
               {localFile?.version ? (
                 <Badge variant="outline">{localFile.version}</Badge>
               ) : null}
+              {canSaveAnnotations ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleSaveAnnotations()}
+                  disabled={isSavingAnnotations || isLoadingPreview}
+                >
+                  {isSavingAnnotations ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Save className="mr-2 h-4 w-4" />
+                  )}
+                  Save annotations
+                </Button>
+              ) : null}
               {view.status === 'rendition' ? (
                 <Badge variant="secondary">PDF rendition</Badge>
               ) : null}
@@ -393,10 +461,12 @@ export function CentralDocumentViewerDialog({
         <div className="min-h-0 flex-1 overflow-hidden bg-background p-4">
           {previewData || viewerUrl ? (
             <CentralDocumentPdfViewer
+              ref={pdfViewerRef}
               fileUrl={viewerUrl}
               fileData={previewData}
               fileName={localFile?.fileName || title}
               enableAnnotations={annotationsEnabled}
+              annotationStateJson={localFile?.annotationStateJson}
             />
           ) : (
             <div className="flex h-full min-h-[420px] items-center justify-center rounded-md border bg-muted/30 p-6">

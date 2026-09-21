@@ -8,6 +8,10 @@ export interface ProcedureCaseSummary {
   title: string;
   referenceNumber?: string | null;
   applicantName?: string | null;
+  organizationLevelId?: string | null;
+  organizationLevelName?: string | null;
+  organizationUnitId?: string | null;
+  organizationUnitName?: string | null;
   status: string;
   currentStageIndex: number;
   currentStageName: string;
@@ -86,6 +90,16 @@ interface ApiResponse<T> {
   message?: string;
 }
 
+export interface PagedResult<T> {
+  items: T[];
+  totalCount: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
+  hasPrevious?: boolean;
+  hasNext?: boolean;
+}
+
 interface CreateCasePayload {
   module: string;
   entityType: string;
@@ -93,6 +107,8 @@ interface CreateCasePayload {
   referenceNumber?: string;
   applicantName?: string;
   sourceDepartment?: string;
+  organizationLevelId?: string;
+  organizationUnitId?: string;
   receivedDate?: string;
   description?: string;
   fieldValues?: Record<string, string | null>;
@@ -116,6 +132,35 @@ class ProcedureCaseService {
       entityType,
     });
     return response.data || [];
+  }
+
+  async listCasesPage(
+    module: string,
+    entityType: string,
+    page = 1,
+    pageSize = 10,
+    mineOnly = false
+  ): Promise<PagedResult<ProcedureCaseSummary>> {
+    const response = await apiService.get<ApiResponse<PagedResult<ProcedureCaseSummary>>>(
+      '/procedure-cases/paged',
+      {
+        module,
+        entityType,
+        page,
+        pageSize,
+        mineOnly,
+      }
+    );
+
+    return (
+      response.data || {
+        items: [],
+        totalCount: 0,
+        page,
+        pageSize,
+        totalPages: 1,
+      }
+    );
   }
 
   async listModuleCases(module: string, mineOnly = false): Promise<ProcedureCaseSummary[]> {
@@ -155,6 +200,8 @@ class ProcedureCaseService {
       referenceNumber?: string | null;
       applicantName?: string | null;
       sourceDepartment?: string | null;
+      organizationLevelId?: string | null;
+      organizationUnitId?: string | null;
       receivedDate?: string | null;
       description?: string | null;
     }

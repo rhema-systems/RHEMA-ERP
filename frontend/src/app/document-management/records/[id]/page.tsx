@@ -36,6 +36,7 @@ import {
   type CentralDocumentRecordDetail,
   type CentralDocumentVersionDownloadFormat,
 } from '@/services/document-management.service';
+import { getStatusBadgeClassName } from '@/lib/status-badge';
 
 function formatDate(value?: string | null) {
   if (!value) return 'Not set';
@@ -149,6 +150,12 @@ export default function CentralDocumentRecordDetailPage() {
         version.status === 'Current' ||
         version.versionNumber === record.currentVersion
     ) || versions[0];
+  const annotationStateForVersion = (versionId?: string | null) =>
+    annotationReviews.find(
+      (review) =>
+        review.documentVersionId === versionId &&
+        review.annotationStateJson?.trim()
+    )?.annotationStateJson || null;
 
   const openViewer = (file: CentralDocumentViewerFile | null | undefined) => {
     if (file) {
@@ -219,8 +226,9 @@ export default function CentralDocumentRecordDetailPage() {
         record.id,
         {
           file,
-          status: 'Submitted',
-          changeSummary: 'Edited workflow copy uploaded as a new DMS version.',
+          status: 'Current',
+          changeSummary:
+            'Edited workflow copy uploaded as the current DMS version.',
         }
       );
 
@@ -239,7 +247,14 @@ export default function CentralDocumentRecordDetailPage() {
                   ? 'PDF preview ready'
                   : current.record.annotationStatus,
               },
-              versions: [version, ...current.versions],
+              versions: [
+                version,
+                ...current.versions.map((item) =>
+                  item.status === 'Current'
+                    ? { ...item, status: 'Published' }
+                    : item
+                ),
+              ],
             }
           : current
       );
@@ -273,6 +288,94 @@ export default function CentralDocumentRecordDetailPage() {
     contentType: currentVersionRecord?.contentType,
     sourceLabel: record.sourceLabel,
     version: currentVersionRecord?.versionNumber || record.currentVersion,
+    annotationStateJson: annotationStateForVersion(currentVersionRecord?.id),
+  };
+
+  const saveAnnotations = async (
+    file: CentralDocumentViewerFile,
+    annotationStateJson: string | null,
+    annotatedPdfBlob: Blob | null
+  ) => {
+    if (!file.documentRecordId || !file.versionId) {
+      throw new Error('This DMS version cannot save annotations.');
+    }
+
+    const sourcePdf =
+      annotatedPdfBlob ||
+      (await documentManagementService.downloadVersionFile(
+        file.documentRecordId,
+        file.versionId,
+        'pdf'
+      ));
+    const baseName =
+      file.fileName?.replace(/\.[^.]+$/, '') ||
+      file.title ||
+      record.documentReference;
+    const annotatedFile = new File(
+      [sourcePdf],
+      safeDownloadName(`${baseName}-annotated.pdf`),
+      { type: 'application/pdf' }
+    );
+    const version = await documentManagementService.uploadVersionFile(
+      file.documentRecordId,
+      {
+        file: annotatedFile,
+        status: 'Current',
+        changeSummary:
+          'PDF annotations, comments, and signatures saved as a new current DMS version.',
+      }
+    );
+    const review = await documentManagementService.addAnnotationReview(
+      file.documentRecordId,
+      {
+        documentVersionId: version.id,
+        reviewTitle: `${record.documentReference} annotation save`,
+        status: 'Open',
+        syncfusionAnnotationStatus: 'Annotations saved',
+        reviewNotes:
+          'Annotations, comments, and signature marks were saved from the PDF viewer.',
+        annotationStateJson: annotationStateJson || '{}',
+      }
+    );
+
+    setDetail((current) =>
+      current
+        ? {
+            ...current,
+            record: {
+              ...current.record,
+              currentVersion: version.versionNumber,
+              versionStatus: version.status,
+              repositoryPath:
+                version.repositoryPath || current.record.repositoryPath,
+              repositoryStatus: 'Linked',
+              annotationStatus: 'Annotations saved',
+              commentStatus: 'Open comments',
+            },
+            versions: [
+              version,
+              ...current.versions.map((item) =>
+                item.status === 'Current'
+                  ? { ...item, status: 'Published' }
+                  : item
+              ),
+            ],
+            annotationReviews: [review, ...current.annotationReviews],
+          }
+        : current
+    );
+
+    return {
+      ...file,
+      versionId: version.id,
+      fileUploadRecordId: version.fileUploadRecordId,
+      fileName: version.fileName || file.fileName,
+      repositoryPath: version.repositoryPath || file.repositoryPath,
+      renditionPath: version.renditionPath || version.repositoryPath,
+      contentType: version.contentType || 'application/pdf',
+      version: version.versionNumber,
+      annotationStateJson: annotationStateJson || '{}',
+    };
   };
 
   return (
@@ -280,9 +383,10 @@ export default function CentralDocumentRecordDetailPage() {
       <CentralDocumentViewerDialog
         file={viewerFile}
         open={Boolean(viewerFile)}
-        enableAnnotations={false}
+        enableAnnotations
         onGenerateRendition={generateRendition}
         onDownload={downloadVersion}
+        onSaveAnnotations={saveAnnotations}
         onOpenChange={(open) => {
           if (!open) setViewerFile(null);
         }}
@@ -591,6 +695,9 @@ export default function CentralDocumentRecordDetailPage() {
               </div>
               <Badge
                 variant={metadataBadgeVariant(metadataCompleteness.status)}
+                className={getStatusBadgeClassName(
+                  metadataCompleteness.status
+                )}
               >
                 {metadataCompleteness.status} {metadataCompleteness.percentage}%
               </Badge>
@@ -745,14 +852,26 @@ export default function CentralDocumentRecordDetailPage() {
                           <div className="font-medium">
                             {version.versionNumber}
                           </div>
-                          {isCurrent ? <Badge>Current</Badge> : null}
+                          {isCurrent ? (
+                            <Badge
+                              variant="outline"
+                              className={getStatusBadgeClassName('Current')}
+                            >
+                              Current
+                            </Badge>
+                          ) : null}
                         </div>
                         <p className="mt-1 text-sm text-muted-foreground">
                           {version.fileName || 'No file name recorded'} /{' '}
                           {formatFileSize(version.fileSize)}
                         </p>
                       </div>
-                      <Badge variant="outline">{version.status}</Badge>
+                      <Badge
+                        variant="outline"
+                        className={getStatusBadgeClassName(version.status)}
+                      >
+                        {version.status}
+                      </Badge>
                     </div>
 
                     <p className="mt-3 break-words text-xs text-muted-foreground">
@@ -787,6 +906,9 @@ export default function CentralDocumentRecordDetailPage() {
                             contentType: version.contentType,
                             sourceLabel: record.sourceLabel,
                             version: version.versionNumber,
+                            annotationStateJson: annotationStateForVersion(
+                              version.id
+                            ),
                           })
                         }
                       >
@@ -850,7 +972,12 @@ export default function CentralDocumentRecordDetailPage() {
                             : 'Not linked'}
                         </p>
                       </div>
-                      <Badge variant="outline">{review.status}</Badge>
+                      <Badge
+                        variant="outline"
+                        className={getStatusBadgeClassName(review.status)}
+                      >
+                        {review.status}
+                      </Badge>
                     </div>
                     <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
                       <CalendarClock className="h-3.5 w-3.5" />

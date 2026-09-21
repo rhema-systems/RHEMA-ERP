@@ -4,7 +4,7 @@ namespace ErpSystem.Data.Seeders;
 public static class EhcPropertyEnquiryCrmConfiguration
 {
     public const string Sql = """
-        -- UNIT-MKT is created by TdcOrganogramSeeder. Department records are historical only.
+        -- UNIT-MKT is created by TdcOrganogramSeeder through HR OrganizationUnit records.
         SELECT 1;
         """;
 }

@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -5671,6 +5671,8 @@ namespace ErpSystem.Data.Migrations
                     ReferenceNumber = table.Column<string>(type: "nvarchar(80)", maxLength: 80, nullable: true),
                     ApplicantName = table.Column<string>(type: "nvarchar(150)", maxLength: 150, nullable: true),
                     SourceDepartment = table.Column<string>(type: "nvarchar(100)", maxLength: 100, nullable: true),
+                    OrganizationLevelId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
+                    OrganizationUnitId = table.Column<Guid>(type: "uniqueidentifier", nullable: true),
                     ReceivedDate = table.Column<DateTime>(type: "datetime2", nullable: true),
                     Description = table.Column<string>(type: "nvarchar(500)", maxLength: 500, nullable: true),
                     Status = table.Column<string>(type: "nvarchar(40)", maxLength: 40, nullable: false),
@@ -5702,6 +5704,18 @@ namespace ErpSystem.Data.Migrations
                         name: "FK_ProcedureCases_Tenants_TenantId",
                         column: x => x.TenantId,
                         principalTable: "Tenants",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_ProcedureCases_OrganizationLevels_OrganizationLevelId",
+                        column: x => x.OrganizationLevelId,
+                        principalTable: "OrganizationLevels",
+                        principalColumn: "Id",
+                        onDelete: ReferentialAction.Restrict);
+                    table.ForeignKey(
+                        name: "FK_ProcedureCases_OrganizationUnits_OrganizationUnitId",
+                        column: x => x.OrganizationUnitId,
+                        principalTable: "OrganizationUnits",
                         principalColumn: "Id",
                         onDelete: ReferentialAction.Restrict);
                 });
@@ -112714,9 +112728,24 @@ namespace ErpSystem.Data.Migrations
                 columns: new[] { "TenantId", "CurrentAssignedRole" });
 
             migrationBuilder.CreateIndex(
+                name: "IX_ProcedureCases_OrganizationLevelId",
+                table: "ProcedureCases",
+                column: "OrganizationLevelId");
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ProcedureCases_OrganizationUnitId",
+                table: "ProcedureCases",
+                column: "OrganizationUnitId");
+
+            migrationBuilder.CreateIndex(
                 name: "IX_ProcedureCases_TenantId_Module_EntityType_Status",
                 table: "ProcedureCases",
                 columns: new[] { "TenantId", "Module", "EntityType", "Status" });
+
+            migrationBuilder.CreateIndex(
+                name: "IX_ProcedureCases_TenantId_OrganizationUnitId",
+                table: "ProcedureCases",
+                columns: new[] { "TenantId", "OrganizationUnitId" });
 
             migrationBuilder.CreateIndex(
                 name: "IX_ProcedureCases_TenantId_ReferenceNumber",

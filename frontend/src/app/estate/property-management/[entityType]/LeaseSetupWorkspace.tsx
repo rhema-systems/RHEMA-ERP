@@ -9,9 +9,11 @@ import {
   CreditCard,
   FileText,
   FileSignature,
+  FileUp,
   Landmark,
   Loader2,
   Home,
+  Plus,
   RefreshCw,
   ShieldCheck,
 } from 'lucide-react';
@@ -27,6 +29,12 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -34,7 +42,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Pagination } from '@/components/ui/pagination';
-import { usePaginatedItems } from '@/hooks/use-paginated-items';
 import { Label } from '@/components/ui/label';
 import {
   Select,
@@ -65,6 +72,7 @@ import {
   estateGroundRentService,
   type GroundRentAccount,
 } from '@/services/estate-ground-rent.service';
+import { useManagedAssetsPage } from './use-managed-assets-page';
 
 function formatMoney(value: number, currency: string) {
   return new Intl.NumberFormat(undefined, {
@@ -83,6 +91,11 @@ function getPlotSizeAcres(asset?: EstateManagedAsset) {
     return asset.areaSquareMeters / 4046.8564224;
   }
   return null;
+}
+
+function leaseYearsFromListingTerm(termMonths?: number | null) {
+  if (!termMonths || termMonths <= 0) return '';
+  return String(Math.max(1, Math.ceil(termMonths / 12)));
 }
 
 function formatDate(value?: string) {
@@ -240,9 +253,6 @@ function getRecordIndexHandoffFields(asset: EstateManagedAsset) {
 
 export function LeaseSetupWorkspace() {
   const [assets, setAssets] = React.useState<EstateManagedAsset[]>([]);
-  const [leaseRecords, setLeaseRecords] = React.useState<EstateManagedAsset[]>(
-    []
-  );
   const [customers, setCustomers] = React.useState<BusinessPartnerDto[]>([]);
   const [groundRentAccounts, setGroundRentAccounts] = React.useState<
     GroundRentAccount[]
@@ -254,39 +264,66 @@ export function LeaseSetupWorkspace() {
   const [rightOfEntryDate, setRightOfEntryDate] = React.useState('');
   const [leaseTermYears, setLeaseTermYears] = React.useState('');
   const [propertyFileReference, setPropertyFileReference] = React.useState('');
+  const [signedAgreementFile, setSignedAgreementFile] =
+    React.useState<File | null>(null);
+  const [fileInputResetKey, setFileInputResetKey] = React.useState(0);
+  const [isCreateDialogOpen, setIsCreateDialogOpen] = React.useState(false);
   const [isLoading, setIsLoading] = React.useState(true);
   const [isSaving, setIsSaving] = React.useState(false);
   const [loadError, setLoadError] = React.useState<string | null>(null);
+  const {
+    assets: leaseRecords,
+    setAssets: setLeaseRecords,
+    page: leasePage,
+    setPage: setLeasePage,
+    isLoading: isLeaseRegisterLoading,
+    loadError: leaseRegisterError,
+    loadAssets: loadLeaseRecords,
+    pageSize: leasePageSize,
+    totalPages: leaseTotalPages,
+    totalItems: leaseTotalItems,
+  } = useManagedAssetsPage({
+    search: registerSearch || undefined,
+    statuses: [
+      EstateManagedAssetStatus.Reserved,
+      EstateManagedAssetStatus.Leased,
+      EstateManagedAssetStatus.Occupied,
+    ],
+    errorMessage: 'Unable to load the Lease Register.',
+  });
 
   const loadOptions = React.useCallback(async () => {
     setIsLoading(true);
     setLoadError(null);
     try {
-      const [managedAssets, activeCustomers, billingAccounts] =
+      const [availableAssets, activeCustomers, billingAccounts] =
         await Promise.all([
-          estateLandManagementService.getManagedAssets({ take: 500 }),
+          estateLandManagementService.getManagedAssets({
+            statuses: [
+              EstateManagedAssetStatus.Available,
+              EstateManagedAssetStatus.LandBank,
+            ],
+            availableForLease: true,
+            take: 25,
+          }),
           businessPartnerService.getActivePartners('Customer'),
           estateGroundRentService.getAccounts().catch(() => []),
         ]);
 
       setAssets(
-        managedAssets.filter(
+        availableAssets.filter(
           (asset) =>
-            asset.status === EstateManagedAssetStatus.Available &&
+            (asset.status === EstateManagedAssetStatus.Available ||
+              (asset.assetType === EstateManagedAssetType.Land &&
+                asset.status === EstateManagedAssetStatus.LandBank)) &&
             asset.isAvailableForLease &&
             !asset.customerBusinessPartnerId
-        )
-      );
-      setLeaseRecords(
-        managedAssets.filter(
-          (asset) => Boolean(asset.customerBusinessPartnerId || asset.lesseeName)
         )
       );
       setCustomers(activeCustomers);
       setGroundRentAccounts(billingAccounts);
     } catch {
       setAssets([]);
-      setLeaseRecords([]);
       setCustomers([]);
       setGroundRentAccounts([]);
       setLoadError(
@@ -310,7 +347,7 @@ export function LeaseSetupWorkspace() {
   const signedAgreementReference = propertyFileReference.trim();
   const leaseStartDate = rightOfEntryDate || dateOfTenancy;
   const signedReferenceNeedsDate =
-    Boolean(signedAgreementReference) && !leaseStartDate;
+    Boolean(signedAgreementReference || signedAgreementFile) && !leaseStartDate;
   const leaseStatusPreview = signedAgreementReference && leaseStartDate
     ? 'Leased - signed agreement and start / move-in date recorded'
     : 'Reserved - customer selected, agreement/signature or start date pending';
@@ -324,23 +361,6 @@ export function LeaseSetupWorkspace() {
       ),
     [groundRentAccounts]
   );
-  const filteredLeaseRecords = React.useMemo(() => {
-    const normalizedSearch = registerSearch.trim().toLowerCase();
-    if (!normalizedSearch) return leaseRecords;
-
-    return leaseRecords.filter((asset) =>
-      [
-        asset.assetCode,
-        asset.name,
-        asset.lesseeName,
-        asset.propertyFileReference,
-        getLeaseStatus(asset),
-      ]
-        .filter((value): value is string => Boolean(value))
-        .some((value) => value.toLowerCase().includes(normalizedSearch))
-    );
-  }, [leaseRecords, registerSearch]);
-  const leasePages = usePaginatedItems(filteredLeaseRecords, 10);
 
   const clearForm = () => {
     setSelectedAssetId('');
@@ -349,11 +369,19 @@ export function LeaseSetupWorkspace() {
     setRightOfEntryDate('');
     setLeaseTermYears('');
     setPropertyFileReference('');
+    setSignedAgreementFile(null);
+    setFileInputResetKey((current) => current + 1);
+  };
+
+  const chooseLeaseAsset = (assetId: string) => {
+    setSelectedAssetId(assetId);
+    const asset = assets.find((item) => item.id === assetId);
+    setLeaseTermYears(leaseYearsFromListingTerm(asset?.externalLeaseTermMonths));
   };
 
   const saveLeaseSetup = async () => {
     if (!selectedAsset || !selectedCustomer) {
-      toast.error('Select an available property or unit and a customer.');
+      toast.error('Select an available lease asset and a customer.');
       return;
     }
 
@@ -365,6 +393,13 @@ export function LeaseSetupWorkspace() {
     }
 
     const termYears = leaseTermYears === '' ? null : Number(leaseTermYears);
+    if (termYears == null) {
+      toast.error(
+        'Enter the lease term in years. Use the Sales term when it exists; otherwise Estate must record it here.'
+      );
+      return;
+    }
+
     if (
       termYears != null &&
       (!Number.isInteger(termYears) || termYears < 1 || termYears > 999)
@@ -375,6 +410,21 @@ export function LeaseSetupWorkspace() {
 
     setIsSaving(true);
     try {
+      let signedAgreementReferenceToSave =
+        propertyFileReference.trim() || null;
+      if (signedAgreementFile) {
+        const uploadedAgreement = await estateLandManagementService.uploadDocument(
+          selectedAsset.id,
+          signedAgreementFile,
+          'Signed Lease Agreement',
+          `Signed agreement - ${selectedAsset.assetCode}`
+        );
+        signedAgreementReferenceToSave =
+          uploadedAgreement.centralDocumentReference ||
+          uploadedAgreement.documentName ||
+          uploadedAgreement.fileName;
+      }
+
       const savedLease = await estateLandManagementService.updateRegister(
         selectedAsset.id,
         {
@@ -384,7 +434,7 @@ export function LeaseSetupWorkspace() {
           customerBusinessPartnerId: selectedCustomer.id,
           lesseeName: selectedCustomer.partnerName,
           lesseeAddress: selectedCustomer.physicalAddress || null,
-          propertyFileReference: propertyFileReference.trim() || null,
+          propertyFileReference: signedAgreementReferenceToSave,
         }
       );
 
@@ -396,6 +446,7 @@ export function LeaseSetupWorkspace() {
         ...current.filter((asset) => asset.id !== savedLease.id),
       ]);
       clearForm();
+      setIsCreateDialogOpen(false);
       toast.success(
         'Lease setup saved and the asset was reserved. Continue Occupancy, Handover, Billing, and Records handoffs as required.'
       );
@@ -410,38 +461,16 @@ export function LeaseSetupWorkspace() {
 
   return (
     <div className="space-y-6">
-      <Card className="border-primary/20">
-      <CardHeader>
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-          <div>
-            <CardTitle className="flex items-center gap-2">
+      <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-5xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
               <FileSignature className="h-5 w-5 text-primary" />
               New Lease Assignment
-            </CardTitle>
-            <CardDescription className="mt-2 max-w-3xl">
-              Attach a customer and set the lease terms here. Land ground rent
-              is inherited from the approved Estates assessment; apartments and
-              units use their agreed rent amount. Only assets released as
-              Available for Lease are offered for selection.
-            </CardDescription>
-          </div>
-          <div className="flex items-center gap-2">
-            <Badge variant="outline">Lease Management</Badge>
-            <Button
-              type="button"
-              size="icon"
-              variant="outline"
-              disabled={isLoading}
-              onClick={() => void loadOptions()}
-              aria-label="Refresh available properties and customers"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
+            </DialogTitle>
+          </DialogHeader>
 
-      <CardContent className="space-y-6">
+      <div className="space-y-6">
         {loadError ? (
           <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
             {loadError}
@@ -450,18 +479,18 @@ export function LeaseSetupWorkspace() {
 
         <div className="grid gap-4 md:grid-cols-2">
           <div className="space-y-2">
-            <Label htmlFor="lease-property">Available property / unit</Label>
+            <Label htmlFor="lease-property">Available property / land</Label>
             <Select
               value={selectedAssetId}
-              onValueChange={setSelectedAssetId}
+              onValueChange={chooseLeaseAsset}
               disabled={isLoading}
             >
               <SelectTrigger id="lease-property">
                 <SelectValue
                   placeholder={
                     isLoading
-                      ? 'Loading available properties'
-                      : 'Select an available property'
+                      ? 'Loading available lease assets'
+                      : 'Select an available asset'
                   }
                 />
               </SelectTrigger>
@@ -475,7 +504,7 @@ export function LeaseSetupWorkspace() {
             </Select>
             {!isLoading && assets.length === 0 ? (
               <p className="text-xs text-muted-foreground">
-                No unassigned Available property or unit is currently eligible.
+                No unassigned Available property, shop, apartment, or land parcel is currently eligible for lease setup.
               </p>
             ) : null}
           </div>
@@ -535,20 +564,30 @@ export function LeaseSetupWorkspace() {
 
           <div className="space-y-2">
             <Label htmlFor="lease-file-reference">
-              Signed agreement / property file reference
+              Signed agreement / property file
             </Label>
             <Input
+              key={fileInputResetKey}
               id="lease-file-reference"
-              maxLength={120}
-              value={propertyFileReference}
-              onChange={(event) => setPropertyFileReference(event.target.value)}
-              placeholder="e.g. PM/LEASE/2026/001"
+              type="file"
+              accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+              onChange={(event) => {
+                const file = event.target.files?.[0] ?? null;
+                setSignedAgreementFile(file);
+                setPropertyFileReference(file?.name ?? '');
+              }}
             />
             <p className="text-xs text-muted-foreground">
-              Required before ground-rent billing can start. Generate the
-              agreement from the approved template, then record the signed
-              document or property file reference here.
+              Upload the signed agreement or property file. The uploaded
+              document reference will be saved on the lease record before
+              billing can continue.
             </p>
+            {signedAgreementFile ? (
+              <Badge variant="secondary" className="w-fit gap-1">
+                <FileUp className="h-3.5 w-3.5" />
+                {signedAgreementFile.name}
+              </Badge>
+            ) : null}
           </div>
         </div>
 
@@ -570,9 +609,9 @@ export function LeaseSetupWorkspace() {
                 Status after save: {leaseStatusPreview}
               </div>
               <p className="mt-1">
-                Ground-rent or rent billing remains held until there is a
+                Ground-rent billing remains held until there is a
                 signed agreement reference and an agreement start / move-in
-                date. Move-in / Handover then marks the unit occupied.
+                date. Move-in / Handover then marks the lease active.
               </p>
             </div>
           </div>
@@ -585,8 +624,8 @@ export function LeaseSetupWorkspace() {
               Land Ground Rent Assessment
             </div>
             <p className="mt-1 text-sm text-muted-foreground">
-              Ground rent applies to land leases only. Apartments and units use
-              the agreed rent amount from the lease/listing terms.
+              Ground rent applies to land leases only and is kept separate from
+              apartment or house rent.
             </p>
           </div>
 
@@ -652,18 +691,8 @@ export function LeaseSetupWorkspace() {
               </p>
               <div className="flex flex-wrap gap-2">
                 <Button asChild type="button" size="sm" variant="outline">
-                  <Link href="/estate/EstateLandsPartiallyServiced">
-                    Lands / Partially Serviced
-                  </Link>
-                </Button>
-                <Button asChild type="button" size="sm" variant="outline">
                   <Link href="/estate/EstateTraditionalLands">
                     Traditional Lands
-                  </Link>
-                </Button>
-                <Button asChild type="button" size="sm" variant="outline">
-                  <Link href="/estate/EstateTenancyRegularisation">
-                    Regularisation
                   </Link>
                 </Button>
               </div>
@@ -691,8 +720,9 @@ export function LeaseSetupWorkspace() {
             Save lease setup
           </Button>
         </div>
-      </CardContent>
-      </Card>
+      </div>
+        </DialogContent>
+      </Dialog>
 
       <Card>
         <CardHeader>
@@ -700,31 +730,62 @@ export function LeaseSetupWorkspace() {
             <div>
               <CardTitle>Lease Register</CardTitle>
               <CardDescription className="mt-2">
-                Saved property and unit lease assignments, tenancy dates,
+                Saved lease assignments, tenancy dates,
                 terms, ground rent, file references, and current operating
                 status.
               </CardDescription>
             </div>
-            <Badge variant="secondary">
-              {filteredLeaseRecords.length} records
-            </Badge>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">
+                {leaseTotalItems} records
+              </Badge>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                disabled={isLoading || isLeaseRegisterLoading}
+                onClick={() =>
+                  void Promise.all([loadOptions(), loadLeaseRecords(leasePage)])
+                }
+                aria-label="Refresh lease management data"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                className="gap-2"
+                onClick={() => setIsCreateDialogOpen(true)}
+              >
+                <Plus className="h-4 w-4" />
+                Add New Lease Assignment
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <Input
             value={registerSearch}
-            onChange={(event) => setRegisterSearch(event.target.value)}
+            onChange={(event) => {
+              setLeasePage(1);
+              setRegisterSearch(event.target.value);
+            }}
             placeholder="Search by property, lessee, file reference, or status"
           />
 
-          {isLoading ? (
+          {isLeaseRegisterLoading ? (
             <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading lease register
             </div>
           ) : null}
 
-          {!isLoading && filteredLeaseRecords.length === 0 ? (
+          {leaseRegisterError ? (
+            <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+              {leaseRegisterError}
+            </div>
+          ) : null}
+
+          {!isLeaseRegisterLoading && !leaseRegisterError && leaseRecords.length === 0 ? (
             <div className="rounded-md border border-dashed p-8 text-center text-sm text-muted-foreground">
               {registerSearch
                 ? 'No lease records match the search.'
@@ -732,12 +793,12 @@ export function LeaseSetupWorkspace() {
             </div>
           ) : null}
 
-          {!isLoading && filteredLeaseRecords.length > 0 ? (
+          {!isLeaseRegisterLoading && leaseRecords.length > 0 ? (
             <div className="overflow-x-auto rounded-md border">
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Property / unit</TableHead>
+                    <TableHead>Property / land</TableHead>
                     <TableHead>Lessee</TableHead>
                     <TableHead>Tenancy date</TableHead>
                     <TableHead>Term / expiry</TableHead>
@@ -749,7 +810,7 @@ export function LeaseSetupWorkspace() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {leasePages.items.map((asset) => {
+                  {leaseRecords.map((asset) => {
                     const billingAccount = billingAccountByAssetId.get(
                       asset.id
                     );
@@ -791,10 +852,10 @@ export function LeaseSetupWorkspace() {
                             {asset.assetType !== EstateManagedAssetType.Land ? (
                               <>
                                 <Badge variant="outline">
-                                  Apartment/unit rent
+                                  Non-land lease charge
                                 </Badge>
                                 <span className="text-xs text-muted-foreground">
-                                  Use the agreed rent amount; ground rent does
+                                  Use the annual lease charge; ground rent does
                                   not apply.
                                 </span>
                               </>
@@ -956,7 +1017,7 @@ export function LeaseSetupWorkspace() {
               </Table>
             </div>
           ) : null}
-          {filteredLeaseRecords.length > leasePages.pageSize ? <Pagination currentPage={leasePages.currentPage} totalPages={leasePages.totalPages} totalItems={leasePages.totalItems} pageSize={leasePages.pageSize} onPageChange={leasePages.setCurrentPage} /> : null}
+          {leaseTotalPages > 1 ? <Pagination currentPage={leasePage} totalPages={leaseTotalPages} totalItems={leaseTotalItems} pageSize={leasePageSize} onPageChange={setLeasePage} /> : null}
         </CardContent>
       </Card>
     </div>

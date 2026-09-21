@@ -2,6 +2,7 @@ using ErpSystem.Core.DTOs.Procedures;
 using ErpSystem.Core.Entities.Estate;
 using ErpSystem.Core.Entities.Procedures;
 using ErpSystem.Core.Entities.Sales;
+using ErpSystem.Core.Enums;
 using ErpSystem.Core.Interfaces.Procedures;
 using ErpSystem.Core.Services.Estate;
 using ErpSystem.Data;
@@ -28,6 +29,9 @@ public sealed record EstateSalesListingApplicationHandoffRequest(
     Guid SalesOpportunityId,
     string SalesReference,
     decimal? AgreedAmount,
+    string? RequestedLeaseTerm,
+    decimal? SalesAmountPaid,
+    string? SalesPaymentReference,
     string? Currency,
     DateTime? SalesCompletedAt,
     string? Notes,
@@ -62,6 +66,8 @@ public sealed class EstateSalesListingApplicationHandoffService(
             throw new ArgumentException("A completed Sales opportunity is required.", nameof(request));
         if (string.IsNullOrWhiteSpace(request.SalesReference))
             throw new ArgumentException("Enter the completed Sales reference before handing the enquiry to Estate.", nameof(request));
+        if (request.SalesAmountPaid is < 0)
+            throw new ArgumentException("Sales amount paid cannot be negative.", nameof(request));
 
         var opportunity = await db.Opportunities
             .AsNoTracking()
@@ -109,7 +115,10 @@ public sealed class EstateSalesListingApplicationHandoffService(
                     && field.Key == "salesOpportunityId"
                     && field.Value == request.SalesOpportunityId.ToString()), cancellationToken);
         if (existingCase is not null)
+        {
+            await ReservePortalListingAsync(tenantId, request.ListingId, demarcation is not null, cancellationToken);
             return ToResult(existingCase, alreadyExists: true);
+        }
 
         var listingReference = demarcation is null
             ? asset.AssetCode
@@ -119,9 +128,15 @@ public sealed class EstateSalesListingApplicationHandoffService(
             : $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}";
         var requestType = NormalizeRequestType(request.RequestType, demarcation?.ExternalListingType ?? asset.ExternalListingType);
         var requestLabel = requestType == "Purchase" ? "Purchase enquiry" : "Lease enquiry";
+        if (requestType != "Purchase" && string.IsNullOrWhiteSpace(request.RequestedLeaseTerm))
+            throw new InvalidOperationException("Enter the Sales-agreed rent or lease duration before handing the enquiry to Estate.");
         var amount = request.AgreedAmount ?? opportunity.Amount;
         if (amount <= 0)
             throw new InvalidOperationException("Enter a positive agreed amount before handing the enquiry to Estate.");
+        var salesAmountPaid = decimal.Round(request.SalesAmountPaid ?? 0m, 2, MidpointRounding.AwayFromZero);
+        if (salesAmountPaid > amount)
+            throw new InvalidOperationException("Sales amount paid cannot be greater than the agreed amount.");
+        var estateRemainingAmount = decimal.Round(amount - salesAmountPaid, 2, MidpointRounding.AwayFromZero);
         var currency = NormalizeCurrency(request.Currency ?? opportunity.Currency ?? demarcation?.ExternalListingCurrency ?? asset.ExternalListingCurrency ?? customer.Currency);
         var completedAt = request.SalesCompletedAt ?? opportunity.ActualCloseDate ?? DateTime.UtcNow;
         var reference = BuildReference("ESTATE");
@@ -139,12 +154,22 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["customerAccountReference"] = customer.CustomerAccountNumber,
             ["customerName"] = customer.PartnerName,
             ["propertyUnit"] = listingReference,
+            ["listingId"] = request.ListingId.ToString(),
+            ["listingRecordType"] = demarcation is null ? "EstateManagedAsset" : "EstateLandDemarcation",
             ["listingReference"] = listingReference,
             ["listingType"] = demarcation?.ExternalListingType ?? asset.ExternalListingType,
             ["requestType"] = requestLabel,
             ["listingPrice"] = amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture),
             ["offerAmount"] = requestType == "Purchase" ? amount.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : null,
+            ["requestedLeaseTerm"] = requestType == "Purchase" ? null : Truncate(request.RequestedLeaseTerm!.Trim(), 120),
             ["currency"] = currency,
+            ["salesAmountPaid"] = salesAmountPaid.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+            ["salesPaymentReference"] = TruncateOptional(request.SalesPaymentReference, 200),
+            ["estateRemainingAmount"] = estateRemainingAmount.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture),
+            ["salePaymentCheckStatus"] = BuildSalesPaymentCheckStatus(currency, amount, salesAmountPaid, estateRemainingAmount),
+            ["salePaymentStatus"] = requestType == "Purchase"
+                ? estateRemainingAmount <= 0m ? "Paid in full" : salesAmountPaid > 0m ? "Part-paid in Sales" : "Pending Estate payment"
+                : null,
             ["requestMessage"] = TruncateOptional(request.Notes, 1000),
             ["customerValidationStatus"] = "Validated by Sales",
             ["listingValidationStatus"] = "Pending",
@@ -155,7 +180,14 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ["customerNotificationStatus"] = "Handled by Sales",
             ["customerAcceptanceStatus"] = "Accepted in Sales",
             ["customerAcceptanceDate"] = completedAt.ToString("yyyy-MM-dd"),
-            ["billingStartStatus"] = requestType == "Purchase" ? "Sales payment handled" : "Blocked - agreement pending",
+            ["billingStartStatus"] = requestType == "Purchase"
+                ? estateRemainingAmount <= 0m ? "No Estate balance from Sales handoff" : "Estate balance pending"
+                : "Blocked - agreement pending",
+            ["ownershipTransferStatus"] = requestType == "Purchase"
+                ? estateRemainingAmount <= 0m
+                    ? "Blocked - Legal conveyance and registration pending"
+                    : "Blocked - Estate balance and Legal conveyance required"
+                : null,
             ["receivedDate"] = DateTime.UtcNow.ToString("yyyy-MM-dd"),
             ["applicationStatus"] = "Submitted from Sales",
             ["salesOpportunityId"] = request.SalesOpportunityId.ToString(),
@@ -175,6 +207,8 @@ public sealed class EstateSalesListingApplicationHandoffService(
             description,
             fieldValues));
 
+        await ReservePortalListingAsync(tenantId, request.ListingId, demarcation is not null, cancellationToken);
+
         return new EstateSalesListingApplicationHandoffResult(
             created.Id,
             created.ReferenceNumber,
@@ -183,6 +217,47 @@ public sealed class EstateSalesListingApplicationHandoffService(
             created.CurrentStageName,
             DateTime.UtcNow,
             AlreadyExists: false);
+    }
+
+    private async Task ReservePortalListingAsync(
+        Guid tenantId,
+        Guid listingId,
+        bool isDemarcationListing,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTime.UtcNow;
+        if (isDemarcationListing)
+        {
+            await db.EstateLandDemarcations
+                .IgnoreQueryFilters()
+                .Where(item => item.TenantId == tenantId
+                    && item.Id == listingId
+                    && !item.IsDeleted)
+                .ExecuteUpdateAsync(setters => setters
+                    .SetProperty(item => item.IsPublishedToExternalPortal, false)
+                    .SetProperty(item => item.ExternalListingStatus, "Reserved")
+                    .SetProperty(item => item.ExternalPublishedAt, (DateTime?)null)
+                    .SetProperty(item => item.UpdatedAt, now),
+                    cancellationToken);
+            return;
+        }
+
+        await db.EstateManagedAssets
+            .IgnoreQueryFilters()
+            .Where(item => item.TenantId == tenantId
+                && item.Id == listingId
+                && !item.IsDeleted)
+            .ExecuteUpdateAsync(setters => setters
+                .SetProperty(item => item.IsPublishedToExternalPortal, false)
+                .SetProperty(item => item.ExternalListingStatus, "Reserved")
+                .SetProperty(item => item.ExternalPublishedAt, (DateTime?)null)
+                .SetProperty(
+                    item => item.Status,
+                    item => item.Status == EstateManagedAssetStatus.Available
+                        ? EstateManagedAssetStatus.Reserved
+                        : item.Status)
+                .SetProperty(item => item.UpdatedAt, now),
+                cancellationToken);
     }
 
     private static EstateSalesListingApplicationHandoffResult ToResult(ProcedureCase procedureCase, bool alreadyExists)
@@ -197,11 +272,21 @@ public sealed class EstateSalesListingApplicationHandoffService(
             || normalized.Equals("Sale", StringComparison.OrdinalIgnoreCase)
             ? "Purchase"
             : normalized.Equals("Lease", StringComparison.OrdinalIgnoreCase)
-                || normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
                 ? "Lease"
-                : string.Equals(listingType, "Sale", StringComparison.OrdinalIgnoreCase) ? "Purchase" : "Lease";
+                : normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
+                    || normalized.Equals("Rental", StringComparison.OrdinalIgnoreCase)
+                    || normalized.Equals("Tenancy", StringComparison.OrdinalIgnoreCase)
+                    ? "Rent"
+                    : listingType switch
+                    {
+                        "Sale" => "Purchase",
+                        "Lease" or "SaleAndLease" => "Lease",
+                        "Rent" or "SaleAndRent" => "Rent",
+                        _ => "Lease"
+                    };
         return string.Equals(listingType, "Sale", StringComparison.OrdinalIgnoreCase) ? "Purchase"
-            : string.Equals(listingType, "Rent", StringComparison.OrdinalIgnoreCase) ? "Lease"
+            : string.Equals(listingType, "Rent", StringComparison.OrdinalIgnoreCase) ? "Rent"
+            : string.Equals(listingType, "Lease", StringComparison.OrdinalIgnoreCase) ? "Lease"
             : normalized;
     }
 
@@ -215,6 +300,17 @@ public sealed class EstateSalesListingApplicationHandoffService(
 
     private static string BuildReference(string prefix)
         => $"{prefix}-{DateTime.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}".ToUpperInvariant();
+
+    private static string BuildSalesPaymentCheckStatus(
+        string currency,
+        decimal agreedAmount,
+        decimal salesAmountPaid,
+        decimal estateRemainingAmount)
+        => estateRemainingAmount <= 0m
+            ? $"Sales recorded {currency} {salesAmountPaid:N2} paid against agreed amount {currency} {agreedAmount:N2}; no Estate balance remains."
+            : salesAmountPaid > 0m
+                ? $"Sales recorded {currency} {salesAmountPaid:N2} paid against agreed amount {currency} {agreedAmount:N2}; Estate balance is {currency} {estateRemainingAmount:N2}."
+                : $"No Sales payment recorded against agreed amount {currency} {agreedAmount:N2}; Estate balance is {currency} {estateRemainingAmount:N2}.";
 
     private static string Truncate(string value, int maxLength)
         => value.Length <= maxLength ? value : value[..maxLength];
