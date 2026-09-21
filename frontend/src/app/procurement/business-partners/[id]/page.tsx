@@ -42,6 +42,7 @@ import { PerformanceReviewDetailDialog } from '@/components/procurement/Performa
 import { PerformanceTrendsChart } from '@/components/procurement/PerformanceTrendsChart';
 import { SupplierBankAccountsPanel, SupplierContactsPanel } from '@/components/procurement/SupplierContactBankDetails';
 import { bankAccountsFromRegistrationData, contactsFromRegistrationData } from '@/lib/supplier-registration-details';
+import { BusinessPartnerAccessSetup } from '@/components/procurement/BusinessPartnerAccessSetup';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
@@ -320,6 +321,7 @@ export default function BusinessPartnerDetailPage() {
         </div>
 
         <div className="flex gap-2">
+          <BusinessPartnerAccessSetup partnerId={id} onSaved={loadPartner} />
           <Button onClick={() => router.push(`/procurement/business-partners/${id}/edit`)}>
             <Edit className="w-4 h-4 mr-2" />
             Edit

@@ -263,6 +263,43 @@ public sealed class QuantitySurveyConfigurationRegistryTests
         var approved = await fixture.Service.ApproveDecisionAsync(created.Id, decision.DecisionKey, request, "independent-user");
         approved.Status.Should().Be(QuantitySurveyConfigurationDecisionStatus.Approved);
         approved.EvidenceStatus.Should().Be(QuantitySurveyConfigurationEvidenceStatus.Verified);
+
+        // One approved process is publishable; the sixteen unused questionnaire decisions
+        // remain present for future configuration without blocking this profile.
+        (await fixture.Service.ValidateProfileAsync(created.Id)).IsValid.Should().BeTrue();
+        var published = await fixture.Service.PublishProfileAsync(created.Id,
+            new QuantitySurveyLifecycleRequest { RowVersion = string.Empty, Reason = "Enable rate build-ups only" },
+            "publish-configured-process");
+        published.LifecycleStatus.Should().Be(QuantitySurveyConfigurationProfileStatus.Published);
+        published.TotalDecisionCount.Should().Be(1);
+        published.CompleteDecisionCount.Should().Be(1);
+        published.IsComplete.Should().BeTrue();
+        published.Decisions.Should().HaveCount(17);
+    }
+
+    [Fact]
+    public async Task EmptyProfileCannotPublishAndConfiguredUnapprovedDecisionsRemainBlocking()
+    {
+        await using var fixture = new ServiceFixture();
+        var profile = await fixture.Service.CreateProfileAsync(new CreateQuantitySurveyProfileRequest
+        { Name = "Core QS", EffectiveFrom = new DateTime(2026, 8, 1) }, "create-core");
+        profile.TotalDecisionCount.Should().Be(0);
+        profile.IsComplete.Should().BeFalse();
+        profile.Validation.Errors.Should().ContainSingle(error => error.Code == "EMPTY_PROFILE");
+
+        var decision = await fixture.Context.QuantitySurveyConfigurationDecisions
+            .SingleAsync(d => d.ProfileId == profile.Id && d.DecisionKey == "QS-DEC-004");
+        decision.ValueJson = ValidRateBuildUpJson;
+        decision.EffectiveFrom = profile.EffectiveFrom;
+        await fixture.Context.SaveChangesAsync();
+        var validation = await fixture.Service.ValidateProfileAsync(profile.Id);
+        validation.Errors.Should().Contain(error => error.Code == "NOT_APPROVED");
+        validation.Errors.Should().OnlyContain(error => error.DecisionKey == "QS-DEC-004");
+
+        decision.ValueJson = "{invalid-json";
+        await fixture.Context.SaveChangesAsync();
+        (await fixture.Service.ValidateProfileAsync(profile.Id)).Errors
+            .Should().Contain(error => error.Code == "INVALID_VALUE");
     }
 
     [Fact]
@@ -352,7 +389,7 @@ public sealed class QuantitySurveyConfigurationRegistryTests
         {
             var options = new DbContextOptionsBuilder<ApplicationDbContext>()
                 .UseInMemoryDatabase(Guid.NewGuid().ToString("N"))
-                .ConfigureWarnings(warnings => warnings.Ignore(InMemoryEventId.TransactionIgnoredWarning))
+                .ConfigureWarnings(warnings => warnings.Throw(InMemoryEventId.TransactionIgnoredWarning))
                 .Options;
             Context = new ApplicationDbContext(options);
             TenantId = Guid.NewGuid(); UserId = Guid.NewGuid();

@@ -69,7 +69,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
             throw new UnauthorizedAccessException("Only the assigned contractor can prepare this valuation claim.");
         if (entity.Status != QuantitySurveyValuationWorkflowStatuses.Draft)
             throw Conflict("Only a Draft interim valuation claim can be amended by the contractor.");
-        ValidateFrozenValuationPolicy(entity, await ResolveValuationPolicyAsync(DateTime.UtcNow, token));
+        ValidateFrozenValuationPolicy(entity, await ResolveValuationPolicyAsync(DateTime.UtcNow, token, entity));
         ApplyRowVersion(entity, request.RowVersion);
         var source = await BuildSourceAsync(entity.ProjectInterimValuation, entity.ProjectBoqVersionId, token);
         var inputs = request.Lines.ToDictionary(value => value.ProjectBoqVersionLineId);
@@ -368,12 +368,12 @@ public sealed partial class QuantitySurveyValuationWorksheetService
             throw Conflict("Evidence cannot be changed after the valuation enters approval or reaches a terminal state.");
         if (entity.Evidence.Count >= MaximumValuationEvidenceFiles)
             throw Validation($"An interim valuation can contain at most {MaximumValuationEvidenceFiles} evidence files.");
-        var policy = await ResolveValuationPolicyAsync(DateTime.UtcNow, token);
+        var policy = await ResolveValuationPolicyAsync(DateTime.UtcNow, token, entity);
         ValidateFrozenValuationPolicy(entity, policy);
         var safeName = Path.GetFileName(fileName?.Trim());
         if (string.IsNullOrWhiteSpace(safeName) || safeName.Length > 260) throw Validation("Select a file with a valid name.");
         var extension = Path.GetExtension(safeName).ToLowerInvariant();
-        if (!policy.External.AllowedFileExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
+        if (policy.ExternalDecision is not null && !policy.External.AllowedFileExtensions.Contains(extension, StringComparer.OrdinalIgnoreCase))
             throw Validation("The selected file type is not allowed by the effective external-submission policy.");
         await using var memory = new MemoryStream(); await stream.CopyToAsync(memory, token);
         var maximumBytes = policy.External.MaximumFileSizeMb * 1024L * 1024L;
@@ -413,7 +413,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
                 FileUploadRecordId = upload.Record.Id, SourceModule = "QuantitySurvey",
                 SourceLabel = "Quantity Survey interim valuation evidence",
                 SourceEntityType = nameof(QuantitySurveyValuationWorksheetEvidence), SourceRecordId = evidenceId,
-                SourceRecordReference = entity.ProjectInterimValuation.ValuationNumber,
+                SourceRecordReference = entity.ProjectInterimValuation.ValuationNumber ?? entity.ProjectInterimValuationId.ToString(),
                 Title = $"{ValuationLabel(entity.ProjectInterimValuation)} · {title}",
                 DocumentType = entity.EvidenceMetadataTemplate?.DocumentType
                     ?? throw Conflict("The frozen interim-valuation DMS template is unavailable."),
@@ -426,6 +426,9 @@ public sealed partial class QuantitySurveyValuationWorksheetService
                     new("valuationWorksheetId", "Valuation worksheet ID", entity.Id.ToString(), "guid"),
                     new("projectId", "Project ID", entity.ProjectId.ToString(), "guid"),
                     new("interimValuationId", "Interim valuation ID", entity.ProjectInterimValuationId.ToString(), "guid"),
+                    new("contractId", "Contract ID", entity.ProjectInterimValuation.ContractId?.ToString(), "guid"),
+                    new("recordReference", "Valuation reference", entity.ProjectInterimValuation.ValuationNumber ?? entity.ProjectInterimValuationId.ToString()),
+                    new("evidenceDate", "Valuation date", entity.ProjectInterimValuation.ValuationDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), "date"),
                     new("evidenceType", "Evidence type", request.EvidenceType.ToString()),
                     new("checksumSha256", "Checksum SHA-256", checksum)
                 ]
@@ -530,8 +533,12 @@ public sealed partial class QuantitySurveyValuationWorksheetService
                ?? throw Conflict("The central-DMS evidence content is unavailable.");
     }
 
-    private async Task<ValuationPolicyContext> ResolveValuationPolicyAsync(DateTime at, CancellationToken token)
+    private async Task<ValuationPolicyContext> ResolveValuationPolicyAsync(DateTime at, CancellationToken token,
+        QuantitySurveyValuationWorksheet? existing = null)
     {
+        // A deployment switch affects new intake only; an existing worksheet retains its frozen controls.
+        var includeExternal = existing is null || IsLegacyDraftValuationPolicy(existing)
+            ? externalSubmissionsEnabled : existing.ExternalSubmissionDecisionId.HasValue;
         var profiles = await db.QuantitySurveyConfigurationProfiles.AsNoTracking().Where(value =>
                 value.TenantId == TenantId && !value.IsDeleted &&
                 value.LifecycleStatus == QuantitySurveyConfigurationProfileStatus.Published && value.PublishedAt != null &&
@@ -547,23 +554,32 @@ public sealed partial class QuantitySurveyValuationWorksheetService
             .ToListAsync(token);
         var valuationDecision = decisions.SingleOrDefault(value => value.DecisionKey == "QS-DEC-008")
             ?? throw Validation("The effective configuration has no QS-DEC-008 valuation decision.");
-        var externalDecision = decisions.SingleOrDefault(value => value.DecisionKey == "QS-DEC-013")
-            ?? throw Validation("The effective configuration has no QS-DEC-013 external-submission decision.");
+        var externalDecision = decisions.SingleOrDefault(value => includeExternal && value.DecisionKey == "QS-DEC-013" &&
+            QuantitySurveyArchitectureScope.HasConfiguration(value.ValueJson));
         ValidateValuationDecision(valuationDecision, at, "QS-DEC-008");
-        ValidateValuationDecision(externalDecision, at, "QS-DEC-013");
+        if (externalDecision is not null) ValidateValuationDecision(externalDecision, at, "QS-DEC-013");
         QsValuationCertificateValue valuation; QsExternalSubmissionValue external;
         try
         {
             valuation = JsonSerializer.Deserialize<QsValuationCertificateValue>(valuationDecision.ValueJson,
                 ValuationPolicyJsonOptions) ?? new();
-            external = JsonSerializer.Deserialize<QsExternalSubmissionValue>(externalDecision.ValueJson,
-                ValuationPolicyJsonOptions) ?? new();
+            external = externalDecision is null
+                ? new QsExternalSubmissionValue { RequirePortalIdentity = false, RequireSignature = false, RequireEvidence = false }
+                : JsonSerializer.Deserialize<QsExternalSubmissionValue>(externalDecision.ValueJson,
+                    ValuationPolicyJsonOptions) ?? new();
         }
         catch (JsonException) { throw Conflict("The effective QS valuation or external-submission policy contains invalid data."); }
+        if (!includeExternal)
+        {
+            valuation.RequireContractorSubmission = false;
+            valuation.RequireConsultantEndorsement = false;
+        }
         if (valuation.ValuationWorkflowDefinitionId == Guid.Empty ||
             valuation.ValuationEvidenceMetadataTemplateId == Guid.Empty)
             throw Conflict("QS-DEC-008 is incomplete for governed interim valuations.");
-        if (external.Channels.Count == 0 || external.AllowedFileExtensions.Count == 0 || external.MaximumFileSizeMb < 1)
+        if (externalDecision is null && (valuation.RequireContractorSubmission || valuation.RequireConsultantEndorsement))
+            throw Validation("Configure external submissions or turn off contractor submission and consultant endorsement for internally prepared valuations.");
+        if (externalDecision is not null && (external.Channels.Count == 0 || external.AllowedFileExtensions.Count == 0 || external.MaximumFileSizeMb < 1))
             throw Conflict("QS-DEC-013 is incomplete for external interim-valuation submissions.");
         var template = await db.CentralDocumentMetadataTemplates.AsNoTracking().FirstOrDefaultAsync(value =>
             value.TenantId == TenantId && value.Id == valuation.ValuationEvidenceMetadataTemplateId && !value.IsDeleted, token)
@@ -582,8 +598,8 @@ public sealed partial class QuantitySurveyValuationWorksheetService
         var policyHash = Hash(new
         {
             Profile = profile.Id, profile.Version, Valuation = valuationDecision.Id,
-            ValuationValueJson = valuationDecision.ValueJson, External = externalDecision.Id,
-            ExternalValueJson = externalDecision.ValueJson, Template = template.Id,
+            ValuationValueJson = valuationDecision.ValueJson, External = externalDecision?.Id,
+            ExternalValueJson = externalDecision?.ValueJson, Template = template.Id,
             template.TemplateCode, Workflow = definition.Id
         });
         return new(profile, valuationDecision, externalDecision, valuation, external, template, policyHash);
@@ -592,7 +608,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
     private async Task ValidateValuationReadinessAsync(QuantitySurveyValuationWorksheet entity,
         bool requireContractor, bool requireConsultant, CancellationToken token)
     {
-        ValidateFrozenValuationPolicy(entity, await ResolveValuationPolicyAsync(DateTime.UtcNow, token));
+        ValidateFrozenValuationPolicy(entity, await ResolveValuationPolicyAsync(DateTime.UtcNow, token, entity));
         if (entity.Lines.Count == 0 || entity.Lines.Any(value => value.IsDeleted))
             throw Conflict("The valuation requires a complete controlled BoQ-line worksheet.");
         if (requireContractor && (!entity.ContractorSubmittedAt.HasValue ||
@@ -611,7 +627,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
     }
 
     private async Task<QuantitySurveyValuationLookupsDto> BuildValuationLookupsAsync(
-        Guid projectId, Guid? actorPartnerId, CancellationToken token)
+        Guid projectId, Guid? actorPartnerId, CancellationToken token, ValuationPolicyContext? policy = null)
     {
         var versions = await db.ProjectBoqVersions.AsNoTracking().Where(value => value.TenantId == TenantId &&
                 value.ProjectId == projectId && !value.IsDeleted && value.Status == ProjectBoqVersionStatuses.Approved &&
@@ -622,7 +638,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
                 Label = $"Approved BoQ v{value.VersionNumber} · {value.LineCount} lines · {value.PublishedAt:dd MMM yyyy}",
                 LineCount = value.LineCount
             }).ToListAsync(token);
-        var policy = await ResolveValuationPolicyAsync(DateTime.UtcNow, token);
+        policy ??= await ResolveValuationPolicyAsync(DateTime.UtcNow, token);
         var partnerIds = await AccessibleValuationPartnerIdsAsync(projectId, token);
         if (actorPartnerId.HasValue) partnerIds = [actorPartnerId.Value];
         var partners = await db.BusinessPartners.AsNoTracking().Where(value => value.TenantId == TenantId &&
@@ -741,7 +757,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
         QuantitySurveyValuationWorksheet entity, ValuationPolicyContext policy)
     {
         if (entity.ConfigurationProfileId != policy.Profile.Id || entity.ValuationDecisionId != policy.ValuationDecision.Id ||
-            entity.ExternalSubmissionDecisionId != policy.ExternalDecision.Id ||
+            entity.ExternalSubmissionDecisionId != policy.ExternalDecision?.Id ||
             entity.ApprovalWorkflowDefinitionId != policy.Valuation.ValuationWorkflowDefinitionId ||
             entity.EvidenceMetadataTemplateId != policy.Template.Id || !FixedEquals(entity.PolicyHash, policy.PolicyHash))
             throw Conflict("The governing QS configuration changed. Create a new interim valuation worksheet.");
@@ -760,7 +776,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
             throw Conflict("Only a legacy Draft valuation can adopt the effective QS policy.");
         entity.ConfigurationProfileId = policy.Profile.Id;
         entity.ValuationDecisionId = policy.ValuationDecision.Id;
-        entity.ExternalSubmissionDecisionId = policy.ExternalDecision.Id;
+        entity.ExternalSubmissionDecisionId = policy.ExternalDecision?.Id;
         entity.ApprovalWorkflowDefinitionId = policy.Valuation.ValuationWorkflowDefinitionId;
         entity.EvidenceMetadataTemplateId = policy.Template.Id;
         entity.EvidenceMetadataTemplateCodeSnapshot = policy.Template.TemplateCode;
@@ -880,7 +896,7 @@ public sealed partial class QuantitySurveyValuationWorksheetService
     private sealed record ValuationPolicyContext(
         QuantitySurveyConfigurationProfile Profile,
         QuantitySurveyConfigurationDecision ValuationDecision,
-        QuantitySurveyConfigurationDecision ExternalDecision,
+        QuantitySurveyConfigurationDecision? ExternalDecision,
         QsValuationCertificateValue Valuation,
         QsExternalSubmissionValue External,
         ErpSystem.Core.Entities.DocumentManagement.CentralDocumentMetadataTemplate Template,

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { CheckCircle2, Download, FileUp, RefreshCw, Save, Send, ShieldCheck, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import { Badge } from '@/components/ui/badge';
@@ -11,6 +11,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
 import { quantitySurveyContractClaimService as service, type ContractClaim, type ContractClaimType, type ContractClaimWorkspace } from '@/services/quantity-survey-contract-claim.service';
 
 type Props = { projectId: string; external?: boolean };
@@ -26,6 +27,7 @@ export function QuantitySurveyContractClaimsWorkspace({ projectId, external = fa
   const canApprove = !external && hasPermission('quantity-survey.transactions.approve');
   const requests = useRef<Record<string, string>>({});
   const [workspace, setWorkspace] = useState(empty); const [selectedId, setSelectedId] = useState('');
+  const [actionError, setActionError] = useState('');
   const [loading, setLoading] = useState(true); const [busy, setBusy] = useState(false);
   const [contractId, setContractId] = useState(''); const [claimType, setClaimType] = useState<ContractClaimType>('LossAndExpense');
   const [boqId, setBoqId] = useState('none'); const [sourceId, setSourceId] = useState('none');
@@ -35,6 +37,7 @@ export function QuantitySurveyContractClaimsWorkspace({ projectId, external = fa
   const [settledTotal, setSettledTotal] = useState(0); const [settlementReference, setSettlementReference] = useState('');
   const [settlementDate, setSettlementDate] = useState(new Date().toISOString().slice(0, 10));
   const selected = useMemo(() => workspace.claims.find(value => value.id === selectedId), [selectedId, workspace.claims]);
+  const visibleClaimTypes = claimTypes.filter(value => !['Daywork', 'AdditionalWork'].includes(value) || isQsOptionalFeatureEnabled('daywork') || selected?.claimType === value);
   const selectedContract = workspace.contracts.find(value => value.id === contractId);
   const needsVariation = ['Variation', 'Daywork', 'AdditionalWork'].includes(claimType);
   const needsExtension = claimType === 'ExtensionOfTime';
@@ -43,34 +46,35 @@ export function QuantitySurveyContractClaimsWorkspace({ projectId, external = fa
   const requestId = (key: string) => requests.current[key] ?? (requests.current[key] = crypto.randomUUID());
   const complete = (key: string) => { delete requests.current[key]; };
 
-  const load = useCallback(async (preferred?: string) => {
-    setLoading(true);
-    try { const value = await service.workspace(projectId, external); setWorkspace(value); setSelectedId(preferred ?? value.claims[0]?.id ?? ''); }
-    catch (error) { toast.error(error instanceof Error ? error.message : 'Contract claims could not be loaded.'); }
-    finally { setLoading(false); }
-  }, [external, projectId]);
-  useEffect(() => { if (canRead) void load(); }, [canRead, load]);
-
-  const select = (value: ContractClaim) => {
+  const select = useCallback((value: ContractClaim) => {
     setSelectedId(value.id); setContractId(value.contractId); setClaimType(value.claimType);
     setBoqId(value.approvedBoqVersionId ?? 'none'); setSourceId(value.variationOrderId ?? value.extensionOfTimeId ?? 'none');
     setTitle(value.title); setBasis(value.basis); setClaimedAmount(value.claimedAmount); setAssessedAmount(value.qsAssessedAmount ?? value.claimedAmount);
     setSettledTotal(value.settledAmount); setSettlementReference(value.settlementReference ?? '');
     setSettlementDate(value.settlementDate?.slice(0, 10) ?? new Date().toISOString().slice(0, 10));
-  };
+  }, []);
+
+  const load = useCallback(async (preferred?: string) => {
+    setLoading(true);
+    try { const value = await service.workspace(projectId, external); setWorkspace(value); const current = value.claims.find(item => item.id === preferred) ?? value.claims[0]; if (current) select(current); else setSelectedId(''); setActionError(''); }
+    catch (error) { setActionError(error instanceof Error ? error.message : 'Contract claims could not be loaded.'); }
+    finally { setLoading(false); }
+  }, [external, projectId, select]);
+  useEffect(() => { if (canRead) void load(); }, [canRead, load]);
+
   const run = async (key: string, operation: () => Promise<ContractClaim>, message: string) => {
-    setBusy(true); try { const value = await operation(); complete(key); setReason(''); toast.success(message); await load(value.id); }
-    catch (error) { toast.error(error instanceof Error ? error.message : 'The claim action failed.'); } finally { setBusy(false); }
+    setBusy(true); setActionError(''); try { const value = await operation(); complete(key); setReason(''); toast.success(message); await load(value.id); }
+    catch (error) { setActionError(error instanceof Error ? error.message : 'The claim action failed.'); } finally { setBusy(false); }
   };
   const save = async () => {
-    if (!external || !contractId || title.trim().length < 3 || basis.trim().length < 10 || claimedAmount <= 0 || ((needsVariation || needsExtension) && sourceId === 'none')) {
-      toast.error('Select the controlled contract/source and complete the claim title, basis and positive amount.'); return;
+    if (!canManage || !contractId || title.trim().length < 3 || basis.trim().length < 10 || claimedAmount <= 0 || ((needsVariation || needsExtension) && sourceId === 'none')) {
+      setActionError('Select the controlled contract/source and complete the claim title, basis and positive amount.'); return;
     }
     const key = `save:${selected?.id ?? 'new'}:${contractId}:${claimType}:${boqId}:${sourceId}:${title}:${basis}:${claimedAmount}`;
-    await run(key, () => service.saveExternal(projectId, { id: selected?.id ?? null, clientRequestId: requestId(key), contractId,
+    await run(key, () => service.save(projectId, { id: selected?.id ?? null, clientRequestId: requestId(key), contractId,
       approvedBoqVersionId: boqId === 'none' ? null : boqId, variationOrderId: needsVariation ? sourceId : null,
       extensionOfTimeId: needsExtension ? sourceId : null, claimType, title: title.trim(), basis: basis.trim(), claimedAmount,
-      rowVersion: selected?.rowVersion ?? null }), 'Claim Draft saved.');
+      rowVersion: selected?.rowVersion ?? null }, external), 'Claim Draft saved.');
   };
   const upload = async () => {
     if (!selected || !evidenceFile || evidenceTitle.trim().length < 3) { toast.error('Select an editable claim, evidence title and file.'); return; }
@@ -83,7 +87,7 @@ export function QuantitySurveyContractClaimsWorkspace({ projectId, external = fa
     const key = `${kind}:${selected.id}:${selected.rowVersion}:${reason}:${assessedAmount}:${settledTotal}:${settlementReference}:${settlementDate}`;
     const request = { clientRequestId: requestId(key), rowVersion: selected.rowVersion, reason: reason.trim() };
     const operations = {
-      submit: () => service.submitExternal(projectId, selected.id, request), dispute: () => service.disputeExternal(projectId, selected.id, request),
+      submit: () => service.submit(projectId, selected.id, request, external), dispute: () => service.disputeExternal(projectId, selected.id, request),
       vet: () => service.vet(selected.id, { ...request, assessedAmount }), submitApproval: () => service.submitApproval(selected.id, request),
       approve: () => service.approve(selected.id, request), reject: () => service.reject(selected.id, request),
       acceptDispute: () => service.resolveDispute(selected.id, true, request), rejectDispute: () => service.resolveDispute(selected.id, false, request),
@@ -96,14 +100,16 @@ export function QuantitySurveyContractClaimsWorkspace({ projectId, external = fa
     catch (error) { toast.error(error instanceof Error ? error.message : 'Evidence could not be opened.'); }
   };
   if (!canRead) return null;
-  const editable = external && (!selected || ['Draft', 'Rejected'].includes(selected.status));
+  const editable = canManage && (!selected || ['Draft', 'Rejected'].includes(selected.status));
   return <Card data-testid={external ? 'qs-contractor-claims-portal' : 'qs-contract-claims-workspace'}>
-    <CardHeader className="pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><CardTitle>Contract claims</CardTitle><CardDescription>{external ? 'Submit governed claims and monitor QS decisions, disputes and settlement.' : 'Vet contractor claims, route approval, resolve disputes and record settlement.'}</CardDescription></div><Button variant="outline" size="sm" onClick={() => void load(selectedId)} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></div></CardHeader>
+    <CardHeader className="pb-3"><div className="flex flex-wrap items-center justify-between gap-2"><div><CardTitle>Contract claims</CardTitle><CardDescription>{external ? 'Submit governed claims and monitor QS decisions, disputes and settlement.' : 'Record received contractor claims, attach evidence and route independent QS review and approval.'}</CardDescription></div><Button variant="outline" size="sm" onClick={() => void load(selectedId)} disabled={loading}><RefreshCw className="mr-2 h-4 w-4" />Refresh</Button></div></CardHeader>
     <CardContent className="space-y-4">
-      <div className="flex flex-wrap gap-2">{workspace.claims.map(value => <Button key={value.id} variant={selectedId === value.id ? 'default' : 'outline'} size="sm" onClick={() => select(value)}>{value.claimNumber}<Badge className="ml-2" variant="secondary">{label(value.status)}</Badge></Button>)}{external && <Button size="sm" variant={!selectedId ? 'default' : 'outline'} onClick={() => { setSelectedId(''); setContractId(''); setClaimType('LossAndExpense'); setBoqId('none'); setSourceId('none'); setTitle(''); setBasis(''); setClaimedAmount(0); }}>New claim</Button>}</div>
-      {external && <div className="grid gap-3 rounded-md border p-4 md:grid-cols-4">
+      {actionError && <p role="alert" className="rounded border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{actionError}</p>}
+      {!loading && !workspace.claims.length && !canManage && <p className="text-sm text-muted-foreground">No contractor claims have been recorded.</p>}
+      <div className="flex flex-wrap gap-2">{workspace.claims.map(value => <Button key={value.id} variant={selectedId === value.id ? 'default' : 'outline'} size="sm" onClick={() => select(value)}>{value.claimNumber}<Badge className="ml-2" variant="secondary">{label(value.status)}</Badge></Button>)}{canManage && <Button size="sm" variant={!selectedId ? 'default' : 'outline'} onClick={() => { setSelectedId(''); setContractId(''); setClaimType('LossAndExpense'); setBoqId('none'); setSourceId('none'); setTitle(''); setBasis(''); setClaimedAmount(0); }}>New claim</Button>}</div>
+      {(canManage || selected) && <div className="grid gap-3 rounded-md border p-4 md:grid-cols-4">
         <div className="grid gap-2 md:col-span-2"><Label>Active Works contract</Label><Select disabled={!editable} value={contractId} onValueChange={setContractId}><SelectTrigger><SelectValue placeholder="Select contract" /></SelectTrigger><SelectContent>{workspace.contracts.map(value => <SelectItem key={value.id} value={value.id}>{value.number} · {value.contractor}</SelectItem>)}</SelectContent></Select></div>
-        <div className="grid gap-2"><Label>Claim type</Label><Select disabled={!editable} value={claimType} onValueChange={value => { setClaimType(value as ContractClaimType); setSourceId('none'); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{claimTypes.map(value => <SelectItem key={value} value={value}>{label(value)}</SelectItem>)}</SelectContent></Select></div>
+        <div className="grid gap-2"><Label>Claim type</Label><Select disabled={!editable} value={claimType} onValueChange={value => { setClaimType(value as ContractClaimType); setSourceId('none'); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{visibleClaimTypes.map(value => <SelectItem key={value} value={value}>{label(value)}</SelectItem>)}</SelectContent></Select></div>
         <div className="grid gap-2"><Label>Approved BoQ version</Label><Select disabled={!editable} value={boqId} onValueChange={setBoqId}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent><SelectItem value="none">Not applicable</SelectItem>{workspace.approvedBoqVersions.map(value => <SelectItem key={value.id} value={value.id}>Version {value.versionNumber}</SelectItem>)}</SelectContent></Select></div>
         {(needsVariation || needsExtension) && <div className="grid gap-2 md:col-span-2"><Label>{needsExtension ? 'Extension of time' : 'Approved variation'}</Label><Select disabled={!editable} value={sourceId} onValueChange={setSourceId}><SelectTrigger><SelectValue placeholder="Select governed source" /></SelectTrigger><SelectContent>{sourceOptions.map(value => <SelectItem key={value.id} value={value.id}>{value.reference} · {value.title}</SelectItem>)}</SelectContent></Select></div>}
         <div className="grid gap-2 md:col-span-2"><Label>Claim title</Label><Input disabled={!editable} value={title} onChange={event => setTitle(event.target.value)} /></div>
@@ -119,7 +125,7 @@ export function QuantitySurveyContractClaimsWorkspace({ projectId, external = fa
         <div className="grid gap-3 md:grid-cols-4">{!external && selected.status === 'Submitted' && <div className="grid gap-2"><Label>QS assessed amount</Label><Input type="number" min="0" max={selected.claimedAmount} value={assessedAmount} onChange={event => setAssessedAmount(Number(event.target.value))} /></div>}{!external && selected.status === 'Approved' && <><div className="grid gap-2"><Label>Settled total</Label><Input type="number" min={selected.settledAmount} max={selected.approvedAmount ?? 0} value={settledTotal} onChange={event => setSettledTotal(Number(event.target.value))} /></div><div className="grid gap-2"><Label>Settlement reference</Label><Input value={settlementReference} onChange={event => setSettlementReference(event.target.value)} /></div><div className="grid gap-2"><Label>Settlement date</Label><Input type="date" value={settlementDate} onChange={event => setSettlementDate(event.target.value)} /></div></>}
           <div className="grid gap-2 md:col-span-4"><Label>Action reason / review note</Label><Textarea value={reason} onChange={event => setReason(event.target.value)} /></div>
         </div>
-        <div className="flex flex-wrap justify-end gap-2">{external && ['Draft', 'Rejected'].includes(selected.status) && <Button onClick={() => void action('submit')} disabled={busy}><Send className="mr-2 h-4 w-4" />Submit to QS</Button>}{external && ['Approved', 'Rejected'].includes(selected.status) && selected.disputeStatus === 'None' && <Button variant="outline" onClick={() => void action('dispute')} disabled={busy}>Open dispute</Button>}{!external && canManage && selected.status === 'Submitted' && <Button onClick={() => void action('vet')} disabled={busy}><ShieldCheck className="mr-2 h-4 w-4" />Record QS vetting</Button>}{!external && canManage && selected.status === 'Vetted' && <Button onClick={() => void action('submitApproval')} disabled={busy}><Send className="mr-2 h-4 w-4" />Submit approval</Button>}{canApprove && selected.status === 'PendingApproval' && <><Button onClick={() => void action('approve')} disabled={busy}><CheckCircle2 className="mr-2 h-4 w-4" />Approve</Button><Button variant="destructive" onClick={() => void action('reject')} disabled={busy}><XCircle className="mr-2 h-4 w-4" />Reject</Button></>}{canApprove && selected.disputeStatus === 'Open' && <><Button variant="outline" onClick={() => void action('acceptDispute')} disabled={busy}>Accept dispute</Button><Button variant="outline" onClick={() => void action('rejectDispute')} disabled={busy}>Reject dispute</Button></>}{!external && canManage && selected.status === 'Approved' && (selected.approvedAmount ?? 0) > selected.settledAmount && <Button onClick={() => void action('settle')} disabled={busy}>Record settlement</Button>}</div>
+        <div className="flex flex-wrap justify-end gap-2">{canManage && ['Draft', 'Rejected'].includes(selected.status) && <Button onClick={() => void action('submit')} disabled={busy}><Send className="mr-2 h-4 w-4" />Submit to QS</Button>}{external && ['Approved', 'Rejected'].includes(selected.status) && selected.disputeStatus === 'None' && <Button variant="outline" onClick={() => void action('dispute')} disabled={busy}>Open dispute</Button>}{!external && canManage && selected.status === 'Submitted' && <Button onClick={() => void action('vet')} disabled={busy}><ShieldCheck className="mr-2 h-4 w-4" />Record QS vetting</Button>}{!external && canManage && selected.status === 'Vetted' && <Button onClick={() => void action('submitApproval')} disabled={busy}><Send className="mr-2 h-4 w-4" />Submit approval</Button>}{canApprove && selected.status === 'PendingApproval' && <><Button onClick={() => void action('approve')} disabled={busy}><CheckCircle2 className="mr-2 h-4 w-4" />Approve</Button><Button variant="destructive" onClick={() => void action('reject')} disabled={busy}><XCircle className="mr-2 h-4 w-4" />Reject</Button></>}{canApprove && selected.disputeStatus === 'Open' && <><Button variant="outline" onClick={() => void action('acceptDispute')} disabled={busy}>Accept dispute</Button><Button variant="outline" onClick={() => void action('rejectDispute')} disabled={busy}>Reject dispute</Button></>}{!external && canManage && selected.status === 'Approved' && (selected.approvedAmount ?? 0) > selected.settledAmount && <Button onClick={() => void action('settle')} disabled={busy}>Record settlement</Button>}</div>
       </div>}
       {!loading && !workspace.contracts.length && <p className="text-sm text-muted-foreground">No active Procurement Works contract is available for this project and contractor.</p>}
     </CardContent>

@@ -102,7 +102,7 @@ import {
   businessPartnerService,
   type BusinessPartnerDto,
 } from '@/services/businessPartnerService';
-import { contractService, type ContractDto } from '@/services/contractService';
+import type { ProjectContractLookupDto } from '@/services/projectService';
 import { type CurrencyListDto } from '@/services/financeCommonService';
 import { fixedAssetsDataService } from '@/services/finance/fixed-assets-data.service';
 import {
@@ -145,6 +145,7 @@ import {
   CreateProjectCommissioningItemDto,
   CreateProjectExtensionOfTimeDto,
   CreateProjectHandoverItemDto,
+  ProjectHandoverItemDto,
   CreateProjectUnitHandoverBatchDto,
   CreateProjectInterimValuationDto,
   CreateProjectIssueDto,
@@ -726,7 +727,7 @@ type ProjectWorkspaceBootstrapData = {
 
 type ProjectWorkspaceStaticReferenceData = {
   users: User[];
-  contracts: ContractDto[];
+  contracts: ProjectContractLookupDto[];
   currencyContext: ProjectWorkspaceCurrencyContext;
   unitsOfMeasure: UnitOfMeasureDto[];
   maintenanceAssets: MaintenanceAssetLookupOption[];
@@ -1421,7 +1422,7 @@ export default function ProjectWorkspacePage({
   const [customerPartnerOptions, setCustomerPartnerOptions] = useState<
     BusinessPartnerDto[]
   >([]);
-  const [contracts, setContracts] = useState<ContractDto[]>([]);
+  const [contracts, setContracts] = useState<ProjectContractLookupDto[]>([]);
   const [tenderLookup, setTenderLookup] = useState<ProjectTenderLookupDto[]>(
     []
   );
@@ -1592,6 +1593,7 @@ export default function ProjectWorkspacePage({
     useState<CreateProjectCustomerVariationDto>(customerVariationInit);
   const [commissioningDraft, setCommissioningDraft] =
     useState<CreateProjectCommissioningItemDto>(commissioningInit);
+  const [editingHandoverItemId, setEditingHandoverItemId] = useState<string | null>(null);
   const [handoverDraft, setHandoverDraft] =
     useState<CreateProjectHandoverItemDto>(handoverItemInit);
   const [snagDraft, setSnagDraft] =
@@ -1839,8 +1841,8 @@ export default function ProjectWorkspacePage({
         loadedFixedAssets,
         catalogResults,
       ] = await Promise.all([
-        userService.searchUsers('').catch(() => []),
-        contractService.getActiveContracts().catch(() => []),
+        userService.searchAssignableUsers('').catch(() => []),
+        projectService.getContractLookup().catch(() => []),
         loadProjectCurrencyContext(),
         inventoryManagementService.getUnitsOfMeasure(true).catch(() => []),
         maintenanceDataService.getAssets().catch(() => []),
@@ -2184,6 +2186,8 @@ export default function ProjectWorkspacePage({
         bootstrapPromise,
       ]);
       const p = (workspace as ProjectWorkspaceDto).project;
+      // The currency state updates after this load; seed drafts from the loaded project.
+      const loadedProjectCurrency = p.baseCurrencyCode?.trim() || '';
       setProject(p);
       setFinancialSummary(workspace.financialSummary ?? null);
       setCommercialSummary(workspace.commercialSummary ?? null);
@@ -2324,10 +2328,10 @@ export default function ProjectWorkspacePage({
       setEditingPaymentCertificateId(null);
       setEditingExtensionOfTimeId(null);
       setEditingUnitId(null);
-      setProjectPackageDraft({ ...packageInit, currency: baseCurrency.code });
+      setProjectPackageDraft({ ...packageInit, currency: loadedProjectCurrency });
       setBoqItemDraft({
         ...boqItemInit,
-        currency: baseCurrency.code,
+        currency: loadedProjectCurrency,
         projectPackageId: p.packages[0]?.id || '',
       });
       setApprovalDraft({
@@ -2353,13 +2357,13 @@ export default function ProjectWorkspacePage({
       });
       setSiteInstructionDraft({
         ...siteInstructionInit,
-        currency: baseCurrency.code,
+        currency: loadedProjectCurrency,
         projectPhaseId: p.phases[0]?.id,
         projectPackageId: p.packages[0]?.id,
       });
       setVariationOrderDraft({
         ...variationOrderInit,
-        currency: baseCurrency.code,
+        currency: loadedProjectCurrency,
         projectPhaseId: p.phases[0]?.id,
         projectPackageId: p.packages[0]?.id,
         contractId:
@@ -2368,7 +2372,7 @@ export default function ProjectWorkspacePage({
       });
       setInterimValuationDraft({
         ...interimValuationInit,
-        currency: baseCurrency.code,
+        currency: loadedProjectCurrency,
         projectPhaseId: p.phases[0]?.id,
         projectPackageId: p.packages[0]?.id,
         projectMilestoneId: p.milestones[0]?.id,
@@ -2378,7 +2382,7 @@ export default function ProjectWorkspacePage({
       });
       setPaymentCertificateDraft({
         ...paymentCertificateInit,
-        currency: baseCurrency.code,
+        currency: loadedProjectCurrency,
         projectPhaseId: p.phases[0]?.id,
         projectPackageId: p.packages[0]?.id,
         contractId:
@@ -2394,10 +2398,10 @@ export default function ProjectWorkspacePage({
           p.contractId ||
           p.packages.find((item) => !!item.contractId)?.contractId,
       });
-      setUnitDraft({ ...unitInit, currency: baseCurrency.code });
+      setUnitDraft({ ...unitInit, currency: loadedProjectCurrency });
       setCustomerVariationDraft({
         ...customerVariationInit,
-        currency: baseCurrency.code,
+        currency: loadedProjectCurrency,
         projectUnitId: p.units[0]?.id,
       });
       setCommissioningDraft({
@@ -2414,7 +2418,7 @@ export default function ProjectWorkspacePage({
       });
       setDefectLiabilityDraft({
         ...defectLiabilityCaseInit,
-        currency: baseCurrency.code,
+        currency: loadedProjectCurrency,
         projectUnitId: p.units[0]?.id,
       });
       setEditingVariationOrderId(null);
@@ -2984,7 +2988,7 @@ export default function ProjectWorkspacePage({
       return;
     }
 
-    if (!analysisLoaded && (activeTab === 'plan' || activeTab === 'analysis')) {
+    if (!analysisLoaded && (activeTab === 'overview' || activeTab === 'plan' || activeTab === 'analysis')) {
       void loadAnalysisData(project.id);
     }
 
@@ -3062,7 +3066,7 @@ export default function ProjectWorkspacePage({
   }, [project?.units]);
 
   useEffect(() => {
-    if (baseCurrency.code) {
+    if (referenceDataLoaded && baseCurrency.code) {
       setProjectPackageDraft((current) =>
         current.currency ? current : { ...current, currency: baseCurrency.code }
       );
@@ -3081,8 +3085,17 @@ export default function ProjectWorkspacePage({
       setDefectLiabilityDraft((current) =>
         current.currency ? current : { ...current, currency: baseCurrency.code }
       );
+      setSiteInstructionDraft((current) =>
+        current.currency ? current : { ...current, currency: baseCurrency.code }
+      );
+      setUnitDraft((current) =>
+        current.currency ? current : { ...current, currency: baseCurrency.code }
+      );
+      setCustomerVariationDraft((current) =>
+        current.currency ? current : { ...current, currency: baseCurrency.code }
+      );
     }
-  }, [baseCurrency.code]);
+  }, [baseCurrency.code, referenceDataLoaded]);
 
   const flat = useMemo(
     () => flatten(project?.workItems || []),
@@ -5610,19 +5623,26 @@ export default function ProjectWorkspacePage({
       () => projectService.deleteProjectCommissioningItem(commissioningItemId),
       'Commissioning item deleted'
     );
+  const resetHandoverEditor = () => {
+    setEditingHandoverItemId(null);
+    setHandoverDraft(current => ({ ...handoverItemInit, projectUnitId: current.projectUnitId,
+      projectUnitHandoverBatchId: current.projectUnitHandoverBatchId }));
+  };
+  const editHandoverItem = (item: ProjectHandoverItemDto) => {
+    setEditingHandoverItemId(item.id);
+    setHandoverDraft({ title: item.title, handoverType: item.handoverType, status: item.status,
+      projectUnitId: item.projectUnitId, projectUnitHandoverBatchId: item.projectUnitHandoverBatchId,
+      responsibleParty: item.responsibleParty, referenceNumber: item.referenceNumber,
+      targetDate: item.targetDate?.slice(0, 10), completedDate: item.completedDate?.slice(0, 10),
+      sortOrder: item.sortOrder, notes: item.notes });
+  };
   const addHandoverItem = () =>
     act(
-      () =>
-        projectService
-          .addProjectHandoverItem(getProjectId(), handoverDraft)
-          .then(() => Promise.resolve()),
-      'Handover item added',
-      () =>
-        setHandoverDraft((current) => ({
-          ...handoverItemInit,
-          projectUnitId: current.projectUnitId,
-          projectUnitHandoverBatchId: current.projectUnitHandoverBatchId,
-        }))
+      () => (editingHandoverItemId
+        ? projectService.updateProjectHandoverItem(editingHandoverItemId, handoverDraft)
+        : projectService.addProjectHandoverItem(getProjectId(), handoverDraft)).then(() => undefined),
+      editingHandoverItemId ? 'Handover item updated' : 'Handover item added',
+      resetHandoverEditor
     );
   const addProjectUnitHandoverBatch = (
     dto: CreateProjectUnitHandoverBatchDto
@@ -6342,6 +6362,9 @@ export default function ProjectWorkspacePage({
             onDeleteHandoverBatch={deleteProjectUnitHandoverBatch}
             onAddCommissioningItem={addCommissioningItem}
             onDeleteCommissioningItem={deleteCommissioningItem}
+            editingHandoverItemId={editingHandoverItemId}
+            onEditHandoverItem={editHandoverItem}
+            onCancelHandoverEdit={resetHandoverEditor}
             onAddHandoverItem={addHandoverItem}
             onDeleteHandoverItem={deleteHandoverItem}
           />

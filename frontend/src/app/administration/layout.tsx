@@ -14,6 +14,10 @@ export default function AdministrationLayout({ children }: AdministrationLayoutP
   let requiredPermissions: string[] | undefined;
   if (pathname.startsWith('/administration/finance')) {
     requiredPermissions = ['Finance.Admin'];
+  } else if (/^\/administration\/project-management\/(quantity-survey-config|quantity-survey-catalogues)(\/|$)/.test(pathname)) {
+    requiredPermissions = ['quantity-survey.configuration.read'];
+  } else if (/^\/administration\/project-management\/quantity-survey-rate-library(\/|$)/.test(pathname)) {
+    requiredPermissions = ['quantity-survey.workspace.read'];
   } else if (pathname.startsWith('/administration/project-management')) {
     requiredPermissions = ['admin.project-management'];
   } else if (

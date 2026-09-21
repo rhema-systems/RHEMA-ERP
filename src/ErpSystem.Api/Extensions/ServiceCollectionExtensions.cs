@@ -1620,6 +1620,9 @@ services.AddScoped<ErpSystem.Core.Interfaces.Projects.IProjectCatalogRepository,
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.SubmitJournalEntries,
                         FinancePermissions.WorkflowCancel)))
+                .AddPolicy(FinancePermissionPolicyMap.ProjectCurrencyLookupPolicy, policy =>
+                    policy.RequireAuthenticatedUser().Requirements.Add(new PermissionRequirement(
+                        FinancePermissions.ViewFinance, "project.access")))
                 .AddPolicy(FinancePermissions.ViewTenderPaymentJournalPolicy, policy =>
                     policy.Requirements.Add(new PermissionRequirement(
                         FinancePermissions.ViewFinance,

@@ -1,7 +1,7 @@
 'use client';
 import { ProcurementControlAccordion } from '@/components/procurement/ProcurementControlAccordion';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   CheckCircle2,
@@ -85,6 +85,7 @@ export function ContractActivationGate({
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [reason, setReason] = useState('');
   const [decisionComment, setDecisionComment] = useState('');
   const [contractorSignatory, setContractorSignatory] = useState('');
@@ -126,8 +127,7 @@ export function ContractActivationGate({
   );
   const failedChecks = overview?.checks.filter((check) => checkStatus(check.status) === 'Failed') ?? [];
   const requiredEvidenceKeys = overview?.requiredEvidenceKeys ?? [];
-  const allEvidenceSelected = requiredEvidenceKeys.length > 0 &&
-    requiredEvidenceKeys.every((key) => selectedDocuments[key]);
+  const allEvidenceSelected = requiredEvidenceKeys.every((key) => selectedDocuments[key]);
 
   const refreshAfterMutation = async () => {
     await Promise.all([load(), Promise.resolve(onContractChanged())]);
@@ -139,6 +139,7 @@ export function ContractActivationGate({
       return;
     }
     if (!overview || !reason.trim() || !allEvidenceSelected) return;
+    setActionError(null);
     setBusy(true);
     try {
       await contractService.submitActivation(contractId, {
@@ -165,7 +166,9 @@ export function ContractActivationGate({
       setSelectedDocuments({});
       await refreshAfterMutation();
     } catch (submitError) {
-      toast.error(getProcurementProblemMessage(submitError, 'Activation submission failed.'));
+      const message = getProcurementProblemMessage(submitError, 'Activation submission failed.');
+      setActionError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -177,6 +180,7 @@ export function ContractActivationGate({
       return;
     }
     if (!current || !decisionComment.trim()) return;
+    setActionError(null);
     setBusy(true);
     try {
       await contractService.decideActivation(
@@ -189,7 +193,9 @@ export function ContractActivationGate({
       setDecisionComment('');
       await refreshAfterMutation();
     } catch (decisionError) {
-      toast.error(getProcurementProblemMessage(decisionError, 'Activation decision failed.'));
+      const message = getProcurementProblemMessage(decisionError, 'Activation decision failed.');
+      setActionError(message);
+      toast.error(message);
     } finally {
       setBusy(false);
     }
@@ -201,6 +207,7 @@ export function ContractActivationGate({
       return;
     }
     if (!current || !contractorSignatory.trim() || !activationComment.trim()) return;
+    setActionError(null);
     setBusy(true);
     try {
       await contractService.applyActivation(
@@ -214,7 +221,9 @@ export function ContractActivationGate({
       setActivationComment('');
       await refreshAfterMutation();
     } catch (activationError) {
-      toast.error(getProcurementProblemMessage(activationError, 'Contract activation failed.'));
+      const message = getProcurementProblemMessage(activationError, 'Contract activation failed.');
+      setActionError(message);
+      toast.error(message);
       await load();
     } finally {
       setBusy(false);
@@ -254,6 +263,7 @@ export function ContractActivationGate({
 
   return (
     <div className="space-y-4" data-testid="contract-activation-gate">
+      {actionError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">{actionError}</div>}
       <ProcurementControlAccordion
         title="Contract approval and activation gate"
         summary={activationComplete ? 'Contract activated' : `${overview.checks.length} activation checks`}
@@ -303,8 +313,9 @@ export function ContractActivationGate({
               Submit controlled activation
             </CardTitle>
             <CardDescription>
-              Select a clean document already registered against this contract in the central DMS
-              for every configured requirement.
+              {requiredEvidenceKeys.length > 0
+                ? 'Select a clean document already registered against this contract in the central DMS for every configured requirement.'
+                : 'No supporting documents are required for this submission.'}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -313,7 +324,7 @@ export function ContractActivationGate({
                 Resolve the failed server checks before submission.
               </div>
             )}
-            {dmsDocuments.length === 0 && (
+            {requiredEvidenceKeys.length > 0 && dmsDocuments.length === 0 && (
               <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
                 Upload the required contract evidence in the Documents tab first. New uploads are
                 malware-scanned and registered in the central DMS.

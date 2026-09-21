@@ -3356,6 +3356,7 @@ public class ProjectContractLookupDto
     public Guid Id { get; set; }
     public string ContractNumber { get; set; } = string.Empty;
     public string ContractTitle { get; set; } = string.Empty;
+    public string ContractType { get; set; } = string.Empty;
     public Guid BusinessPartnerId { get; set; }
     public string BusinessPartnerName { get; set; } = string.Empty;
     public string Status { get; set; } = string.Empty;

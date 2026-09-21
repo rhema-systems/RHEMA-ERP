@@ -134,7 +134,7 @@ public sealed class QuantitySurveyStatutoryReportService(
 
     private async Task<List<ReportRow>> VariationLogAsync(ProjectDetailDto project, CancellationToken token)
     {
-        var variations = await db.ProjectVariationOrders.AsNoTracking().Where(value =>
+        var variations = await db.ProjectVariationOrders.AsNoTracking().Include(value => value.RevisedBoqVersion).Where(value =>
             value.TenantId == currentUser.TenantId && value.ProjectId == project.Id && !value.IsDeleted)
             .OrderByDescending(value => value.RequestedDate).ToListAsync(token);
         var contracts = await ContractsAsync(variations.Where(value => value.ContractId.HasValue).Select(value => value.ContractId!.Value), token);
@@ -144,7 +144,7 @@ public sealed class QuantitySurveyStatutoryReportService(
             ("Status", value.Status), ("RequestedDate", value.RequestedDate), ("ApprovedDate", value.ApprovedDate),
             ("Currency", value.Currency), ("EstimatedAmount", value.EstimatedAmount), ("ApprovedAmount", value.ApprovedAmount),
             ("BudgetImpact", value.BudgetImpactAmount), ("ForecastImpact", value.ForecastImpactAmount),
-            ("ScheduleImpactDays", value.ScheduleImpactDays), ("ApplicationStatus", value.DownstreamApplicationStatus)))).ToList();
+            ("ScheduleImpactDays", value.ScheduleImpactDays), ("ApplicationStatus", QuantitySurveyVariationService.ResolveApplicationStatus(value))))).ToList();
     }
 
     private async Task<List<ReportRow>> FinalAccountAsync(ProjectDetailDto project, CancellationToken token)

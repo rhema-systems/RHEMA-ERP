@@ -8,6 +8,7 @@ import { Progress } from '@/components/ui/progress';
 import { ArrowLeft, ArrowRight, Save, FileText, Package, Upload, DollarSign, Users, CheckCircle2, ClipboardList } from 'lucide-react';
 import { toast } from 'sonner';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
+import { purchasingService, type PurchaseRequisitionDetailDto } from '@/services/purchasingService';
 import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { buildUpdateTenderDto } from '@/lib/tender-form-payload';
 import { getTenderScheduleError } from '@/lib/tender-schedule';
@@ -43,6 +44,7 @@ export default function EditTenderPage() {
   const [saving, setSaving] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
   const [tender, setTender] = useState<TenderDetailDto | null>(null);
+  const [sourceRequisition, setSourceRequisition] = useState<PurchaseRequisitionDetailDto | null>(null);
   const [showConfirmDialog, setShowConfirmDialog] = useState(false);
 
   const [formData, setFormData] = useState<TenderFormData>({
@@ -111,6 +113,10 @@ export default function EditTenderPage() {
       setLoading(true);
       const data = await tenderService.getTenderById(tenderId);
       setTender(data);
+      // Reuse persisted lineage on edit, including when no query string is present.
+      setSourceRequisition(data.sourcePurchaseRequisitionId
+        ? await purchasingService.getPurchaseRequisitionById(data.sourcePurchaseRequisitionId)
+        : null);
 
       // Parse document requirements
       let documentRequirements: DocumentRequirement[] = [];
@@ -392,7 +398,9 @@ export default function EditTenderPage() {
   const renderStepContent = () => {
     switch (currentStep) {
       case 1:
-        return <BasicInformation formData={formData} updateFormData={updateFormData} />;
+        return <BasicInformation formData={formData} updateFormData={updateFormData}
+          procurementCategory={sourceRequisition?.linkage?.procurementCategory}
+          sourceCurrency={sourceRequisition?.currency} />;
       case 2:
         return <TenderLots formData={formData} updateFormData={updateFormData} tenderId={tenderId} />;
       case 3:
@@ -404,7 +412,7 @@ export default function EditTenderPage() {
       case 6:
         return <TenderInvitations formData={formData} updateFormData={updateFormData} tenderId={tenderId} fromRequisitionId={fromRequisitionId} />;
       case 7:
-        return <TenderReview formData={formData} onSubmit={handleSubmit} loading={saving} tenderDocuments={tender?.documents || []} />;
+        return <TenderReview formData={formData} onSubmit={handleSubmit} loading={saving} buttonText="Save Tender" tenderDocuments={tender?.documents || []} />;
       default:
         return null;
     }

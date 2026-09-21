@@ -26,6 +26,8 @@ const externalRoot = (projectId: string) => `/projects/external/my-projects/${pr
 export const quantitySurveyContractClaimService = {
   workspace: (projectId: string, external = false) => apiService.get<ContractClaimWorkspace>(external ? externalRoot(projectId) : root, external ? undefined : { projectId }),
   get: (projectId: string, id: string, external = false) => apiService.get<ContractClaim>(external ? `${externalRoot(projectId)}/${id}` : `${root}/${id}`),
+  save: (projectId: string, request: object, external = false) => apiService.put<ContractClaim>(external ? externalRoot(projectId) : `${root}?projectId=${encodeURIComponent(projectId)}`, request),
+  submit: (projectId: string, id: string, request: ClaimAction, external = false) => apiService.post<ContractClaim>(external ? `${externalRoot(projectId)}/${id}/submit` : `${root}/${id}/submit`, request),
   saveExternal: (projectId: string, request: object) => apiService.put<ContractClaim>(externalRoot(projectId), request),
   uploadEvidence: (projectId: string, id: string, clientRequestId: string, title: string, file: File, external = false) => {
     const form = new FormData(); form.append('clientRequestId', clientRequestId); form.append('title', title); form.append('file', file, file.name);

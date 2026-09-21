@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   CheckCircle2,
   Download,
@@ -19,6 +19,7 @@ import {
   Dialog,
   DialogContent,
   DialogHeader,
+  DialogDescription,
   DialogTitle,
   DialogTrigger,
 } from '@/components/ui/dialog';
@@ -32,6 +33,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { CentralDocumentViewerDialog, type CentralDocumentViewerFile } from '@/components/document-management/CentralDocumentViewerDialog';
 import { useAuth } from '@/hooks/use-auth';
 import { getQuantitySurveyWorkspaceAccess } from '@/lib/quantity-survey-workspace-access';
 import {
@@ -66,14 +68,6 @@ const money = (value: number, currency: string) =>
     currency: currency || 'GHS',
     maximumFractionDigits: 2,
   }).format(value || 0);
-const download = (blob: Blob, fileName: string) => {
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = fileName;
-  anchor.click();
-  URL.revokeObjectURL(url);
-};
 
 export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
   const { hasPermission } = useAuth();
@@ -86,8 +80,15 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
     {}
   );
   const [open, setOpen] = useState(false);
+  const [pdfPreview, setPdfPreview] = useState<CentralDocumentViewerFile | null>(null);
+  const [preparedPdf, setPreparedPdf] = useState<{ url: string; fileName: string; certificateId: string } | null>(null);
+  const [preparingPdf, setPreparingPdf] = useState(false);
+  useEffect(() => () => { if (preparedPdf) URL.revokeObjectURL(preparedPdf.url); }, [preparedPdf]);
+  useEffect(() => { if (!open) setPreparedPdf(null); }, [open, preparedPdf]);
+  useEffect(() => { if (!open) setPdfPreview(null); }, [open]);
   const [loading, setLoading] = useState(false);
   const [working, setWorking] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
   const [lookups, setLookups] = useState<PaymentCertificateLookups>({
     eligibleValuations: [],
     eligibleAdvanceRecoveries: [],
@@ -188,14 +189,13 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
     message: string
   ) => {
     setWorking(true);
+    setActionError(null);
     try {
       await complete(await action(), message);
     } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : 'Payment-certificate action failed'
-      );
+      const message = error instanceof Error ? error.message : 'Payment-certificate action failed';
+      setActionError(message);
+      toast.error(message);
     } finally {
       setWorking(false);
     }
@@ -271,22 +271,23 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
   };
   const exportDocument = async () => {
     if (!selected) return;
+    setPreparingPdf(true);
     try {
-      download(
-        await service.document(selected.id),
-        `${selected.certificateNumber || 'payment-certificate'}.pdf`
-      );
+      const blob = await service.document(selected.id);
+      setPreparedPdf({ url: URL.createObjectURL(blob), certificateId: selected.id,
+        fileName: `${selected.certificateNumber || 'payment-certificate'}.pdf` });
     } catch (error) {
       toast.error(
         error instanceof Error
           ? error.message
           : 'Failed to generate certificate PDF'
       );
-    }
+    } finally { setPreparingPdf(false); }
   };
 
   if (!canRead) return null;
   return (
+    <>
     <Dialog
       open={open}
       onOpenChange={(value) => {
@@ -303,7 +304,9 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
       <DialogContent className="max-h-[92vh] max-w-6xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Governed payment certificates</DialogTitle>
+          <DialogDescription>Prepare certificates from approved valuations and follow their review and Finance handoff.</DialogDescription>
         </DialogHeader>
+        {actionError && <div role="alert" className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{actionError}</div>}
         <div className="rounded-md border bg-muted/20 p-3 text-sm text-muted-foreground">
           Certificates originate from independently approved valuations. Policy,
           workflow, template, tax and AP account lineage are selected by the
@@ -404,6 +407,7 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
                     (value) => value.worksheetId === worksheetId
                   )}
                   grossAmount={selectedLookup?.currentGrossAmount || 0}
+                  disabled={!canManage || working}
                 />
                 <Button
                   disabled={!canManage || working || !worksheetId}
@@ -476,7 +480,9 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
                       selected.materialReconciliationId
                   )}
                   grossAmount={selected.grossCertifiedAmount}
-                  disabled={selected.status !== 'Draft'}
+                  disabled={
+                    !canManage || working || selected.status !== 'Draft'
+                  }
                 />
                 <div className="grid gap-2">
                   <Label>Action reason</Label>
@@ -550,11 +556,23 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
                   ) : null}
                   {['Approved', 'Paid'].includes(selected.status) &&
                   canAudit ? (
-                    <Button variant="outline" onClick={exportDocument}>
+                    <>
+                    <Button variant="outline" onClick={() => setPdfPreview({
+                      title: selected.certificateNumber || 'Payment certificate',
+                      fileName: `${selected.certificateNumber || 'payment-certificate'}.pdf`,
+                      contentType: 'application/pdf',
+                      repositoryPath: `/api/quantity-survey/payment-certificates/${encodeURIComponent(selected.id)}/document`,
+                      sourceLabel: 'QS payment certificate',
+                    })}>Preview PDF</Button>
+                    <Button variant="outline" disabled={preparingPdf} onClick={exportDocument}>
                       <Download className="mr-2 h-4 w-4" />
-                      PDF
+                      {preparingPdf ? 'Preparing PDF...' : 'PDF'}
                     </Button>
+                    </>
                   ) : null}
+                  {canAudit && preparedPdf?.certificateId === selected.id && (
+                    <Button variant="outline" asChild><a href={preparedPdf.url} download={preparedPdf.fileName}>Download PDF</a></Button>
+                  )}
                   {canAudit ? (
                     <Button variant="outline" onClick={showHistory}>
                       <History className="mr-2 h-4 w-4" />
@@ -599,6 +617,9 @@ export function QuantitySurveyPaymentCertificateDialog({ projectId }: Props) {
         </div>
       </DialogContent>
     </Dialog>
+    <CentralDocumentViewerDialog file={pdfPreview} open={pdfPreview !== null}
+      onOpenChange={value => { if (!value) setPdfPreview(null); }} enableAnnotations={false} enableSaveCopy />
+    </>
   );
 }
 

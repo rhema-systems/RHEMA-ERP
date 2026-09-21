@@ -628,8 +628,52 @@ public class BusinessPartnerService : IBusinessPartnerService
 
     public async Task<BusinessPartnerLicenseDto> AddLicenseAsync(Guid partnerId, CreateBusinessPartnerLicenseDto dto)
     {
-        await Task.CompletedTask;
-        throw new NotImplementedException("License repository not yet implemented");
+        var tenantId = _currentUserProvider.TenantId;
+        if (!_currentUserProvider.IsAuthenticated || tenantId == Guid.Empty || _currentUserProvider.IsExternalUser ||
+            !(_currentUserProvider.HasRole("SuperAdmin") || _currentUserProvider.HasRole("TenantAdmin")))
+            throw new UnauthorizedAccessException("Only a tenant administrator can maintain contractor licences.");
+        if (dto.LicenseTypeId == Guid.Empty || string.IsNullOrWhiteSpace(dto.LicenseNumber) ||
+            string.IsNullOrWhiteSpace(dto.IssuingAuthority) || dto.IssueDate == default ||
+            dto.IssueDate.Date > DateTime.UtcNow.Date || dto.ExpiryDate?.Date < dto.IssueDate.Date)
+            throw new InvalidOperationException("A licence type, number, issuing authority and valid issue/expiry dates are required.");
+        var partner = await _unitOfWork.Repository<BusinessPartner>().FirstOrDefaultAsync(p =>
+            p.Id == partnerId && p.TenantId == tenantId && !p.IsDeleted);
+        var type = await _unitOfWork.Repository<LicenseType>().FirstOrDefaultAsync(t =>
+            t.Id == dto.LicenseTypeId && t.TenantId == tenantId && !t.IsDeleted && t.IsActive);
+        if (partner is null || type is null)
+            throw new InvalidOperationException("The partner and an active licence type must belong to the current tenant.");
+        return await _unitOfWork.ExecuteInStrategyAsync(async () =>
+        {
+            await _unitOfWork.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+            try
+            {
+                await _unitOfWork.AcquireTransactionLockAsync($"partner-licences:{tenantId:N}:{partnerId:N}");
+                var repository = _unitOfWork.Repository<BusinessPartnerLicense>();
+                if (await repository.ExistsAsync(l => l.TenantId == tenantId && l.BusinessPartnerId == partnerId &&
+                    !l.IsDeleted && l.LicenseTypeId == dto.LicenseTypeId && l.LicenseNumber == dto.LicenseNumber.Trim()))
+                    throw new InvalidOperationException("This licence is already recorded for the partner.");
+                var licence = new BusinessPartnerLicense
+                {
+                    Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partnerId,
+                    LicenseTypeId = type.Id, LicenseNumber = dto.LicenseNumber.Trim(),
+                    IssuingAuthority = dto.IssuingAuthority.Trim(), IssueDate = dto.IssueDate.Date,
+                    ExpiryDate = dto.ExpiryDate?.Date,
+                    Status = dto.ExpiryDate?.Date < DateTime.UtcNow.Date ? "Expired" : "Active",
+                    CreatedById = _currentUserProvider.UserId, CreatedBy = _currentUserProvider.Username
+                };
+                await repository.AddAsync(licence);
+                await _unitOfWork.SaveChangesAsync();
+                await _unitOfWork.CommitAsync();
+                return new BusinessPartnerLicenseDto
+                {
+                    Id = licence.Id, BusinessPartnerId = partnerId, LicenseTypeId = type.Id,
+                    LicenseTypeName = type.LicenseName, LicenseNumber = licence.LicenseNumber,
+                    IssuingAuthority = licence.IssuingAuthority, IssueDate = licence.IssueDate,
+                    ExpiryDate = licence.ExpiryDate, Status = licence.Status
+                };
+            }
+            catch { await _unitOfWork.RollbackAsync(); _unitOfWork.ClearTrackedChanges(); throw; }
+        });
     }
 
     public async Task<BusinessPartnerLicenseDto> UpdateLicenseAsync(Guid partnerId, Guid licenseId, CreateBusinessPartnerLicenseDto dto)

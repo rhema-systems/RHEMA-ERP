@@ -2039,6 +2039,23 @@ public class WorkflowEngine : IWorkflowEngine
             };
         }
 
+        // A missing transition must not bypass a configured final approval. Retain
+        // compatibility with legacy definitions that never declared an end step.
+        var definitionSteps = (await _workflowStepRepository.GetByWorkflowDefinitionAsync(instance.WorkflowDefinitionId))
+            .Where(step => !step.IsDeleted).ToList();
+        if (definitionSteps.Any(step => step.IsEndStep)
+            && !definitionSteps.Any(step => step.Id == instance.CurrentStepId && step.IsEndStep))
+        {
+            return new WorkflowExecutionResult
+            {
+                Success = false,
+                Status = instance.Status,
+                WorkflowInstanceId = instance.Id,
+                CurrentStepId = instance.CurrentStepId,
+                Message = "The workflow has not reached its configured end step. Connect the remaining review/approval steps in Administration > Workflow Setup before completing this process."
+            };
+        }
+
         instance.Status = WorkflowInstanceStatus.Completed;
         instance.CompletedDate = DateTime.UtcNow;
         await _workflowInstanceRepository.UpdateAsync(instance);

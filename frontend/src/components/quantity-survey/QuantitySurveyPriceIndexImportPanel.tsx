@@ -180,6 +180,7 @@ export function QuantitySurveyPriceIndexImportPanel({
     mutationFn: async () => {
       const selected = activeFamilies.find((value) => value.id === familyId);
       if (!selected) throw new Error('Select a controlled index family first.');
+      if (!importFormat) throw new Error('Select an import format first.');
       const blob = await quantitySurveyPriceIndexImportService.template(
         selected.id
       );
@@ -316,7 +317,7 @@ export function QuantitySurveyPriceIndexImportPanel({
   const selectedFamily = activeFamilies.find((value) => value.id === familyId);
   const expectedExtension = importFormat === 'CSV' ? '.csv' : '.xlsx';
   const manualImportSupported = ['Controlled Excel', 'CSV'].includes(
-    importFormat
+    importFormat ?? ''
   );
   const stageValid = Boolean(
     manualImportSupported &&

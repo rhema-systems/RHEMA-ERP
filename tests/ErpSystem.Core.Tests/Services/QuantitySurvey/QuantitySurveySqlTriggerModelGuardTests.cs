@@ -8,6 +8,18 @@ namespace ErpSystem.Core.Tests.Services.QuantitySurvey;
 public sealed class QuantitySurveySqlTriggerModelGuardTests
 {
     [Theory]
+    [InlineData("ProjectBoqVersions")]
+    [InlineData("ProjectBoqVersionLines")]
+    [InlineData("ProjectBoqRemeasurementRevisions")]
+    [InlineData("ProjectBoqRemeasurementLines")]
+    [InlineData("ProjectBoqRemeasurementSources")]
+    [InlineData("QuantitySurveyRateBuildUps")]
+    [InlineData("QuantitySurveyRateBuildUpLines")]
+    [InlineData("QuantitySurveyEstimateVersions")]
+    [InlineData("QuantitySurveyEstimateLines")]
+    [InlineData("QuantitySurveyEstimateAssumptions")]
+    [InlineData("QuantitySurveyEstimateMarkups")]
+    [InlineData("QuantitySurveyEstimateRevisions")]
     [InlineData("QuantitySurveyMeasurementSheets")]
     [InlineData("QuantitySurveyMeasurementLines")]
     [InlineData("QuantitySurveyMeasurementAttachments")]
