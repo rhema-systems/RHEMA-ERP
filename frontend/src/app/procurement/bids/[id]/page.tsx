@@ -54,6 +54,7 @@ import { ConfirmationDialog } from '@/components/ui/confirmation-dialog';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { QuantitySurveyTenderBoqVettingPanel } from '@/components/quantity-survey/QuantitySurveyTenderBoqVettingPanel';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
 import { useAuth } from '@/hooks/use-auth';
 import { getProcurementProblemMessage } from '@/lib/procurement-tender-header-actions';
 import { tenderService, type TenderDetailDto } from '@/services/tenderService';
@@ -495,7 +496,7 @@ export default function BidDetailPage() {
   const [opening, setOpening] = useState(false);
   const [showOpenDialog, setShowOpenDialog] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
-  const canVetTenderBoq = hasPermission('quantity-survey.transactions.approve');
+  const canVetTenderBoq = isQsOptionalFeatureEnabled('tender-exchange') && hasPermission('quantity-survey.transactions.approve');
   const canVerifyTenderPayment = hasPermission(
     TENDER_PAYMENT_VERIFY_PERMISSION
   );

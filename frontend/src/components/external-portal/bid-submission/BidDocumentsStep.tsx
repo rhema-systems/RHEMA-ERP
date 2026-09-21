@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
+import { parseBidDocumentRequirements } from './documentRequirements';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -31,81 +32,13 @@ export default function BidDocumentsStep({
   const [uploading, setUploading] = useState<string | null>(null);
   const [selectedFiles, setSelectedFiles] = useState<Record<string, File>>({});
 
-  // Parse tender requirements or use default
-  const documentRequirements = useMemo<TenderDocumentRequirement[]>(() => {
-    if (tender?.requiredDocuments) {
-      try {
-        return JSON.parse(tender.requiredDocuments) as TenderDocumentRequirement[];
-      } catch (error) {
-        console.error('Error parsing tender requirements:', error);
-      }
+  const { documentRequirements, requirementsError } = useMemo(() => {
+    try {
+      return { documentRequirements: parseBidDocumentRequirements(tender?.requiredDocuments), requirementsError: '' };
+    } catch (error) {
+      return { documentRequirements: [] as TenderDocumentRequirement[], requirementsError: (error as Error).message };
     }
-
-    // Default requirements if tender doesn't specify
-    return [
-      {
-        documentType: 'CompanyRegistration',
-        documentName: 'Company Registration Certificate',
-        isRequired: true,
-        description: 'Valid company registration certificate',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-      {
-        documentType: 'TaxClearance',
-        documentName: 'Tax Clearance Certificate',
-        isRequired: true,
-        description: 'Current tax clearance certificate',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-      {
-        documentType: 'FinancialStatements',
-        documentName: 'Financial Statements (Last 2 Years)',
-        isRequired: true,
-        description: 'Audited financial statements for the last 2 years',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF'
-      },
-      {
-        documentType: 'CompanyProfile',
-        documentName: 'Company Profile',
-        isRequired: false,
-        description: 'Company profile and capabilities',
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,DOC,DOCX'
-      },
-      {
-        documentType: 'ProductBrochures',
-        documentName: 'Product Brochures/Catalogs',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF'
-      },
-      {
-        documentType: 'QualityCertifications',
-        documentName: 'Quality Certifications (ISO, etc.)',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-      {
-        documentType: 'References',
-        documentName: 'References/Past Performance',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,DOC,DOCX'
-      },
-      {
-        documentType: 'Insurance',
-        documentName: 'Insurance Certificates',
-        isRequired: false,
-        maxFileSizeMB: 20,
-        allowedFileTypes: 'PDF,JPG,PNG'
-      },
-    ];
-  }, [tender]);
-
+  }, [tender?.requiredDocuments]);
   const handleFileSelect = (documentType: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -210,6 +143,8 @@ export default function BidDocumentsStep({
         </CardHeader>
         <CardContent>
           <div className="space-y-4">
+            {requirementsError ? <p role="alert" className="text-destructive">{requirementsError}</p>
+              : documentRequirements.length === 0 && <p>This tender has no supporting document requirements. You can continue to review your bid.</p>}
             {documentRequirements.map((doc) => {
               const uploadedDoc = getUploadedDocument(doc.documentType);
               const selectedFile = selectedFiles[doc.documentType];
@@ -333,7 +268,7 @@ export default function BidDocumentsStep({
       </Card>
 
       {/* Upload Guidelines */}
-      <Card className="bg-yellow-50 border-yellow-200">
+      {documentRequirements.length > 0 && <Card className="bg-yellow-50 border-yellow-200">
         <CardHeader>
           <CardTitle className="text-yellow-900">Document Upload Guidelines</CardTitle>
         </CardHeader>
@@ -348,7 +283,7 @@ export default function BidDocumentsStep({
             <li>• Required documents: {documentRequirements.filter(d => d.isRequired).length} of {documentRequirements.length}</li>
           </ul>
         </CardContent>
-      </Card>
+      </Card>}
 
       {/* Note about saving draft first */}
       {!bidId && (

@@ -721,7 +721,7 @@ public class PurchaseRequisition : TenantEntity
     [MaxLength(100)]
     public string? Department { get; set; }
 
-    /// <summary>Owning organization unit for requisition routing.</summary>
+    /// <summary>Authoritative owner from HR's Organization Structure → Level → Unit hierarchy.</summary>
     public Guid? OrganizationUnitId { get; set; }
 
     [MaxLength(100)]

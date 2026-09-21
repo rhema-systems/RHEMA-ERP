@@ -23,10 +23,11 @@ import { QuantitySurveyMaterialReconciliationDialog } from '@/components/quantit
 import { QuantitySurveyVariationDialog } from '@/components/quantity-survey/QuantitySurveyVariationDialog';
 import { QuantitySurveyContractClaimsWorkspace } from '@/components/quantity-survey/QuantitySurveyContractClaimsWorkspace';
 import { QuantitySurveyDayworkWorkspace } from '@/components/quantity-survey/QuantitySurveyDayworkWorkspace';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
 import { QuantitySurveySubcontractWorkspace } from '@/components/quantity-survey/QuantitySurveySubcontractWorkspace';
 import { useAuth } from '@/hooks/use-auth';
 import { getQuantitySurveyWorkspaceAccess } from '@/lib/quantity-survey-workspace-access';
-import type { ContractDto } from '@/services/contractService';
+import type { ProjectContractLookupDto } from '@/services/projectService';
 import type {
   CreateProjectExtensionOfTimeDto,
   CreateProjectInterimValuationDto,
@@ -45,7 +46,7 @@ type Props = {
   project: ProjectDetailDto;
   phases: ProjectPhaseDto[];
   packages: ProjectPackageDto[];
-  activeContracts: ContractDto[];
+  activeContracts: ProjectContractLookupDto[];
   currencyOptions: string[];
   variationOrderDraft: CreateProjectVariationOrderDto;
   setVariationOrderDraft: Dispatch<
@@ -117,7 +118,7 @@ const flattenPhases = (
     ...flattenPhases(phase.children || [], depth + 1),
   ]);
 
-const contractLabel = (contract: ContractDto) =>
+const contractLabel = (contract: ProjectContractLookupDto) =>
   [contract.contractNumber, contract.contractTitle]
     .filter(Boolean)
     .join(' - ') ||
@@ -131,14 +132,14 @@ const normalizeId = (value?: string | null) =>
   (value || '').trim().toLowerCase();
 
 export const usesCivilWorksEotWorkflow = (
-  contracts: ContractDto[],
+  contracts: ProjectContractLookupDto[],
   contractId?: string | null
 ) => {
   const normalizedContractId = normalizeId(contractId);
   if (!normalizedContractId) return false;
 
   return contracts.some(
-    contract =>
+    (contract) =>
       normalizeId(contract.id) === normalizedContractId &&
       contract.contractType?.trim().toLowerCase() === 'works'
   );
@@ -475,7 +476,7 @@ export function ProjectCommercialAdminTab(props: Props) {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        {isQsOptionalFeatureEnabled('final-accounts') && <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">Final Account</div>
             <div className="text-2xl font-semibold">
@@ -490,7 +491,7 @@ export function ProjectCommercialAdminTab(props: Props) {
               {formatCatalogLabel(project.finalAccount?.status || 'NotSet')}
             </div>
           </CardContent>
-        </Card>
+        </Card>}
         <Card>
           <CardContent className="p-4">
             <div className="text-sm text-muted-foreground">Contracts</div>
@@ -505,15 +506,40 @@ export function ProjectCommercialAdminTab(props: Props) {
         </Card>
       </div>
 
-      <Card data-testid="qs-retention-control-entry">
+      <nav
+        aria-label="QS commercial process"
+        className="flex flex-wrap gap-2 rounded-lg border p-3"
+      >
+        {[
+          ['qs-valuations', '1. Valuations'],
+          ['qs-certificates', '2. Certificates and payments'],
+          ['qs-changes', '3. Variations and claims'],
+          ['qs-retention', '4. Retention and closeout'],
+        ].map(([id, label]) => (
+          <Button key={id} variant="outline" size="sm" asChild>
+            <a href={`#${id}`}>{label}</a>
+          </Button>
+        ))}
+      </nav>
+
+      <Card
+        id="qs-retention"
+        className="scroll-mt-20"
+        data-testid="qs-retention-control-entry"
+      >
         <CardHeader>
           <CardTitle>Retention and closeout controls</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
           <p className="text-sm text-muted-foreground">
-            Retention releases use the shared Works contract control, DEC-009
-            policy, workflow approval and Finance reconciliation ledger.
+            Open the linked Works contract to review retention, approved
+            releases and Finance payment reconciliation.
           </p>
+          {!hasPermission('procurement.records.read') && (
+            <p className="text-sm text-muted-foreground">
+              This stage is handled by Procurement. Use an account with Procurement contract access to open these records.
+            </p>
+          )}
           {worksContracts.length > 0 ? (
             <div className="flex flex-wrap gap-2">
               {worksContracts.map((contract) => (
@@ -864,26 +890,29 @@ export function ProjectCommercialAdminTab(props: Props) {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="qs-changes" className="scroll-mt-20">
         <CardHeader>
           <CardTitle>Variations and change orders</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center justify-between gap-3">
           <p className="max-w-3xl text-sm text-muted-foreground">
-            Prepare site-instruction and change-request valuations against
-            controlled Approved BoQ lines, retain clean central-DMS evidence,
-            and route the result through the configured QS workflow.
+            Record the reason, cost and time impact of a change, attach
+            supporting documents and submit it for approval.
           </p>
           <QuantitySurveyVariationDialog projectId={project.id} />
         </CardContent>
       </Card>
 
-      <QuantitySurveyDayworkWorkspace projectId={project.id} />
+      {isQsOptionalFeatureEnabled('daywork') && (
+        <QuantitySurveyDayworkWorkspace projectId={project.id} />
+      )}
       <QuantitySurveyContractClaimsWorkspace projectId={project.id} />
-      <QuantitySurveySubcontractWorkspace projectId={project.id} />
+      {isQsOptionalFeatureEnabled('subcontracts') && (
+        <QuantitySurveySubcontractWorkspace projectId={project.id} />
+      )}
 
       <div className="grid gap-6 xl:grid-cols-2">
-        <Card>
+        <Card id="qs-valuations" className="scroll-mt-20">
           <CardHeader>
             <CardTitle>Interim Valuations</CardTitle>
           </CardHeader>
@@ -1334,11 +1363,13 @@ export function ProjectCommercialAdminTab(props: Props) {
             </div>
           </CardContent>
         </Card>
-        <Card>
+        <Card id="qs-certificates" className="scroll-mt-20">
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <CardTitle>Payment Certificates</CardTitle>
             <div className="flex flex-wrap gap-2">
-              <QuantitySurveyAdvanceRecoveryDialog projectId={project.id} />
+              {isQsOptionalFeatureEnabled('advance-recovery') && (
+                <QuantitySurveyAdvanceRecoveryDialog projectId={project.id} />
+              )}
               <QuantitySurveyMaterialReconciliationDialog
                 projectId={project.id}
               />
@@ -1705,8 +1736,8 @@ export function ProjectCommercialAdminTab(props: Props) {
                 <Label>Contract</Label>
                 <Select
                   value={extensionOfTimeDraft.contractId || '__unlinked__'}
-                  onValueChange={value =>
-                    setExtensionOfTimeDraft(current => ({
+                  onValueChange={(value) =>
+                    setExtensionOfTimeDraft((current) => ({
                       ...current,
                       contractId: value === '__unlinked__' ? undefined : value,
                     }))
@@ -1716,8 +1747,10 @@ export function ProjectCommercialAdminTab(props: Props) {
                     <SelectValue placeholder="Select contract" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__unlinked__">No linked contract</SelectItem>
-                    {activeContracts.map(contract => (
+                    <SelectItem value="__unlinked__">
+                      No linked contract
+                    </SelectItem>
+                    {activeContracts.map((contract) => (
                       <SelectItem key={contract.id} value={contract.id}>
                         {contractLabel(contract)} ·{' '}
                         {contract.contractType || 'Unspecified type'}
@@ -1960,19 +1993,21 @@ export function ProjectCommercialAdminTab(props: Props) {
             </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle>Final Account</CardTitle>
-          </CardHeader>
-          <CardContent className="flex flex-wrap items-center justify-between gap-3">
-            <p className="max-w-3xl text-sm text-muted-foreground">
-              Reconcile the approved BoQ lineage, contract changes,
-              certificates, deductions, retention, and Finance-owned payments
-              through the governed final-account workflow.
-            </p>
-            <QuantitySurveyFinalAccountDialog projectId={project.id} />
-          </CardContent>
-        </Card>
+        {isQsOptionalFeatureEnabled('final-accounts') && (
+          <Card>
+            <CardHeader>
+              <CardTitle>Final Account</CardTitle>
+            </CardHeader>
+            <CardContent className="flex flex-wrap items-center justify-between gap-3">
+              <p className="max-w-3xl text-sm text-muted-foreground">
+                Reconcile the approved BoQ lineage, contract changes,
+                certificates, deductions, retention, and Finance-owned payments
+                through the governed final-account workflow.
+              </p>
+              <QuantitySurveyFinalAccountDialog projectId={project.id} />
+            </CardContent>
+          </Card>
+        )}
       </div>
     </div>
   );

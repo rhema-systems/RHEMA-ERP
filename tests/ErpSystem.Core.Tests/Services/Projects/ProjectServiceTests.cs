@@ -37,6 +37,42 @@ namespace ErpSystem.Core.Tests.Services.Projects;
 public class ProjectServiceTests
 {
     [Fact]
+    public async Task ContractLookup_ShouldSupplyActiveTenantChoicesToInternalQsWithoutProcurementRoles()
+    {
+        var tenantId = Guid.NewGuid();
+        var fixture = new ProjectServiceFixture(tenantId, Guid.NewGuid());
+        fixture.SetRoles();
+        var partner = new BusinessPartner { Id = Guid.NewGuid(), TenantId = tenantId, PartnerName = "QS test contractor" };
+        fixture.BusinessPartners.Add(partner);
+        var active = new Contract { Id = Guid.NewGuid(), TenantId = tenantId, BusinessPartnerId = partner.Id,
+            ContractNumber = "CTR-QS", ContractTitle = "QS Works", ContractType = "Works", Status = "Active", Currency = "GHS", ContractValue = 10000 };
+        fixture.Contracts.AddRange(new[] { active,
+            new Contract { TenantId = Guid.NewGuid(), Status = "Active", ContractNumber = "OTHER-TENANT" },
+            new Contract { TenantId = tenantId, Status = "Draft", ContractNumber = "DRAFT" },
+            new Contract { TenantId = tenantId, Status = "Active", IsDeleted = true, ContractNumber = "DELETED" } });
+
+        var result = (await fixture.CreateService().GetContractLookupAsync()).Should().ContainSingle().Which;
+        result.Id.Should().Be(active.Id);
+        result.ContractType.Should().Be("Works");
+        result.BusinessPartnerId.Should().Be(partner.Id);
+        result.BusinessPartnerName.Should().Be(partner.PartnerName);
+        result.ContractValue.Should().Be(10000);
+        result.Currency.Should().Be("GHS");
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, true)]
+    public async Task ContractLookup_ShouldRejectAnonymousAndExternalUsers(bool authenticated, bool external)
+    {
+        var fixture = new ProjectServiceFixture(Guid.NewGuid(), Guid.NewGuid());
+        fixture.CurrentUserProvider.SetupGet(x => x.IsAuthenticated).Returns(authenticated);
+        fixture.CurrentUserProvider.SetupGet(x => x.IsExternalUser).Returns(external);
+        var act = () => fixture.CreateService().GetContractLookupAsync();
+        await act.Should().ThrowAsync<UnauthorizedAccessException>();
+    }
+
+    [Fact]
     public async Task CreateProjectAsync_ShouldGenerateCode_ApplyTemplate_AndCreateInitiationSnapshot()
     {
         var tenantId = Guid.NewGuid();
@@ -4620,8 +4656,10 @@ public class ProjectServiceTests
             && item.ChangedFields.Contains("Quantity"));
     }
 
-    [Fact]
-    public async Task SubmitBoqVersionAsync_ShouldUseConfiguredWorkflowAndCreateImmutableApprovedPublication()
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task SubmitBoqVersionAsync_ShouldUseConfiguredWorkflowAndCreateImmutableApprovedPublication(bool includesOriginal)
     {
         var tenantId = Guid.NewGuid();
         var userId = Guid.NewGuid();
@@ -4677,6 +4715,10 @@ public class ProjectServiceTests
         fixture.ProjectBoqItems.Add(line);
         fixture.QuantitySurveyProfiles.Add(profile);
         fixture.QuantitySurveyDecisions.Add(decision);
+        if (!includesOriginal)
+        {
+            decision.ValueJson = decision.ValueJson.Replace("\"original\", ", string.Empty);
+        }
         fixture.WorkflowIntegrationService
             .Setup(service => service.SubmitAsync(
                 QuantitySurveyWorkflowBindingRegistry.Boq,
@@ -4692,6 +4734,7 @@ public class ProjectServiceTests
                 WorkflowOutcome.Approved));
         var service = fixture.CreateService();
         var workspace = await service.GetProjectBoqVersionWorkspaceAsync(project.Id);
+        workspace.AllowedVersionTypes.Should().Contain(QuantitySurveyBoqVersionType.Original);
         var candidate = await service.CreateProjectBoqVersionAsync(project.Id, new CreateProjectBoqVersionDto
         {
             VersionType = QuantitySurveyBoqVersionType.Original,
@@ -5007,6 +5050,7 @@ public class ProjectServiceTests
         public List<WarehouseLocation> WarehouseLocations { get; } = new();
         public List<Tender> Tenders { get; } = new();
         public List<BusinessPartner> BusinessPartners { get; } = new();
+        public List<Contract> Contracts { get; } = new();
         public List<SalesAgreement> SalesAgreements { get; } = new();
         public List<SalesOrder> SalesOrders { get; } = new();
         public List<ApplicationUser> Users { get; } = new();
@@ -5199,6 +5243,12 @@ public class ProjectServiceTests
             _warehouseLocationRepository = CreateRepository(WarehouseLocations);
             _tenderRepository = CreateRepository(Tenders);
             _businessPartnerRepository = CreateRepository(BusinessPartners);
+            UnitOfWork.Setup(x => x.Repository<Contract>()).Returns(CreateRepository(Contracts).Object);
+            // These shared Projects paths also inspect optional Civil controls.
+            UnitOfWork.Setup(x => x.Repository<ProjectCivilDirectTaskControl>())
+                .Returns(CreateRepository(new List<ProjectCivilDirectTaskControl>()).Object);
+            UnitOfWork.Setup(x => x.Repository<ProjectCivilInspectionControl>())
+                .Returns(CreateRepository(new List<ProjectCivilInspectionControl>()).Object);
             _salesAgreementRepository = CreateRepository(SalesAgreements);
             _salesOrderRepository = CreateRepository(SalesOrders);
             _projectPackageRepository = CreateRepository(ProjectPackages);

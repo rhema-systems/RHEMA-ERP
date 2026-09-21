@@ -94,6 +94,7 @@ public partial class ApplicationDbContext
         });
         builder.Entity<QuantitySurveyRateBuildUp>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_QsRateBuildUps_Immutable"));
             entity.Property(value => value.MaterialSubtotal).HasColumnType("decimal(18,6)");
             entity.Property(value => value.DirectCost).HasColumnType("decimal(18,6)");
             entity.Property(value => value.AddOnCost).HasColumnType("decimal(18,6)");
@@ -101,6 +102,7 @@ public partial class ApplicationDbContext
         });
         builder.Entity<QuantitySurveyRateBuildUpLine>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_QsRateBuildUpLines_Immutable"));
             entity.Property(value => value.SourceUnitRate).HasColumnType("decimal(18,6)");
             entity.Property(value => value.InputQuantity).HasColumnType("decimal(18,6)");
             entity.Property(value => value.InputPercentage).HasColumnType("decimal(9,4)");
@@ -110,6 +112,11 @@ public partial class ApplicationDbContext
         });
         builder.Entity<QuantitySurveyEstimateVersion>(entity =>
         {
+            entity.ToTable(table =>
+            {
+                table.HasTrigger("TR_QsEstimateVersions_TenantAndLineageGuard");
+                table.HasTrigger("TR_QsEstimateVersions_ApprovedImmutable");
+            });
             entity.Property(value => value.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.Property(value => value.CurrencyCodeSnapshot).IsUnicode(false);
             entity.Property(value => value.SnapshotHash).IsUnicode(false);
@@ -141,6 +148,11 @@ public partial class ApplicationDbContext
         });
         builder.Entity<QuantitySurveyEstimateLine>(entity =>
         {
+            entity.ToTable(table =>
+            {
+                table.HasTrigger("TR_QsEstimateLines_ParentAndImmutableGuard");
+                table.HasTrigger("TR_QsEstimateLines_LineageGuard");
+            });
             entity.Property(value => value.Quantity).HasColumnType("decimal(18,4)");
             entity.Property(value => value.UnitRate).HasColumnType("decimal(18,6)");
             entity.Property(value => value.LineAmount).HasColumnType("decimal(18,2)");
@@ -158,6 +170,7 @@ public partial class ApplicationDbContext
         });
         builder.Entity<QuantitySurveyEstimateAssumption>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_QsEstimateAssumptions_ParentAndImmutableGuard"));
             entity.Property(value => value.Code).IsUnicode(false);
             entity.HasIndex(value => new { value.TenantId, value.EstimateVersionId, value.Sequence }).IsUnique();
             entity.HasIndex(value => new { value.TenantId, value.EstimateVersionId, value.Code }).IsUnique();
@@ -167,6 +180,7 @@ public partial class ApplicationDbContext
         });
         builder.Entity<QuantitySurveyEstimateMarkup>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_QsEstimateMarkups_ParentAndImmutableGuard"));
             entity.Property(value => value.Percentage).HasColumnType("decimal(9,4)");
             entity.Property(value => value.BasisAmount).HasColumnType("decimal(18,2)");
             entity.Property(value => value.Amount).HasColumnType("decimal(18,2)");
@@ -183,6 +197,7 @@ public partial class ApplicationDbContext
         });
         builder.Entity<QuantitySurveyEstimateRevision>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_QsEstimateRevisions_Immutable"));
             entity.HasIndex(value => new { value.TenantId, value.EstimateVersionId, value.CreatedAt });
             entity.HasIndex(value => new { value.TenantId, value.CorrelationId });
             entity.HasOne(value => value.EstimateVersion).WithMany().HasForeignKey(value => value.EstimateVersionId).OnDelete(DeleteBehavior.Restrict);
@@ -544,7 +559,7 @@ public partial class ApplicationDbContext
                 table.HasCheckConstraint("CK_QsValuationWorksheets_Status", "[Status] IN ('Draft','ContractorSubmitted','UnderQsReview','QsVetted','ConsultantEndorsed','PendingApproval','Approved','Rejected')");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_Approval", "[ApprovalStatus] IN ('Draft','Pending','Approved','Rejected')");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_StateAlignment", "([Status] IN ('Draft','ContractorSubmitted','UnderQsReview','QsVetted','ConsultantEndorsed') AND [ApprovalStatus] = 'Draft') OR ([Status] = 'PendingApproval' AND [ApprovalStatus] = 'Pending') OR ([Status] = 'Approved' AND [ApprovalStatus] = 'Approved') OR ([Status] = 'Rejected' AND [ApprovalStatus] = 'Rejected')");
-                table.HasCheckConstraint("CK_QsValuationWorksheets_Policy", "([ConfigurationProfileId] IS NULL AND [ValuationDecisionId] IS NULL AND [ExternalSubmissionDecisionId] IS NULL AND [ApprovalWorkflowDefinitionId] IS NULL AND [EvidenceMetadataTemplateId] IS NULL AND [PolicyHash] IS NULL) OR ([ConfigurationProfileId] IS NOT NULL AND [ValuationDecisionId] IS NOT NULL AND [ExternalSubmissionDecisionId] IS NOT NULL AND [ApprovalWorkflowDefinitionId] IS NOT NULL AND [EvidenceMetadataTemplateId] IS NOT NULL AND LEN([PolicyHash]) = 64)");
+                table.HasCheckConstraint("CK_QsValuationWorksheets_Policy", "([ConfigurationProfileId] IS NULL AND [ValuationDecisionId] IS NULL AND [ExternalSubmissionDecisionId] IS NULL AND [ApprovalWorkflowDefinitionId] IS NULL AND [EvidenceMetadataTemplateId] IS NULL AND [PolicyHash] IS NULL) OR ([ConfigurationProfileId] IS NOT NULL AND [ValuationDecisionId] IS NOT NULL AND (([ContractorSubmissionRequired] = 0 AND [ConsultantEndorsementRequired] = 0) OR [ExternalSubmissionDecisionId] IS NOT NULL) AND [ApprovalWorkflowDefinitionId] IS NOT NULL AND [EvidenceMetadataTemplateId] IS NOT NULL AND LEN([PolicyHash]) = 64)");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_Lifecycle", "([Status] = 'Draft' AND [WorkflowInstanceId] IS NULL AND [ApprovedAt] IS NULL AND [CertificateReady] = 0) OR ([Status] IN ('ContractorSubmitted','UnderQsReview','QsVetted','ConsultantEndorsed') AND [WorkflowInstanceId] IS NULL AND [ApprovedAt] IS NULL AND [CertificateReady] = 0) OR ([Status] = 'PendingApproval' AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedAt] IS NULL AND [CertificateReady] = 0) OR ([Status] = 'Approved' AND [WorkflowInstanceId] IS NOT NULL AND [ApprovedById] IS NOT NULL AND [ApprovedAt] IS NOT NULL AND [CertificateReady] = 1 AND [CertificateReadyAt] IS NOT NULL) OR ([Status] = 'Rejected' AND [WorkflowInstanceId] IS NOT NULL AND [RejectionReason] IS NOT NULL AND [CertificateReady] = 0)");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_Retention", "[RetentionPercentage] >= 0 AND [RetentionPercentage] <= 100");
                 table.HasCheckConstraint("CK_QsValuationWorksheets_Counts", "[LineCount] > 0");
@@ -1555,6 +1570,7 @@ public partial class ApplicationDbContext
 
         builder.Entity<ProjectBoqVersion>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_ProjectBoqVersions_ImmutablePublished"));
             entity.Property(x => x.RowVersion).IsRowVersion().IsConcurrencyToken();
             entity.Property(x => x.SnapshotHash).IsUnicode(false);
             entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.VersionNumber }).IsUnique();
@@ -1579,6 +1595,7 @@ public partial class ApplicationDbContext
 
         builder.Entity<ProjectBoqVersionLine>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_ProjectBoqVersionLines_ImmutablePublished"));
             entity.HasIndex(x => new { x.TenantId, x.ProjectBoqVersionId, x.LineKey }).IsUnique();
             entity.HasIndex(x => new { x.TenantId, x.ProjectId, x.LineKey });
             entity.HasIndex(x => new { x.TenantId, x.ProjectBoqVersionId, x.SortOrder });
@@ -1594,6 +1611,7 @@ public partial class ApplicationDbContext
 
         builder.Entity<ProjectBoqRemeasurementRevision>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_ProjectBoqRemeasurementRevisions_Guard"));
             entity.Property(value => value.RequestHash).IsUnicode(false);
             entity.Property(value => value.MeasurementSetHash).IsUnicode(false);
             entity.HasIndex(value => new { value.TenantId, value.ProjectBoqVersionId }).IsUnique();
@@ -1611,6 +1629,7 @@ public partial class ApplicationDbContext
 
         builder.Entity<ProjectBoqRemeasurementLine>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_ProjectBoqRemeasurementLines_Guard"));
             entity.HasIndex(value => new { value.TenantId, value.RemeasurementRevisionId, value.BoqLineKey }).IsUnique();
             entity.HasIndex(value => new { value.TenantId, value.ProjectBoqVersionLineId }).IsUnique();
             entity.HasOne(value => value.Revision).WithMany(value => value.Lines).HasForeignKey(value => value.RemeasurementRevisionId).OnDelete(DeleteBehavior.Restrict);
@@ -1624,6 +1643,7 @@ public partial class ApplicationDbContext
 
         builder.Entity<ProjectBoqRemeasurementSource>(entity =>
         {
+            entity.ToTable(table => table.HasTrigger("TR_ProjectBoqRemeasurementSources_Guard"));
             entity.HasIndex(value => new { value.TenantId, value.MeasurementSheetId }).IsUnique();
             entity.HasIndex(value => new { value.TenantId, value.RemeasurementLineId, value.MeasurementSheetId }).IsUnique();
             entity.HasOne(value => value.Revision).WithMany().HasForeignKey(value => value.RemeasurementRevisionId).OnDelete(DeleteBehavior.Restrict);

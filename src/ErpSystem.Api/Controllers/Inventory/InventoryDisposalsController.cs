@@ -4,6 +4,7 @@ using ErpSystem.Core.Interfaces.Inventory;
 using ErpSystem.Core.Interfaces.Procurement;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace ErpSystem.Api.Controllers.Inventory;
 
@@ -121,6 +122,11 @@ public sealed class InventoryDisposalsController : ControllerBase
         catch (InventoryNegativeStockControlException exception)
         {
             return UnprocessableEntity(Problem(exception.Code, exception.Message));
+        }
+        catch (DbUpdateConcurrencyException)
+        {
+            return StatusCode(StatusCodes.Status409Conflict,
+                Problem("INV_DISPOSAL_CONCURRENCY", "This disposal was updated after the dialog was opened. Refresh the record and try again."));
         }
         catch (InvalidOperationException exception)
         {

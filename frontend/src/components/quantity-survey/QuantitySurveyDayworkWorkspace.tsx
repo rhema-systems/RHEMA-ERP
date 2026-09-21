@@ -62,7 +62,7 @@ export function QuantitySurveyDayworkWorkspace({ projectId, external = false }: 
     const key = `save:${selected?.id ?? 'new'}:${variationId}:${workDate}:${location}:${description}:${JSON.stringify(lines)}`;
     setBusy(true);
     try {
-      const value = await service.saveExternal(projectId, { id: selected?.id ?? null, clientRequestId: requestId(key), variationOrderId,
+      const value = await service.saveExternal(projectId, { id: selected?.id ?? null, clientRequestId: requestId(key), variationOrderId: variationId,
         workDate: new Date(`${workDate}T00:00:00Z`).toISOString(), workLocation: location.trim(), description: description.trim(),
         rowVersion: selected?.rowVersion ?? null, lines: lines.map(line => ({ rateLibraryRateId: line.rateId, quantity: line.quantity, note: line.note.trim() || null })) });
       complete(key); toast.success('Daywork Draft saved.'); await load(value.id);

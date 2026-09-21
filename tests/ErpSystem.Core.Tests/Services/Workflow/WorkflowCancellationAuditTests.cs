@@ -93,8 +93,11 @@ public class WorkflowCancellationAuditTests
         instances.Verify(repository => repository.SaveChangesAsync(), Times.Never);
     }
 
-    [Fact]
-    public async Task SingleApproval_ExpiresUnusedSiblingBeforeCompletingStep()
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task SingleApproval_ExpiresUnusedSiblingAndCannotSkipConfiguredEndStep(bool hasDeclaredEnd, bool atEnd)
     {
         var tenantId = Guid.NewGuid();
         var workflowId = Guid.NewGuid();
@@ -115,12 +118,15 @@ public class WorkflowCancellationAuditTests
             TenantId = tenantId,
             Name = "Accounts Officer Review",
             StepType = WorkflowStepType.Approval,
+            IsEndStep = atEnd,
             Configuration = JsonSerializer.Serialize(config)
         };
         var instance = new WorkflowInstance
         {
             Id = workflowId,
             TenantId = tenantId,
+            WorkflowDefinitionId = Guid.NewGuid(),
+            CurrentStepId = stepId,
             Status = WorkflowInstanceStatus.InProgress
         };
         var step = new WorkflowStepInstance
@@ -174,10 +180,16 @@ public class WorkflowCancellationAuditTests
             .Returns(Task.CompletedTask);
         var currentUser = new Mock<ICurrentUserService>();
         currentUser.SetupGet(service => service.Roles).Returns(["Senior Accountant"]);
+        var workflowSteps = new Mock<IWorkflowStepRepository>();
+        var definitionSteps = new List<WorkflowStep> { stepDefinition };
+        if (hasDeclaredEnd && !atEnd)
+            definitionSteps.Add(new WorkflowStep { Id = Guid.NewGuid(), Name = "Independent final approval", IsEndStep = true, StepType = WorkflowStepType.Approval });
+        workflowSteps.Setup(repository => repository.GetByWorkflowDefinitionAsync(instance.WorkflowDefinitionId, default))
+            .ReturnsAsync(definitionSteps);
 
         var engine = new WorkflowEngine(
             Mock.Of<IWorkflowDefinitionRepository>(),
-            Mock.Of<IWorkflowStepRepository>(),
+            workflowSteps.Object,
             transitions.Object,
             instances.Object,
             steps.Object,
@@ -193,12 +205,19 @@ public class WorkflowCancellationAuditTests
 
         var result = await engine.ProcessStepAsync(stepInstanceId, approverId, WorkflowStepAction.Complete);
 
-        Assert.True(result.Success);
+        var completionAllowed = !hasDeclaredEnd || atEnd;
+        Assert.Equal(completionAllowed, result.Success);
         Assert.Equal(WorkflowApprovalStatus.Approved, selected.Status);
         Assert.Equal(WorkflowApprovalStatus.Expired, sibling.Status);
         Assert.NotNull(sibling.ProcessedDate);
         Assert.Equal(WorkflowStepInstanceStatus.Completed, step.Status);
-        Assert.Equal(WorkflowInstanceStatus.Completed, instance.Status);
+        Assert.Equal(completionAllowed ? WorkflowInstanceStatus.Completed : WorkflowInstanceStatus.InProgress, instance.Status);
+        notifications.Verify(service => service.SendWorkflowCompletionNotificationAsync(workflowId), completionAllowed ? Times.Once() : Times.Never());
+        if (!completionAllowed)
+        {
+            Assert.Null(instance.CompletedDate);
+            Assert.Contains("configured end step", result.Message);
+        }
     }
 
     [Fact]

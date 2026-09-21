@@ -8,7 +8,7 @@ public partial class ProjectSetupService
 {
     public async Task<IEnumerable<ProjectUnitTypeTemplateDto>> GetProjectUnitTypeTemplatesAsync(bool includeInactive = false)
     {
-        EnsureAdministrationAccess();
+        EnsureInternalCatalogAccess();
 
         var templates = (await _unitOfWork.Repository<ProjectUnitTypeTemplate>().FindAsync(x =>
                 x.TenantId == _currentUserProvider.TenantId

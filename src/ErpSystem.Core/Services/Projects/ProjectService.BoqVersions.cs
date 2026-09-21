@@ -365,6 +365,8 @@ public partial class ProjectService
         if (hasUnpublishedCandidate) return [];
 
         return configured
+            // Every configured lifecycle needs the Original candidate before approval can publish it.
+            .Append(QuantitySurveyBoqVersionType.Original)
             .Where(item => item != QuantitySurveyBoqVersionType.Approved)
             .Where(item => !hasCurrentPublication
                 ? item == QuantitySurveyBoqVersionType.Original
@@ -380,7 +382,8 @@ public partial class ProjectService
         IReadOnlyCollection<ProjectBoqVersion> versions,
         QsBoqVersionPolicyValue? policy)
     {
-        if (policy?.RequiredVersionTypes.Count > 0
+        if (versionType != QuantitySurveyBoqVersionType.Original
+            && policy?.RequiredVersionTypes.Count > 0
             && !policy.RequiredVersionTypes.Contains(versionType))
         {
             throw new InvalidOperationException($"BoQ version type '{versionType}' is not enabled by the effective QS-DEC-003 policy.");

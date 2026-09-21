@@ -653,13 +653,14 @@ public sealed class EstateWorkflowIntegrationRegressionTests
             "{saleListingDisabledReason ? (",
             "{selected.asset.isReadyForProjectManagement ? (");
 
-        listingAction.Should().Contain("<Button");
-        listingAction.Should().Contain("disabled");
-        listingAction.Should().Contain("<Button asChild variant=\"outline\">");
-        listingAction.IndexOf("disabled", StringComparison.Ordinal)
-            .Should().BeLessThan(
-                listingAction.IndexOf("<Link", StringComparison.Ordinal));
-        listingAction.Should().NotContain("asChild\n                    variant=\"outline\"\n                    disabled");
+        var enabledBranch = listingAction.IndexOf(") : (", StringComparison.Ordinal);
+        enabledBranch.Should().BePositive();
+        var disabledAction = listingAction[..enabledBranch];
+        disabledAction.Should().Contain("<Button").And.Contain("disabled")
+            .And.NotContain("<Link").And.NotContain("onClick=").And.NotContain("asChild");
+        // Eligible listings now open the demarcation editor instead of navigating away.
+        listingAction[enabledBranch..].Should()
+            .Contain("onClick={() => setDemarcationAsset(selected.asset)}");
     }
 
     [Fact]

@@ -1,6 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
+import { isQsOptionalFeatureEnabled } from '@/lib/quantity-survey-architecture-scope';
+
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -3549,6 +3551,8 @@ export const navigationItems: NavItem[] = [
       'admin.she',
       'Reference.Geography.Write',
       'Reference.Geography.Admin',
+      'quantity-survey.configuration.read',
+      'quantity-survey.workspace.read',
     ],
     accessMode: 'any',
     children: [
@@ -4103,12 +4107,12 @@ export const navigationItems: NavItem[] = [
             icon: BarChart3,
             permissions: ['quantity-survey.workspace.read'],
           },
-          {
+          ...(isQsOptionalFeatureEnabled('escalation') ? [{
             title: 'QS Escalation Formulas',
             href: '/administration/project-management/quantity-survey-escalation',
             icon: LineChart,
             permissions: ['quantity-survey.workspace.read'],
-          },
+          }] : []),
         ],
       },
       {

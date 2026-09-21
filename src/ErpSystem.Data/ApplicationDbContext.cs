@@ -1363,7 +1363,13 @@ public partial class ApplicationDbContext : IdentityDbContext<ApplicationUser, A
         // The archived-final checks are SQL Server schema authority. Keep their original
         // model-configuration order and do not apply SQL Server predicates to InMemory/SQLite.
         if (Database.IsSqlServer())
+        {
             ArchivedCheckConstraintBaselineModel.Apply(builder);
+            // Current QS architecture permits internal valuations; retain the historical archive verbatim.
+            builder.Entity<ErpSystem.Core.Entities.QuantitySurvey.QuantitySurveyValuationWorksheet>().ToTable(table => table.HasCheckConstraint(
+                "CK_QsValuationWorksheets_Policy",
+                "([ConfigurationProfileId] IS NULL AND [ValuationDecisionId] IS NULL AND [ExternalSubmissionDecisionId] IS NULL AND [ApprovalWorkflowDefinitionId] IS NULL AND [EvidenceMetadataTemplateId] IS NULL AND [PolicyHash] IS NULL) OR ([ConfigurationProfileId] IS NOT NULL AND [ValuationDecisionId] IS NOT NULL AND (([ContractorSubmissionRequired] = 0 AND [ConsultantEndorsementRequired] = 0) OR [ExternalSubmissionDecisionId] IS NOT NULL) AND [ApprovalWorkflowDefinitionId] IS NOT NULL AND [EvidenceMetadataTemplateId] IS NOT NULL AND LEN([PolicyHash]) = 64)"));
+        }
         builder.ApplyConfiguration(new AssetTypeConfiguration());
         builder.ApplyConfiguration(new AssetTypeFieldConfiguration());
 

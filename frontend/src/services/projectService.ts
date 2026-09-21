@@ -3964,6 +3964,7 @@ export interface ProjectContractLookupDto {
   id: string;
   contractNumber: string;
   contractTitle: string;
+  contractType: string;
   businessPartnerId: string;
   businessPartnerName: string;
   status: string;
@@ -5219,8 +5220,7 @@ class ProjectService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to add project BOQ item');
+      throw new Error(await this.readProblemMessage(response, 'Failed to add project BOQ item'));
     }
 
     return response.json();
@@ -5240,8 +5240,7 @@ class ProjectService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to update project BOQ item');
+      throw new Error(await this.readProblemMessage(response, 'Failed to update project BOQ item'));
     }
 
     return response.json();
@@ -5257,8 +5256,7 @@ class ProjectService {
     );
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(error || 'Failed to delete project BOQ item');
+      throw new Error(await this.readProblemMessage(response, 'Failed to delete project BOQ item'));
     }
   }
 

@@ -1970,9 +1970,16 @@ public partial class ProjectService : IProjectService
 
     public async Task<IEnumerable<ProjectContractLookupDto>> GetContractLookupAsync(Guid? businessPartnerId = null, string? search = null)
     {
-        var contracts = businessPartnerId.HasValue
-            ? await _contractService.GetByBusinessPartnerIdAsync(businessPartnerId.Value)
-            : await _contractService.GetActiveContractsAsync();
+        EnsureInternalAuthenticatedProjectAccess();
+        var contracts = await _unitOfWork.Repository<Contract>().FindAsync(x =>
+            x.TenantId == _currentUserProvider.TenantId && !x.IsDeleted &&
+            (businessPartnerId.HasValue
+                ? x.BusinessPartnerId == businessPartnerId.Value
+                : x.Status == "Active"));
+        var partnerIds = contracts.Select(x => x.BusinessPartnerId).Distinct().ToArray();
+        var partners = await _unitOfWork.Repository<BusinessPartner>().FindAsync(x =>
+            x.TenantId == _currentUserProvider.TenantId && !x.IsDeleted && partnerIds.Contains(x.Id));
+        var partnerNames = partners.ToDictionary(x => x.Id, x => x.PartnerName);
 
         return contracts
             .Where(x => string.IsNullOrWhiteSpace(search)
@@ -1984,8 +1991,9 @@ public partial class ProjectService : IProjectService
                 Id = x.Id,
                 ContractNumber = x.ContractNumber,
                 ContractTitle = x.ContractTitle,
-                BusinessPartnerId = Guid.Empty,
-                BusinessPartnerName = x.BusinessPartnerName,
+                ContractType = x.ContractType,
+                BusinessPartnerId = x.BusinessPartnerId,
+                BusinessPartnerName = partnerNames.GetValueOrDefault(x.BusinessPartnerId, string.Empty),
                 Status = x.Status,
                 ContractValue = x.ContractValue,
                 Currency = x.Currency
@@ -8359,7 +8367,7 @@ public partial class ProjectSetupService : IProjectSetupService
 
     public async Task<IEnumerable<ProjectCatalogEntryDto>> GetCatalogEntriesAsync(string catalogType)
     {
-        EnsureAdministrationAccess();
+        EnsureInternalCatalogAccess();
         var normalizedCatalogType = NormalizeCatalogType(catalogType);
         EnsureGenericCatalogType(normalizedCatalogType);
         return (await _projectCatalogRepository.GetByCatalogTypeAsync(normalizedCatalogType)).Select(MapToDto);
@@ -8595,7 +8603,7 @@ public partial class ProjectSetupService : IProjectSetupService
 
     public async Task<IEnumerable<ProjectTypeDto>> GetProjectTypesAsync()
     {
-        EnsureAdministrationAccess();
+        EnsureInternalCatalogAccess();
         return (await _projectTypeRepository.GetAllAsync()).Select(x => new ProjectTypeDto { Id = x.Id, Code = x.Code, Name = x.Name, Description = x.Description, IsActive = x.IsActive, RequiresSponsor = x.RequiresSponsor, RequiresApproval = x.RequiresApproval, MandatoryFieldsJson = x.MandatoryFieldsJson });
     }
     public async Task<ProjectTypeDto> CreateProjectTypeAsync(CreateProjectTypeDto dto)
@@ -8624,8 +8632,13 @@ public partial class ProjectSetupService : IProjectSetupService
 
     public async Task<IEnumerable<ProjectPriorityDto>> GetProjectPrioritiesAsync()
     {
-        EnsureAdministrationAccess();
-        await EnsureDefaultPrioritiesAsync();
+        EnsureInternalCatalogAccess();
+        if (_currentUserProvider.HasRole(ErpSystem.Shared.Constants.Roles.SuperAdmin)
+            || _currentUserProvider.HasRole(ErpSystem.Shared.Constants.Roles.TenantAdmin)
+            || _currentUserProvider.HasRole(ErpSystem.Shared.Constants.Roles.Manager))
+        {
+            await EnsureDefaultPrioritiesAsync();
+        }
         return (await _projectPriorityRepository.GetAllAsync()).Select(x => new ProjectPriorityDto { Id = x.Id, Code = x.Code, Name = x.Name, ColorHex = x.ColorHex, SortOrder = x.SortOrder, IsActive = x.IsActive });
     }
     public async Task<ProjectPriorityDto> CreateProjectPriorityAsync(CreateProjectPriorityDto dto)
@@ -8654,7 +8667,7 @@ public partial class ProjectSetupService : IProjectSetupService
 
     public async Task<IEnumerable<ProjectTemplateDto>> GetProjectTemplatesAsync(Guid? projectTypeId = null)
     {
-        EnsureAdministrationAccess();
+        EnsureInternalCatalogAccess();
         var templates = projectTypeId.HasValue ? await _projectTemplateRepository.GetByProjectTypeAsync(projectTypeId.Value) : await _projectTemplateRepository.GetActiveAsync();
         return templates.Select(x => new ProjectTemplateDto { Id = x.Id, Code = x.Code, Name = x.Name, Description = x.Description, ProjectTypeId = x.ProjectTypeId, ProjectTypeName = x.ProjectType?.Name, VersionLabel = x.VersionLabel, TemplateDefinitionJson = x.TemplateDefinitionJson, IsActive = x.IsActive });
     }
@@ -8684,7 +8697,7 @@ public partial class ProjectSetupService : IProjectSetupService
 
     public async Task<IEnumerable<ProjectPortfolioDto>> GetPortfoliosAsync()
     {
-        EnsureAdministrationAccess();
+        EnsureInternalCatalogAccess();
         return (await _projectPortfolioRepository.GetAllAsync()).Select(MapToDto);
     }
 
@@ -8742,7 +8755,7 @@ public partial class ProjectSetupService : IProjectSetupService
 
     public async Task<IEnumerable<ProjectProgramDto>> GetProgramsAsync(Guid? portfolioId = null)
     {
-        EnsureAdministrationAccess();
+        EnsureInternalCatalogAccess();
         var programs = portfolioId.HasValue
             ? await _projectProgramRepository.GetByPortfolioIdAsync(portfolioId.Value)
             : await _projectProgramRepository.GetAllAsync();
@@ -8832,7 +8845,7 @@ public partial class ProjectSetupService : IProjectSetupService
     {
         if (!_currentUserProvider.IsAuthenticated || _currentUserProvider.IsExternalUser)
         {
-            throw new UnauthorizedAccessException("Only authenticated internal users can access quantity-survey catalogues.");
+            throw new UnauthorizedAccessException("Only authenticated internal users can access project catalogues.");
         }
     }
 
@@ -9015,7 +9028,10 @@ public class ProjectManagementSettingsService : IProjectManagementSettingsServic
 
     public async Task<ProjectManagementSettingsDto> GetSettingsAsync()
     {
-        EnsureAdministrationAccess();
+        if (!_currentUserProvider.IsAuthenticated || _currentUserProvider.IsExternalUser)
+        {
+            throw new UnauthorizedAccessException("Only authenticated internal users can read project settings.");
+        }
         return MapToDto(await _settingsRepository.GetOrCreateDefaultAsync(_currentUserProvider.TenantId, _currentUserProvider.UserId));
     }
     public async Task<ProjectManagementSettingsDto> UpdateSettingsAsync(UpdateProjectManagementSettingsDto dto)

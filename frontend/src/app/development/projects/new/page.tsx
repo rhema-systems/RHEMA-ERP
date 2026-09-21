@@ -19,7 +19,6 @@ import {
   type ProjectCurrencyReference,
 } from '@/lib/project-currency';
 import { businessPartnerService, type BusinessPartnerDto } from '@/services/businessPartnerService';
-import { contractService, type ContractDto } from '@/services/contractService';
 import { type CurrencyListDto } from '@/services/financeCommonService';
 import {
   CreateProjectDto,
@@ -30,6 +29,7 @@ import {
   ProjectPriorityDto,
   ProjectTemplateDto,
   ProjectTypeDto,
+  ProjectContractLookupDto,
   projectService,
 } from '@/services/projectService';
 import { userService } from '@/services/user';
@@ -66,7 +66,7 @@ const formatUserLabel = (user: User) => {
 const formatBusinessPartnerLabel = (partner: BusinessPartnerDto) =>
   `${partner.partnerName}${partner.partnerType ? ` (${partner.partnerType})` : ''}`;
 
-const formatContractLabel = (contract: ContractDto) =>
+const formatContractLabel = (contract: ProjectContractLookupDto) =>
   `${contract.contractNumber} - ${contract.contractTitle}`;
 
 const resolveCatalogOptions = (entries: ProjectCatalogEntryDto[], fallbackValues: string[], currentValue?: string) => {
@@ -193,7 +193,7 @@ export default function NewProjectPage() {
   const [currencies, setCurrencies] = useState<CurrencyListDto[]>([]);
   const [financeBaseCurrency, setFinanceBaseCurrency] = useState<ProjectCurrencyReference>(DEFAULT_PROJECT_CURRENCY);
   const [businessPartners, setBusinessPartners] = useState<BusinessPartnerDto[]>([]);
-  const [contracts, setContracts] = useState<ContractDto[]>([]);
+  const [contracts, setContracts] = useState<ProjectContractLookupDto[]>([]);
   const [methodologyCatalog, setMethodologyCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [fundingSourceCatalog, setFundingSourceCatalog] = useState<ProjectCatalogEntryDto[]>([]);
   const [form, setForm] = useState<CreateProjectDto>(initialForm);
@@ -238,10 +238,7 @@ export default function NewProjectPage() {
     return [...source].sort((left, right) => left.partnerName.localeCompare(right.partnerName));
   }, [businessPartners, approvedBusinessPartners]);
   const isUsingBusinessPartnerFallback = businessPartners.length > 0 && approvedBusinessPartners.length === 0 && availableBusinessPartners.length > 0;
-  const availableContracts = useMemo(
-    () => contracts.filter((contract) => !form.businessPartnerId || contract.businessPartnerId === form.businessPartnerId),
-    [contracts, form.businessPartnerId],
-  );
+  const availableContracts = contracts;
   const requiredFields = useMemo(() => {
     const required = new Set<string>(['Title', 'DevelopmentProfile.DeliveryStructure']);
 
@@ -271,7 +268,7 @@ export default function NewProjectPage() {
   useEffect(() => {
     const loadSetup = async () => {
       try {
-        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, loadedContracts, currencyContext] = await Promise.all([
+        const [loadedTypes, loadedPriorities, loadedTemplates, loadedPortfolios, settings, loadedMethodologies, loadedFundingSources, loadedUsers, loadedPartners, currencyContext] = await Promise.all([
           projectService.getProjectTypes(),
           projectService.getProjectPriorities(),
           projectService.getProjectTemplates(),
@@ -279,9 +276,8 @@ export default function NewProjectPage() {
           projectService.getSettings(),
           projectService.getCatalogEntries('methodologies').catch(() => []),
           projectService.getCatalogEntries('funding-sources').catch(() => []),
-          userService.searchUsers('').catch(() => []),
+          userService.searchAssignableUsers('').catch(() => []),
           businessPartnerService.getAllPartnersForDropdown().catch(() => businessPartnerService.getActivePartners().catch(() => [])),
-          contractService.getActiveContracts().catch(() => []),
           loadProjectCurrencyContext(),
         ]);
         setTypes(loadedTypes);
@@ -295,7 +291,6 @@ export default function NewProjectPage() {
         setCurrencies(currencyContext.activeCurrencies);
         setFinanceBaseCurrency(currencyContext.baseCurrency);
         setBusinessPartners(loadedPartners);
-        setContracts(loadedContracts);
         setForm((prev) => ({
           ...prev,
           projectTypeId: settings.defaultProjectTypeId,
@@ -313,6 +308,15 @@ export default function NewProjectPage() {
 
     loadSetup();
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    setContracts([]);
+    projectService.getContractLookup(form.businessPartnerId)
+      .then((items) => { if (active) setContracts(items); })
+      .catch(() => { if (active) toast.error('Failed to load project contracts'); });
+    return () => { active = false; };
+  }, [form.businessPartnerId]);
 
   useEffect(() => {
     const loadPrograms = async () => {

@@ -30,6 +30,7 @@ import {
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { useAuth } from '@/hooks/use-auth';
+import { MeasurementSiteLocationPicker, measurementSiteOptions } from './MeasurementSiteLocationPicker';
 import {
   quantitySurveyMeasurementService as service,
   type MeasurementEvidenceType,
@@ -41,7 +42,7 @@ import {
   type MeasurementSourceType,
 } from '@/services/quantity-survey-measurement.service';
 
-type Props = { projectId: string };
+type Props = { projectId: string; projectSite?: string };
 type RequestState = { fingerprint: string; id: string };
 
 const newLine = (sequence: number): MeasurementLineInput => ({
@@ -75,7 +76,7 @@ const formulaLabel = (value: MeasurementFormulaType) =>
         ? 'Area'
         : 'Volume';
 
-export function QuantitySurveyMeasurementsDialog({ projectId }: Props) {
+export function QuantitySurveyMeasurementsDialog({ projectId, projectSite }: Props) {
   const { hasPermission } = useAuth();
   const canRead = hasPermission('quantity-survey.workspace.read');
   const canManage = hasPermission('quantity-survey.measurements.manage');
@@ -97,7 +98,8 @@ export function QuantitySurveyMeasurementsDialog({ projectId }: Props) {
   const [measurementDate, setMeasurementDate] = useState(
     new Date().toISOString().slice(0, 10)
   );
-  const [siteLocation, setSiteLocation] = useState('');
+  const defaultSite = measurementSiteOptions([projectSite])[0] ?? '';
+  const [siteLocation, setSiteLocation] = useState(defaultSite);
   const [lines, setLines] = useState<MeasurementLineInput[]>([newLine(1)]);
   const [evidenceTitle, setEvidenceTitle] = useState('');
   const [evidenceType, setEvidenceType] =
@@ -162,7 +164,7 @@ export function QuantitySurveyMeasurementsDialog({ projectId }: Props) {
     setSourceType('Design');
     setTitle('');
     setMeasurementDate(new Date().toISOString().slice(0, 10));
-    setSiteLocation('');
+    setSiteLocation(defaultSite);
     setLines([newLine(1)]);
   };
 
@@ -513,15 +515,12 @@ export function QuantitySurveyMeasurementsDialog({ projectId }: Props) {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label>
-                      Site location {sourceType === 'Site' ? '*' : '(optional)'}
-                    </Label>
-                    <Input
-                      value={siteLocation}
-                      onChange={(event) => setSiteLocation(event.target.value)}
-                    />
-                  </div>
+                  <MeasurementSiteLocationPicker
+                    value={siteLocation}
+                    suggestions={measurementSiteOptions([defaultSite, ...sheets.map((sheet) => sheet.siteLocation)])}
+                    required={sourceType === 'Site'}
+                    onChange={setSiteLocation}
+                  />
                 </div>
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">

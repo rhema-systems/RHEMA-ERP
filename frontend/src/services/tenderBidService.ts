@@ -414,7 +414,7 @@ export async function submitBid(
   );
 
   if (!response.ok) {
-    throw new Error('Failed to submit bid');
+    throw new Error(await readTenderPaymentError(response, 'Failed to submit bid'));
   }
 }
 

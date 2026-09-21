@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/dialog';
 import { apiService as rawApiService } from '@/services/api.service';
 import { documentManagementService } from '@/services/document-management.service';
+import { savePdfCopy } from '@/lib/save-pdf-copy';
 import type { CentralDocumentPdfViewerHandle } from '@/components/document-management/CentralDocumentPdfViewer';
 
 const CentralDocumentPdfViewer = dynamic(
@@ -51,6 +52,7 @@ interface CentralDocumentViewerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   enableAnnotations?: boolean;
+  enableSaveCopy?: boolean;
   onGenerateRendition?: (
     file: CentralDocumentViewerFile
   ) => Promise<CentralDocumentViewerFile | null>;
@@ -142,6 +144,7 @@ export function CentralDocumentViewerDialog({
   open,
   onOpenChange,
   enableAnnotations = true,
+  enableSaveCopy = false,
   onGenerateRendition,
   onDownload,
   onSaveAnnotations,
@@ -164,12 +167,15 @@ export function CentralDocumentViewerDialog({
   const [isSavingAnnotations, setIsSavingAnnotations] = React.useState(false);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
+  const [savingCopy, setSavingCopy] = React.useState(false);
+  const [saveCopyMessage, setSaveCopyMessage] = React.useState<string | null>(null);
 
   React.useEffect(() => {
     setLocalFile(file);
     setGenerateError(null);
     setDownloadError(null);
     setDownloadingFormat(null);
+    setSaveCopyMessage(null);
   }, [file]);
 
   const view = resolvePdfView(localFile);
@@ -453,8 +459,22 @@ export function CentralDocumentViewerDialog({
               ) : null}
             </div>
           </div>
+          {enableSaveCopy && !annotationsEnabled && previewData && (
+            <Button variant="outline" disabled={savingCopy} onClick={async () => {
+              setSavingCopy(true);
+              setDownloadError(null);
+              setSaveCopyMessage(null);
+              try {
+                const result = await savePdfCopy(previewData, localFile?.fileName || `${title}.pdf`);
+                if (result === 'saved') setSaveCopyMessage('PDF saved successfully.');
+              } catch (error) {
+                setDownloadError(error instanceof Error ? error.message : 'The PDF could not be saved. Please try again.');
+              } finally { setSavingCopy(false); }
+            }}>{savingCopy ? 'Saving PDF...' : 'Save PDF as...'}</Button>
+          )}
+          {saveCopyMessage && <p role="status" className="mt-2 text-sm">{saveCopyMessage}</p>}
           {downloadError ? (
-            <p className="mt-2 text-sm text-destructive">{downloadError}</p>
+            <p role="alert" className="mt-2 text-sm text-destructive">{downloadError}</p>
           ) : null}
         </DialogHeader>
 

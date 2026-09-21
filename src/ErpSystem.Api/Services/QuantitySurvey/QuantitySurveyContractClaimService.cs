@@ -89,10 +89,17 @@ public sealed class QuantitySurveyContractClaimService(
         return Map(entity);
     }
 
-    public async Task<QuantitySurveyContractClaimDto> SaveExternalAsync(Guid projectId, SaveQuantitySurveyContractClaimRequest request,
-        string correlationId, CancellationToken token = default)
+    public Task<QuantitySurveyContractClaimDto> SaveExternalAsync(Guid projectId, SaveQuantitySurveyContractClaimRequest request,
+        string correlationId, CancellationToken token = default) => SaveAsync(projectId, request, true, correlationId, token);
+
+    public Task<QuantitySurveyContractClaimDto> SaveInternalAsync(Guid projectId, SaveQuantitySurveyContractClaimRequest request,
+        string correlationId, CancellationToken token = default) => SaveAsync(projectId, request, false, correlationId, token);
+
+    private async Task<QuantitySurveyContractClaimDto> SaveAsync(Guid projectId, SaveQuantitySurveyContractClaimRequest request,
+        bool external, string correlationId, CancellationToken token)
     {
-        var actor = await RequireExternalActorAsync(projectId, true, false, request.Id, token);
+        ExternalActor? actor = external ? await RequireExternalActorAsync(projectId, true, false, request.Id, token) : null;
+        if (!external) await RequireProjectAsync(projectId);
         if (request.ClientRequestId == Guid.Empty) throw Validation("A client request identifier is required.");
         if (!QuantitySurveyContractClaimRules.HasValidSource(request.ClaimType, request.VariationOrderId, request.ExtensionOfTimeId))
             throw Validation("Select the required controlled source for the selected claim type.");
@@ -100,11 +107,12 @@ public sealed class QuantitySurveyContractClaimService(
         var basis = RequiredText(request.Basis, 10, 4000, "Claim basis");
         var amount = Round(request.ClaimedAmount);
         if (amount <= 0) throw Validation("The claimed amount must be greater than zero.");
-        var contract = await RequiredContractAsync(projectId, request.ContractId, actor.BusinessPartnerId, token);
+        var contract = await RequiredContractAsync(projectId, request.ContractId, actor?.BusinessPartnerId, token);
+        var contractorId = contract.BusinessPartnerId;
         await ValidateSourcesAsync(projectId, contract.Id, request, token);
         var policy = await ResolvePolicyAsync(token);
         var requestHash = Hash(new { projectId, request.ContractId, request.ApprovedBoqVersionId, request.VariationOrderId,
-            request.ExtensionOfTimeId, request.ClaimType, title, basis, amount, actor.BusinessPartnerId, policy.PolicyHash });
+            request.ExtensionOfTimeId, request.ClaimType, title, basis, amount, BusinessPartnerId = contractorId, policy.PolicyHash });
         if (request.Id.HasValue)
         {
             var retryRevision = await db.QuantitySurveyContractClaimRevisions.AsNoTracking().FirstOrDefaultAsync(value =>
@@ -112,7 +120,7 @@ public sealed class QuantitySurveyContractClaimService(
             if (retryRevision is not null)
             {
                 if (retryRevision.ContractClaimId != request.Id.Value || !FixedEquals(retryRevision.RequestHash, requestHash)) throw RetryConflict();
-                return await GetAsync(retryRevision.ContractClaimId, true, token);
+                return await GetAsync(retryRevision.ContractClaimId, external, token);
             }
         }
         else
@@ -122,7 +130,7 @@ public sealed class QuantitySurveyContractClaimService(
             if (retry is not null)
             {
                 if (!FixedEquals(retry.RequestHash, requestHash) || retry.ProjectId != projectId) throw RetryConflict();
-                return await GetAsync(retry.Id, true, token);
+                return await GetAsync(retry.Id, external, token);
             }
         }
         var strategy = db.Database.CreateExecutionStrategy();
@@ -137,7 +145,7 @@ public sealed class QuantitySurveyContractClaimService(
             if (request.Id.HasValue)
             {
                 entity = await RequiredAsync(request.Id.Value, true, token);
-                if (entity.ProjectId != projectId || entity.ContractorBusinessPartnerId != actor.BusinessPartnerId)
+                if (entity.ProjectId != projectId || entity.ContractorBusinessPartnerId != contractorId)
                     throw new UnauthorizedAccessException("The claim is not assigned to the linked contractor.");
                 if (!QuantitySurveyContractClaimRules.CanEdit(entity.Status)) throw Conflict("Only a Draft or Rejected claim can be amended.");
                 ApplyRowVersion(entity, request.RowVersion);
@@ -155,7 +163,7 @@ public sealed class QuantitySurveyContractClaimService(
                 };
                 db.QuantitySurveyContractClaims.Add(entity);
             }
-            entity.ContractId = contract.Id; entity.ContractorBusinessPartnerId = actor.BusinessPartnerId;
+            entity.ContractId = contract.Id; entity.ContractorBusinessPartnerId = contractorId;
             entity.ApprovedBoqVersionId = request.ApprovedBoqVersionId; entity.VariationOrderId = request.VariationOrderId;
             entity.ExtensionOfTimeId = request.ExtensionOfTimeId; entity.ClaimType = request.ClaimType;
             entity.Title = title; entity.Basis = basis; entity.ClaimedAmount = amount; entity.Currency = contract.Currency.ToUpperInvariant();
@@ -168,15 +176,15 @@ public sealed class QuantitySurveyContractClaimService(
             entity.PolicyHash = policy.PolicyHash;
             if (!request.Id.HasValue) entity.RequestHash = requestHash;
             entity.CorrelationId = Correlation(correlationId);
-            entity.SubmittedById = null; entity.SubmittedBusinessPartnerId = actor.BusinessPartnerId; entity.SubmittedAt = null;
+            entity.SubmittedById = null; entity.SubmittedBusinessPartnerId = contractorId; entity.SubmittedAt = null;
             entity.QsVettedById = null; entity.QsVettedAt = null; entity.ApprovedById = null; entity.ApprovedAt = null;
             entity.WorkflowInstanceId = null; entity.RejectionReason = null; entity.UpdatedAt = DateTime.UtcNow;
             entity.UpdatedBy = UserName; entity.LastModifiedById = UserId;
-            AddRevision(entity, request.ClientRequestId, requestHash, action, basis, before, Snapshot(entity), correlationId, actor.BusinessPartnerId);
+            AddRevision(entity, request.ClientRequestId, requestHash, action, basis, before, Snapshot(entity), correlationId, actor?.BusinessPartnerId);
             AddAudit(entity, action, before, Snapshot(entity), correlationId);
             await SaveChangesAsync(token); id = entity.Id; await transaction.CommitAsync(token);
         });
-        db.ChangeTracker.Clear(); return await GetAsync(id, true, token);
+        db.ChangeTracker.Clear(); return await GetAsync(id, external, token);
     }
 
     public async Task<QuantitySurveyContractClaimEvidenceDto> UploadEvidenceAsync(Guid id, Guid clientRequestId, string title,
@@ -220,11 +228,14 @@ public sealed class QuantitySurveyContractClaimService(
                 TenantId = TenantId, ActorUserId = UserId, ActorName = UserName, FileUploadRecordId = upload.Record.Id,
                 SourceModule = "QuantitySurvey", SourceLabel = "Quantity Survey contractor claim evidence",
                 SourceEntityType = nameof(QuantitySurveyContractClaimEvidence), SourceRecordId = evidenceId,
-                SourceRecordReference = entity.ClaimNumber, Title = safeTitle, DocumentType = "ContractClaimEvidence",
+                SourceRecordReference = entity.ClaimNumber, Title = safeTitle, DocumentType = template.DocumentType,
                 MetadataTemplateCode = template.TemplateCode, AccessProfile = template.AccessProfile, VersionStatus = "Submitted",
                 ChangeSummary = "Clean scanned contractor-claim evidence retained in the central DMS.", RequirePublishedGovernance = true,
                 MetadataValues = [new("contractClaimId", "Contract claim ID", entity.Id.ToString(), "guid"),
                     new("projectId", "Project ID", entity.ProjectId.ToString(), "guid"),
+                    new("contractId", "Contract ID", entity.ContractId.ToString(), "guid"),
+                    new("recordReference", "Claim reference", entity.ClaimNumber),
+                    new("evidenceDate", "Evidence date", DateTime.UtcNow.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture), "date"),
                     new("checksumSha256", "Checksum SHA-256", checksum)]
             }, token);
         }
@@ -263,17 +274,24 @@ public sealed class QuantitySurveyContractClaimService(
                ?? throw Conflict("The central-DMS evidence content is unavailable.");
     }
 
-    public async Task<QuantitySurveyContractClaimDto> SubmitExternalAsync(Guid id, QuantitySurveyContractClaimActionRequest request,
-        string correlationId, CancellationToken token = default)
+    public Task<QuantitySurveyContractClaimDto> SubmitExternalAsync(Guid id, QuantitySurveyContractClaimActionRequest request,
+        string correlationId, CancellationToken token = default) => SubmitAsync(id, request, true, correlationId, token);
+
+    public Task<QuantitySurveyContractClaimDto> SubmitInternalAsync(Guid id, QuantitySurveyContractClaimActionRequest request,
+        string correlationId, CancellationToken token = default) => SubmitAsync(id, request, false, correlationId, token);
+
+    private async Task<QuantitySurveyContractClaimDto> SubmitAsync(Guid id, QuantitySurveyContractClaimActionRequest request,
+        bool external, string correlationId, CancellationToken token)
     {
-        var actor = await ExternalForClaimAsync(id, true, false, token);
-        return await MutateAsync(id, request, QuantitySurveyAuditEventMap.SubmitContractClaim, correlationId, token, actor.BusinessPartnerId, async value =>
+        ExternalActor? actor = external ? await ExternalForClaimAsync(id, true, false, token) : null;
+        if (!external) await RequireProjectAsync((await RequiredAsync(id, false, token)).ProjectId);
+        return await MutateAsync(id, request, QuantitySurveyAuditEventMap.SubmitContractClaim, correlationId, token, actor?.BusinessPartnerId, async value =>
         {
             if (!QuantitySurveyContractClaimRules.CanEdit(value.Status)) throw Conflict("Only a Draft or Rejected claim can be submitted.");
             if (value.Evidence.All(item => item.IsDeleted)) throw Conflict("Attach at least one clean centrally governed evidence file before submission.");
             await ValidateFrozenAsync(value, token);
             value.Status = QuantitySurveyContractClaimStatuses.Submitted; value.ApprovalStatus = "Draft";
-            value.SubmittedById = UserId; value.SubmittedBusinessPartnerId = actor.BusinessPartnerId; value.SubmittedAt = DateTime.UtcNow;
+            value.SubmittedById = UserId; value.SubmittedBusinessPartnerId = value.ContractorBusinessPartnerId; value.SubmittedAt = DateTime.UtcNow;
             value.QsVettedById = null; value.QsVettedAt = null; value.QsAssessedAmount = null; value.QsReviewNote = null;
         });
     }
@@ -336,6 +354,8 @@ public sealed class QuantitySurveyContractClaimService(
                 if (!result.ExecutionResult.Success) throw Conflict(result.ExecutionResult.Message ?? "The claim workflow decision failed.");
                 outcome = result.Outcome;
             }
+            // A multi-step review must persist progress without approving or settling the claim early.
+            if (approve && outcome == WorkflowOutcome.Pending) return;
             if (outcome != (approve ? WorkflowOutcome.Approved : WorkflowOutcome.Rejected))
                 throw Conflict("The shared workflow has not reached the requested final outcome.");
             workflowAdapters.GetAdapter(QuantitySurveyWorkflowBindingRegistry.Claim)
@@ -494,8 +514,8 @@ public sealed class QuantitySurveyContractClaimService(
     }
 
     private async Task<ErpSystem.Core.Entities.Procurement.Contract> RequiredContractAsync(Guid projectId, Guid contractId,
-        Guid contractorId, CancellationToken token) => await db.Contracts.AsNoTracking().Include(value => value.Tender).ThenInclude(value => value.SourcePurchaseRequisition)
-        .SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == contractId && value.BusinessPartnerId == contractorId &&
+        Guid? contractorId, CancellationToken token) => await db.Contracts.AsNoTracking().Include(value => value.Tender).ThenInclude(value => value.SourcePurchaseRequisition)
+        .SingleOrDefaultAsync(value => value.TenantId == TenantId && value.Id == contractId && (!contractorId.HasValue || value.BusinessPartnerId == contractorId) &&
             !value.IsDeleted && value.ContractType == "Works" && value.Status == "Active" && value.Tender.SourcePurchaseRequisition != null &&
             value.Tender.SourcePurchaseRequisition.ProjectId == projectId, token)
         ?? throw Validation("Select an active Procurement Works contract assigned to this contractor and project.");

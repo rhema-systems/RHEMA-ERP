@@ -76,7 +76,7 @@ import { calculateNetTradeDiscountLineAmount } from '@/lib/finance/invoice-trade
 
 const lineItemSchema = z.object({
     sourceLineId: z.string().uuid(),
-    lineItemType: z.enum(['Expense', 'Product', 'Inventory']).default('Expense'),
+    lineItemType: z.enum(['Expense', 'Service', 'Product', 'Inventory']).default('Expense'),
     glAccountId: z.string().optional(),
     budgetEntryId: z.string().optional(),
     inventoryItemId: z.string().optional(),
@@ -131,7 +131,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     const { currentTenantCode } = useTenant();
     const exchangeRateRequestId = useRef(0);
     const editHydratedRef = useRef(false);
-    const editBudgetCellsLoadedRef = useRef(false);
+    const editBudgetCellsLoadedRef = useRef(new Set<string>());
     const suppressPurchaseOrderHydrationRef = useRef(false);
     const hydratedPurchaseOrderIdRef = useRef('');
     const isEditMode = Boolean(editInvoiceId);
@@ -446,7 +446,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
         if (!supplier) return;
 
         editHydratedRef.current = true;
-        editBudgetCellsLoadedRef.current = false;
+        editBudgetCellsLoadedRef.current.clear();
         setSelectedSupplier(supplier);
         setSelectedPurchaseOrderId(editInvoice.purchaseOrderId || '');
         suppressPurchaseOrderHydrationRef.current = Boolean(editInvoice.purchaseOrderId);
@@ -486,7 +486,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
             isOpeningBalance: editInvoice.isOpeningBalance,
             lineItems: editInvoice.lineItems.map(line => ({
                 sourceLineId: line.id,
-                lineItemType: (line.lineItemType || 'Expense') as 'Expense' | 'Product' | 'Inventory',
+                lineItemType: (line.lineItemType || 'Expense') as 'Expense' | 'Service' | 'Product' | 'Inventory',
                 glAccountId: line.glAccountId,
                 budgetEntryId: line.budgetEntryId,
                 inventoryItemId: line.inventoryItemId,
@@ -504,12 +504,12 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
     }, [editInvoice, form, isEditMode, suppliersData]);
 
     useEffect(() => {
-        if (!isEditMode || !editInvoice || !editHydratedRef.current || editBudgetCellsLoadedRef.current) return;
+        if (!isEditMode || !editInvoice || !editHydratedRef.current) return;
         if (fields.length !== editInvoice.lineItems.length) return;
 
-        editBudgetCellsLoadedRef.current = true;
         editInvoice.lineItems.forEach((line, index) => {
-            if (line.glAccountId) {
+            if (line.glAccountId && !editBudgetCellsLoadedRef.current.has(fields[index].id)) {
+                editBudgetCellsLoadedRef.current.add(fields[index].id);
                 void loadBudgetCells(fields[index].id, index, line.glAccountId, line.budgetEntryId);
             }
         });
@@ -940,7 +940,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                     lines: data.lineItems.flatMap(item => {
                         const editableAccountId = !isOpeningBalance
                             && !data.purchaseOrderId
-                            && item.lineItemType === 'Expense'
+                            && (item.lineItemType === 'Expense' || item.lineItemType === 'Service')
                             ? item.glAccountId
                             : undefined;
                         const { accountId } = getSourceLineDimensionAccounts(isOpeningBalance ? undefined : editInvoice?.financeDimensions, item.sourceLineId, editableAccountId);
@@ -1483,7 +1483,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                 id: item.sourceLineId,
                                 ...getSourceLineDimensionAccounts(watchIsOpeningBalance ? undefined : editInvoice?.financeDimensions, item.sourceLineId, !watchIsOpeningBalance
                                     && !selectedPurchaseOrderId
-                                    && item.lineItemType === 'Expense'
+                                    && (item.lineItemType === 'Expense' || item.lineItemType === 'Service')
                                     ? item.glAccountId
                                     : undefined),
                                 accountLabel: item.description || undefined,
@@ -1535,6 +1535,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                                         <SelectTrigger><SelectValue placeholder="Type" /></SelectTrigger>
                                                         <SelectContent>
                                                             <SelectItem value="Expense">GL Account / Expense</SelectItem>
+                                                            <SelectItem value="Service">Service / Works certificate</SelectItem>
                                                             <SelectItem value="Inventory">Inventory Item</SelectItem>
                                                             <SelectItem value="Product">Product / Other</SelectItem>
                                                         </SelectContent>
@@ -1543,7 +1544,7 @@ export function VendorInvoiceFormPage({ editInvoiceId }: { editInvoiceId?: strin
                                             />
                                         </div>
 
-                                        {lineItemType === 'Expense' ? (
+                                        {lineItemType === 'Expense' || lineItemType === 'Service' ? (
                                             <>
                                                 <div className="col-span-2 min-w-0 space-y-2">
                                                     <Label className={index !== 0 ? 'sr-only' : ''}>GL Account</Label>
