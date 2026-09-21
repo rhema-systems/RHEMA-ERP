@@ -127,7 +127,12 @@ public sealed class EstateSalesListingApplicationHandoffService(
             ? asset.Name
             : $"{asset.Name} - Parcel {demarcation.DemarcationNumber:000}";
         var requestType = NormalizeRequestType(request.RequestType, demarcation?.ExternalListingType ?? asset.ExternalListingType);
-        var requestLabel = requestType == "Purchase" ? "Purchase enquiry" : "Lease enquiry";
+        var requestLabel = requestType switch
+        {
+            "Purchase" => "Purchase enquiry",
+            "Rent" => "Rent enquiry",
+            _ => "Lease enquiry"
+        };
         if (requestType != "Purchase" && string.IsNullOrWhiteSpace(request.RequestedLeaseTerm))
             throw new InvalidOperationException("Enter the Sales-agreed rent or lease duration before handing the enquiry to Estate.");
         var amount = request.AgreedAmount ?? opportunity.Amount;
@@ -266,28 +271,49 @@ public sealed class EstateSalesListingApplicationHandoffService(
 
     private static string NormalizeRequestType(string? requestedType, string listingType)
     {
-        var normalized = string.IsNullOrWhiteSpace(requestedType) ? listingType : requestedType.Trim();
-        normalized = normalized.Equals("Purchase", StringComparison.OrdinalIgnoreCase)
-            || normalized.Equals("Buy", StringComparison.OrdinalIgnoreCase)
-            || normalized.Equals("Sale", StringComparison.OrdinalIgnoreCase)
-            ? "Purchase"
-            : normalized.Equals("Lease", StringComparison.OrdinalIgnoreCase)
-                ? "Lease"
-                : normalized.Equals("Rent", StringComparison.OrdinalIgnoreCase)
-                    || normalized.Equals("Rental", StringComparison.OrdinalIgnoreCase)
-                    || normalized.Equals("Tenancy", StringComparison.OrdinalIgnoreCase)
-                    ? "Rent"
-                    : listingType switch
-                    {
-                        "Sale" => "Purchase",
-                        "Lease" or "SaleAndLease" => "Lease",
-                        "Rent" or "SaleAndRent" => "Rent",
-                        _ => "Lease"
-                    };
-        return string.Equals(listingType, "Sale", StringComparison.OrdinalIgnoreCase) ? "Purchase"
-            : string.Equals(listingType, "Rent", StringComparison.OrdinalIgnoreCase) ? "Rent"
-            : string.Equals(listingType, "Lease", StringComparison.OrdinalIgnoreCase) ? "Lease"
-            : normalized;
+        var normalizedListingType = NormalizeListingType(listingType);
+        if (string.IsNullOrWhiteSpace(requestedType))
+        {
+            return normalizedListingType;
+        }
+
+        var normalized = requestedType.Trim();
+        if (normalized.Contains("purchase", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("buy", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("sale", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Purchase";
+        }
+
+        if (normalized.Contains("rent", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("rental", StringComparison.OrdinalIgnoreCase)
+            || normalized.Contains("tenancy", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Rent";
+        }
+
+        if (normalized.Contains("lease", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Lease";
+        }
+
+        return normalizedListingType;
+    }
+
+    private static string NormalizeListingType(string? listingType)
+    {
+        var normalized = listingType?.Trim();
+        if (string.Equals(normalized, "Sale", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Purchase";
+        }
+
+        if (string.Equals(normalized, "Rent", StringComparison.OrdinalIgnoreCase))
+        {
+            return "Rent";
+        }
+
+        return "Lease";
     }
 
     private static string NormalizeCurrency(string? value)

@@ -455,3 +455,48 @@ html.dark .dark\:border-slate-700 { border-color: #353535; }
   box-shadow: 0 0 5px #ef4444, 0 0 12px rgb(239 68 68 / 75%);
   animation: mobile-scanner-sweep 2.2s ease-in-out infinite;
 }
+
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-viewer-container,
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-text-layer,
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-text {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}
+
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-viewer-container,
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-page-container,
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-page-div,
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-text-layer {
+  cursor: text !important;
+}
+
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-text-layer {
+  z-index: 20 !important;
+  pointer-events: auto !important;
+}
+
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-annotation-canvas,
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-annotation-container {
+  pointer-events: none !important;
+}
+
+.central-dms-pdf-viewer.annotation-mode .e-pdfviewer .e-pv-annotation-canvas,
+.central-dms-pdf-viewer.annotation-mode .e-pdfviewer .e-pv-annotation-container {
+  pointer-events: auto !important;
+}
+
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-pv-text {
+  display: inline-block !important;
+  pointer-events: auto !important;
+  cursor: text !important;
+}
+
+.central-dms-pdf-viewer.text-selection-mode .e-pdfviewer .e-disable-text-selection .e-pv-text {
+  display: inline-block !important;
+}
+
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-text-selection-none.e-pv-text,
+.central-dms-pdf-viewer .e-pdfviewer .e-pv-text-layer.e-pv-text-selection-none {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+}

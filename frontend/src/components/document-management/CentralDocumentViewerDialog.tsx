@@ -3,6 +3,7 @@
 import React from 'react';
 import dynamic from 'next/dynamic';
 import {
+  CheckCircle2,
   Download,
   ExternalLink,
   FileWarning,
@@ -101,6 +102,10 @@ function toApiEndpoint(url: string) {
   return url.startsWith('/api/') ? url.slice(4) : url;
 }
 
+async function blobToUint8Array(blob: Blob) {
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
 function resolvePdfView(file: CentralDocumentViewerFile | null) {
   if (!file) {
     return { url: null, originalUrl: null, status: 'none' as const };
@@ -139,6 +144,27 @@ function resolvePdfView(file: CentralDocumentViewerFile | null) {
   };
 }
 
+function isSyncfusionPopupTarget(target: EventTarget | null) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest(
+      [
+        '.e-popup',
+        '.e-dialog',
+        '.e-dropdown-popup',
+        '.e-tooltip-wrap',
+        '.e-pv-signature-dialog',
+        '.e-pv-stamp-popup',
+        '.e-pv-annotation-popup',
+        '.e-pdfviewer',
+      ].join(',')
+    )
+  );
+}
+
 export function CentralDocumentViewerDialog({
   file,
   open,
@@ -167,6 +193,8 @@ export function CentralDocumentViewerDialog({
   const [isSavingAnnotations, setIsSavingAnnotations] = React.useState(false);
   const [generateError, setGenerateError] = React.useState<string | null>(null);
   const [downloadError, setDownloadError] = React.useState<string | null>(null);
+  const [annotationSaveMessage, setAnnotationSaveMessage] =
+    React.useState<string | null>(null);
   const [savingCopy, setSavingCopy] = React.useState(false);
   const [saveCopyMessage, setSaveCopyMessage] = React.useState<string | null>(null);
 
@@ -174,6 +202,7 @@ export function CentralDocumentViewerDialog({
     setLocalFile(file);
     setGenerateError(null);
     setDownloadError(null);
+    setAnnotationSaveMessage(null);
     setDownloadingFormat(null);
     setSaveCopyMessage(null);
   }, [file]);
@@ -324,6 +353,7 @@ export function CentralDocumentViewerDialog({
 
     setIsSavingAnnotations(true);
     setDownloadError(null);
+    setAnnotationSaveMessage(null);
     try {
       const annotationStateJson =
         (await pdfViewerRef.current?.exportAnnotationState()) ?? null;
@@ -337,6 +367,17 @@ export function CentralDocumentViewerDialog({
       if (updatedFile) {
         setLocalFile(updatedFile);
       }
+      if (annotatedPdfBlob) {
+        const savedPreviewData = await blobToUint8Array(annotatedPdfBlob);
+        window.setTimeout(() => {
+          setPreviewData(savedPreviewData);
+        }, 0);
+      }
+      setAnnotationSaveMessage(
+        updatedFile?.version
+          ? `Annotations saved as ${updatedFile.version}.`
+          : 'Annotations saved.'
+      );
     } catch (error) {
       setDownloadError(
         error instanceof Error
@@ -384,8 +425,15 @@ export function CentralDocumentViewerDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[92vh] max-h-[92vh] w-[96vw] max-w-7xl flex-col overflow-hidden p-0">
+    <Dialog open={open} onOpenChange={onOpenChange} modal={false}>
+      <DialogContent
+        className="flex h-[92vh] max-h-[92vh] w-[96vw] max-w-7xl flex-col overflow-hidden p-0"
+        onInteractOutside={(event) => {
+          if (isSyncfusionPopupTarget(event.target)) {
+            event.preventDefault();
+          }
+        }}
+      >
         <DialogHeader className="border-b px-5 py-4 pr-12">
           <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0">
@@ -475,6 +523,12 @@ export function CentralDocumentViewerDialog({
           {saveCopyMessage && <p role="status" className="mt-2 text-sm">{saveCopyMessage}</p>}
           {downloadError ? (
             <p role="alert" className="mt-2 text-sm text-destructive">{downloadError}</p>
+          ) : null}
+          {annotationSaveMessage ? (
+            <div className="mt-2 flex items-center gap-2 text-sm text-emerald-700">
+              <CheckCircle2 className="h-4 w-4" />
+              {annotationSaveMessage}
+            </div>
           ) : null}
         </DialogHeader>
 

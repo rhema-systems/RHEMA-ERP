@@ -296,6 +296,10 @@ public sealed class CentralDocumentRenditionService : ICentralDocumentRenditionS
 
         using var wordDocument = new WordDocument(sourceStream, formatType);
         using var renderer = new DocIORenderer();
+        renderer.Settings.AutoDetectComplexScript = true;
+        renderer.Settings.EmbedFonts = true;
+        renderer.Settings.EmbedCompleteFonts = true;
+        renderer.Settings.UpdateDocumentFields = true;
         using var pdfDocument = renderer.ConvertToPDF(wordDocument);
         pdfDocument.Save(outputStream);
     }

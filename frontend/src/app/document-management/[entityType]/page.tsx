@@ -182,7 +182,8 @@ export default function DocumentManagementWorkspacePage() {
 
     const version = await documentManagementService.generateVersionRendition(
       file.documentRecordId,
-      file.versionId
+      file.versionId,
+      Boolean(file.renditionPath)
     );
     await refreshQueues();
 
@@ -214,6 +215,62 @@ export default function DocumentManagementWorkspacePage() {
       blob,
       safeDownloadName(`${baseName}-${file.version || 'version'}.${extension}`)
     );
+  };
+
+  const saveAnnotations = async (
+    file: CentralDocumentViewerFile,
+    annotationStateJson: string | null,
+    annotatedPdfBlob: Blob | null
+  ) => {
+    if (!file.documentRecordId || !file.versionId) {
+      throw new Error('This DMS version cannot save annotations.');
+    }
+
+    const sourcePdf =
+      annotatedPdfBlob ||
+      (await documentManagementService.downloadVersionFile(
+        file.documentRecordId,
+        file.versionId,
+        'pdf'
+      ));
+    const baseName = file.fileName?.replace(/\.[^.]+$/, '') || file.title;
+    const annotatedFile = new File(
+      [sourcePdf],
+      safeDownloadName(`${baseName}-annotated.pdf`),
+      { type: 'application/pdf' }
+    );
+    const version = await documentManagementService.uploadVersionFile(
+      file.documentRecordId,
+      {
+        file: annotatedFile,
+        status: 'Current',
+        changeSummary:
+          'PDF annotations, comments, and signatures saved from version control.',
+      }
+    );
+
+    await documentManagementService.addAnnotationReview(file.documentRecordId, {
+      documentVersionId: version.id,
+      reviewTitle: `${file.title} annotation save`,
+      status: 'Open',
+      syncfusionAnnotationStatus: 'Annotations saved',
+      reviewNotes:
+        'Annotations, comments, and signature marks were saved from the PDF viewer.',
+      annotationStateJson: annotationStateJson || '{}',
+    });
+    await refreshQueues();
+
+    return {
+      ...file,
+      versionId: version.id,
+      fileUploadRecordId: version.fileUploadRecordId,
+      fileName: version.fileName || file.fileName,
+      repositoryPath: version.repositoryPath || file.repositoryPath,
+      renditionPath: version.renditionPath || version.repositoryPath,
+      contentType: version.contentType || 'application/pdf',
+      version: version.versionNumber,
+      annotationStateJson: annotationStateJson || '{}',
+    };
   };
 
   const updateGovernanceStatus = async (
@@ -326,6 +383,7 @@ export default function DocumentManagementWorkspacePage() {
         open={Boolean(viewerFile)}
         onGenerateRendition={generateRendition}
         onDownload={downloadVersion}
+        onSaveAnnotations={saveAnnotations}
         onOpenChange={(open) => {
           if (!open) setViewerFile(null);
         }}

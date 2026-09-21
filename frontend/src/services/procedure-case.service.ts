@@ -50,6 +50,14 @@ export interface ProcedureCaseDocument {
   isMandatory: boolean;
   fileName?: string | null;
   fileUrl?: string | null;
+  centralDocumentRecordId?: string | null;
+  centralDocumentVersionId?: string | null;
+  centralDocumentVersion?: string | null;
+  centralDocumentRepositoryPath?: string | null;
+  centralDocumentRenditionPath?: string | null;
+  centralDocumentContentType?: string | null;
+  centralDocumentAnnotationStateJson?: string | null;
+  canUploadAtCurrentStage: boolean;
   notes?: string | null;
   uploadedById?: string | null;
   uploadedAt?: string | null;

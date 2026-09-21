@@ -223,6 +223,7 @@ export interface CentralDocumentAnnotationReview {
   reviewNotes?: string | null;
   annotationStateJson?: string | null;
   createdAt: string;
+  updatedAt?: string | null;
 }
 
 export interface CentralDocumentRecordDetail {
@@ -752,12 +753,14 @@ class DocumentManagementService {
 
   async generateVersionRendition(
     recordId: string,
-    versionId: string
+    versionId: string,
+    force = false
   ): Promise<CentralDocumentVersion> {
+    const query = force ? '?force=true' : '';
     const response = await apiService.post<ApiResponse<CentralDocumentVersion>>(
       `/document-management/records/${encodeURIComponent(
         recordId
-      )}/versions/${encodeURIComponent(versionId)}/rendition/generate`
+      )}/versions/${encodeURIComponent(versionId)}/rendition/generate${query}`
     );
     return response.data;
   }

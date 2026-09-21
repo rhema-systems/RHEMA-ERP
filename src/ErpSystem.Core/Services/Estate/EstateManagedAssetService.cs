@@ -819,6 +819,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             .ToList();
         var demarcation = demarcations.FirstOrDefault(item => item.Id == demarcationId)
             ?? throw new InvalidOperationException("Land demarcation was not found.");
+        EnsureListingIsNotWorkflowReserved(demarcation.ExternalListingStatus);
         var assignedLandReferences = await GetAssignedProjectLandReferencesAsync();
         if (request.IsPublishedToExternalPortal &&
             IsDemarcationAssignedToProject(asset, demarcations, demarcation, assignedLandReferences))
@@ -1445,6 +1446,7 @@ public class EstateManagedAssetService : IEstateManagedAssetService
         var asset = await repository.FirstOrDefaultAsync(item => item.Id == assetId &&
             item.TenantId == _currentUserProvider.TenantId && !item.IsDeleted);
         if (asset == null) throw new InvalidOperationException("Estate asset was not found.");
+        EnsureListingIsNotWorkflowReserved(asset.ExternalListingStatus);
 
         var listingType = NormalizeListingType(request.ExternalListingType);
         if (listingType is "SaleAndRent" or "SaleAndLease")
@@ -2679,5 +2681,14 @@ public class EstateManagedAssetService : IEstateManagedAssetService
             "paused" => "Paused",
             _ => "Published"
         };
+    }
+
+    private static void EnsureListingIsNotWorkflowReserved(string? status)
+    {
+        if (string.Equals(status, "Reserved", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "This listing is reserved for an active Estate case and cannot be republished manually.");
+        }
     }
 }
